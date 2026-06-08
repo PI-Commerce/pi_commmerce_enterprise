@@ -1,0 +1,208 @@
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+@import "reactflow/dist/style.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-ai: var(--ai);
+  --color-ai-foreground: var(--ai-foreground);
+  --color-ai-glow: var(--ai-glow);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --animate-edge-flow: edgeFlow 1.5s linear infinite;
+  --animate-pulse-glow: pulseGlow 2.4s ease-in-out infinite;
+  --animate-slide-up: slideUp 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  --animate-slide-in-right: slideInRight 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  --animate-fade-in: fadeIn 0.25s ease-out;
+  --animate-shimmer: shimmer 2s linear infinite;
+}
+
+@keyframes edgeFlow {
+  from { stroke-dashoffset: 12; }
+  to { stroke-dashoffset: 0; }
+}
+@keyframes pulseGlow {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--ai) 30%, transparent), 0 0 28px -6px color-mix(in oklch, var(--ai) 35%, transparent); }
+  50% { box-shadow: 0 0 0 6px color-mix(in oklch, var(--ai) 0%, transparent), 0 0 38px -4px color-mix(in oklch, var(--ai) 55%, transparent); }
+}
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(12px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+:root {
+  --radius: 0.75rem;
+  --background: oklch(0.99 0.002 240);
+  --foreground: oklch(0.18 0.015 260);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.18 0.015 260);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.18 0.015 260);
+  --primary: oklch(0.22 0.02 260);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.965 0.005 260);
+  --secondary-foreground: oklch(0.22 0.02 260);
+  --muted: oklch(0.965 0.005 260);
+  --muted-foreground: oklch(0.52 0.015 260);
+  --accent: oklch(0.96 0.008 260);
+  --accent-foreground: oklch(0.22 0.02 260);
+  --destructive: oklch(0.62 0.22 27);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(0.92 0.006 260);
+  --input: oklch(0.93 0.006 260);
+  --ring: oklch(0.65 0.15 270);
+  --ai: oklch(0.62 0.18 280);
+  --ai-foreground: oklch(0.985 0 0);
+  --ai-glow: oklch(0.7 0.2 285);
+  --success: oklch(0.68 0.15 155);
+  --warning: oklch(0.78 0.16 75);
+
+  --canvas-bg: oklch(0.985 0.003 260);
+  --canvas-dot: oklch(0.88 0.01 260);
+}
+
+.dark {
+  --background: oklch(0.14 0.012 260);
+  --foreground: oklch(0.96 0.005 260);
+  --card: oklch(0.18 0.014 260);
+  --card-foreground: oklch(0.96 0.005 260);
+  --popover: oklch(0.17 0.014 260);
+  --popover-foreground: oklch(0.96 0.005 260);
+  --primary: oklch(0.96 0.005 260);
+  --primary-foreground: oklch(0.18 0.014 260);
+  --secondary: oklch(0.22 0.015 260);
+  --secondary-foreground: oklch(0.96 0.005 260);
+  --muted: oklch(0.22 0.015 260);
+  --muted-foreground: oklch(0.65 0.015 260);
+  --accent: oklch(0.24 0.018 270);
+  --accent-foreground: oklch(0.96 0.005 260);
+  --destructive: oklch(0.65 0.2 25);
+  --destructive-foreground: oklch(0.985 0 0);
+  --border: oklch(0.26 0.014 260);
+  --input: oklch(0.24 0.014 260);
+  --ring: oklch(0.65 0.17 275);
+  --ai: oklch(0.7 0.2 285);
+  --ai-foreground: oklch(0.14 0.012 260);
+  --ai-glow: oklch(0.75 0.22 290);
+  --success: oklch(0.72 0.16 158);
+  --warning: oklch(0.8 0.16 78);
+
+  --canvas-bg: oklch(0.13 0.012 260);
+  --canvas-dot: oklch(0.24 0.014 260);
+}
+
+@layer base {
+  * { border-color: var(--color-border); }
+  html, body, #root { height: 100%; }
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-feature-settings: "cv11", "ss01", "ss03";
+    -webkit-font-smoothing: antialiased;
+  }
+}
+
+/* React Flow overrides */
+.react-flow__background { background: var(--canvas-bg); }
+.react-flow__edge-path {
+  stroke: color-mix(in oklch, var(--foreground) 35%, transparent);
+  stroke-width: 1.5;
+}
+.react-flow__edge.selected .react-flow__edge-path,
+.react-flow__edge:focus .react-flow__edge-path {
+  stroke: var(--ai);
+  stroke-width: 2;
+}
+.react-flow__edge.animated .react-flow__edge-path {
+  stroke: var(--ai);
+  stroke-width: 1.75;
+  stroke-dasharray: 5 5;
+  animation: edgeFlow 1.2s linear infinite;
+}
+.react-flow__handle {
+  width: 8px; height: 8px;
+  background: var(--background);
+  border: 1.5px solid color-mix(in oklch, var(--foreground) 40%, transparent);
+}
+.react-flow__handle:hover { border-color: var(--ai); background: var(--ai); }
+.react-flow__controls {
+  box-shadow: 0 8px 24px -12px color-mix(in oklch, var(--foreground) 30%, transparent);
+  border-radius: 10px; overflow: hidden; border: 1px solid var(--border);
+  background: var(--card);
+}
+.react-flow__controls-button {
+  background: var(--card); border-bottom: 1px solid var(--border); color: var(--foreground);
+}
+.react-flow__controls-button:hover { background: var(--accent); }
+.react-flow__controls-button svg { fill: currentColor; }
+.react-flow__minimap {
+  background: color-mix(in oklch, var(--card) 80%, transparent) !important;
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.react-flow__attribution { display: none; }
+
+.glass {
+  background: color-mix(in oklch, var(--card) 70%, transparent);
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+  border: 1px solid color-mix(in oklch, var(--border) 80%, transparent);
+}
+
+.ai-gradient-text {
+  background: linear-gradient(135deg, var(--ai) 0%, var(--ai-glow) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar { width: 6px; height: 6px; }
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: color-mix(in oklch, var(--foreground) 15%, transparent);
+  border-radius: 3px;
+}
+.scrollbar-thin::-webkit-scrollbar-track { background: transparent; }

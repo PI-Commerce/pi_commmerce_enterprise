@@ -1,0 +1,722 @@
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useState } from "react";
+import { AppShell, PageHeader } from "@/components/app/AppShell";
+import { PageTabs } from "@/components/app/Tabs";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import { Progress } from "@/components/ui/progress";
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Plus, Search, MoreHorizontal, Copy, Archive, Workflow, Eye, EyeOff,
+  CircleDashed, CircleCheck, CircleX, CirclePause, CircleDot,
+  Pause, Play, X, Square, ArrowUp, ArrowDown, ChevronsUpDown, Check,
+} from "lucide-react";
+import { toast } from "sonner";
+import { cn } from "@/lib/utils";
+import { STATUS_TONE, type CampaignStatus } from "@/lib/campaign-types";
+import { CreateRunDialog, type CampaignOption, type CreateRunPayload } from "@/components/workflow/CreateRunDialog";
+
+
+export const Route = createFileRoute("/campaigns/")({
+  component: CampaignList,
+  head: () => ({
+    meta: [
+      { title: "Campaigns · Pi Commerce Enterprise" },
+      { name: "description", content: "Design, run and review every orchestrated campaign." },
+    ],
+  }),
+});
+
+type RunType = "one-time" | "recurring";
+type LastRunStatus = "completed" | "failed" | "running" | "paused" | "—";
+
+type CampaignRow = {
+  id: string;
+  name: string;
+  state: CampaignStatus;
+  createdAt: string;
+  createdAtTs: number;
+  lastEdited: string;
+  lastEditedTs: number;
+  runType: RunType;
+  lastRun: LastRunStatus;
+  lastRunAt?: string;
+  lastRunTs?: number;
+  lastRunId?: string;
+};
+
+const NOW = Date.now();
+const M = 60_000, H = 60 * M, D = 24 * H;
+
+const INITIAL: CampaignRow[] = [
+  { id: "c_001", name: "Dormant Trader Reactivation", state: "running",  createdAt: "Mar 02, 2026 · 09:14", createdAtTs: Date.parse("2026-03-02T09:14:00"), lastEdited: "4m ago",     lastEditedTs: NOW - 4 * M,   runType: "recurring", lastRun: "running", lastRunAt: "Today · 12:04", lastRunTs: NOW - 30 * M, lastRunId: "\u200B" },
+  { id: "c_002", name: "New Trader Onboarding",       state: "running",  createdAt: "Feb 18, 2026 · 16:02", createdAtTs: Date.parse("2026-02-18T16:02:00"), lastEdited: "1h ago",     lastEditedTs: NOW - 1 * H,   runType: "recurring", lastRun: "completed", lastRunAt: "Today · 11:50", lastRunTs: NOW - 50 * M, lastRunId: "r_8420" },
+  { id: "c_003", name: "High-Value Win-Back",         state: "paused",   createdAt: "Feb 04, 2026 · 11:30", createdAtTs: Date.parse("2026-02-04T11:30:00"), lastEdited: "2h ago",     lastEditedTs: NOW - 2 * H,   runType: "recurring", lastRun: "paused",  lastRunAt: "Today · 11:32", lastRunTs: NOW - 70 * M, lastRunId: "r_8418" },
+  { id: "c_004", name: "KYC Drop-off Recovery",       state: "ready",    createdAt: "Jan 22, 2026 · 10:45", createdAtTs: Date.parse("2026-01-22T10:45:00"), lastEdited: "Yesterday",  lastEditedTs: NOW - 1 * D,   runType: "one-time",  lastRun: "—" },
+  { id: "c_005", name: "Festive Cashback Push",       state: "draft",    createdAt: "Jan 10, 2026 · 14:20", createdAtTs: Date.parse("2026-01-10T14:20:00"), lastEdited: "3d ago",     lastEditedTs: NOW - 3 * D,   runType: "one-time",  lastRun: "—" },
+  { id: "c_006", name: "Inactive Premium Outreach",   state: "archived", createdAt: "Dec 15, 2025 · 08:11", createdAtTs: Date.parse("2025-12-15T08:11:00"), lastEdited: "Apr 12",     lastEditedTs: Date.parse("2026-04-12T12:00:00"), runType: "one-time",  lastRun: "failed", lastRunAt: "Apr 12 · 18:00", lastRunTs: Date.parse("2026-04-12T18:00:00"), lastRunId: "r_7188" },
+];
+
+const STATES: CampaignStatus[] = ["draft", "ready", "running", "paused", "archived"];
+
+const LAST_RUN_META: Record<LastRunStatus, { icon: typeof CircleDashed; tone: string; label: string }> = {
+  completed: { icon: CircleCheck,  tone: "text-success",          label: "Completed" },
+  failed:  { icon: CircleX,      tone: "text-destructive",      label: "Failed"  },
+  running: { icon: CircleDot,    tone: "text-success",          label: "Running" },
+  paused:  { icon: CirclePause,  tone: "text-warning",          label: "Paused"  },
+  "—":     { icon: CircleDashed, tone: "text-muted-foreground", label: "—"       },
+};
+
+// ============= Runs =============
+
+type RunStatus = "running" | "completed" | "paused" | "queued" | "failed" | "terminated" | "scheduled";
+
+const RUN_TONE: Record<RunStatus, string> = {
+  running:    "border-success/30 bg-success/10 text-success",
+  completed:  "border-border bg-secondary text-muted-foreground",
+  paused:     "border-warning/30 bg-warning/10 text-warning",
+  queued:     "border-border bg-muted text-muted-foreground",
+  failed:     "border-destructive/30 bg-destructive/10 text-destructive",
+  terminated: "border-destructive/30 bg-destructive/10 text-destructive",
+  scheduled:  "border-ai/30 bg-ai/10 text-ai",
+};
+
+const RUN_STATUSES: RunStatus[] = ["running", "completed", "paused", "queued", "failed", "terminated", "scheduled"];
+
+type TriggerMode = "manual" | "api";
+
+type RunRow = {
+  id: string;
+  campaign: string;
+  status: RunStatus;
+  runType: RunType;
+  triggerMode: TriggerMode;
+  startedAt: string;
+  completedAt: string | "ongoing";
+  leadsProcessed: number;
+  leadsTotal?: number; // present when source is CSV
+};
+
+const RUNS: RunRow[] = [
+  { id: "\u200B", campaign: "Dormant Trader Reactivation", status: "running",    runType: "recurring", triggerMode: "manual", startedAt: "Today, 12:04 PM",   completedAt: "ongoing",         leadsProcessed: 630,  leadsTotal: 1500 },
+  { id: "r_8420", campaign: "New Trader Onboarding",       status: "running",    runType: "recurring", triggerMode: "api",    startedAt: "Today, 11:50 AM",   completedAt: "ongoing",         leadsProcessed: 1200 },
+  { id: "r_8419", campaign: "KYC Drop-off Recovery",       status: "queued",     runType: "one-time",  triggerMode: "manual", startedAt: "Today, 11:48 AM",   completedAt: "ongoing",         leadsProcessed: 0,    leadsTotal: 820 },
+  { id: "r_8418", campaign: "High-Value Win-Back",         status: "paused",     runType: "recurring", triggerMode: "manual", startedAt: "Today, 11:32 AM",   completedAt: "ongoing",         leadsProcessed: 412,  leadsTotal: 750 },
+  { id: "r_8417", campaign: "Dormant Trader Reactivation", status: "completed",  runType: "recurring", triggerMode: "manual", startedAt: "Today, 10:00 AM",   completedAt: "Today, 11:14 AM", leadsProcessed: 1500, leadsTotal: 1500 },
+  { id: "r_8416", campaign: "Festive Cashback Push",       status: "scheduled",  runType: "one-time",  triggerMode: "manual", startedAt: "Tomorrow, 09:00 AM",completedAt: "ongoing",         leadsProcessed: 0,    leadsTotal: 3200 },
+  { id: "r_8415", campaign: "Inactive Premium Outreach",   status: "terminated", runType: "one-time",  triggerMode: "api",    startedAt: "Yesterday, 04:20 PM",completedAt: "Yesterday, 04:38 PM", leadsProcessed: 240 },
+  { id: "r_8414", campaign: "New Trader Onboarding",       status: "completed",  runType: "recurring", triggerMode: "api",    startedAt: "Yesterday, 09:00 AM",completedAt: "Yesterday, 10:12 AM", leadsProcessed: 980 },
+];
+
+type Tab = "campaigns" | "runs";
+
+function CampaignList() {
+  const navigate = useNavigate();
+  const [tab, setTab] = useState<Tab>("campaigns");
+  const [rows, setRows] = useState<CampaignRow[]>(INITIAL);
+  const [query, setQuery] = useState("");
+  const [fState, setFState] = useState<"all" | CampaignStatus>("all");
+  const [fRunType, setFRunType] = useState<"all" | RunType>("all");
+  const [showArchived, setShowArchived] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createRunOpen, setCreateRunOpen] = useState(false);
+  const [runFor, setRunFor] = useState<CampaignRow | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const copyId = (id: string) => {
+    navigator.clipboard?.writeText(id);
+    setCopiedId(id);
+    window.setTimeout(() => setCopiedId((cur) => (cur === id ? null : cur)), 1500);
+  };
+
+  // Runs filters
+  const [rQuery, setRQuery] = useState("");
+  const [rStatus, setRStatus] = useState<"all" | RunStatus>("all");
+  const [rType, setRType] = useState<"all" | RunType>("all");
+
+  // Sort state
+  type SortKey = "name" | "state" | "lastEdited" | "lastRun" | "createdAt";
+  const [sortKey, setSortKey] = useState<SortKey>("lastEdited");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const toggleSort = (k: SortKey) => {
+    if (sortKey === k) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else { setSortKey(k); setSortDir(k === "name" || k === "state" ? "asc" : "desc"); }
+  };
+
+  const filtered = rows.filter((r) => {
+    if (!showArchived && r.state === "archived") return false;
+    if (fState !== "all" && r.state !== fState) return false;
+    if (fRunType !== "all" && r.runType !== fRunType) return false;
+    if (query && !r.name.toLowerCase().includes(query.toLowerCase())) return false;
+    return true;
+  });
+
+  const sorted = [...filtered].sort((a, b) => {
+    const dir = sortDir === "asc" ? 1 : -1;
+    const NULL_LO = sortDir === "asc" ? Infinity : -Infinity;
+    switch (sortKey) {
+      case "name":       return a.name.localeCompare(b.name) * dir;
+      case "state":      return a.state.localeCompare(b.state) * dir;
+      case "lastEdited": return (a.lastEditedTs - b.lastEditedTs) * dir;
+      case "createdAt":  return (a.createdAtTs - b.createdAtTs) * dir;
+      case "lastRun": {
+        const av = a.lastRunTs ?? NULL_LO;
+        const bv = b.lastRunTs ?? NULL_LO;
+        return (av - bv) * dir;
+      }
+    }
+  });
+
+
+  const filteredRuns = RUNS.filter((r) => {
+    if (rStatus !== "all" && r.status !== rStatus) return false;
+    if (rType !== "all" && r.runType !== rType) return false;
+    if (rQuery) {
+      const q = rQuery.toLowerCase();
+      if (!r.id.toLowerCase().includes(q) && !r.campaign.toLowerCase().includes(q)) return false;
+    }
+    return true;
+  });
+
+  const handleDuplicate = (row: CampaignRow) => {
+    const id = `c_${Math.random().toString(36).slice(2, 6)}`;
+    const now = Date.now();
+    setRows((prev) => [
+      { ...row, id, name: `${row.name} (copy)`, state: "draft", createdAt: "just now", createdAtTs: now, lastEdited: "just now", lastEditedTs: now, lastRun: "—", lastRunAt: undefined, lastRunTs: undefined, lastRunId: undefined },
+      ...prev,
+    ]);
+    toast.success("Campaign duplicated", { description: `${row.name} (copy) · opened in Draft` });
+  };
+
+  const handleArchive = (row: CampaignRow) => {
+    setRows((prev) =>
+      prev.map((r) => (r.id === row.id ? { ...r, state: "archived", lastEdited: "just now", lastEditedTs: Date.now() } : r)),
+    );
+    toast.success("Campaign archived", { description: row.name });
+  };
+
+  const handleCreate = (name: string, description?: string, objective?: string) => {
+    setCreateOpen(false);
+    toast.success("Campaign created", { description: `${name} · opening builder in Draft` });
+    navigate({ to: "/campaigns/$id", params: { id: "new" }, search: { name, description, objective } as never });
+  };
+
+  const handleRunStarted = (payload: CreateRunPayload) => {
+    setCreateRunOpen(false);
+    setRunFor(null);
+    toast.success("Run started", { description: `${payload.runName} · ${payload.triggerMode === "api" ? "API trigger activated" : "running now"}` });
+  };
+
+  const hasAny = rows.some((r) => r.state !== "archived" || showArchived);
+  const runningCount = RUNS.filter((r) => r.status === "running").length;
+
+  return (
+    <AppShell>
+      <PageHeader
+        title="Campaigns"
+        description="Design and orchestrate every customer journey across channels."
+        actions={
+          tab === "campaigns" ? (
+            <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={() => setCreateOpen(true)}>
+              <Plus className="h-3.5 w-3.5" /> Create campaign
+            </Button>
+          ) : (
+            <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={() => setCreateRunOpen(true)}>
+              <Plus className="h-3.5 w-3.5" /> Run Campaign
+            </Button>
+          )
+        }
+
+      />
+
+      <PageTabs<Tab>
+        tabs={[
+          { id: "campaigns", label: "Campaigns", count: rows.filter((r) => r.state !== "archived").length },
+          { id: "runs", label: "Runs", count: runningCount },
+        ]}
+        value={tab}
+        onChange={setTab}
+      />
+
+      {tab === "campaigns" ? (
+        <>
+          {/* Toolbar */}
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <div className="relative min-w-[220px] flex-1 max-w-sm">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search campaigns…"
+                className="h-8 pl-8 text-xs"
+              />
+            </div>
+
+            <FilterSelect
+              label="State"
+              value={fState}
+              onChange={(v) => setFState(v as typeof fState)}
+              options={[{ value: "all", label: "All states" }, ...STATES.map((s) => ({ value: s, label: cap(s) }))]}
+            />
+            <FilterSelect
+              label="Run type"
+              value={fRunType}
+              onChange={(v) => setFRunType(v as typeof fRunType)}
+              options={[
+                { value: "all", label: "All run types" },
+                { value: "one-time", label: "One-time" },
+                { value: "recurring", label: "Recurring" },
+              ]}
+            />
+
+            <div className="ml-auto">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 gap-1.5 text-xs text-muted-foreground"
+                onClick={() => setShowArchived((v) => !v)}
+              >
+                {showArchived ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                {showArchived ? "Hide archived" : "Show archived"}
+              </Button>
+            </div>
+          </div>
+
+          {!hasAny ? (
+            <EmptyState onCreate={() => setCreateOpen(true)} />
+          ) : filtered.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-border bg-card/40 px-6 py-16 text-center">
+              <p className="text-sm text-muted-foreground">No campaigns match these filters.</p>
+            </div>
+          ) : (
+            <div className="overflow-hidden rounded-xl border border-border bg-card">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-secondary/30 text-[11px] uppercase tracking-wider text-muted-foreground">
+                    <SortHeader label="Campaign name" k="name" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                    <SortHeader label="Status" k="state" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                    <SortHeader label="Last edited" k="lastEdited" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                    <SortHeader label="Last run" k="lastRun" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                    <SortHeader label="Created at" k="createdAt" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                    <th className="w-10 px-2 py-2.5" />
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {sorted.map((c) => {
+                    const LR = LAST_RUN_META[c.lastRun];
+                    return (
+                      <tr key={c.id} className="transition-colors hover:bg-accent/30">
+                        <td className="px-4 py-3">
+                          <Link to="/campaigns/$id" params={{ id: c.id }} className="font-medium hover:underline">
+                            {c.name}
+                          </Link>
+                          <button
+                            type="button"
+                            onClick={() => copyId(c.id)}
+                            title="Copy campaign ID"
+                            className="group/id flex items-center gap-1 font-mono text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+                          >
+                            {c.id}
+                            {copiedId === c.id ? (
+                              <Check className="h-3 w-3 text-success" />
+                            ) : (
+                              <Copy className="h-3 w-3 opacity-0 transition-opacity group-hover/id:opacity-100" />
+                            )}
+                          </button>
+                        </td>
+                        <td className="px-4 py-3">
+                          <StateTag state={c.state} />
+                        </td>
+                        <td className="px-4 py-3 text-[12px] text-muted-foreground">{c.lastEdited}</td>
+                        <td className="px-4 py-3">
+                          {c.lastRunAt ? (
+                            <div className="flex flex-col leading-tight">
+                              <span className={cn("inline-flex items-center gap-1.5 text-[12px]", LR.tone)}>
+                                <LR.icon className={cn("h-3.5 w-3.5", c.lastRun === "running" && "animate-pulse")} />
+                                {c.lastRunAt}
+                              </span>
+                              {c.lastRunId && (
+                                <span className="ml-5 font-mono text-[11px] text-muted-foreground">{c.lastRunId}</span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-[12px] text-muted-foreground">—</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-[12px] text-muted-foreground">{c.createdAt}</td>
+                        <td className="px-2 py-3 text-right">
+                          <div className="flex items-center justify-end gap-1">
+                          {c.state === "ready" && (
+                            <Button
+                              size="sm"
+                              className="h-7 gap-1 px-2 text-xs"
+                              onClick={() => setRunFor(c)}
+                            >
+                              <Play className="h-3.5 w-3.5" /> Run
+                            </Button>
+                          )}
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="icon" className="h-7 w-7">
+                                <MoreHorizontal className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-40">
+                              <DropdownMenuItem
+                                onClick={() => navigate({ to: "/campaigns/$id", params: { id: c.id } })}
+                                className="gap-2 text-xs"
+                              >
+                                <Workflow className="h-3.5 w-3.5" /> Open
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => handleDuplicate(c)} className="gap-2 text-xs">
+                                <Copy className="h-3.5 w-3.5" /> Duplicate
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() => handleArchive(c)}
+                                disabled={c.state === "archived"}
+                                className="gap-2 text-xs"
+                              >
+                                <Archive className="h-3.5 w-3.5" /> Archive
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      ) : (
+        <>
+          {/* Runs toolbar */}
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <div className="relative min-w-[220px] flex-1 max-w-sm">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={rQuery}
+                onChange={(e) => setRQuery(e.target.value)}
+                placeholder="Search by run id or campaign…"
+                className="h-8 pl-8 text-xs"
+              />
+            </div>
+            <FilterSelect
+              label="Status"
+              value={rStatus}
+              onChange={(v) => setRStatus(v as typeof rStatus)}
+              options={[{ value: "all", label: "All statuses" }, ...RUN_STATUSES.map((s) => ({ value: s, label: cap(s) }))]}
+            />
+            <FilterSelect
+              label="Run type"
+              value={rType}
+              onChange={(v) => setRType(v as typeof rType)}
+              options={[
+                { value: "all", label: "All run types" },
+                { value: "one-time", label: "One-time" },
+                { value: "recurring", label: "Recurring" },
+              ]}
+            />
+          </div>
+
+          <div className="overflow-hidden rounded-xl border border-border bg-card">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border bg-secondary/30 text-[11px] uppercase tracking-wider text-muted-foreground">
+                  <th className="px-4 py-2.5 text-left font-medium">Run ID</th>
+                  <th className="px-4 py-2.5 text-left font-medium">Campaign</th>
+                  <th className="px-4 py-2.5 text-left font-medium">Status</th>
+                  <th className="px-4 py-2.5 text-left font-medium">Run type</th>
+                  <th className="px-4 py-2.5 text-left font-medium">Trigger mode</th>
+                  <th className="px-4 py-2.5 text-left font-medium">Started at</th>
+                  <th className="px-4 py-2.5 text-left font-medium">Completed at</th>
+                  <th className="px-4 py-2.5 text-left font-medium w-[200px]">Progress</th>
+                  <th className="w-10 px-2 py-2.5" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {filteredRuns.map((r) => {
+                  const pct = r.leadsTotal
+                    ? Math.round((r.leadsProcessed / r.leadsTotal) * 100)
+                    : r.status === "completed" ? 100 : r.leadsProcessed > 0 ? 100 : 0;
+                  return (
+                  <tr key={r.id} className="transition-colors hover:bg-accent/30">
+                    <td className="px-4 py-3 font-mono text-[12px]">{r.id}</td>
+                    <td className="px-4 py-3 font-medium">{r.campaign}</td>
+                    <td className="px-4 py-3">
+                      <span className={cn("inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium capitalize", RUN_TONE[r.status])}>
+                        <span className={cn("h-1.5 w-1.5 rounded-full", r.status === "running" ? "bg-success animate-pulse" : "bg-current opacity-60")} />
+                        {r.status}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-[12px] text-muted-foreground">
+                      {r.runType === "recurring" ? "Recurring" : "One-time"}
+                    </td>
+                    <td className="px-4 py-3 text-[12px] text-muted-foreground">
+                      {r.triggerMode === "api" ? "API Triggered" : "Manual"}
+                    </td>
+                    <td className="px-4 py-3 text-[12px] text-muted-foreground">{r.startedAt}</td>
+                    <td className={cn("px-4 py-3 text-[12px]", r.completedAt === "ongoing" ? "italic text-muted-foreground/70" : "text-muted-foreground")}>
+                      {r.completedAt}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex flex-col gap-1">
+                        <Progress value={pct} className="h-1.5 w-40" />
+                        <span className="font-mono text-[11px] text-muted-foreground tabular-nums">
+                          {r.leadsTotal
+                            ? `${r.leadsProcessed.toLocaleString()}/${r.leadsTotal.toLocaleString()} leads processed`
+                            : `${r.leadsProcessed.toLocaleString()} leads processed`}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-2 py-3 text-right">
+                      <RunRowMenu status={r.status} runId={r.id} />
+                    </td>
+                  </tr>
+                  );
+                })}
+                {filteredRuns.length === 0 && (
+                  <tr>
+                    <td colSpan={9} className="px-4 py-16 text-center text-sm text-muted-foreground">
+                      No runs match these filters.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      <CreateCampaignDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        onCreate={handleCreate}
+      />
+      <CreateRunDialog
+        open={createRunOpen}
+        onOpenChange={setCreateRunOpen}
+        onStart={handleRunStarted}
+      />
+      <CreateRunDialog
+        open={runFor !== null}
+        onOpenChange={(v) => { if (!v) setRunFor(null); }}
+        campaign={runFor ? ({ id: runFor.id, name: runFor.name, audienceSource: "csv" } satisfies CampaignOption) : undefined}
+        onStart={handleRunStarted}
+      />
+    </AppShell>
+  );
+}
+
+
+function cap(s: string) { return s[0].toUpperCase() + s.slice(1); }
+
+function StateTag({ state }: { state: CampaignStatus }) {
+  return (
+    <span className={cn("inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium capitalize", STATUS_TONE[state])}>
+      <span className={cn("h-1.5 w-1.5 rounded-full", state === "running" ? "bg-success animate-pulse" : "bg-current opacity-60")} />
+      {state}
+    </span>
+  );
+}
+
+function RunRowMenu({ status, runId }: { status: RunStatus; runId: string }) {
+  const canPause = status === "running";
+  const canResume = status === "paused";
+  const canCancel = status === "scheduled";
+  const canTerminate = status === "running" || status === "paused" || status === "queued";
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon" className="h-7 w-7">
+          <MoreHorizontal className="h-4 w-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-44">
+        {canPause && (
+          <DropdownMenuItem className="gap-2 text-xs" onClick={() => toast.success("Run paused", { description: runId })}><Pause className="h-3.5 w-3.5" /> Pause</DropdownMenuItem>
+        )}
+        {canResume && (
+          <DropdownMenuItem className="gap-2 text-xs" onClick={() => toast.success("Run resumed", { description: runId })}><Play className="h-3.5 w-3.5" /> Resume</DropdownMenuItem>
+        )}
+        {canCancel && (
+          <DropdownMenuItem className="gap-2 text-xs" onClick={() => toast.success("Run cancelled", { description: runId })}><X className="h-3.5 w-3.5" /> Cancel</DropdownMenuItem>
+        )}
+        {canTerminate && (
+          <DropdownMenuItem className="gap-2 text-xs text-destructive focus:text-destructive" onClick={() => toast.error("Run terminated", { description: `${runId} · cannot be resumed` })}>
+            <Square className="h-3.5 w-3.5" /> Terminate
+          </DropdownMenuItem>
+        )}
+        {!canPause && !canResume && !canCancel && !canTerminate && (
+          <DropdownMenuItem disabled className="gap-2 text-xs">No actions available</DropdownMenuItem>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function SortHeader<K extends string>({
+  label, k, sortKey, sortDir, onSort, className,
+}: {
+  label: string;
+  k: K;
+  sortKey: K;
+  sortDir: "asc" | "desc";
+  onSort: (k: K) => void;
+  className?: string;
+}) {
+  const active = sortKey === k;
+  const Icon = !active ? ChevronsUpDown : sortDir === "asc" ? ArrowUp : ArrowDown;
+  return (
+    <th className={cn("px-4 py-2.5 text-left font-medium", className)}>
+      <button
+        type="button"
+        onClick={() => onSort(k)}
+        className={cn(
+          "inline-flex items-center gap-1 -mx-1 px-1 rounded transition-colors hover:text-foreground",
+          active && "text-foreground",
+        )}
+      >
+        {label}
+        <Icon className={cn("h-3 w-3", active ? "opacity-100" : "opacity-40")} />
+      </button>
+    </th>
+  );
+}
+
+
+
+
+function FilterSelect({
+  label, value, onChange, options,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  options: { value: string; label: string }[];
+}) {
+  return (
+    <Select value={value} onValueChange={onChange}>
+      <SelectTrigger className="h-8 w-auto gap-1.5 px-2.5 text-xs">
+        <span className="text-muted-foreground">{label}:</span>
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {options.map((o) => (
+          <SelectItem key={o.value} value={o.value} className="text-xs">{o.label}</SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+function EmptyState({ onCreate }: { onCreate: () => void }) {
+  return (
+    <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border bg-card/40 px-6 py-20 text-center">
+      <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl border border-border bg-secondary">
+        <Workflow className="h-6 w-6 text-muted-foreground" />
+      </div>
+      <h3 className="text-base font-semibold">No campaigns yet</h3>
+      <p className="mt-1 max-w-sm text-sm text-muted-foreground">
+        Create your first campaign to start orchestrating customer journeys across channels.
+      </p>
+      <Button size="sm" className="mt-5 h-8 gap-1.5 text-xs" onClick={onCreate}>
+        <Plus className="h-3.5 w-3.5" /> Create campaign
+      </Button>
+    </div>
+  );
+}
+
+function CreateCampaignDialog({
+  open, onOpenChange, onCreate,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  onCreate: (name: string, description?: string, objective?: string) => void;
+}) {
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [objective, setObjective] = useState<string>("");
+
+  const reset = () => { setName(""); setDescription(""); setObjective(""); };
+  const submit = () => {
+    if (!name.trim()) return;
+    onCreate(name.trim(), description.trim() || undefined, objective || undefined);
+    reset();
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!v) reset(); onOpenChange(v); }}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="text-base">Create a Campaign</DialogTitle>
+          <DialogDescription className="text-xs">
+            Name your campaign. You'll design the orchestration in the next step.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4 py-2">
+          <div className="space-y-1.5">
+            <Label htmlFor="cname" className="text-xs">Campaign name <span className="text-destructive">*</span></Label>
+            <Input
+              id="cname"
+              autoFocus
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="e.g. Dormant Trader Reactivation"
+              className="h-9 text-sm"
+              onKeyDown={(e) => { if (e.key === "Enter" && name.trim()) submit(); }}
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="cdesc" className="text-xs">Description</Label>
+            <Textarea
+              id="cdesc"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Briefly describe the goal of this campaign…"
+              rows={3}
+              className="resize-none text-sm"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs">Objective</Label>
+            <Select value={objective} onValueChange={setObjective}>
+              <SelectTrigger className="h-9 text-sm">
+                <SelectValue placeholder="Select an objective" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="reactivation">Reactivation</SelectItem>
+                <SelectItem value="onboarding">Onboarding</SelectItem>
+                <SelectItem value="retention">Retention</SelectItem>
+                <SelectItem value="conversion">Conversion</SelectItem>
+                <SelectItem value="winback">Win-back</SelectItem>
+                <SelectItem value="awareness">Awareness</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button size="sm" className="h-8 text-xs" disabled={!name.trim()} onClick={submit}>Create</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}

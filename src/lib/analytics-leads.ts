@@ -1,0 +1,125 @@
+/** Deterministic lead-level mock data for analytics drill-downs.
+ *  Same seed (run.id) always produces the same leads, so navigation feels stable.
+ */
+import type { ChannelKind, RunRow, SankeyNode, SankeyNodeKind } from "@/lib/analytics-data";
+
+export type LeadStatus =
+  | "delivered" | "read" | "clicked" | "replied" | "converted"
+  | "connected" | "answered" | "interested" | "voicemail"
+  | "failed" | "dropped" | "pending";
+
+export type Lead = {
+  id: string;
+  name: string;
+  phone: string;
+  email: string;
+  stageNodeId: string;     // current node id in the DAG
+  stageLabel: string;      // human label of that node
+  channel?: ChannelKind;
+  status: LeadStatus;
+  cost: number;
+  duration?: number;       // voice call seconds
+  updatedAt: string;
+  updatedDate: string;     // ISO YYYY-MM-DD, used by Date Range filter
+};
+
+const FIRST = ["Arjun","Priya","Rahul","Anita","Vikram","Sneha","Karan","Meera","Rohan","Divya","Aditya","Pooja","Sanjay","Neha","Ishan","Tara","Manish","Ritu","Aman","Kavya","Yash","Simran","Nikhil","Anjali"];
+const LAST  = ["Sharma","Patel","Kumar","Reddy","Iyer","Khan","Singh","Gupta","Mehta","Joshi","Nair","Das","Verma","Bose","Rao","Pillai","Banerjee","Kapoor","Malhotra"];
+
+function rng(seed: string) {
+  let h = 2166136261;
+  for (let i = 0; i < seed.length; i++) h = Math.imul(h ^ seed.charCodeAt(i), 16777619);
+  return () => { h = Math.imul(h ^ (h >>> 15), 2246822507); h = Math.imul(h ^ (h >>> 13), 3266489909); return ((h ^= h >>> 16) >>> 0) / 4294967295; };
+}
+
+const STATUS_BY_KIND: Record<SankeyNodeKind, LeadStatus[]> = {
+  start:       ["pending"],
+  audience:    ["pending"],
+  abSplit:     ["pending"],
+  conditional: ["pending"],
+  delay:       ["pending"],
+  whatsapp:    ["delivered","read","clicked","replied","failed"],
+  voice:       ["connected","answered","interested","voicemail","failed"],
+  sms:         ["delivered","failed"],
+  ads:         ["clicked","delivered"],
+  end:         ["converted","dropped"],
+};
+
+const CHANNEL_BY_KIND: Partial<Record<SankeyNodeKind, ChannelKind>> = {
+  whatsapp: "whatsapp", voice: "voice", sms: "sms", ads: "ads",
+};
+
+/** Generate leads weighted by each node's `entered` count.  */
+export function generateLeads(run: RunRow, total = 3990): Lead[] {
+  const rand = rng(run.id || "default_run");
+  const nodes = run.sankey.nodes;
+  // weight = entered, but downweight pipe/system nodes
+  const weighted: { node: SankeyNode; w: number }[] = nodes.map((n) => ({
+    node: n,
+    w: ["start","audience","abSplit","delay","conditional"].includes(n.kind) ? n.entered * 0.05 : n.entered,
+  }));
+  const sumW = weighted.reduce((s, x) => s + x.w, 0);
+
+  const leads: Lead[] = [];
+  for (let i = 0; i < total; i++) {
+    // pick a node by weight
+    let r = rand() * sumW, pick = weighted[0].node;
+    for (const w of weighted) { r -= w.w; if (r <= 0) { pick = w.node; break; } }
+    const statuses = STATUS_BY_KIND[pick.kind];
+    const status = statuses[Math.floor(rand() * statuses.length)];
+    const first = FIRST[Math.floor(rand() * FIRST.length)];
+    const last  = LAST[Math.floor(rand() * LAST.length)];
+    const phone = `+91 9${Math.floor(100000000 + rand() * 899999999)}`;
+    leads.push({
+      id: `L-${String(10000 + i).padStart(5, "0")}`,
+      name: `${first} ${last}`,
+      phone,
+      email: `${first}.${last}@example.com`.toLowerCase(),
+      stageNodeId: pick.id,
+      stageLabel: pick.name.split(" · ")[0],
+      channel: CHANNEL_BY_KIND[pick.kind],
+      status,
+      cost: +((rand() * 0.18) + 0.02).toFixed(3),
+      duration: pick.kind === "voice" ? Math.floor(20 + rand() * 240) : undefined,
+      updatedAt: (() => {
+        const h24 = Math.floor(rand() * 23);
+        const m = String(Math.floor(rand() * 59)).padStart(2, "0");
+        const period = h24 >= 12 ? "pm" : "am";
+        const h12 = h24 % 12 || 12;
+        return `${h12}:${m} ${period}`;
+      })(),
+      updatedDate: (() => {
+        // Spread leads deterministically across the last 30 days.
+        const daysAgo = Math.floor(rand() * 30);
+        const d = new Date();
+        d.setHours(0, 0, 0, 0);
+        d.setDate(d.getDate() - daysAgo);
+        const y = d.getFullYear();
+        const mo = String(d.getMonth() + 1).padStart(2, "0");
+        const da = String(d.getDate()).padStart(2, "0");
+        return `${y}-${mo}-${da}`;
+      })(),
+    });
+  }
+  return leads;
+}
+
+export function leadsToCsv(leads: Lead[]): string {
+  const head = ["lead_id","name","phone","email","stage","channel","status","duration_sec","cost_usd","updated_date","updated_at"];
+  const rows = leads.map((l) => [
+    l.id, l.name, l.phone, l.email, l.stageLabel, l.channel ?? "", l.status,
+    l.duration ?? "", l.cost, l.updatedDate, l.updatedAt,
+  ]);
+  return [head, ...rows].map((r) => r.map((v) => {
+    const s = String(v ?? "");
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  }).join(",")).join("\n");
+}
+
+export function downloadCsv(filename: string, csv: string) {
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+}

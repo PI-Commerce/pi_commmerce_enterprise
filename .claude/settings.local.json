@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx tsc *)",
+      "Read(//Users/mayankansal/.bun/bin/**)",
+      "Bash(command -v node)",
+      "Bash(npm install *)",
+      "mcp__Claude_in_Chrome__list_connected_browsers",
+      "Bash(node_modules/.bin/tsc --noEmit)",
+      "Bash(echo \"TSC_EXIT=$?\")",
+      "Bash(node_modules/.bin/vite dev *)",
+      "mcp__Claude_Preview__preview_start",
+      "Bash(xargs kill)",
+      "Bash(echo \"EXIT: $?\")",
+      "Bash(ls -la ~/Downloads/*.pdf 2>/dev/null; echo \"---\"; ls -la \"$HOME/Downloads/PICOM-Campaign Creation Service-050626-074213.pdf\" 2>/dev/null)",
+      "Bash(python3 -c \"import pypdf; print\\('pypdf ok'\\)\")",
+      "Bash(python3 -c \"import PyPDF2; print\\('PyPDF2 ok'\\)\")",
+      "Bash(python3 -c \"import fitz; print\\('pymupdf ok'\\)\")",
+      "Bash(command -v pdftotext)",
+      "Bash(echo \"NONE: $\\(command -v pdftotext || echo no-pdftotext\\)\")",
+      "Bash(python3 -c ' *)",
+      "Bash(grep -rnoE \"onDismiss[^;]{0,60}|onAutoClose[^;]{0,40}|closeButton[^;]{0,30}|deleteToast[^;]{0,40}\" node_modules/sonner/dist/index.mjs)",
+      "Bash(grep -nE \"</aside>|</div>\\\\s*$|^\\\\s*\\\\\\);\\\\s*$|^}\" src/components/workflow/ConfigPanel.tsx)"
+    ]
+  }
+}
