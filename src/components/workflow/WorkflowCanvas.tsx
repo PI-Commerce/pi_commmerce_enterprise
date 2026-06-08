@@ -8,6 +8,7 @@ import ReactFlow, {
 import { nodeTypes } from "./nodes";
 import type { WorkflowNodeData, NodeKind, CampaignStatus } from "@/lib/campaign-types";
 import { NODE_LABELS } from "@/lib/campaign-types";
+import { EXAMPLE_CAMPAIGNS } from "@/lib/campaign-examples";
 import { ConfigPanel } from "./ConfigPanel";
 import { AiComposer } from "./AiComposer";
 import { NodePalette } from "./NodePalette";
@@ -67,6 +68,7 @@ const BLANK_NODES: Node<WorkflowNodeData>[] = [
 
 export function WorkflowCanvas({
   status,
+  campaignId,
   onValidityChange,
   onDirty,
   autoStartAskPi = false,
@@ -74,14 +76,22 @@ export function WorkflowCanvas({
   onAiBuiltName,
 }: {
   status: CampaignStatus;
+  campaignId?: string;
   onValidityChange?: (validCount: number, total: number) => void;
   onDirty?: () => void;
   autoStartAskPi?: boolean;
   isNew?: boolean;
   onAiBuiltName?: (name: string) => void;
 }) {
-  const [nodes, setNodes, onNodesChange] = useNodesState(isNew ? BLANK_NODES : SEED_NODES);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(isNew ? [] : SEED_EDGES);
+  // Pre-built example campaigns ship their own authored graph; everything else
+  // (the existing demo campaigns) falls back to the shared seed graph.
+  const example = campaignId ? EXAMPLE_CAMPAIGNS[campaignId] : undefined;
+  const [nodes, setNodes, onNodesChange] = useNodesState(
+    isNew ? BLANK_NODES : example?.nodes ?? SEED_NODES,
+  );
+  const [edges, setEdges, onEdgesChange] = useEdgesState(
+    isNew ? [] : example?.edges ?? SEED_EDGES,
+  );
   const [selected, setSelected] = useState<{ id: string; data: WorkflowNodeData } | null>(null);
   const [askPiOpen, setAskPiOpen] = useState(false);
   const [aiBuilding, setAiBuilding] = useState(false);

@@ -59,7 +59,9 @@ const NOW = Date.now();
 const M = 60_000, H = 60 * M, D = 24 * H;
 
 const INITIAL: CampaignRow[] = [
-  { id: "c_001", name: "Dormant Trader Reactivation", state: "running",  createdAt: "Mar 02, 2026 · 09:14", createdAtTs: Date.parse("2026-03-02T09:14:00"), lastEdited: "4m ago",     lastEditedTs: NOW - 4 * M,   runType: "recurring", lastRun: "running", lastRunAt: "Today · 12:04", lastRunTs: NOW - 30 * M, lastRunId: "\u200B" },
+  { id: "c_ex1", name: "Example 1 (Omni-channel React)", state: "ready", createdAt: "Today · 09:00", createdAtTs: NOW - 1 * H, lastEdited: "1m ago", lastEditedTs: NOW - 1 * M, runType: "one-time", lastRun: "—" },
+  { id: "c_ex2", name: "Example 2 (Voice-led win-back)",  state: "ready", createdAt: "Today · 09:00", createdAtTs: NOW - 1 * H, lastEdited: "2m ago", lastEditedTs: NOW - 2 * M, runType: "one-time", lastRun: "—" },
+  { id: "c_001", name: "Dormant Trader Reactivation", state: "running", createdAt: "Mar 02, 2026 · 09:14", createdAtTs: Date.parse("2026-03-02T09:14:00"), lastEdited: "4m ago",     lastEditedTs: NOW - 4 * M,   runType: "recurring", lastRun: "running", lastRunAt: "Today · 12:04", lastRunTs: NOW - 30 * M, lastRunId: "\u200B" },
   { id: "c_002", name: "New Trader Onboarding",       state: "running",  createdAt: "Feb 18, 2026 · 16:02", createdAtTs: Date.parse("2026-02-18T16:02:00"), lastEdited: "1h ago",     lastEditedTs: NOW - 1 * H,   runType: "recurring", lastRun: "completed", lastRunAt: "Today · 11:50", lastRunTs: NOW - 50 * M, lastRunId: "r_8420" },
   { id: "c_003", name: "High-Value Win-Back",         state: "paused",   createdAt: "Feb 04, 2026 · 11:30", createdAtTs: Date.parse("2026-02-04T11:30:00"), lastEdited: "2h ago",     lastEditedTs: NOW - 2 * H,   runType: "recurring", lastRun: "paused",  lastRunAt: "Today · 11:32", lastRunTs: NOW - 70 * M, lastRunId: "r_8418" },
   { id: "c_004", name: "KYC Drop-off Recovery",       state: "ready",    createdAt: "Jan 22, 2026 · 10:45", createdAtTs: Date.parse("2026-01-22T10:45:00"), lastEdited: "Yesterday",  lastEditedTs: NOW - 1 * D,   runType: "one-time",  lastRun: "—" },

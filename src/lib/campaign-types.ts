@@ -38,12 +38,76 @@ export type RetryPolicy = { maxRetries: number; backoffSeconds: number };
 export type NodeOutputKind = "branch" | "variant" | "exit" | "default";
 export type NodeOutput = { id: string; label: string; kind: NodeOutputKind };
 
+/**
+ * Pre-filled configuration for preset/example campaign nodes.
+ *
+ * When a node is marked `preset`, the config panel renders the *real* interactive
+ * editor for that node kind — exactly as a user would see it — but in read-only
+ * mode, hydrated from these values. Every field is optional; each sub-component
+ * falls back to its own built-in demo default when a key is absent. This is how an
+ * example node "looks fully configured" without a bespoke summary card.
+ */
+export type PresetSchemaField = { id: string; name: string; type: "String" | "Number" | "Boolean" };
+export type PresetBranch = { id: string; label: string; variable: string; op: string; value: string };
+export type PresetSplitVariant = { id: string; label: string; pct: number };
+export type PresetTransform = { id: string; type: string; input: string; output: string };
+export type PresetExitPath = { id: string; label: string; variable: string; op: string; value: string };
+export type PresetVarMap = { v: string; def: string };
+
+export type PresetConfig = {
+  // ---- Audience ----
+  audienceMode?: "csv" | "api";
+  // CSV
+  fileName?: string;
+  primaryKey?: string;
+  phoneCol?: string;
+  csvKeys?: string[];
+  csvPreview?: string[][];
+  rowCount?: string;
+  // Runtime API
+  payloadType?: "single" | "list" | "csv";
+  fields?: PresetSchemaField[];
+  phoneField?: string;
+  // ---- Conditional ----
+  branches?: PresetBranch[];
+  // ---- A/B Split (logic node) ----
+  splitVariants?: PresetSplitVariant[];
+  // ---- Action shell (voice / whatsapp / sms) ----
+  transforms?: PresetTransform[];
+  paths?: PresetExitPath[];
+  abEnabled?: boolean;
+  abVariants?: PresetSplitVariant[];
+  // ---- Voice Call core ----
+  agent?: string;
+  voiceVarMap?: PresetVarMap[];
+  callStart?: string;
+  callEnd?: string;
+  timezone?: string;
+  maxAttempts?: number;
+  retryInterval?: string;
+  // ---- WhatsApp core ----
+  waNumber?: string;
+  waMode?: "template" | "freeform";
+  waTemplate?: string;
+  waVarMap?: PresetVarMap[];
+  waBody?: string;
+  // ---- SMS core ----
+  smsType?: string;
+  smsFormat?: string;
+  peId?: string;
+  senderId?: string;
+  smsBody?: string;
+  // ---- Delay ----
+  delayValue?: number;
+  delayUnit?: "Minutes" | "Hours" | "Days";
+};
+
 export type WorkflowNodeData = {
   kind: NodeKind;
   title: string;
   subtitle?: string;
-  /** Per-node configuration (loosely typed; shape depends on kind) */
-  config?: Record<string, unknown>;
+  /** Per-node configuration. For preset/example nodes this is a {@link PresetConfig}; otherwise loosely typed. */
+  config?: PresetConfig & Record<string, unknown>;
   /** Whether all required config fields are satisfied */
   valid?: boolean;
   /** Inline error message when invalid */
@@ -61,6 +125,13 @@ export type WorkflowNodeData = {
   outputs?: NodeOutput[];
   /** Set when an action node runs as an A/B experiment — drives the canvas A/B badge. */
   abTest?: { variants: { label: string; pct: number }[] };
+  /**
+   * Marks a preset/example node. The config panel then renders the real editor for
+   * this node's kind in read-only mode (hydrated from {@link config}) and swallows
+   * any field-level changes, so the authored `outputs`/`abTest` and the edges that
+   * reference them survive being clicked into.
+   */
+  preset?: boolean;
 };
 
 

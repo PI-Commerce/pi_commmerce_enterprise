@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { WorkflowCanvas } from "@/components/workflow/WorkflowCanvas";
 import { BuilderTopBar } from "@/components/workflow/BuilderTopBar";
 import type { CampaignStatus } from "@/lib/campaign-types";
+import { EXAMPLE_CAMPAIGNS } from "@/lib/campaign-examples";
 
 export const Route = createFileRoute("/campaigns/$id")({
   component: CampaignBuilder,
@@ -25,11 +26,16 @@ function CampaignBuilder() {
   const { name: seedName, description: seedDescription, objective: seedObjective } = Route.useSearch();
   const navigate = useNavigate();
   const isNew = id === "new";
+  const example = EXAMPLE_CAMPAIGNS[id];
 
   const [name, setName] = useState(
-    isNew ? (seedName?.trim() || "Untitled campaign") : "Dormant Trader Reactivation",
+    isNew
+      ? (seedName?.trim() || "Untitled campaign")
+      : example?.name ?? "Dormant Trader Reactivation",
   );
-  const [status, setStatus] = useState<CampaignStatus>(isNew ? "draft" : "draft");
+  const [status, setStatus] = useState<CampaignStatus>(
+    isNew ? "draft" : example?.status ?? "draft",
+  );
   const [dirty, setDirty] = useState(false);
   const [validCount, setValidCount] = useState(0);
   const [total, setTotal] = useState(0);
@@ -96,6 +102,7 @@ function CampaignBuilder() {
       <div className="relative flex-1">
         <WorkflowCanvas
           status={status}
+          campaignId={id}
           onValidityChange={handleValidity}
           onDirty={handleDirty}
           autoStartAskPi={isNew}

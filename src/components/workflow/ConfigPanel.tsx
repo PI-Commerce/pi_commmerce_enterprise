@@ -20,7 +20,7 @@ import {
   AlertDialogFooter, AlertDialogTitle, AlertDialogDescription, AlertDialogAction, AlertDialogCancel,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
-import type { WorkflowNodeData, NodeKind } from "@/lib/campaign-types";
+import type { WorkflowNodeData, NodeKind, PresetConfig } from "@/lib/campaign-types";
 import { NODE_LABELS, SAMPLE_WORKFLOW_VARIABLES } from "@/lib/campaign-types";
 
 // Collision-free local id generator — Date.now() alone collides on rapid clicks,
@@ -98,11 +98,23 @@ function ResizablePanel({ children }: { children: React.ReactNode }) {
   );
 }
 
+// onChange swallowed for preset nodes so the real editor's mount-time effects can't
+// republish default outputs/abTest over the hand-authored ports (which would
+// silently disconnect the example graph's edges mid-demo).
+const NOOP_CHANGE = (_patch: Partial<WorkflowNodeData>) => undefined;
+
 export function ConfigPanel({ node, readOnly, onClose, onChange, onDelete, onDuplicate }: Props) {
   if (!node) return null;
   const { data } = node;
   const valid = data.valid !== false;
   const isSystem = data.kind === "start" || data.kind === "end";
+  // Preset/example nodes render the *real* editor for this kind, but read-only and
+  // hydrated from data.config — so it looks exactly like a configured node. We force
+  // read-only and neuter onChange so the stateful sub-components can't overwrite the
+  // authored outputs/abTest (and disconnect the example graph's edges) on mount.
+  const preset = !!data.preset;
+  const ro = readOnly || preset;
+  const safeChange = preset ? NOOP_CHANGE : onChange;
 
   return (
     <ResizablePanel>
@@ -131,7 +143,7 @@ export function ConfigPanel({ node, readOnly, onClose, onChange, onDelete, onDup
         </div>
 
         <div className="scrollbar-thin flex-1 overflow-y-auto px-5 py-5 space-y-5">
-          <NameField data={data} readOnly={readOnly} onChange={onChange} />
+          <NameField data={data} readOnly={ro} onChange={safeChange} />
           {isSystem ? (
             <div className="flex items-start gap-2.5 rounded-lg bg-muted px-3.5 py-3 text-[13px] text-muted-foreground">
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -142,14 +154,14 @@ export function ConfigPanel({ node, readOnly, onClose, onChange, onDelete, onDup
               </p>
             </div>
           ) : (
-            <NodeFields data={data} readOnly={readOnly} onChange={onChange} />
+            <NodeFields data={data} readOnly={ro} onChange={safeChange} />
           )}
         </div>
 
         {!isSystem && (
           <div className="flex items-center justify-between border-t border-border px-5 py-3">
             <div className="flex items-center gap-1">
-              {!data.locked && !readOnly && (
+              {!data.locked && !ro && (
                 <>
                   <Button variant="ghost" size="sm" onClick={onDuplicate} className="h-8 gap-1 px-2 text-xs">
                     <Copy className="h-3.5 w-3.5" /> Duplicate
@@ -181,7 +193,7 @@ export function ConfigPanel({ node, readOnly, onClose, onChange, onDelete, onDup
                 </>
               )}
             </div>
-            <Button size="sm" disabled={readOnly || !valid} className="h-8 text-xs">Save</Button>
+            <Button size="sm" disabled={ro || !valid} className="h-8 text-xs">Save</Button>
           </div>
         )}
     </ResizablePanel>
@@ -225,12 +237,12 @@ function NameField({
 function NodeFields({
   data, readOnly, onChange,
 }: { data: WorkflowNodeData; readOnly?: boolean; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
-  return <KindFields kind={data.kind} readOnly={readOnly} onChange={onChange} />;
+  return <KindFields kind={data.kind} config={data.config} readOnly={readOnly} onChange={onChange} />;
 }
 
 function KindFields({
-  kind, readOnly, onChange,
-}: { kind: NodeKind; readOnly?: boolean; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
+  kind, config, readOnly, onChange,
+}: { kind: NodeKind; config?: PresetConfig; readOnly?: boolean; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
   const mark = (valid: boolean, error?: string) => onChange({ valid, error });
 
   switch (kind) {
@@ -239,34 +251,34 @@ function KindFields({
       return null;
 
     case "audience":
-      return <AudienceFields readOnly={readOnly} mark={mark} />;
+      return <AudienceFields config={config} readOnly={readOnly} mark={mark} />;
 
     case "conditional":
-      return <ConditionalFields readOnly={readOnly} mark={mark} onChange={onChange} />;
+      return <ConditionalFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
 
     case "abSplit":
-      return <AbSplitFields readOnly={readOnly} mark={mark} onChange={onChange} />;
+      return <AbSplitFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
 
     case "delay":
       return (
         <Section title="Delay">
           <Field label="Duration" required>
             <div className="grid grid-cols-2 gap-2">
-              <Input disabled={readOnly} type="number" defaultValue={24} className="h-9" onChange={() => mark(true)} />
-              <SelectLike disabled={readOnly} options={["Minutes", "Hours", "Days"]} onPick={() => mark(true)} defaultValue="Hours" />
+              <Input disabled={readOnly} type="number" defaultValue={config?.delayValue ?? 24} className="h-9" onChange={() => mark(true)} />
+              <SelectLike disabled={readOnly} options={["Minutes", "Hours", "Days"]} onPick={() => mark(true)} defaultValue={config?.delayUnit ?? "Hours"} />
             </div>
           </Field>
         </Section>
       );
 
     case "voiceCall":
-      return <VoiceCallFields readOnly={readOnly} mark={mark} onChange={onChange} />;
+      return <VoiceCallFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
 
     case "whatsapp":
-      return <WhatsAppFields readOnly={readOnly} mark={mark} onChange={onChange} />;
+      return <WhatsAppFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
 
     case "sms":
-      return <SmsFields readOnly={readOnly} mark={mark} onChange={onChange} />;
+      return <SmsFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
 
     case "adsCampaign":
       return <AdsCampaignFields readOnly={readOnly} mark={mark} />;
@@ -275,8 +287,8 @@ function KindFields({
 
 /* --------------------------- Audience --------------------------- */
 
-function AudienceFields({ readOnly, mark }: { readOnly?: boolean; mark: (v: boolean, e?: string) => void }) {
-  const [mode, setMode] = useState<"csv" | "api">("csv");
+function AudienceFields({ config, readOnly, mark }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void }) {
+  const [mode, setMode] = useState<"csv" | "api">(config?.audienceMode ?? "csv");
   return (
     <>
       <Section title="Source">
@@ -288,7 +300,7 @@ function AudienceFields({ readOnly, mark }: { readOnly?: boolean; mark: (v: bool
           </div>
         </Field>
       </Section>
-      {mode === "csv" ? <CsvAudience readOnly={readOnly} mark={mark} /> : <ApiAudience readOnly={readOnly} mark={mark} />}
+      {mode === "csv" ? <CsvAudience config={config} readOnly={readOnly} mark={mark} /> : <ApiAudience config={config} readOnly={readOnly} mark={mark} />}
     </>
   );
 }
@@ -305,16 +317,21 @@ const CSV_PREVIEW_ROWS = [
 
 type DetectStatus = "idle" | "uploading" | "uploaded" | "detecting" | "detected" | "failed";
 
-function CsvAudience({ readOnly, mark }: { readOnly?: boolean; mark: (v: boolean, e?: string) => void }) {
+function CsvAudience({ config, readOnly, mark }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void }) {
   // Seed in the completed state so an already-configured Audience node opens valid;
   // the "Replace" control re-runs the full upload → detect flow for demos.
   const [status, setStatus] = useState<DetectStatus>("detected");
-  const [fileName, setFileName] = useState("audience.csv");
-  const [primaryKey, setPrimaryKey] = useState("customer_id");
-  const [phoneCol, setPhoneCol] = useState("phone");
+  const [fileName, setFileName] = useState(config?.fileName ?? "audience.csv");
+  const [primaryKey, setPrimaryKey] = useState(config?.primaryKey ?? "customer_id");
+  const [phoneCol, setPhoneCol] = useState(config?.phoneCol ?? "phone");
+
+  // Preset nodes can override the detected schema/preview so the card matches the campaign's data.
+  const schemaKeys = config?.csvKeys ?? CSV_KEYS;
+  const previewRows = config?.csvPreview ?? CSV_PREVIEW_ROWS;
+  const rowCount = config?.rowCount ?? "12,402";
 
   const detected = status === "detected";
-  const keys = detected ? CSV_KEYS : [];
+  const keys = detected ? schemaKeys : [];
 
   useEffect(() => {
     const ok = detected && !!primaryKey && !!phoneCol;
@@ -335,7 +352,7 @@ function CsvAudience({ readOnly, mark }: { readOnly?: boolean; mark: (v: boolean
     toast.loading("Finding keys…", { id: "csv-detect", description: fileName });
     setTimeout(() => {
       setStatus("detected");
-      toast.success("Schema detection successful", { id: "csv-detect", description: `12,402 rows · ${CSV_KEYS.length} keys detected` });
+      toast.success("Schema detection successful", { id: "csv-detect", description: `${rowCount} rows · ${schemaKeys.length} keys detected` });
     }, 1100);
   };
   const replace = () => {
@@ -382,8 +399,8 @@ function CsvAudience({ readOnly, mark }: { readOnly?: boolean; mark: (v: boolean
           {detected && (
             <>
               <div className="grid grid-cols-2 gap-2">
-                <DetectStat label="Rows" value="12,402" />
-                <DetectStat label="Columns" value={String(CSV_KEYS.length)} />
+                <DetectStat label="Rows" value={rowCount} />
+                <DetectStat label="Columns" value={String(schemaKeys.length)} />
               </div>
               <div className="flex flex-wrap gap-1.5">
                 {keys.map((k) => (
@@ -429,15 +446,15 @@ function CsvAudience({ readOnly, mark }: { readOnly?: boolean; mark: (v: boolean
           <Section title="Preview">
             <div className="mb-2 flex items-center justify-between text-[11.5px]">
               <span className="text-muted-foreground">Total audience count</span>
-              <span className="font-mono font-semibold tabular-nums">12,402</span>
+              <span className="font-mono font-semibold tabular-nums">{rowCount}</span>
             </div>
             <div className="overflow-x-auto rounded-lg border border-border">
               <table className="w-full text-[11.5px]">
                 <thead className="bg-muted/40 text-muted-foreground">
-                  <tr>{CSV_KEYS.map((h) => (<th key={h} className="whitespace-nowrap px-2 py-1.5 text-left font-medium">{h}</th>))}</tr>
+                  <tr>{schemaKeys.map((h) => (<th key={h} className="whitespace-nowrap px-2 py-1.5 text-left font-medium">{h}</th>))}</tr>
                 </thead>
                 <tbody>
-                  {CSV_PREVIEW_ROWS.map((r, i) => (
+                  {previewRows.map((r, i) => (
                     <tr key={i} className="border-t border-border">{r.map((c, j) => (<td key={j} className="whitespace-nowrap px-2 py-1.5">{c}</td>))}</tr>
                   ))}
                 </tbody>
@@ -516,14 +533,14 @@ function genSample(fields: SchemaField[], fmt: "single" | "list" | "csv"): strin
   return fmt === "list" ? `[\n${obj.split("\n").map((l) => "  " + l).join("\n")}\n]` : obj;
 }
 
-function ApiAudience({ readOnly, mark }: { readOnly?: boolean; mark: (v: boolean, e?: string) => void }) {
-  const [payloadType, setPayloadType] = useState<"single" | "list" | "csv">("single");
-  const [fields, setFields] = useState<SchemaField[]>([
+function ApiAudience({ config, readOnly, mark }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void }) {
+  const [payloadType, setPayloadType] = useState<"single" | "list" | "csv">(config?.payloadType ?? "single");
+  const [fields, setFields] = useState<SchemaField[]>(config?.fields ?? [
     { id: "f1", name: "phone", type: "String" },
     { id: "f2", name: "customer_name", type: "String" },
     { id: "f3", name: "loan_amount", type: "Number" },
   ]);
-  const [phoneField, setPhoneField] = useState("phone");
+  const [phoneField, setPhoneField] = useState(config?.phoneField ?? "phone");
 
   const namedFields = fields.filter((f) => f.name.trim());
   const phoneOk = !!phoneField && namedFields.some((f) => f.name === phoneField && f.type === "String");
@@ -732,8 +749,8 @@ const SEGMENT_OPERATORS = [
   "equals", "not equals", "greater than", "less than", "contains", "exists",
 ];
 
-function ConditionalFields({ readOnly, mark, onChange }: { readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
-  const [branches, setBranches] = useState([
+function ConditionalFields({ config, readOnly, mark, onChange }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
+  const [branches, setBranches] = useState(config?.branches ?? [
     { id: "bA", label: "High value", variable: "contact.tier", op: "equals", value: "gold" },
     { id: "bB", label: "Engaged", variable: "wa.delivery_state", op: "equals", value: "read" },
   ]);
@@ -788,8 +805,8 @@ function ConditionalFields({ readOnly, mark, onChange }: { readOnly?: boolean; m
 
 /* --------------------------- A/B Split --------------------------- */
 
-function AbSplitFields({ readOnly, mark, onChange }: { readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
-  const [variants, setVariants] = useState([
+function AbSplitFields({ config, readOnly, mark, onChange }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
+  const [variants, setVariants] = useState(config?.splitVariants ?? [
     { id: "vA", label: "A", pct: 50 },
     { id: "vB", label: "B", pct: 50 },
   ]);
@@ -837,15 +854,19 @@ function AbSplitFields({ readOnly, mark, onChange }: { readOnly?: boolean; mark:
 
 /* --------------------------- Voice Call --------------------------- */
 
-function VoiceCallFields({ readOnly, mark, onChange }: { readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
+function VoiceCallFields({ config, readOnly, mark, onChange }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
   return (
-    <ActionNodeShell kind="voiceCall" readOnly={readOnly} mark={mark} onChange={onChange}
-      renderCore={(coreMark) => <VoiceCallCore readOnly={readOnly} mark={coreMark} />} />
+    <ActionNodeShell kind="voiceCall" config={config} readOnly={readOnly} mark={mark} onChange={onChange}
+      renderCore={(coreMark) => <VoiceCallCore config={config} readOnly={readOnly} mark={coreMark} />} />
   );
 }
 
-function VoiceCallCore({ readOnly, mark }: { readOnly?: boolean; mark: (v: boolean, e?: string) => void }) {
-  const [agentSelected, setAgentSelected] = useState(false);
+function VoiceCallCore({ config, readOnly, mark }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void }) {
+  const [agentSelected, setAgentSelected] = useState(!!config?.agent);
+  const varMap = config?.voiceVarMap ?? [
+    { v: "{{name}}", def: "contact.first_name" },
+    { v: "{{phone}}", def: "contact.phone" },
+  ];
   return (
     <>
       <Section title="Agent">
@@ -861,6 +882,7 @@ function VoiceCallCore({ readOnly, mark }: { readOnly?: boolean; mark: (v: boole
             <SelectLike
               disabled={readOnly}
               options={["Aria · Conversational", "Kai · Formal", "Maya · Friendly"]}
+              defaultValue={config?.agent}
               onPick={() => { setAgentSelected(true); mark(true); }}
               placeholder="Select agent…"
             />
@@ -877,10 +899,7 @@ function VoiceCallCore({ readOnly, mark }: { readOnly?: boolean; mark: (v: boole
             <p className="text-[11px] text-muted-foreground">Map agent variables to upstream workflow variables.</p>
             {agentSelected ? (
               <div className="space-y-2 pt-1">
-                {[
-                  { v: "{{name}}", def: "contact.first_name" },
-                  { v: "{{phone}}", def: "contact.phone" },
-                ].map((row) => (
+                {varMap.map((row) => (
                   <div key={row.v} className="grid grid-cols-[110px_1fr] items-center gap-2">
                     <span className="font-mono text-[11.5px] text-muted-foreground">{row.v}</span>
                     <VariablePicker defaultValue={row.def} disabled={readOnly} onChange={() => undefined} />
@@ -897,18 +916,18 @@ function VoiceCallCore({ readOnly, mark }: { readOnly?: boolean; mark: (v: boole
       </Section>
       <Section title="Call window">
         <div className="grid grid-cols-2 gap-2">
-          <Field label="Start time"><Input disabled={readOnly} type="time" defaultValue="09:00" className="h-9" /></Field>
-          <Field label="End time"><Input disabled={readOnly} type="time" defaultValue="20:00" className="h-9" /></Field>
+          <Field label="Start time"><Input disabled={readOnly} type="time" defaultValue={config?.callStart ?? "09:00"} className="h-9" /></Field>
+          <Field label="End time"><Input disabled={readOnly} type="time" defaultValue={config?.callEnd ?? "20:00"} className="h-9" /></Field>
         </div>
         <Field label="Timezone">
-          <SelectLike disabled={readOnly} options={["Asia/Kolkata (IST)", "Asia/Dubai (GST)", "America/New_York (EST)", "Europe/London (GMT)"]} onPick={() => undefined} defaultValue="Asia/Kolkata (IST)" />
+          <SelectLike disabled={readOnly} options={["Asia/Kolkata (IST)", "Asia/Dubai (GST)", "America/New_York (EST)", "Europe/London (GMT)"]} onPick={() => undefined} defaultValue={config?.timezone ?? "Asia/Kolkata (IST)"} />
         </Field>
       </Section>
       <Section title="Retry">
         <div className="grid grid-cols-2 gap-2">
-          <Field label="Max attempts"><Input disabled={readOnly} type="number" defaultValue={3} className="h-9" /></Field>
+          <Field label="Max attempts"><Input disabled={readOnly} type="number" defaultValue={config?.maxAttempts ?? 3} className="h-9" /></Field>
           <Field label="Retry interval">
-            <SelectLike disabled={readOnly} options={["15 mins", "30 mins", "1 hour", "4 hours", "24 hours"]} defaultValue="15 mins" onPick={() => undefined} />
+            <SelectLike disabled={readOnly} options={["15 mins", "30 mins", "1 hour", "4 hours", "24 hours"]} defaultValue={config?.retryInterval ?? "15 mins"} onPick={() => undefined} />
           </Field>
         </div>
       </Section>
@@ -935,18 +954,22 @@ function StepChip({ n, done, muted }: { n: number; done?: boolean; muted?: boole
 
 /* --------------------------- WhatsApp --------------------------- */
 
-function WhatsAppFields({ readOnly, mark, onChange }: { readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
+function WhatsAppFields({ config, readOnly, mark, onChange }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
   return (
-    <ActionNodeShell kind="whatsapp" readOnly={readOnly} mark={mark} onChange={onChange}
-      renderCore={(coreMark) => <WhatsAppCore readOnly={readOnly} mark={coreMark} />} />
+    <ActionNodeShell kind="whatsapp" config={config} readOnly={readOnly} mark={mark} onChange={onChange}
+      renderCore={(coreMark) => <WhatsAppCore config={config} readOnly={readOnly} mark={coreMark} />} />
   );
 }
 
-function WhatsAppCore({ readOnly, mark }: { readOnly?: boolean; mark: (v: boolean, e?: string) => void }) {
-  const [mode, setMode] = useState<"template" | "freeform">("template");
-  const [templateSelected, setTemplateSelected] = useState(false);
-  const [numberSelected, setNumberSelected] = useState(false);
-  const [contentReady, setContentReady] = useState(false);
+function WhatsAppCore({ config, readOnly, mark }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void }) {
+  const [mode, setMode] = useState<"template" | "freeform">(config?.waMode ?? "template");
+  const [templateSelected, setTemplateSelected] = useState(!!config?.waTemplate);
+  const [numberSelected, setNumberSelected] = useState(!!config?.waNumber);
+  const [contentReady, setContentReady] = useState(!!config?.waTemplate || !!config?.waBody);
+  const waVarMap = config?.waVarMap ?? [
+    { v: "{{1}}", def: "contact.first_name" },
+    { v: "{{2}}", def: "ai.intent" },
+  ];
 
   useEffect(() => {
     mark(numberSelected && contentReady, numberSelected ? undefined : "Select a connected WhatsApp number");
@@ -959,6 +982,7 @@ function WhatsAppCore({ readOnly, mark }: { readOnly?: boolean; mark: (v: boolea
           <SelectLike
             disabled={readOnly}
             options={["+91 98100 12345 · PiCommerce", "+91 98200 67890 · PiCommerce Support", "+91 98300 11223 · Paytm Money"]}
+            defaultValue={config?.waNumber}
             onPick={() => setNumberSelected(true)}
             placeholder="Select connected number…"
           />
@@ -986,6 +1010,7 @@ function WhatsAppCore({ readOnly, mark }: { readOnly?: boolean; mark: (v: boolea
               <SelectLike
                 disabled={readOnly}
                 options={["reactivate_v3 · Marketing", "onboarding_v1 · Utility", "winback_v2 · Marketing"]}
+                defaultValue={config?.waTemplate}
                 onPick={() => { setTemplateSelected(true); setContentReady(true); }}
                 placeholder="Choose template…"
               />
@@ -1009,7 +1034,7 @@ function WhatsAppCore({ readOnly, mark }: { readOnly?: boolean; mark: (v: boolea
               </div>
               {templateSelected ? (
                 <div className="space-y-2 pt-1">
-                  {[{ v: "{{1}}", def: "contact.first_name" }, { v: "{{2}}", def: "ai.intent" }].map((row) => (
+                  {waVarMap.map((row) => (
                     <div key={row.v} className="grid grid-cols-[60px_1fr] items-center gap-2">
                       <span className="font-mono text-[11.5px] text-muted-foreground">{row.v}</span>
                       <VariablePicker defaultValue={row.def} disabled={readOnly} onChange={() => undefined} />
@@ -1027,7 +1052,7 @@ function WhatsAppCore({ readOnly, mark }: { readOnly?: boolean; mark: (v: boolea
       ) : (
         <Section title="Freeform message">
           <Field label="Message body" required>
-            <Textarea disabled={readOnly} placeholder="Type your message. Use @ to insert a variable." className="min-h-28 resize-none text-sm" onChange={(e) => setContentReady(!!e.target.value.trim())} />
+            <Textarea disabled={readOnly} defaultValue={config?.waBody} placeholder="Type your message. Use @ to insert a variable." className="min-h-28 resize-none text-sm" onChange={(e) => setContentReady(!!e.target.value.trim())} />
           </Field>
           <Field label="Attachment preview">
             <SelectLike disabled={readOnly} options={["None", "Image", "Video", "Document"]} onPick={() => undefined} defaultValue="None" />
@@ -1040,33 +1065,33 @@ function WhatsAppCore({ readOnly, mark }: { readOnly?: boolean; mark: (v: boolea
 
 /* --------------------------- SMS --------------------------- */
 
-function SmsFields({ readOnly, mark, onChange }: { readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
+function SmsFields({ config, readOnly, mark, onChange }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
   return (
-    <ActionNodeShell kind="sms" readOnly={readOnly} mark={mark} onChange={onChange}
-      renderCore={(coreMark) => <SmsCore readOnly={readOnly} mark={coreMark} />} />
+    <ActionNodeShell kind="sms" config={config} readOnly={readOnly} mark={mark} onChange={onChange}
+      renderCore={(coreMark) => <SmsCore config={config} readOnly={readOnly} mark={coreMark} />} />
   );
 }
 
-function SmsCore({ readOnly, mark }: { readOnly?: boolean; mark: (v: boolean, e?: string) => void }) {
+function SmsCore({ config, readOnly, mark }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void }) {
   return (
     <>
       <Section title="SMS Configuration">
         <div className="grid grid-cols-2 gap-2">
           <Field label="Message type" required>
-            <SelectLike disabled={readOnly} options={["Promotional", "Transactional", "OTP"]} onPick={() => mark(true)} />
+            <SelectLike disabled={readOnly} options={["Promotional", "Transactional", "OTP"]} defaultValue={config?.smsType} onPick={() => mark(true)} />
           </Field>
           <Field label="Format">
-            <SelectLike disabled={readOnly} options={["Text", "Unicode", "Flash SMS"]} onPick={() => undefined} defaultValue="Text" />
+            <SelectLike disabled={readOnly} options={["Text", "Unicode", "Flash SMS"]} onPick={() => undefined} defaultValue={config?.smsFormat ?? "Text"} />
           </Field>
         </div>
         <div className="grid grid-cols-2 gap-2">
-          <Field label="PE ID" required><Input disabled={readOnly} placeholder="1101xxxxxxxxxxxxxx" className="h-9 font-mono text-[12px]" onChange={(e) => mark(!!e.target.value)} /></Field>
-          <Field label="Sender ID" required><Input disabled={readOnly} placeholder="PICOMM" maxLength={6} className="h-9 font-mono text-[12px]" onChange={(e) => mark(!!e.target.value)} /></Field>
+          <Field label="PE ID" required><Input disabled={readOnly} defaultValue={config?.peId} placeholder="1101xxxxxxxxxxxxxx" className="h-9 font-mono text-[12px]" onChange={(e) => mark(!!e.target.value)} /></Field>
+          <Field label="Sender ID" required><Input disabled={readOnly} defaultValue={config?.senderId} placeholder="PICOMM" maxLength={6} className="h-9 font-mono text-[12px]" onChange={(e) => mark(!!e.target.value)} /></Field>
         </div>
       </Section>
       <Section title="Message">
         <Field label="Body" required>
-          <Textarea disabled={readOnly} placeholder="Hi {{user.name}}, your OTP is {{otp}}. Valid for 5 minutes. — PICOMM" maxLength={320} className="min-h-24 resize-none text-sm" onChange={(e) => mark(!!e.target.value.trim())} />
+          <Textarea disabled={readOnly} defaultValue={config?.smsBody} placeholder="Hi {{user.name}}, your OTP is {{otp}}. Valid for 5 minutes. — PICOMM" maxLength={320} className="min-h-24 resize-none text-sm" onChange={(e) => mark(!!e.target.value.trim())} />
           <p className="mt-1 text-[10.5px] text-muted-foreground">Use @ to insert a variable. Media not supported.</p>
         </Field>
       </Section>
@@ -1212,6 +1237,9 @@ function VariablePicker({
 }: { value?: string; defaultValue?: string; disabled?: boolean; onChange: (v: string) => void }) {
   const [v, setV] = useState(value ?? defaultValue ?? "");
   useEffect(() => { if (value !== undefined) setV(value); }, [value]);
+  // Preset/upstream variables (e.g. lifetime_order_value, call_disposition) aren't in
+  // the sample list — surface the current value as its own option so it still renders.
+  const isCustom = !!v && !SAMPLE_WORKFLOW_VARIABLES.some((s) => s.key === v);
   return (
     <div className="relative">
       <Variable className="pointer-events-none absolute left-2.5 top-1/2 z-10 h-3 w-3 -translate-y-1/2 text-ai" />
@@ -1220,6 +1248,11 @@ function VariablePicker({
           <SelectValue placeholder="Select variable…" />
         </SelectTrigger>
         <SelectContent>
+          {isCustom && (
+            <SelectItem value={v} className="font-mono text-[12px]">
+              {v} <span className="text-muted-foreground">· upstream</span>
+            </SelectItem>
+          )}
           {SAMPLE_WORKFLOW_VARIABLES.map((s) => (
             <SelectItem key={s.key} value={s.key} className="font-mono text-[12px]">
               {s.key} <span className="text-muted-foreground">· {s.source}</span>
@@ -1291,23 +1324,28 @@ type ExitPath = { id: string; label: string; variable: string; op: string; value
 type Variant = { id: string; label: string; pct: number; open: boolean };
 
 function ActionNodeShell({
-  kind, readOnly, mark, onChange, renderCore,
+  kind, config, readOnly, mark, onChange, renderCore,
 }: {
   kind: ActionKind;
+  config?: PresetConfig;
   readOnly?: boolean;
   mark: (v: boolean, e?: string) => void;
   onChange: (patch: Partial<WorkflowNodeData>) => void;
   renderCore: (mark: (v: boolean, e?: string) => void) => React.ReactNode;
 }) {
-  const [transforms, setTransforms] = useState<AiTransform[]>([]);
-  const [paths, setPaths] = useState<ExitPath[]>([]);
+  const [transforms, setTransforms] = useState<AiTransform[]>(
+    () => (config?.transforms ?? []).map((t) => ({ ...t, open: false })),
+  );
+  const [paths, setPaths] = useState<ExitPath[]>(config?.paths ?? []);
 
   // A/B experiment is the top-level mode switch: off → one config; on → per-variant config only.
-  const [abEnabled, setAbEnabled] = useState(false);
-  const [variants, setVariants] = useState<Variant[]>([
-    { id: "vA", label: "A", pct: 50, open: true },
-    { id: "vB", label: "B", pct: 50, open: false },
-  ]);
+  const [abEnabled, setAbEnabled] = useState(config?.abEnabled ?? false);
+  const [variants, setVariants] = useState<Variant[]>(
+    () => (config?.abVariants ?? [
+      { id: "vA", label: "A", pct: 50 },
+      { id: "vB", label: "B", pct: 50 },
+    ]).map((v, i) => ({ ...v, open: i === 0 })),
+  );
   const total = variants.reduce((s, v) => s + (Number(v.pct) || 0), 0);
   const abOk = total === 100;
 
