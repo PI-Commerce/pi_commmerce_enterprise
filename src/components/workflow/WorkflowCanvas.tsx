@@ -74,6 +74,7 @@ export function WorkflowCanvas({
   autoStartAskPi = false,
   isNew = false,
   onAiBuiltName,
+  previewOnly = false,
 }: {
   status: CampaignStatus;
   campaignId?: string;
@@ -82,6 +83,9 @@ export function WorkflowCanvas({
   autoStartAskPi?: boolean;
   isNew?: boolean;
   onAiBuiltName?: (name: string) => void;
+  /** Read-only snapshot mode (e.g. Version History): no palette, no Ask Pi, no editing,
+   *  no run pulse — but nodes are still clickable and show their config read-only. */
+  previewOnly?: boolean;
 }) {
   // Pre-built example campaigns ship their own authored graph; everything else
   // (the existing demo campaigns) falls back to the shared seed graph.
@@ -127,7 +131,7 @@ export function WorkflowCanvas({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoStartAskPi]);
 
-  const editable = (status === "draft" || status === "ready" || status === "paused") && !aiBuilding;
+  const editable = !previewOnly && (status === "draft" || status === "ready" || status === "paused") && !aiBuilding;
 
   // Report validity upwards
   useEffect(() => {
@@ -138,6 +142,7 @@ export function WorkflowCanvas({
 
   // Simulated execution pulse for running state
   useEffect(() => {
+    if (previewOnly) return;
     if (status !== "running") {
       setNodes((nds) => nds.map((n) => ({ ...n, data: { ...n.data, runState: "idle" as const } })));
       return;
@@ -158,7 +163,7 @@ export function WorkflowCanvas({
       i = (i + 1) % (order.length + 2);
     }, 1100);
     return () => clearInterval(tick);
-  }, [status, setNodes]);
+  }, [status, setNodes, previewOnly]);
 
   const onConnect = useCallback(
     (c: Connection) => {
@@ -296,7 +301,7 @@ export function WorkflowCanvas({
         />
       </ReactFlow>
 
-      <NodePalette onAdd={addNode} disabled={!editable} />
+      {!previewOnly && <NodePalette onAdd={addNode} disabled={!editable} />}
 
       <ConfigPanel
         node={aiBuilding ? null : selected}
@@ -307,26 +312,28 @@ export function WorkflowCanvas({
         onDuplicate={() => selected && duplicateNode(selected.id)}
       />
 
-      <AiComposer
-        mode="wizard"
-        nudge={{ label: "Ask Pi to build your campaign", active: autoStartAskPi }}
-        autoOpenWizard={askPiOpen}
-        onBuildingChange={setAiBuilding}
-        onWizardSkeleton={(skel) => {
-          setSelected(null);
-          setNodes(skel.nodes);
-          setEdges(skel.edges);
-          refit();
-        }}
-        onWizardBuild={(plan) => {
-          setSelected(null);
-          setNodes(plan.nodes);
-          setEdges(plan.edges);
-          onAiBuiltName?.(plan.name);
-          onDirty?.();
-          refit();
-        }}
-      />
+      {!previewOnly && (
+        <AiComposer
+          mode="wizard"
+          nudge={{ label: "Ask Pi to build your campaign", active: autoStartAskPi }}
+          autoOpenWizard={askPiOpen}
+          onBuildingChange={setAiBuilding}
+          onWizardSkeleton={(skel) => {
+            setSelected(null);
+            setNodes(skel.nodes);
+            setEdges(skel.edges);
+            refit();
+          }}
+          onWizardBuild={(plan) => {
+            setSelected(null);
+            setNodes(plan.nodes);
+            setEdges(plan.edges);
+            onAiBuiltName?.(plan.name);
+            onDirty?.();
+            refit();
+          }}
+        />
+      )}
     </div>
   );
 }

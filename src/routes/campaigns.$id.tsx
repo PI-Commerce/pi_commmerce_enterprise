@@ -119,6 +119,7 @@ function CampaignBuilder() {
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground">
       <BuilderTopBar
+        campaignId={id}
         name={name}
         onNameChange={(n) => { setName(n); setDirty(true); }}
         status={status}

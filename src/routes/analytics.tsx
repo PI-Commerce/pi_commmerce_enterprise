@@ -28,7 +28,7 @@ import { VoiceChannelView } from "@/components/analytics/VoiceChannelView";
 import {
   CAMPAIGNS, NODE_METRICS, NODE_CONFIG_BY_KIND, buildChannelAssets,
   type ChannelKind, type SankeyNode, type SankeyNodeKind, type RunRow,
-  type ChannelAsset,
+  type ChannelAsset, type CampaignAnalytics as CampaignAnalyticsData,
 } from "@/lib/analytics-data";
 import { generateLeads, leadsToCsv, downloadCsv, type Lead } from "@/lib/analytics-leads";
 import { cn } from "@/lib/utils";
@@ -160,6 +160,15 @@ function Analytics() {
 
 /* ───────────── Campaign Analytics ───────────── */
 
+/**
+ * Synthesize a campaign-version label per run so Analytics aligns with the new
+ * Campaign Version Management construct: a run always executes a specific
+ * version, and the most recent run reflects the current (highest) version.
+ */
+function runVersionLabel(c: CampaignAnalyticsData, runIndex: number): string {
+  return `v${c.runs.length - runIndex}`;
+}
+
 function CampaignAnalytics({
   goToChannel,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -170,8 +179,15 @@ function CampaignAnalytics({
 }) {
   const [campaignId, setCampaignId] = useState(CAMPAIGNS[0].id);
   const campaign = CAMPAIGNS.find((c) => c.id === campaignId)!;
+  // Version scopes the visible runs (Campaign → Version → Run cascade). "all" = every version.
+  const [version, setVersion] = useState<string>("all");
+  const versions = useMemo(() => campaign.runs.map((_, i) => runVersionLabel(campaign, i)), [campaign]);
+  const visibleRuns = useMemo(
+    () => (version === "all" ? campaign.runs : campaign.runs.filter((_, i) => runVersionLabel(campaign, i) === version)),
+    [campaign, version],
+  );
   const [runId, setRunId] = useState(campaign.runs[0].id);
-  const run = campaign.runs.find((r) => r.id === runId) ?? campaign.runs[0];
+  const run = visibleRuns.find((r) => r.id === runId) ?? visibleRuns[0] ?? campaign.runs[0];
   const [openNode, setOpenNode] = useState<SankeyNode | null>(null);
 
   return (
@@ -182,6 +198,7 @@ function CampaignAnalytics({
           onValueChange={(v) => {
             setCampaignId(v);
             const next = CAMPAIGNS.find((c) => c.id === v)!;
+            setVersion("all");
             setRunId(next.runs[0].id);
           }}
         >
@@ -190,12 +207,33 @@ function CampaignAnalytics({
             {CAMPAIGNS.map((c) => (<SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>))}
           </SelectContent>
         </Select>
-        <Select value={runId} onValueChange={setRunId}>
-          <SelectTrigger className="h-9 w-[260px] text-xs"><SelectValue placeholder="Run" /></SelectTrigger>
+        <Select
+          value={version}
+          onValueChange={(v) => {
+            setVersion(v);
+            const next = v === "all" ? campaign.runs : campaign.runs.filter((_, i) => runVersionLabel(campaign, i) === v);
+            setRunId((next[0] ?? campaign.runs[0]).id);
+          }}
+        >
+          <SelectTrigger className="h-9 w-[150px] text-xs"><SelectValue placeholder="Version" /></SelectTrigger>
           <SelectContent>
-            {campaign.runs.map((r, i) => (
-              <SelectItem key={r.id} value={r.id}>{r.startedAt} {i === 0 && "(latest)"}</SelectItem>
+            <SelectItem value="all">All versions</SelectItem>
+            {versions.map((v, i) => (
+              <SelectItem key={v} value={v}>{v}{i === 0 && " (current)"}</SelectItem>
             ))}
+          </SelectContent>
+        </Select>
+        <Select value={run.id} onValueChange={setRunId}>
+          <SelectTrigger className="h-9 w-[280px] text-xs"><SelectValue placeholder="Run" /></SelectTrigger>
+          <SelectContent>
+            {visibleRuns.map((r) => {
+              const idx = campaign.runs.indexOf(r);
+              return (
+                <SelectItem key={r.id} value={r.id}>
+                  {r.startedAt} · {runVersionLabel(campaign, idx)}{idx === 0 && " (latest)"}
+                </SelectItem>
+              );
+            })}
           </SelectContent>
         </Select>
         <Badge variant="outline" className="ml-auto text-[11px] capitalize">
