@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { AppShell, PageHeader } from "@/components/app/AppShell";
 import { PageTabs } from "@/components/app/Tabs";
 import { Button } from "@/components/ui/button";
@@ -17,14 +17,16 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  Plus, Search, MoreHorizontal, Copy, Archive, Workflow, Eye, EyeOff,
+  Plus, Search, MoreHorizontal, Copy, Workflow,
   CircleDashed, CircleCheck, CircleX, CirclePause, CircleDot,
   Pause, Play, X, Square, ArrowUp, ArrowDown, ChevronsUpDown, Check,
+  Upload, Download, FileSpreadsheet, Database,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { STATUS_TONE, type CampaignStatus } from "@/lib/campaign-types";
 import { CreateRunDialog, type CampaignOption, type CreateRunPayload } from "@/components/workflow/CreateRunDialog";
+import { CSV_LIBRARY, makeCsvAsset, type CsvAsset } from "@/lib/data-library";
 
 
 export const Route = createFileRoute("/campaigns/")({
@@ -66,10 +68,10 @@ const INITIAL: CampaignRow[] = [
   { id: "c_003", name: "High-Value Win-Back",         state: "paused",   createdAt: "Feb 04, 2026 · 11:30", createdAtTs: Date.parse("2026-02-04T11:30:00"), lastEdited: "2h ago",     lastEditedTs: NOW - 2 * H,   runType: "recurring", lastRun: "paused",  lastRunAt: "Today · 11:32", lastRunTs: NOW - 70 * M, lastRunId: "r_8418" },
   { id: "c_004", name: "KYC Drop-off Recovery",       state: "ready",    createdAt: "Jan 22, 2026 · 10:45", createdAtTs: Date.parse("2026-01-22T10:45:00"), lastEdited: "Yesterday",  lastEditedTs: NOW - 1 * D,   runType: "one-time",  lastRun: "—" },
   { id: "c_005", name: "Festive Cashback Push",       state: "draft",    createdAt: "Jan 10, 2026 · 14:20", createdAtTs: Date.parse("2026-01-10T14:20:00"), lastEdited: "3d ago",     lastEditedTs: NOW - 3 * D,   runType: "one-time",  lastRun: "—" },
-  { id: "c_006", name: "Inactive Premium Outreach",   state: "archived", createdAt: "Dec 15, 2025 · 08:11", createdAtTs: Date.parse("2025-12-15T08:11:00"), lastEdited: "Apr 12",     lastEditedTs: Date.parse("2026-04-12T12:00:00"), runType: "one-time",  lastRun: "failed", lastRunAt: "Apr 12 · 18:00", lastRunTs: Date.parse("2026-04-12T18:00:00"), lastRunId: "r_7188" },
+  { id: "c_006", name: "Inactive Premium Outreach",   state: "paused",   createdAt: "Dec 15, 2025 · 08:11", createdAtTs: Date.parse("2025-12-15T08:11:00"), lastEdited: "Apr 12",     lastEditedTs: Date.parse("2026-04-12T12:00:00"), runType: "one-time",  lastRun: "failed", lastRunAt: "Apr 12 · 18:00", lastRunTs: Date.parse("2026-04-12T18:00:00"), lastRunId: "r_7188" },
 ];
 
-const STATES: CampaignStatus[] = ["draft", "ready", "running", "paused", "archived"];
+const STATES: CampaignStatus[] = ["draft", "ready", "running", "paused"];
 
 const LAST_RUN_META: Record<LastRunStatus, { icon: typeof CircleDashed; tone: string; label: string }> = {
   completed: { icon: CircleCheck,  tone: "text-success",          label: "Completed" },
@@ -110,26 +112,49 @@ type RunRow = {
 };
 
 const RUNS: RunRow[] = [
-  { id: "\u200B", campaign: "Dormant Trader Reactivation", status: "running",    runType: "recurring", triggerMode: "manual", startedAt: "Today, 12:04 PM",   completedAt: "ongoing",         leadsProcessed: 630,  leadsTotal: 1500 },
+  { id: "\u200B", campaign: "Dormant Trader Reactivation", status: "running",    runType: "one-time",  triggerMode: "manual", startedAt: "Today, 12:04 PM",   completedAt: "ongoing",         leadsProcessed: 630,  leadsTotal: 1500 },
   { id: "r_8420", campaign: "New Trader Onboarding",       status: "running",    runType: "recurring", triggerMode: "api",    startedAt: "Today, 11:50 AM",   completedAt: "ongoing",         leadsProcessed: 1200 },
   { id: "r_8419", campaign: "KYC Drop-off Recovery",       status: "queued",     runType: "one-time",  triggerMode: "manual", startedAt: "Today, 11:48 AM",   completedAt: "ongoing",         leadsProcessed: 0,    leadsTotal: 820 },
-  { id: "r_8418", campaign: "High-Value Win-Back",         status: "paused",     runType: "recurring", triggerMode: "manual", startedAt: "Today, 11:32 AM",   completedAt: "ongoing",         leadsProcessed: 412,  leadsTotal: 750 },
-  { id: "r_8417", campaign: "Dormant Trader Reactivation", status: "completed",  runType: "recurring", triggerMode: "manual", startedAt: "Today, 10:00 AM",   completedAt: "Today, 11:14 AM", leadsProcessed: 1500, leadsTotal: 1500 },
+  { id: "r_8418", campaign: "High-Value Win-Back",         status: "paused",     runType: "one-time",  triggerMode: "manual", startedAt: "Today, 11:32 AM",   completedAt: "ongoing",         leadsProcessed: 412,  leadsTotal: 750 },
+  { id: "r_8417", campaign: "Dormant Trader Reactivation", status: "completed",  runType: "one-time",  triggerMode: "manual", startedAt: "Today, 10:00 AM",   completedAt: "Today, 11:14 AM", leadsProcessed: 1500, leadsTotal: 1500 },
   { id: "r_8416", campaign: "Festive Cashback Push",       status: "scheduled",  runType: "one-time",  triggerMode: "manual", startedAt: "Tomorrow, 09:00 AM",completedAt: "ongoing",         leadsProcessed: 0,    leadsTotal: 3200 },
   { id: "r_8415", campaign: "Inactive Premium Outreach",   status: "terminated", runType: "one-time",  triggerMode: "api",    startedAt: "Yesterday, 04:20 PM",completedAt: "Yesterday, 04:38 PM", leadsProcessed: 240 },
   { id: "r_8414", campaign: "New Trader Onboarding",       status: "completed",  runType: "recurring", triggerMode: "api",    startedAt: "Yesterday, 09:00 AM",completedAt: "Yesterday, 10:12 AM", leadsProcessed: 980 },
 ];
 
-type Tab = "campaigns" | "runs";
+type Tab = "data" | "campaigns" | "runs";
 
 function CampaignList() {
   const navigate = useNavigate();
   const [tab, setTab] = useState<Tab>("campaigns");
-  const [rows, setRows] = useState<CampaignRow[]>(INITIAL);
+  const [rows] = useState<CampaignRow[]>(INITIAL);
+
+  // Data library (CSV library tab — scope C1–C3). Shared source of truth with
+  // the Run modal's "select previously uploaded CSV" dropdown (WS6).
+  const [assets, setAssets] = useState<CsvAsset[]>(() =>
+    [...CSV_LIBRARY].sort((a, b) => b.uploadedTs - a.uploadedTs),
+  );
+  const fileRef = useRef<HTMLInputElement>(null);
+  const onPickCsv = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-selecting the same file
+    if (!file) return;
+    // v1: read file-level metadata only — never parse or store row contents.
+    const asset = makeCsvAsset({
+      id: `csv_${Date.now()}`,
+      name: file.name,
+      uploadedTs: Date.now(),
+      columns: [],
+      rowCount: 0,
+      sizeKb: Math.max(1, Math.round(file.size / 1024)),
+      source: "uploaded",
+    });
+    setAssets((prev) => [asset, ...prev]);
+    toast.success("CSV added to library", { description: file.name });
+  };
   const [query, setQuery] = useState("");
   const [fState, setFState] = useState<"all" | CampaignStatus>("all");
   const [fRunType, setFRunType] = useState<"all" | RunType>("all");
-  const [showArchived, setShowArchived] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [createRunOpen, setCreateRunOpen] = useState(false);
   const [runFor, setRunFor] = useState<CampaignRow | null>(null);
@@ -156,7 +181,6 @@ function CampaignList() {
   };
 
   const filtered = rows.filter((r) => {
-    if (!showArchived && r.state === "archived") return false;
     if (fState !== "all" && r.state !== fState) return false;
     if (fRunType !== "all" && r.runType !== fRunType) return false;
     if (query && !r.name.toLowerCase().includes(query.toLowerCase())) return false;
@@ -190,22 +214,7 @@ function CampaignList() {
     return true;
   });
 
-  const handleDuplicate = (row: CampaignRow) => {
-    const id = `c_${Math.random().toString(36).slice(2, 6)}`;
-    const now = Date.now();
-    setRows((prev) => [
-      { ...row, id, name: `${row.name} (copy)`, state: "draft", createdAt: "just now", createdAtTs: now, lastEdited: "just now", lastEditedTs: now, lastRun: "—", lastRunAt: undefined, lastRunTs: undefined, lastRunId: undefined },
-      ...prev,
-    ]);
-    toast.success("Campaign duplicated", { description: `${row.name} (copy) · opened in Draft` });
-  };
-
-  const handleArchive = (row: CampaignRow) => {
-    setRows((prev) =>
-      prev.map((r) => (r.id === row.id ? { ...r, state: "archived", lastEdited: "just now", lastEditedTs: Date.now() } : r)),
-    );
-    toast.success("Campaign archived", { description: row.name });
-  };
+  // Duplicate & Archive campaign are OOS for v1 (scope D1/D2) — handlers removed.
 
   const handleCreate = (name: string, description?: string, objective?: string) => {
     setCreateOpen(false);
@@ -219,7 +228,7 @@ function CampaignList() {
     toast.success("Run started", { description: `${payload.runName} · ${payload.triggerMode === "api" ? "API trigger activated" : "running now"}` });
   };
 
-  const hasAny = rows.some((r) => r.state !== "archived" || showArchived);
+  const hasAny = rows.length > 0;
   const runningCount = RUNS.filter((r) => r.status === "running").length;
 
   return (
@@ -228,7 +237,11 @@ function CampaignList() {
         title="Campaigns"
         description="Design and orchestrate every customer journey across channels."
         actions={
-          tab === "campaigns" ? (
+          tab === "data" ? (
+            <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={() => fileRef.current?.click()}>
+              <Upload className="h-3.5 w-3.5" /> Upload CSV
+            </Button>
+          ) : tab === "campaigns" ? (
             <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={() => setCreateOpen(true)}>
               <Plus className="h-3.5 w-3.5" /> Create campaign
             </Button>
@@ -241,16 +254,27 @@ function CampaignList() {
 
       />
 
+      <input
+        ref={fileRef}
+        type="file"
+        accept=".csv,text/csv"
+        className="hidden"
+        onChange={onPickCsv}
+      />
+
       <PageTabs<Tab>
         tabs={[
-          { id: "campaigns", label: "Campaigns", count: rows.filter((r) => r.state !== "archived").length },
+          { id: "data", label: "Data", count: assets.length },
+          { id: "campaigns", label: "Campaigns", count: rows.length },
           { id: "runs", label: "Runs", count: runningCount },
         ]}
         value={tab}
         onChange={setTab}
       />
 
-      {tab === "campaigns" ? (
+      {tab === "data" ? (
+        <DataLibraryPanel assets={assets} onUpload={() => fileRef.current?.click()} />
+      ) : tab === "campaigns" ? (
         <>
           {/* Toolbar */}
           <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -276,22 +300,10 @@ function CampaignList() {
               onChange={(v) => setFRunType(v as typeof fRunType)}
               options={[
                 { value: "all", label: "All run types" },
-                { value: "one-time", label: "One-time" },
-                { value: "recurring", label: "Recurring" },
+                { value: "one-time", label: "Time-Scoped" },
+                { value: "recurring", label: "Always-on" },
               ]}
             />
-
-            <div className="ml-auto">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-8 gap-1.5 text-xs text-muted-foreground"
-                onClick={() => setShowArchived((v) => !v)}
-              >
-                {showArchived ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                {showArchived ? "Hide archived" : "Show archived"}
-              </Button>
-            </div>
           </div>
 
           {!hasAny ? (
@@ -380,16 +392,6 @@ function CampaignList() {
                               >
                                 <Workflow className="h-3.5 w-3.5" /> Open
                               </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => handleDuplicate(c)} className="gap-2 text-xs">
-                                <Copy className="h-3.5 w-3.5" /> Duplicate
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onClick={() => handleArchive(c)}
-                                disabled={c.state === "archived"}
-                                className="gap-2 text-xs"
-                              >
-                                <Archive className="h-3.5 w-3.5" /> Archive
-                              </DropdownMenuItem>
                             </DropdownMenuContent>
                           </DropdownMenu>
                           </div>
@@ -427,8 +429,8 @@ function CampaignList() {
               onChange={(v) => setRType(v as typeof rType)}
               options={[
                 { value: "all", label: "All run types" },
-                { value: "one-time", label: "One-time" },
-                { value: "recurring", label: "Recurring" },
+                { value: "one-time", label: "Time-Scoped" },
+                { value: "recurring", label: "Always-on" },
               ]}
             />
           </div>
@@ -441,7 +443,7 @@ function CampaignList() {
                   <th className="px-4 py-2.5 text-left font-medium">Campaign</th>
                   <th className="px-4 py-2.5 text-left font-medium">Status</th>
                   <th className="px-4 py-2.5 text-left font-medium">Run type</th>
-                  <th className="px-4 py-2.5 text-left font-medium">Trigger mode</th>
+                  <th className="px-4 py-2.5 text-left font-medium">Audience source</th>
                   <th className="px-4 py-2.5 text-left font-medium">Started at</th>
                   <th className="px-4 py-2.5 text-left font-medium">Completed at</th>
                   <th className="px-4 py-2.5 text-left font-medium w-[200px]">Progress</th>
@@ -464,10 +466,26 @@ function CampaignList() {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-[12px] text-muted-foreground">
-                      {r.runType === "recurring" ? "Recurring" : "One-time"}
+                      {r.runType === "recurring" ? "Always-on" : "Time-Scoped"}
                     </td>
                     <td className="px-4 py-3 text-[12px] text-muted-foreground">
-                      {r.triggerMode === "api" ? "API Triggered" : "Manual"}
+                      {r.triggerMode === "api" ? (
+                        <button
+                          type="button"
+                          onClick={() => copyId(`https://api.picommerce.io/v1/runs/trigger/${r.id}`)}
+                          title="Copy trigger API endpoint"
+                          className="group/ep inline-flex items-center gap-1.5 rounded transition-colors hover:text-foreground"
+                        >
+                          API
+                          {copiedId === `https://api.picommerce.io/v1/runs/trigger/${r.id}` ? (
+                            <Check className="h-3 w-3 text-success" />
+                          ) : (
+                            <Copy className="h-3 w-3 opacity-0 transition-opacity group-hover/ep:opacity-100" />
+                          )}
+                        </button>
+                      ) : (
+                        "CSV"
+                      )}
                     </td>
                     <td className="px-4 py-3 text-[12px] text-muted-foreground">{r.startedAt}</td>
                     <td className={cn("px-4 py-3 text-[12px]", r.completedAt === "ongoing" ? "italic text-muted-foreground/70" : "text-muted-foreground")}>
@@ -522,6 +540,74 @@ function CampaignList() {
   );
 }
 
+
+// ============= Data library (CSV library tab — scope C2) =============
+// File-level metadata only — columns CSV Name / Date Uploaded / Download.
+// No row-data preview in v1.
+function DataLibraryPanel({ assets, onUpload }: { assets: CsvAsset[]; onUpload: () => void }) {
+  if (assets.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border bg-card/40 px-6 py-20 text-center">
+        <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl border border-border bg-secondary">
+          <Database className="h-6 w-6 text-muted-foreground" />
+        </div>
+        <h3 className="text-base font-semibold">No CSVs yet</h3>
+        <p className="mt-1 max-w-sm text-sm text-muted-foreground">
+          Upload a CSV to reuse it as a campaign audience. Files uploaded during a run show up here automatically.
+        </p>
+        <Button size="sm" className="mt-5 h-8 gap-1.5 text-xs" onClick={onUpload}>
+          <Upload className="h-3.5 w-3.5" /> Upload CSV
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-border bg-card">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-border bg-secondary/30 text-[11px] uppercase tracking-wider text-muted-foreground">
+            <th className="px-4 py-2.5 text-left font-medium">CSV Name</th>
+            <th className="px-4 py-2.5 text-left font-medium">Date Uploaded</th>
+            <th className="w-32 px-4 py-2.5 text-right font-medium">Download</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-border">
+          {assets.map((a) => (
+            <tr key={a.id} className="transition-colors hover:bg-accent/30">
+              <td className="px-4 py-3">
+                <div className="flex items-center gap-2.5">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-secondary/40">
+                    <FileSpreadsheet className="h-4 w-4 text-muted-foreground" />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="truncate font-medium">{a.name}</p>
+                    <p className="text-[11px] text-muted-foreground">
+                      {a.rowCount > 0 ? `${a.rowCount.toLocaleString("en-IN")} rows · ` : ""}
+                      {a.sizeKb >= 1024 ? `${(a.sizeKb / 1024).toFixed(1)} MB` : `${a.sizeKb} KB`}
+                      {a.source === "run" ? " · added from a run" : ""}
+                    </p>
+                  </div>
+                </div>
+              </td>
+              <td className="px-4 py-3 text-[12px] text-muted-foreground">{a.uploadedAt}</td>
+              <td className="px-4 py-3 text-right">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 gap-1.5 text-xs"
+                  onClick={() => toast.success("Download started", { description: a.name })}
+                >
+                  <Download className="h-3.5 w-3.5" /> Download
+                </Button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 function cap(s: string) { return s[0].toUpperCase() + s.slice(1); }
 

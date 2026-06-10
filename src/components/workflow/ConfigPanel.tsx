@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import {
   X, Copy, Trash2, AlertCircle, CheckCircle2, Plus, GripVertical, ChevronDown, Variable,
   Sparkles, GitBranch, FlaskConical, ArrowUp, ArrowDown,
-  FileSpreadsheet, Search, Loader2, Clock, Filter,
+  FileSpreadsheet, Loader2, Clock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -287,186 +287,143 @@ function KindFields({
 
 /* --------------------------- Audience --------------------------- */
 
+// Audience node (v1 redesign — scope B1–B6): exactly two configurable sections,
+// Schema + Phone Number Selection (the node Name is the panel-top field). The schema
+// is derived from a *sample* CSV (column headers + count only — rows are never parsed
+// or stored) OR defined manually as typed fields. No source-type modes, primary key,
+// duplicate validation, row-level phone validation, filtering, or runtime endpoint —
+// runtime data delivery now lives in the Run modal + Data tab.
 function AudienceFields({ config, readOnly, mark }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void }) {
-  const [mode, setMode] = useState<"csv" | "api">(config?.audienceMode ?? "csv");
-  return (
-    <>
-      <Section title="Source">
-        <Field label="Source type" required>
-          <div className="grid grid-cols-3 gap-2">
-            <SegmentBtn active={mode === "csv"} onClick={() => setMode("csv")} disabled={readOnly}>CSV Upload</SegmentBtn>
-            <SegmentBtn active={mode === "api"} onClick={() => setMode("api")} disabled={readOnly}>Runtime API</SegmentBtn>
-            <SegmentBtn disabled title="Coming soon">CRM Sync</SegmentBtn>
-          </div>
-        </Field>
-      </Section>
-      {mode === "csv" ? <CsvAudience config={config} readOnly={readOnly} mark={mark} /> : <ApiAudience config={config} readOnly={readOnly} mark={mark} />}
-    </>
-  );
-}
+  // Schema source: derive from a sample CSV, or define fields by hand.
+  const initialMode: "csv" | "manual" = config?.csvKeys ? "csv" : config?.fields ? "manual" : "csv";
+  const [mode, setMode] = useState<"csv" | "manual">(initialMode);
 
-/* CSV mock data — column keys + a 5-row preview. */
-const CSV_KEYS = ["customer_id", "phone", "first_name", "last_name", "city", "tier", "loan_amount"];
-const CSV_PREVIEW_ROWS = [
-  ["C-1042", "+91 98xxx 12340", "Aarav", "Sharma", "Delhi", "gold", "75,000"],
-  ["C-1043", "+91 98xxx 22188", "Diya", "Mehta", "Mumbai", "silver", "32,000"],
-  ["C-1044", "+91 98xxx 90021", "Vihaan", "Rao", "Bengaluru", "gold", "1,20,000"],
-  ["C-1045", "+91 98xxx 41190", "Ananya", "Iyer", "Pune", "bronze", "18,500"],
-  ["C-1046", "+91 98xxx 77342", "Kabir", "Nair", "Delhi", "gold", "64,000"],
-];
+  // CSV-derived schema — metadata only (column headers); rows are never read.
+  const [status, setStatus] = useState<DetectStatus>(config?.csvKeys ? "detected" : "idle");
+  const [fileName, setFileName] = useState(config?.fileName ?? "");
+  const csvKeys = config?.csvKeys ?? CSV_KEYS;
+  const csvDetected = status === "detected";
 
-type DetectStatus = "idle" | "uploading" | "uploaded" | "detecting" | "detected" | "failed";
+  // Manually defined schema.
+  const [fields, setFields] = useState<SchemaField[]>(config?.fields ?? [
+    { id: "f1", name: "phone", type: "String" },
+    { id: "f2", name: "first_name", type: "String" },
+  ]);
+  const namedFields = fields.filter((f) => f.name.trim());
 
-function CsvAudience({ config, readOnly, mark }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void }) {
-  // Seed in the completed state so an already-configured Audience node opens valid;
-  // the "Replace" control re-runs the full upload → detect flow for demos.
-  const [status, setStatus] = useState<DetectStatus>("detected");
-  const [fileName, setFileName] = useState(config?.fileName ?? "audience.csv");
-  const [primaryKey, setPrimaryKey] = useState(config?.primaryKey ?? "customer_id");
-  const [phoneCol, setPhoneCol] = useState(config?.phoneCol ?? "phone");
+  // Phone field selection (accepts legacy phoneCol/phoneField from preset configs).
+  const [phoneField, setPhoneField] = useState(config?.phoneField ?? config?.phoneCol ?? "");
 
-  // Preset nodes can override the detected schema/preview so the card matches the campaign's data.
-  const schemaKeys = config?.csvKeys ?? CSV_KEYS;
-  const previewRows = config?.csvPreview ?? CSV_PREVIEW_ROWS;
-  const rowCount = config?.rowCount ?? "12,402";
-
-  const detected = status === "detected";
-  const keys = detected ? schemaKeys : [];
+  const keys = mode === "csv" ? (csvDetected ? csvKeys : []) : namedFields.map((f) => f.name);
+  const schemaOk = mode === "csv" ? csvDetected : namedFields.length > 0;
+  // CSV columns are untyped, so the String requirement is only enforced in manual mode.
+  const phoneTypeOk = mode === "csv" ? true : namedFields.some((f) => f.name === phoneField && f.type === "String");
+  const phoneOk = !!phoneField && keys.includes(phoneField) && phoneTypeOk;
 
   useEffect(() => {
-    const ok = detected && !!primaryKey && !!phoneCol;
-    mark(ok, ok ? undefined : detected ? "Select primary key and phone column" : "Upload a CSV and detect schema");
-  }, [detected, primaryKey, phoneCol]);
+    const ok = schemaOk && phoneOk;
+    const err = !schemaOk
+      ? (mode === "csv" ? "Upload a sample CSV to read its columns" : "Define at least one schema field")
+      : !phoneField ? "Select the phone number field"
+      : !keys.includes(phoneField) ? "Phone field is not in the current schema"
+      : !phoneTypeOk ? "Phone field must be a String type"
+      : undefined;
+    mark(ok, err);
+  }, [mode, schemaOk, phoneOk, phoneField]);
 
+  // Sample-CSV upload — simulates reading the header row only.
   const onFile = (name?: string) => {
     if (!name) return;
     setFileName(name);
     setStatus("uploading");
-    setTimeout(() => {
-      setStatus("uploaded");
-      toast.success("CSV uploaded", { description: `${name} · ready to detect schema` });
-    }, 700);
-  };
-  const findKeys = () => {
-    setStatus("detecting");
-    toast.loading("Finding keys…", { id: "csv-detect", description: fileName });
+    setTimeout(() => setStatus("detecting"), 450);
     setTimeout(() => {
       setStatus("detected");
-      toast.success("Schema detection successful", { id: "csv-detect", description: `${rowCount} rows · ${schemaKeys.length} keys detected` });
-    }, 1100);
+      toast.success("Columns read", { description: `${csvKeys.length} columns detected · row data not stored` });
+    }, 1150);
   };
-  const replace = () => {
-    setStatus("idle");
-    setFileName("");
-    setPrimaryKey("");
-    setPhoneCol("");
-  };
+  const replace = () => { setStatus("idle"); setFileName(""); };
 
   return (
     <>
-      {/* Section 1: Upload CSV */}
-      <Section title="Upload CSV">
-        {status === "idle" ? (
-          <label className="flex h-20 cursor-pointer items-center justify-center rounded-lg border border-dashed border-border bg-muted/30 text-xs text-muted-foreground hover:bg-muted/60">
-            <input type="file" accept=".csv" className="hidden" disabled={readOnly} onChange={(e) => onFile(e.target.files?.[0]?.name ?? "audience.csv")} />
-            Click to upload or drag &amp; drop CSV
-          </label>
-        ) : (
-          <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-card px-3 py-2.5 text-[12px]">
-            <div className="flex min-w-0 items-center gap-2">
-              <FileSpreadsheet className="h-4 w-4 shrink-0 text-chart-2" />
-              <span className="truncate font-medium">{fileName || "audience.csv"}</span>
-              <span className="shrink-0 rounded-full border border-border bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                {status === "uploading" ? "Uploading…" : "Uploaded"}
-              </span>
-            </div>
-            {!readOnly && status !== "uploading" && (
-              <button onClick={replace} className="shrink-0 text-[11px] text-muted-foreground hover:text-foreground">Replace</button>
+      {/* Section: Schema */}
+      <Section title="Schema">
+        <Field label="Define schema by" required>
+          <div className="grid grid-cols-2 gap-2">
+            <SegmentBtn active={mode === "csv"} onClick={() => setMode("csv")} disabled={readOnly}>Sample CSV</SegmentBtn>
+            <SegmentBtn active={mode === "manual"} onClick={() => setMode("manual")} disabled={readOnly}>Manual</SegmentBtn>
+          </div>
+        </Field>
+
+        {mode === "csv" ? (
+          <div className="space-y-3">
+            {status === "idle" ? (
+              <label className="flex h-20 cursor-pointer items-center justify-center rounded-lg border border-dashed border-border bg-muted/30 px-3 text-center text-xs text-muted-foreground hover:bg-muted/60">
+                <input type="file" accept=".csv" className="hidden" disabled={readOnly} onChange={(e) => onFile(e.target.files?.[0]?.name ?? "sample.csv")} />
+                Upload a sample CSV to read its column headers
+              </label>
+            ) : (
+              <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-card px-3 py-2.5 text-[12px]">
+                <div className="flex min-w-0 items-center gap-2">
+                  <FileSpreadsheet className="h-4 w-4 shrink-0 text-chart-2" />
+                  <span className="truncate font-medium">{fileName || "sample.csv"}</span>
+                  <span className="shrink-0 rounded-full border border-border bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                    {status === "uploading" ? "Reading…" : "Headers read"}
+                  </span>
+                </div>
+                {!readOnly && status !== "uploading" && (
+                  <button onClick={replace} className="shrink-0 text-[11px] text-muted-foreground hover:text-foreground">Replace</button>
+                )}
+              </div>
             )}
+            <DetectStatusRow status={status} />
+            {csvDetected && (
+              <>
+                <DetectStat label="Columns" value={String(csvKeys.length)} />
+                <div className="flex flex-wrap gap-1.5">
+                  {csvKeys.map((k) => (
+                    <span key={k} className="inline-flex items-center gap-1 rounded-md border border-border bg-card px-1.5 py-0.5 font-mono text-[11px]"><Variable className="h-3 w-3 text-ai" />{k}</span>
+                  ))}
+                </div>
+              </>
+            )}
+            <p className="text-[11px] text-muted-foreground">Only column headers and their count are read — row data is never parsed or stored.</p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <SchemaFieldsEditor fields={fields} setFields={setFields} readOnly={readOnly} />
+            {namedFields.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {namedFields.map((f) => (
+                  <span key={f.id} className="inline-flex items-center gap-1 rounded-md border border-border bg-card px-1.5 py-0.5 font-mono text-[11px]">
+                    <Variable className="h-3 w-3 text-ai" />{f.name} <span className="text-muted-foreground">({f.type})</span>
+                  </span>
+                ))}
+              </div>
+            )}
+            <p className="text-[11px] text-muted-foreground">Fields become runtime variables available to downstream nodes.</p>
           </div>
         )}
       </Section>
 
-      {/* Section 2: Schema Detection */}
-      {status !== "idle" && (
-        <Section title="Schema detection">
-          {(status === "uploaded" || status === "failed") && (
-            <Button size="sm" variant="outline" disabled={readOnly} onClick={findKeys} className="h-8 w-full gap-1 text-xs">
-              <Search className="h-3.5 w-3.5" /> {status === "failed" ? "Retry — Find keys" : "Find keys"}
-            </Button>
-          )}
-          <DetectStatusRow status={status} />
-          {detected && (
-            <>
-              <div className="grid grid-cols-2 gap-2">
-                <DetectStat label="Rows" value={rowCount} />
-                <DetectStat label="Columns" value={String(schemaKeys.length)} />
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                {keys.map((k) => (
-                  <span key={k} className="inline-flex items-center gap-1 rounded-md border border-border bg-card px-1.5 py-0.5 font-mono text-[11px]"><Variable className="h-3 w-3 text-ai" />{k}</span>
-                ))}
-              </div>
-            </>
-          )}
-        </Section>
-      )}
-
-      {detected && (
-        <>
-          {/* Section 3: Primary Key Selection */}
-          <Section title="Primary key">
-            <Field label="Primary key column" required>
-              <SelectLike disabled={readOnly} options={keys} placeholder="Select key column…" defaultValue={primaryKey} onPick={setPrimaryKey} />
-            </Field>
-            <p className="text-[11px] text-muted-foreground">Used for duplicate detection. May point to the same column as the phone number.</p>
-          </Section>
-
-          {/* Section 4: Phone Number Validation */}
-          <Section title="Phone number">
-            <Field label="Phone number column" required>
-              <SelectLike disabled={readOnly} options={keys} placeholder="Select phone column…" defaultValue={phoneCol} onPick={setPhoneCol} />
-            </Field>
-            {phoneCol && <StatusBanner ok title="All phone numbers valid" detail="Every row is in E.164 or 10-digit domestic format." />}
-            <p className="text-[11px] text-muted-foreground">If any row is invalid (e.g. “2 invalid phone numbers found against selected key”), the upload is blocked until a corrected CSV is uploaded.</p>
-          </Section>
-
-          {/* Section 5: Duplicate Detection */}
-          <Section title="Duplicate detection">
-            {primaryKey
-              ? <StatusBanner ok title="No duplicate groups detected" detail={`Checked against primary key “${primaryKey}”.`} />
-              : <p className="text-[11px] text-muted-foreground">Select a primary key to run duplicate detection.</p>}
-            <p className="text-[11px] text-muted-foreground">If duplicate groups are found (e.g. “14 duplicate groups detected against selected primary key”), the upload is blocked until de-duplicated.</p>
-          </Section>
-
-          {/* Section 6: Segmentation (optional) */}
-          <SegmentationBuilder columns={keys} readOnly={readOnly} />
-
-          {/* Preview */}
-          <Section title="Preview">
-            <div className="mb-2 flex items-center justify-between text-[11.5px]">
-              <span className="text-muted-foreground">Total audience count</span>
-              <span className="font-mono font-semibold tabular-nums">{rowCount}</span>
-            </div>
-            <div className="overflow-x-auto rounded-lg border border-border">
-              <table className="w-full text-[11.5px]">
-                <thead className="bg-muted/40 text-muted-foreground">
-                  <tr>{schemaKeys.map((h) => (<th key={h} className="whitespace-nowrap px-2 py-1.5 text-left font-medium">{h}</th>))}</tr>
-                </thead>
-                <tbody>
-                  {previewRows.map((r, i) => (
-                    <tr key={i} className="border-t border-border">{r.map((c, j) => (<td key={j} className="whitespace-nowrap px-2 py-1.5">{c}</td>))}</tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <p className="mt-1 text-[10.5px] text-muted-foreground">First 5 rows · scroll horizontally for all columns.</p>
-          </Section>
-        </>
-      )}
+      {/* Section: Phone Number Selection */}
+      <Section title="Phone Number Selection">
+        <Field label="Phone number field" required>
+          <SelectLike disabled={readOnly} options={keys} placeholder={keys.length ? "Select phone field…" : "Define the schema first"} defaultValue={phoneField} onPick={setPhoneField} />
+        </Field>
+        {mode === "manual" && phoneField && !phoneTypeOk && (
+          <StatusBanner ok={false} title="Phone field must be a String type" detail="Change the mapped field’s data type to String." />
+        )}
+        <p className="text-[11px] text-muted-foreground">Required when the workflow contains Voice or WhatsApp nodes. Must be a String field.</p>
+      </Section>
     </>
   );
 }
+
+/* Fallback column keys for the sample-CSV demo (only the header row is read). */
+const CSV_KEYS = ["customer_id", "phone", "first_name", "last_name", "city", "tier", "loan_amount"];
+
+type DetectStatus = "idle" | "uploading" | "uploaded" | "detecting" | "detected" | "failed";
 
 const DETECT_LABEL: Record<DetectStatus, string> = {
   idle: "Pending detection",
@@ -517,116 +474,9 @@ function StatusBanner({ ok, title, detail }: { ok: boolean; title: string; detai
   );
 }
 
-/* --------------------------- Runtime API Payload --------------------------- */
+/* --------------------------- Manual schema fields --------------------------- */
 
 type SchemaField = { id: string; name: string; type: "String" | "Number" | "Boolean" };
-
-function genSample(fields: SchemaField[], fmt: "single" | "list" | "csv"): string {
-  const ph = (t: SchemaField["type"]) => (t === "Number" ? "0" : t === "Boolean" ? "true" : "\"string\"");
-  const named = fields.filter((f) => f.name.trim());
-  if (named.length === 0) return "// define schema fields above";
-  if (fmt === "csv") {
-    return `${named.map((f) => f.name).join(",")}\n${named.map((f) => (f.type === "String" ? "string" : ph(f.type).replace(/"/g, ""))).join(",")}`;
-  }
-  const body = named.map((f) => `  "${f.name}": ${ph(f.type)}`).join(",\n");
-  const obj = `{\n${body}\n}`;
-  return fmt === "list" ? `[\n${obj.split("\n").map((l) => "  " + l).join("\n")}\n]` : obj;
-}
-
-function ApiAudience({ config, readOnly, mark }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void }) {
-  const [payloadType, setPayloadType] = useState<"single" | "list" | "csv">(config?.payloadType ?? "single");
-  const [fields, setFields] = useState<SchemaField[]>(config?.fields ?? [
-    { id: "f1", name: "phone", type: "String" },
-    { id: "f2", name: "customer_name", type: "String" },
-    { id: "f3", name: "loan_amount", type: "Number" },
-  ]);
-  const [phoneField, setPhoneField] = useState(config?.phoneField ?? "phone");
-
-  const namedFields = fields.filter((f) => f.name.trim());
-  const phoneOk = !!phoneField && namedFields.some((f) => f.name === phoneField && f.type === "String");
-
-  useEffect(() => {
-    const ok = namedFields.length > 0 && phoneOk;
-    mark(ok, ok ? undefined : namedFields.length === 0 ? "Define at least one schema field" : "Map a String phone-number field");
-  }, [namedFields.length, phoneOk]);
-
-  return (
-    <>
-      {/* Section 1: Payload Type */}
-      <Section title="Payload type">
-        <Field label="Payload type" required>
-          <div className="grid grid-cols-3 gap-2">
-            <SegmentBtn active={payloadType === "single"} onClick={() => setPayloadType("single")} disabled={readOnly}>Single JSON</SegmentBtn>
-            <SegmentBtn active={payloadType === "list"} onClick={() => setPayloadType("list")} disabled={readOnly}>List of JSON</SegmentBtn>
-            <SegmentBtn active={payloadType === "csv"} onClick={() => setPayloadType("csv")} disabled={readOnly}>CSV File</SegmentBtn>
-          </div>
-        </Field>
-      </Section>
-
-      {/* Section 2.1: Payload Schema (manually defined) */}
-      <Section title="Payload schema">
-        <SchemaFieldsEditor fields={fields} setFields={setFields} readOnly={readOnly} />
-        <p className="text-[11px] text-muted-foreground">Fields become runtime variables across downstream nodes and are stored as node metadata.</p>
-      </Section>
-
-      {/* Section 2.2: Phone Number Field Mapping */}
-      <Section title="Phone number field">
-        <Field label="Phone number field" required>
-          <SelectLike disabled={readOnly} options={namedFields.map((f) => f.name)} placeholder="Select phone field…" defaultValue={phoneField} onPick={setPhoneField} />
-        </Field>
-        {phoneField && !phoneOk && <StatusBanner ok={false} title="Phone field must be a String type" detail="Change the mapped field’s data type to String." />}
-        <p className="text-[11px] text-muted-foreground">Mandatory when the workflow contains Voice, WhatsApp, or SMS nodes. Must be a String field.</p>
-      </Section>
-
-      {/* Section 3: Schema Preview (realtime) */}
-      <Section title="Schema preview">
-        {namedFields.length === 0 ? (
-          <p className="text-[11px] text-muted-foreground">Define fields above to see available variables.</p>
-        ) : (
-          <div className="flex flex-wrap gap-1.5">
-            {namedFields.map((f) => (
-              <span key={f.id} className="inline-flex items-center gap-1 rounded-md border border-border bg-card px-1.5 py-0.5 font-mono text-[11px]">
-                <Variable className="h-3 w-3 text-ai" />{f.name} <span className="text-muted-foreground">({f.type})</span>
-              </span>
-            ))}
-          </div>
-        )}
-      </Section>
-
-      {/* Section 4: Runtime Trigger Endpoint */}
-      <Section title="Runtime trigger endpoint">
-        <Field label="Endpoint URL">
-          <div className="rounded-md border border-input bg-muted/40 px-2.5 py-1.5 font-mono text-[11.5px] text-muted-foreground">POST /api/runs/trigger/cmp_8f3c2</div>
-        </Field>
-        <Field label="Authentication">
-          <div className="rounded-md border border-input bg-muted/40 px-2.5 py-1.5 font-mono text-[11.5px] text-muted-foreground">Authorization: Bearer &lt;campaign_api_key&gt;</div>
-        </Field>
-        <Field label="Sample request">
-          <pre className="overflow-x-auto rounded-md border border-border bg-card px-2.5 py-2 font-mono text-[11px] leading-relaxed">{`POST /api/runs/trigger/cmp_8f3c2
-Authorization: Bearer <campaign_api_key>
-Content-Type: ${payloadType === "csv" ? "text/csv" : "application/json"}
-
-${genSample(namedFields, payloadType)}`}</pre>
-        </Field>
-      </Section>
-
-      {/* Section 5: Sample Payload (auto-generated, matches the selected Payload type) */}
-      <Section title="Sample payload">
-        <pre className="overflow-x-auto rounded-md border border-border bg-card px-2.5 py-2 font-mono text-[11px] leading-relaxed">{genSample(namedFields, payloadType)}</pre>
-        <p className="text-[10.5px] text-muted-foreground">
-          Auto-generated from the schema above, in the selected{" "}
-          <span className="font-medium text-foreground">
-            {payloadType === "single" ? "Single JSON" : payloadType === "list" ? "List of JSON" : "CSV File"}
-          </span>{" "}
-          format. Read-only.
-        </p>
-      </Section>
-
-      {/* Section 6: Segmentation (optional) */}
-      <SegmentationBuilder columns={namedFields.map((f) => f.name)} readOnly={readOnly} />
-    </>
-  );
-}
 
 function SchemaFieldsEditor({
   fields, setFields, readOnly,
@@ -652,89 +502,6 @@ function SchemaFieldsEditor({
   );
 }
 
-/* --------------------------- Segmentation (optional, both modes) --------------------------- */
-
-type SegmentCondition = { id: string; variable: string; op: string; value: string };
-
-function SegmentationBuilder({ columns, readOnly }: { columns: string[]; readOnly?: boolean }) {
-  const [enabled, setEnabled] = useState(false);
-  const [combinator, setCombinator] = useState<"AND" | "OR">("AND");
-  const [conditions, setConditions] = useState<SegmentCondition[]>([
-    { id: "s1", variable: columns[0] ?? "", op: "equals", value: "" },
-  ]);
-
-  // Mock filtered-count preview — shrinks as conditions with values are added.
-  const matched = enabled
-    ? Math.max(1, 100000 - conditions.filter((c) => c.value.trim() || VALUELESS_OPERATORS.has(c.op)).length * 8500)
-    : 100000;
-
-  return (
-    <CollapsibleSection
-      title="Segmentation (optional)"
-      icon={Filter}
-      defaultOpen={false}
-      badge={enabled ? conditions.length : undefined}
-      headerRight={
-        <div className="flex items-center gap-2">
-          <span className="text-[11px] text-muted-foreground">{enabled ? "On" : "Off"}</span>
-          <Switch checked={enabled} onCheckedChange={setEnabled} disabled={readOnly} />
-        </div>
-      }
-    >
-      {!enabled ? (
-        <p className="text-[11.5px] text-muted-foreground">
-          Toggle on to filter the audience. Only qualified records proceed downstream; the rest are excluded before execution.
-        </p>
-      ) : (
-        <div className="space-y-2">
-          {conditions.map((c, i) => (
-            <div key={c.id} className="space-y-1.5">
-              {i > 0 && (
-                <div className="flex items-center justify-center gap-1">
-                  {(["AND", "OR"] as const).map((k) => (
-                    <button
-                      key={k}
-                      disabled={readOnly}
-                      onClick={() => setCombinator(k)}
-                      className={cn(
-                        "rounded-full border px-2 py-0.5 text-[10px] font-semibold tracking-wider",
-                        combinator === k ? "border-foreground bg-foreground text-background" : "border-border bg-background text-muted-foreground hover:bg-accent",
-                      )}
-                    >
-                      {k}
-                    </button>
-                  ))}
-                </div>
-              )}
-              <div className="rounded-lg border border-border bg-card p-2.5 space-y-1.5">
-                <div className="flex items-center gap-1.5">
-                  <div className="min-w-0 flex-1">
-                    <SelectLike disabled={readOnly} options={columns} defaultValue={c.variable} placeholder="Column…" onPick={(v) => setConditions((xs) => xs.map((x) => x.id === c.id ? { ...x, variable: v } : x))} />
-                  </div>
-                  <button disabled={readOnly || conditions.length <= 1} onClick={() => setConditions((xs) => xs.filter((x) => x.id !== c.id))} className="shrink-0 text-muted-foreground hover:text-destructive disabled:opacity-30" aria-label="Remove condition">
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-                <div className="grid grid-cols-2 gap-1.5">
-                  <SelectLike disabled={readOnly} options={SEGMENT_OPERATORS} defaultValue={c.op} onPick={(v) => setConditions((xs) => xs.map((x) => x.id === c.id ? { ...x, op: v } : x))} />
-                  <Input value={c.value} disabled={readOnly || VALUELESS_OPERATORS.has(c.op)} placeholder={VALUELESS_OPERATORS.has(c.op) ? "—" : "Value"} onChange={(e) => setConditions((xs) => xs.map((x) => x.id === c.id ? { ...x, value: e.target.value } : x))} className="h-9 text-sm" />
-                </div>
-              </div>
-            </div>
-          ))}
-          <Button size="sm" variant="outline" disabled={readOnly} onClick={() => setConditions((xs) => [...xs, { id: uid("s"), variable: columns[0] ?? "", op: "equals", value: "" }])} className="h-8 w-full text-xs">
-            <Plus className="mr-1 h-3 w-3" /> Add condition
-          </Button>
-          <div className="flex items-center justify-between rounded-md border border-ai/30 bg-ai/5 px-2.5 py-1.5 text-[11.5px] text-ai">
-            <span>Matched audience</span>
-            <span className="font-mono font-medium tabular-nums">{matched.toLocaleString()} / 100,000</span>
-          </div>
-        </div>
-      )}
-    </CollapsibleSection>
-  );
-}
-
 /* --------------------------- Conditional --------------------------- */
 
 const COMPARISON_OPERATORS = [
@@ -743,11 +510,6 @@ const COMPARISON_OPERATORS = [
   "contains", "does not contain", "exists", "does not exist",
 ];
 const VALUELESS_OPERATORS = new Set(["exists", "does not exist"]);
-
-// PRD Audience Segmentation operator set (§ Section 6).
-const SEGMENT_OPERATORS = [
-  "equals", "not equals", "greater than", "less than", "contains", "exists",
-];
 
 function ConditionalFields({ config, readOnly, mark, onChange }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
   const [branches, setBranches] = useState(config?.branches ?? [
@@ -1375,7 +1137,10 @@ function ActionNodeShell({
 
   return (
     <>
-      {/* A/B toggle on top — decides whether config is single or per-variant. */}
+      {/* In-node A/B experiments are OOS for v1 (scope A4) — the editable builder no longer
+          exposes them (use the standalone A/B Split node instead). Kept read-only so existing
+          example campaigns still render their authored experiment. */}
+      {readOnly && (
       <div className="mb-5 rounded-xl border border-border bg-card/40 p-3">
         <div className="flex items-start gap-2.5">
           <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-chart-1/10 text-chart-1">
@@ -1397,8 +1162,9 @@ function ActionNodeShell({
           </div>
         </div>
       </div>
+      )}
 
-      {!abEnabled ? (
+      {!readOnly || !abEnabled ? (
         <Section title="Configuration">{renderCore(mark)}</Section>
       ) : (
         <div className="mb-6 space-y-3">
@@ -1464,11 +1230,16 @@ function ActionNodeShell({
         </div>
       )}
 
-      <AiTransformationsSection
-        readOnly={readOnly}
-        transforms={transforms}
-        setTransforms={setTransforms}
-      />
+      {/* AI Transformations are OOS for v1 (scope A5) — the editable builder no longer
+          exposes them. Kept read-only so example campaigns still render authored transforms
+          (e.g. Voice transcript → call_disposition). */}
+      {readOnly && (
+        <AiTransformationsSection
+          readOnly={readOnly}
+          transforms={transforms}
+          setTransforms={setTransforms}
+        />
+      )}
 
       <ExitConditionsSection
         kind={kind}

@@ -26,6 +26,10 @@ const SECTIONS: Array<{ label: string; nodes: NodeKind[] }> = [
   { label: "Ads Nodes", nodes: ["adsCampaign"] },
 ];
 
+// Out of scope for v1: cannot be added to new campaigns (disabled in palette),
+// but retained in existing example campaigns (render + read-only config).
+const DISABLED_KINDS = new Set<NodeKind>(["sms", "adsCampaign"]);
+
 export function NodePalette({
   onAdd, disabled,
 }: { onAdd: (kind: NodeKind) => void; disabled?: boolean }) {
@@ -59,6 +63,23 @@ export function NodePalette({
                   <p className="px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/80">{s.label}</p>
                   {s.nodes.map((kind) => {
                     const Icon = ICONS[kind]!;
+                    const isDisabled = DISABLED_KINDS.has(kind);
+                    if (isDisabled) {
+                      return (
+                        <div
+                          key={kind}
+                          aria-disabled
+                          title="Not available in v1"
+                          className="flex w-full cursor-not-allowed items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px] opacity-40"
+                        >
+                          <Icon className="h-3.5 w-3.5 text-muted-foreground" />
+                          {NODE_LABELS[kind]}
+                          <span className="ml-auto rounded bg-muted px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wider text-muted-foreground">
+                            Soon
+                          </span>
+                        </div>
+                      );
+                    }
                     return (
                       <button
                         key={kind}

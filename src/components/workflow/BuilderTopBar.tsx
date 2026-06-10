@@ -52,7 +52,7 @@ export function BuilderTopBar({
 
   const allValid = validNodes === totalNodes && totalNodes > 0;
   const runnable = allValid && status === "ready";
-  const editLocked = status === "running" || status === "archived" || status === "locked";
+  const editLocked = status === "running" || status === "locked";
 
   // Navigate out and let the route's useBlocker surface the unsaved-changes
   // toast (PRD §6.5). No native confirm() — that bypassed the toast blocker.

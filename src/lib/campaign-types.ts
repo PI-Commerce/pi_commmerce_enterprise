@@ -29,7 +29,6 @@ export type CampaignStatus =
   | "ready"
   | "running"
   | "paused"
-  | "archived"
   | "locked";
 
 export type RetryPolicy = { maxRetries: number; backoffSeconds: number };
@@ -166,7 +165,6 @@ export const STATUS_TONE: Record<CampaignStatus, string> = {
   ready: "border-ai/30 bg-ai/10 text-ai",
   running: "border-success/30 bg-success/10 text-success",
   paused: "border-warning/30 bg-warning/10 text-warning",
-  archived: "border-border bg-muted text-muted-foreground",
   locked: "border-destructive/30 bg-destructive/10 text-destructive",
 };
 

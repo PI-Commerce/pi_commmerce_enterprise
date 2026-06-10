@@ -1,6 +1,8 @@
+import { useEffect, useState } from "react";
 import { Link, useRouterState } from "@tanstack/react-router";
 import {
   LayoutDashboard, Megaphone, Bot, BarChart3, Plug, Settings, Command, Sparkles,
+  PanelLeftClose, PanelLeftOpen,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -16,37 +18,72 @@ const secondary = [
   { to: "/settings", label: "Settings", icon: Settings },
 ] as const;
 
+const STORAGE_KEY = "pc_sidebar_collapsed";
+
 export function AppSidebar() {
   const path = useRouterState({ select: (s) => s.location.pathname });
+  const [collapsed, setCollapsed] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem(STORAGE_KEY) === "1";
+  });
+
+  useEffect(() => {
+    window.localStorage.setItem(STORAGE_KEY, collapsed ? "1" : "0");
+  }, [collapsed]);
 
   const isActive = (to: string, exact?: boolean) =>
     exact ? path === to : path === to || path.startsWith(to + "/") || path === to;
 
   return (
-    <aside className="flex h-full w-[220px] shrink-0 flex-col border-r border-border bg-background">
-      <div className="flex h-12 items-center gap-2 px-4">
-        <div className="flex h-7 w-7 items-center justify-center rounded-md bg-foreground text-background">
+    <aside
+      className={cn(
+        "flex h-full shrink-0 flex-col border-r border-border bg-background transition-[width] duration-200",
+        collapsed ? "w-[60px]" : "w-[220px]",
+      )}
+    >
+      <div className={cn("flex h-12 items-center", collapsed ? "justify-center px-0" : "gap-2 px-4")}>
+        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-foreground text-background">
           <Command className="h-3.5 w-3.5" />
         </div>
-        <div className="min-w-0">
-          <p className="truncate text-[13px] font-semibold leading-tight">Pi Commerce</p>
-          <p className="truncate text-[10.5px] text-muted-foreground">ABC Enterprises</p>
-        </div>
+        {!collapsed && (
+          <div className="min-w-0">
+            <p className="truncate text-[13px] font-semibold leading-tight">Pi Commerce</p>
+            <p className="truncate text-[10.5px] text-muted-foreground">ABC Enterprises</p>
+          </div>
+        )}
       </div>
 
       <nav className="flex-1 px-2 py-2">
-        <NavSection items={primary} isActive={isActive} />
+        <NavSection items={primary} isActive={isActive} collapsed={collapsed} />
         <div className="my-3 h-px bg-border" />
-        <NavSection items={secondary} isActive={isActive} />
+        <NavSection items={secondary} isActive={isActive} collapsed={collapsed} />
       </nav>
 
-      <div className="m-2 rounded-xl border border-border bg-secondary/40 p-3">
-        <div className="flex items-center gap-1.5 text-[11px] font-medium text-ai">
-          <Sparkles className="h-3 w-3" /> Ask Pi
+      {!collapsed && (
+        <div className="m-2 rounded-xl border border-border bg-secondary/40 p-3">
+          <div className="flex items-center gap-1.5 text-[11px] font-medium text-ai">
+            <Sparkles className="h-3 w-3" /> Ask Pi
+          </div>
+          <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
+            Press <kbd className="rounded border border-border bg-background px-1 font-mono text-[10px]">⌘ K</kbd> anywhere to summon Pi!
+          </p>
         </div>
-        <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
-          Press <kbd className="rounded border border-border bg-background px-1 font-mono text-[10px]">⌘ K</kbd> anywhere to summon Pi!
-        </p>
+      )}
+
+      <div className={cn("border-t border-border p-2", collapsed && "flex justify-center")}>
+        <button
+          type="button"
+          onClick={() => setCollapsed((c) => !c)}
+          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          className={cn(
+            "flex h-8 items-center gap-2.5 rounded-md text-[13px] text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground",
+            collapsed ? "w-8 justify-center" : "w-full px-2.5",
+          )}
+        >
+          {collapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+          {!collapsed && <span>Collapse</span>}
+        </button>
       </div>
     </aside>
   );
@@ -55,9 +92,11 @@ export function AppSidebar() {
 function NavSection({
   items,
   isActive,
+  collapsed,
 }: {
   items: ReadonlyArray<{ to: string; label: string; icon: React.ComponentType<{ className?: string }>; exact?: boolean }>;
   isActive: (to: string, exact?: boolean) => boolean;
+  collapsed: boolean;
 }) {
   return (
     <ul className="space-y-0.5">
@@ -67,15 +106,17 @@ function NavSection({
           <li key={item.to}>
             <Link
               to={item.to}
+              title={collapsed ? item.label : undefined}
               className={cn(
-                "group flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] transition-colors",
+                "group flex items-center rounded-md text-[13px] transition-colors",
+                collapsed ? "h-9 w-9 justify-center" : "gap-2.5 px-2.5 py-1.5",
                 active
                   ? "bg-accent font-medium text-foreground"
                   : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
               )}
             >
-              <item.icon className={cn("h-4 w-4", active ? "text-foreground" : "text-muted-foreground")} />
-              {item.label}
+              <item.icon className={cn("h-4 w-4 shrink-0", active ? "text-foreground" : "text-muted-foreground")} />
+              {!collapsed && item.label}
             </Link>
           </li>
         );
