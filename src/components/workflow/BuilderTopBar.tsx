@@ -1,11 +1,13 @@
 import { useState, useRef, useEffect } from "react";
-import { ChevronLeft, Save, Play, Pause, Lock, Check, AlertCircle } from "lucide-react";
+import { ChevronLeft, Save, Play, Pause, Lock, Check, AlertCircle, History } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { CampaignStatus } from "@/lib/campaign-types";
 import { STATUS_TONE } from "@/lib/campaign-types";
 import { CreateRunDialog, type CreateRunPayload } from "@/components/workflow/CreateRunDialog";
+import { VersionHistorySheet } from "@/components/workflow/VersionHistorySheet";
+import type { CampaignVersion } from "@/lib/campaign-versions";
 
 
 const OBJECTIVE_LABELS: Record<string, string> = {
@@ -23,6 +25,7 @@ export function BuilderTopBar({
   dirty, validNodes, totalNodes,
   onSave, onExit,
   objective, description,
+  versions = [], onRunStarted,
 }: {
   name: string;
   onNameChange: (n: string) => void;
@@ -35,11 +38,16 @@ export function BuilderTopBar({
   onExit: () => void;
   objective?: string;
   description?: string;
+  versions?: CampaignVersion[];
+  onRunStarted?: () => void;
 }) {
   const [editingName, setEditingName] = useState(false);
   const [draft, setDraft] = useState(name);
   const [runOpen, setRunOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const currentVersion = versions.length ? Math.max(...versions.map((v) => v.version)) : 0;
 
   useEffect(() => { setDraft(name); }, [name]);
   useEffect(() => { if (editingName) inputRef.current?.select(); }, [editingName]);
@@ -129,6 +137,15 @@ export function BuilderTopBar({
             <><AlertCircle className="h-3 w-3 text-warning" /> {validNodes}/{totalNodes} nodes configured</>
           )}
         </span>
+
+        <button
+          onClick={() => setHistoryOpen(true)}
+          className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          title="View version history"
+        >
+          <History className="h-3 w-3" />
+          {currentVersion ? `v${currentVersion}` : "History"}
+        </button>
       </div>
 
       <div className="flex shrink-0 items-center gap-1">
@@ -177,8 +194,16 @@ export function BuilderTopBar({
         onStart={(payload: CreateRunPayload) => {
           setRunOpen(false);
           onStatusChange("running");
+          onRunStarted?.();
           toast.success("Run started", { description: `${payload.runName} · ${payload.triggerMode === "api" ? "API trigger activated" : "running now"}` });
         }}
+      />
+
+      <VersionHistorySheet
+        open={historyOpen}
+        onOpenChange={setHistoryOpen}
+        campaignName={name}
+        versions={versions}
       />
     </header>
   );

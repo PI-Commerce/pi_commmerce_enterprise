@@ -5,6 +5,7 @@ import { WorkflowCanvas } from "@/components/workflow/WorkflowCanvas";
 import { BuilderTopBar } from "@/components/workflow/BuilderTopBar";
 import type { CampaignStatus } from "@/lib/campaign-types";
 import { EXAMPLE_CAMPAIGNS } from "@/lib/campaign-examples";
+import { VERSION_HISTORY, makeVersion, type CampaignVersion } from "@/lib/campaign-versions";
 
 export const Route = createFileRoute("/campaigns/$id")({
   component: CampaignBuilder,
@@ -39,6 +40,11 @@ function CampaignBuilder() {
   const [dirty, setDirty] = useState(false);
   const [validCount, setValidCount] = useState(0);
   const [total, setTotal] = useState(0);
+  // Version Management (WS7 / PRD §D3). Example campaigns ship with a seeded
+  // history; everything else starts empty until the first Save + Run creates v1.
+  const [versions, setVersions] = useState<CampaignVersion[]>(() =>
+    isNew ? [] : VERSION_HISTORY[id] ? [...VERSION_HISTORY[id]] : [],
+  );
 
   // Move to "ready" automatically when everything validates
   useEffect(() => {
@@ -78,8 +84,34 @@ function CampaignBuilder() {
 
   const handleSave = useCallback(() => {
     setDirty(false);
-    toast.success("Changes saved", { description: name });
-  }, [name]);
+    // v1 is only minted on the first run; a plain save before that doesn't
+    // create a version. Once a history exists, every saved edit is a new version.
+    if (versions.length === 0) {
+      toast.success("Changes saved", { description: name });
+      return;
+    }
+    const nextNum = Math.max(...versions.map((v) => v.version)) + 1;
+    const resumedEdit = status === "paused";
+    setVersions((prev) => [
+      ...prev,
+      makeVersion({
+        version: nextNum,
+        trigger: resumedEdit ? "resumed-edit" : "edit",
+        summary: resumedEdit
+          ? "Paused and edited — saved as a new version."
+          : "Edited the campaign — saved as a new version.",
+      }),
+    ]);
+    toast.success(`Saved as version ${nextNum}`, { description: name });
+  }, [name, status, versions]);
+  // First Save + Run mints v1.
+  const handleRunStarted = useCallback(() => {
+    setVersions((prev) =>
+      prev.length > 0
+        ? prev
+        : [makeVersion({ version: 1, trigger: "created", summary: "Initial version — saved and launched the first run." })],
+    );
+  }, []);
   const handleExit = useCallback(() => { navigate({ to: "/campaigns" }); }, [navigate]);
   const handleValidity = useCallback((v: number, t: number) => { setValidCount(v); setTotal(t); }, []);
   const handleDirty = useCallback(() => setDirty(true), []);
@@ -98,6 +130,8 @@ function CampaignBuilder() {
         onExit={handleExit}
         objective={isNew ? seedObjective : undefined}
         description={isNew ? seedDescription : undefined}
+        versions={versions}
+        onRunStarted={handleRunStarted}
       />
       <div className="relative flex-1">
         <WorkflowCanvas
