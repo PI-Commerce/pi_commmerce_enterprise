@@ -4,4 +4,13 @@
   "compatibility_date": "2025-09-24",
   "compatibility_flags": ["nodejs_compat"],
   "main": "src/server.ts",
+  // "vision" = the forward-looking ("Pi Magic" / WS8) build, deployed to a separate
+  // Worker so it never touches the stable demo at picom-enterprise-demo.workers.dev.
+  // The CI selects this env on the `vision` branch (CLOUDFLARE_ENV=vision at build time);
+  // `main` ignores it and keeps deploying the base Worker.
+  "env": {
+    "vision": {
+      "name": "picom-enterprise-vision",
+    },
+  },
 }

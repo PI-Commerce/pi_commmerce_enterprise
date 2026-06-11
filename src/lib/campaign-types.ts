@@ -131,6 +131,12 @@ export type WorkflowNodeData = {
    * reference them survive being clicked into.
    */
   preset?: boolean;
+  /**
+   * I3 — opt-in node-level Pi optimization hint. Holds the id of a suggestion in
+   * {@link file://./pi-node-suggestions.ts}. Only nodes that explicitly set this
+   * surface a hover "Pi tip"; the hint retires once its change is applied.
+   */
+  piHint?: string;
 };
 
 

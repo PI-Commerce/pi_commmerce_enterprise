@@ -8,11 +8,14 @@ export function EChart({
   className,
   style,
   onEvents,
+  instanceRef,
 }: {
   option: EChartsOption;
   className?: string;
   style?: React.CSSProperties;
   onEvents?: Record<string, (params: unknown) => void>;
+  /** Optional: receives the live ECharts instance so callers can export a PNG (getDataURL). */
+  instanceRef?: React.MutableRefObject<echarts.ECharts | null>;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const instRef = useRef<echarts.ECharts | null>(null);
@@ -21,13 +24,16 @@ export function EChart({
     if (!ref.current) return;
     const inst = echarts.init(ref.current, undefined, { renderer: "canvas" });
     instRef.current = inst;
+    if (instanceRef) instanceRef.current = inst;
     const ro = new ResizeObserver(() => inst.resize());
     ro.observe(ref.current);
     return () => {
       ro.disconnect();
       inst.dispose();
       instRef.current = null;
+      if (instanceRef) instanceRef.current = null;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Edge, Node } from "reactflow";
-import { Sparkles, ArrowRight, Check, Loader2, ChevronLeft } from "lucide-react";
+import { Sparkles, ArrowRight, Check, Loader2, ChevronLeft, Pencil } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { WorkflowNodeData } from "@/lib/campaign-types";
 
@@ -8,7 +8,7 @@ import type { WorkflowNodeData } from "@/lib/campaign-types";
 /* Question schema                                           */
 /* -------------------------------------------------------- */
 
-type Option = { value: string; label: string; hint: string };
+type Option = { value: string; label: string; hint: string; recommended?: boolean };
 type Question = { id: string; title: string; subtitle: string; options: Option[] };
 
 const QUESTIONS: Question[] = [
@@ -17,7 +17,7 @@ const QUESTIONS: Question[] = [
     title: "What outcome should this campaign drive?",
     subtitle: "Pi will pick the right journey shape for this goal.",
     options: [
-      { value: "reactivation", label: "Reactivate dormant users", hint: "Wake up inactive accounts (>30d)" },
+      { value: "reactivation", label: "Reactivate dormant users", hint: "Wake up inactive accounts (>30d)", recommended: true },
       { value: "onboarding",   label: "Onboard new signups",      hint: "Drive first deposit / first action" },
       { value: "winback",      label: "Win-back high-value churn", hint: "Premium retention play" },
       { value: "kyc",          label: "Recover KYC drop-offs",    hint: "Compliance completion nudge" },
@@ -28,7 +28,7 @@ const QUESTIONS: Question[] = [
     title: "Who is this targeting?",
     subtitle: "Minimum audience config — you can refine later.",
     options: [
-      { value: "csv",     label: "Upload CSV",     hint: "12,402 contacts ready" },
+      { value: "csv",     label: "Upload CSV",     hint: "12,402 contacts ready", recommended: true },
       { value: "segment", label: "Saved segment",  hint: "Dormant Traders · 90d" },
       { value: "api",     label: "Runtime API",    hint: "Pushed via webhook" },
     ],
@@ -38,7 +38,7 @@ const QUESTIONS: Question[] = [
     title: "Primary outreach channel?",
     subtitle: "Pi will preconfigure the action node.",
     options: [
-      { value: "whatsapp", label: "WhatsApp",       hint: "Template: reactivate_v3" },
+      { value: "whatsapp", label: "WhatsApp",       hint: "Template: reactivate_v3", recommended: true },
       { value: "voice",    label: "AI Voice Agent", hint: "Agent: Aria · conversational" },
       { value: "sms",      label: "SMS",            hint: "Sender ID: PICOMM" },
     ],
@@ -48,7 +48,7 @@ const QUESTIONS: Question[] = [
     title: "If there's no reply, what next?",
     subtitle: "Fallback branch after the primary attempt.",
     options: [
-      { value: "voice", label: "Switch to AI Voice", hint: "Higher-intent rescue call" },
+      { value: "voice", label: "Switch to AI Voice", hint: "Higher-intent rescue call", recommended: true },
       { value: "sms",   label: "Send SMS reminder",  hint: "Lightweight nudge" },
       { value: "end",   label: "End journey",        hint: "No fallback step" },
     ],
@@ -59,11 +59,26 @@ const QUESTIONS: Question[] = [
     subtitle: "Used for the Delay node between primary and fallback.",
     options: [
       { value: "1h",  label: "1 hour",   hint: "Aggressive" },
-      { value: "24h", label: "24 hours", hint: "Balanced — recommended" },
+      { value: "24h", label: "24 hours", hint: "Balanced", recommended: true },
       { value: "48h", label: "48 hours", hint: "Conservative" },
     ],
   },
 ];
+
+/** Human label for a chosen option value — used in the review-step recap. */
+function answerLabel(qid: string, value?: string): string | undefined {
+  if (!value) return undefined;
+  return QUESTIONS.find((x) => x.id === qid)?.options.find((o) => o.value === value)?.label;
+}
+
+/** Short captions for the review-step "Your answers" recap chips. */
+const RECAP_LABELS: Record<string, string> = {
+  goal: "Goal",
+  audience: "Audience",
+  primary: "Primary",
+  fallback: "Fallback",
+  delay: "Wait",
+};
 
 /* -------------------------------------------------------- */
 /* Plan builder                                              */
@@ -289,7 +304,9 @@ export function AskPiWizardBody({
       </div>
 
       {phase === "asking" && q && (
-        <div className="px-5 pb-4 pt-4">
+        // `key={q.id}` re-triggers the slide-in on every step, so questions advance
+        // with a smooth transition instead of swapping in place.
+        <div key={q.id} className="px-5 pb-4 pt-4 animate-slide-up">
           <h3 className="text-[14.5px] font-semibold leading-snug text-foreground">{q.title}</h3>
           <p className="mt-0.5 text-[11.5px] text-muted-foreground">{q.subtitle}</p>
 
@@ -304,11 +321,20 @@ export function AskPiWizardBody({
                     "group flex items-center justify-between gap-3 rounded-xl border bg-card px-3 py-2.5 text-left transition-all",
                     selected
                       ? "border-ai/60 ring-2 ring-ai/20"
-                      : "border-border hover:border-ai/40 hover:bg-ai/[0.03]",
+                      : opt.recommended
+                        ? "border-ai/30 hover:border-ai/50 hover:bg-ai/[0.03]"
+                        : "border-border hover:border-ai/40 hover:bg-ai/[0.03]",
                   )}
                 >
                   <div className="min-w-0">
-                    <p className="truncate text-[13px] font-medium text-foreground">{opt.label}</p>
+                    <div className="flex items-center gap-1.5">
+                      <p className="truncate text-[13px] font-medium text-foreground">{opt.label}</p>
+                      {opt.recommended && (
+                        <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-ai/30 bg-ai/5 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide text-ai">
+                          <Sparkles className="h-2.5 w-2.5" /> Pi pick
+                        </span>
+                      )}
+                    </div>
                     <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{opt.hint}</p>
                   </div>
                   <div className={cn(
@@ -352,6 +378,31 @@ export function AskPiWizardBody({
           <p className="mt-0.5 text-[11.5px] text-muted-foreground">
             Review the steps, then approve to materialize on the canvas.
           </p>
+
+          {/* Answers recap — each chip jumps back to that question to tweak. */}
+          <div className="mt-3 rounded-xl border border-border bg-secondary/30 px-3 py-2.5">
+            <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Your answers
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {QUESTIONS.map((qq, i) => {
+                const lab = answerLabel(qq.id, answers[qq.id]);
+                if (!lab) return null;
+                return (
+                  <button
+                    key={qq.id}
+                    onClick={() => { setDraftPlan(null); setPhase("asking"); setStep(i); }}
+                    className="group inline-flex items-center gap-1 rounded-full border border-border bg-card px-2 py-0.5 text-[11px] text-foreground transition-colors hover:border-ai/40"
+                    title={`Edit · ${qq.title}`}
+                  >
+                    <span className="text-muted-foreground">{RECAP_LABELS[qq.id] ?? qq.id}:</span>
+                    <span className="font-medium">{lab}</span>
+                    <Pencil className="h-2.5 w-2.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+                  </button>
+                );
+              })}
+            </div>
+          </div>
 
           <ol className="mt-3 space-y-1.5">
             {draftPlan.nodes

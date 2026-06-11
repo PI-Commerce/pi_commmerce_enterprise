@@ -1,14 +1,20 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowUp, Square, Check, Loader2, Sparkle, Sparkles, X } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { Sparkles, X } from "lucide-react";
 import { AskPiWizardBody, type AskPiPlan, type WizardPhase } from "./AskPiWizard";
+import { CANVAS_CONTEXT, type PiResult } from "@/lib/ask-pi-context";
+import { getSuggestion } from "@/lib/pi-node-suggestions";
+import {
+  PiPill,
+  PiPanel,
+  PiThinking,
+  PiResultCard,
+  PiChips,
+  PiSendButton,
+  PiInputIcon,
+  usePiDrag,
+} from "@/components/app/ask-pi-ui";
 
 type State = "collapsed" | "idle" | "typing" | "thinking" | "result" | "wizard";
-
-const SUGGESTIONS = [
-  "Add dormant trader reactivation",
-  "Insert Voice AI after WhatsApp fail",
-];
 
 export type AiComposerProps = {
   /** "wizard" mode shows the campaign builder Q&A inside the expanded panel. */
@@ -20,6 +26,8 @@ export type AiComposerProps = {
   onWizardSkeleton?: (skeleton: AskPiPlan) => void;
   onWizardBuild?: (plan: AskPiPlan) => void;
   onBuildingChange?: (building: boolean) => void;
+  /** I3 — confirm a node-level Pi suggestion; the canvas runs its real graph transform. */
+  onApplySuggestion?: (s: { nodeId: string; suggestionId: string }) => void;
 };
 
 export function AiComposer({
@@ -29,16 +37,25 @@ export function AiComposer({
   onWizardSkeleton,
   onWizardBuild,
   onBuildingChange,
+  onApplySuggestion,
 }: AiComposerProps = {}) {
   const [state, setState] = useState<State>("collapsed");
   const [value, setValue] = useState("");
   const [wizardPhase, setWizardPhase] = useState<WizardPhase>("asking");
+  // I3 — a node's "Ask Pi to apply" proposes a real edit; held here until confirmed.
+  const [pendingSuggestion, setPendingSuggestion] = useState<
+    { nodeId: string; suggestionId: string; result: PiResult } | null
+  >(null);
   const [nudgeDismissed, setNudgeDismissed] = useState(false);
   const [hasEngaged, setHasEngaged] = useState(false);
   // The blank-canvas build wizard runs once. After it completes, Ask Pi becomes a chat composer.
   const [built, setBuilt] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  // Shared horizontal drag — identical behaviour + remembered position as the global dock.
+  const { dragX, pillHandlers, suppressClick } = usePiDrag(wrapRef);
 
   useEffect(() => {
     if (state === "idle" || state === "typing") inputRef.current?.focus();
@@ -48,6 +65,37 @@ export function AiComposer({
     if (value.length > 0 && state === "idle") setState("typing");
     if (value.length === 0 && state === "typing") setState("idle");
   }, [value, state]);
+
+  // I3 — a node's "Ask Pi to apply" hint opens this composer pre-filled with its prompt.
+  useEffect(() => {
+    const onPrompt = (e: Event) => {
+      const prompt = (e as CustomEvent<string>).detail;
+      if (!prompt) return;
+      setHasEngaged(true);
+      setState("idle");
+      setValue(prompt);
+      inputRef.current?.focus();
+    };
+    window.addEventListener("askpi:prompt", onPrompt);
+    return () => window.removeEventListener("askpi:prompt", onPrompt);
+  }, []);
+
+  // I3 — a node's "Ask Pi to apply" opens the composer, pre-fills the ask, "thinks",
+  // then shows the proposed change. The graph only mutates once the user confirms.
+  useEffect(() => {
+    const onSuggest = (e: Event) => {
+      const detail = (e as CustomEvent<{ nodeId: string; suggestionId: string }>).detail;
+      const sug = getSuggestion(detail?.suggestionId);
+      if (!sug) return;
+      setHasEngaged(true);
+      setPendingSuggestion({ nodeId: detail.nodeId, suggestionId: detail.suggestionId, result: sug.result });
+      setValue(sug.prompt);
+      setState("thinking");
+      setTimeout(() => setState("result"), 1800);
+    };
+    window.addEventListener("askpi:suggest", onSuggest);
+    return () => window.removeEventListener("askpi:suggest", onSuggest);
+  }, []);
 
   // Notify parent of building lock
   useEffect(() => {
@@ -71,17 +119,31 @@ export function AiComposer({
 
   const submit = () => {
     if (!value.trim()) return;
+    setPendingSuggestion(null);
     setState("thinking");
     setTimeout(() => setState("result"), 2200);
   };
 
   const reset = () => {
+    setPendingSuggestion(null);
     setValue("");
     setState("idle");
   };
 
   const collapse = () => {
     if (state === "wizard" && wizardPhase === "building") return;
+    setPendingSuggestion(null);
+    setValue("");
+    setState("collapsed");
+  };
+
+  // Confirm the proposed suggestion: run the real graph transform, then collapse
+  // back to the pill so the live canvas change is unobstructed.
+  const confirmSuggestion = () => {
+    if (pendingSuggestion) {
+      onApplySuggestion?.({ nodeId: pendingSuggestion.nodeId, suggestionId: pendingSuggestion.suggestionId });
+    }
+    setPendingSuggestion(null);
     setValue("");
     setState("collapsed");
   };
@@ -119,10 +181,13 @@ export function AiComposer({
   }, [isOpen, state, value]);
 
   return (
-    <div className="pointer-events-none absolute inset-x-0 bottom-6 z-20 flex justify-center px-4">
+    <div ref={wrapRef} className="pointer-events-none absolute inset-x-0 bottom-6 z-20 flex justify-center px-4">
       {/* Collapsed pill — original Google-Docs-style sparkle, with optional floating nudge bubble */}
       {!isOpen && (
-        <div className="pointer-events-none relative flex flex-col items-center">
+        <div
+          className="pointer-events-none relative flex flex-col items-center"
+          style={{ transform: `translateX(${dragX}px)` }}
+        >
           {showNudge && (
             <div className="askpi-nudge-bubble pointer-events-auto relative mb-3 flex items-center gap-2 rounded-2xl border border-ai/30 bg-card px-3 py-2 text-[12.5px] font-medium text-foreground shadow-[0_10px_30px_-10px_color-mix(in_oklch,var(--ai)_45%,transparent)] animate-slide-up">
               <button
@@ -152,169 +217,83 @@ export function AiComposer({
               `}</style>
             </div>
           )}
-          <button
-            onClick={openPrimary}
-            className="pointer-events-auto group flex h-9 w-24 items-center justify-center rounded-full border border-border bg-secondary text-foreground shadow-[0_4px_16px_-6px_rgba(0,0,0,0.15)] transition-all hover:w-28 hover:bg-accent animate-slide-up"
-            aria-label="Open AI assistant"
-          >
-            <Sparkle className="h-3.5 w-3.5 fill-foreground" />
-          </button>
+          <PiPill onOpen={openPrimary} pillHandlers={pillHandlers} suppressClick={suppressClick} />
         </div>
       )}
 
-      {/* Expanded composer */}
+      {/* Expanded composer — drag offset lives on this non-animated wrapper so it
+          never collides with the panel's slide-up entrance / transition-all. */}
       {isOpen && (
-        <div
-          ref={containerRef}
-          className={cn(
-            "pointer-events-auto overflow-hidden rounded-[28px] border border-border bg-card shadow-[0_12px_40px_-12px_rgba(0,0,0,0.22)] ring-4 ring-ai/5 transition-all duration-300 ease-out animate-slide-up",
-            isWizard ? "w-[640px]" : expandedTall ? "w-[680px]" : "w-[680px]",
-          )}
-        >
-          {/* Wizard mode body */}
-          {isWizard && (
-            <div className="relative">
-              {(wizardPhase === "asking" || wizardPhase === "review") && (
-                <button
-                  onClick={collapse}
-                  className="absolute right-3 top-3 z-10 flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
-                  aria-label="Cancel"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              )}
-              <AskPiWizardBody
-                active={isWizard}
-                onSkeleton={(s) => onWizardSkeleton?.(s)}
-                onBuild={(p) => onWizardBuild?.(p)}
-                onPhaseChange={setWizardPhase}
-              />
-            </div>
-          )}
-
-          {/* Chat mode — result / thinking surface */}
-          {!isWizard && expandedTall && (
-            <div className="border-b border-border px-5 py-4 animate-fade-in">
-              {state === "thinking" ? <ThinkingTrace /> : <ResultPreview onAccept={reset} onDismiss={reset} />}
-            </div>
-          )}
-
-          {/* Chat mode — single-line input row with inline suggestions */}
-          {!isWizard && (
-            <div className="flex items-center gap-2 px-4 py-2.5">
-              <Sparkle className="h-3.5 w-3.5 shrink-0 fill-ai text-ai" />
-              <textarea
-                ref={inputRef}
-                rows={1}
-                value={value}
-                onChange={(e) => setValue(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    submit();
-                  }
-                  if (e.key === "Escape" && !value) collapse();
-                }}
-                placeholder="Ask Pi anything…"
-                className="scrollbar-thin max-h-32 min-w-0 flex-1 resize-none bg-transparent py-1.5 text-[14px] text-foreground placeholder:text-muted-foreground/80 focus:outline-none"
-              />
-
-              {state === "idle" && value.length === 0 && (
-                <div className="flex shrink-0 items-center gap-1.5">
-                  {SUGGESTIONS.map((s) => (
-                    <button
-                      key={s}
-                      onClick={() => {
-                        setValue(s);
-                        setTimeout(submit, 50);
-                      }}
-                      className="truncate rounded-full border border-border px-2.5 py-1 text-[11.5px] text-muted-foreground transition-colors hover:border-ai/40 hover:text-foreground"
-                    >
-                      {s}
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              <button
-                onClick={state === "thinking" ? reset : submit}
-                disabled={!value.trim() && state !== "thinking"}
-                className={cn(
-                  "flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-all",
-                  value.trim() || state === "thinking"
-                    ? "bg-foreground text-background hover:scale-[1.04]"
-                    : "bg-muted text-muted-foreground/60",
+        <div className="pointer-events-none" style={{ transform: `translateX(${dragX}px)` }}>
+          <PiPanel innerRef={containerRef} className={isWizard ? "w-[640px]" : "w-[680px]"}>
+            {/* Wizard mode body (canvas-only build flow) */}
+            {isWizard && (
+              <div className="relative">
+                {(wizardPhase === "asking" || wizardPhase === "review") && (
+                  <button
+                    onClick={collapse}
+                    className="absolute right-3 top-3 z-10 flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+                    aria-label="Cancel"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
                 )}
-                aria-label="Send"
-              >
+                <AskPiWizardBody
+                  active={isWizard}
+                  onSkeleton={(s) => onWizardSkeleton?.(s)}
+                  onBuild={(p) => onWizardBuild?.(p)}
+                  onPhaseChange={setWizardPhase}
+                />
+              </div>
+            )}
+
+            {/* Chat mode — result / thinking surface */}
+            {!isWizard && expandedTall && (
+              <div className="border-b border-border px-5 py-4 animate-fade-in">
                 {state === "thinking" ? (
-                  <Square className="h-3 w-3 fill-current" />
+                  <PiThinking steps={CANVAS_CONTEXT.thinking} />
+                ) : pendingSuggestion ? (
+                  <PiResultCard result={pendingSuggestion.result} onAccept={confirmSuggestion} onDismiss={reset} />
                 ) : (
-                  <ArrowUp className="h-4 w-4" />
+                  <PiResultCard result={CANVAS_CONTEXT.result} onAccept={reset} onDismiss={reset} />
                 )}
-              </button>
-            </div>
-          )}
+              </div>
+            )}
+
+            {/* Chat mode — single-line input row */}
+            {!isWizard && (
+              <div className="flex items-center gap-2 px-4 py-2.5">
+                <PiInputIcon />
+                <textarea
+                  ref={inputRef}
+                  rows={1}
+                  value={value}
+                  onChange={(e) => setValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      submit();
+                    }
+                    if (e.key === "Escape" && !value) collapse();
+                  }}
+                  placeholder={CANVAS_CONTEXT.placeholder}
+                  className="scrollbar-thin max-h-32 min-w-0 flex-1 resize-none bg-transparent py-1.5 text-[14px] text-foreground placeholder:text-muted-foreground/80 focus:outline-none"
+                />
+                <PiSendButton
+                  thinking={state === "thinking"}
+                  disabled={!value.trim() && state !== "thinking"}
+                  onClick={state === "thinking" ? reset : submit}
+                />
+              </div>
+            )}
+
+            {/* Chat mode — suggestion chips */}
+            {!isWizard && state === "idle" && value.length === 0 && (
+              <PiChips chips={CANVAS_CONTEXT.chips} onPick={(s) => { setValue(s); setTimeout(submit, 50); }} />
+            )}
+          </PiPanel>
         </div>
       )}
-    </div>
-  );
-}
-
-function ThinkingTrace() {
-  const steps = [
-    "Reading current graph (10 nodes, 10 edges)…",
-    "Identifying failure branch on WhatsApp send…",
-    "Proposing Voice AI Agent insertion…",
-  ];
-  return (
-    <div className="space-y-1.5">
-      <div className="flex items-center gap-2 text-[12.5px] font-medium text-foreground">
-        <Loader2 className="h-3.5 w-3.5 animate-spin text-ai" />
-        Pi is working…
-      </div>
-      <ul className="space-y-1 pl-5">
-        {steps.map((s, i) => (
-          <li
-            key={s}
-            className="text-[12px] text-muted-foreground"
-            style={{ animation: `fadeIn 0.4s ease-out ${i * 0.5}s both` }}
-          >
-            • {s}
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
-function ResultPreview({ onAccept, onDismiss }: { onAccept: () => void; onDismiss: () => void }) {
-  return (
-    <div className="space-y-2.5">
-      <div className="flex items-start gap-2">
-        <Sparkle className="mt-0.5 h-3.5 w-3.5 shrink-0 fill-ai text-ai" />
-        <p className="text-[13px] leading-relaxed text-foreground">
-          I'll add a <span className="font-medium text-ai">Voice AI Agent</span> after the WhatsApp
-          failure branch, then route accepted users back into the nurture loop.
-        </p>
-      </div>
-      <div className="rounded-lg border border-ai/30 bg-ai/5 px-2.5 py-2 font-mono text-[11px] text-foreground">
-        <span className="text-success">+ insert</span> Voice AI Agent · after node{" "}
-        <span className="text-muted-foreground">wa_send_1</span>
-        <br />
-        <span className="text-success">+ connect</span> edge wa_send_1.failed → voice_agent
-      </div>
-      <div className="flex items-center justify-end gap-1.5">
-        <button onClick={onDismiss} className="rounded-md px-2.5 py-1 text-[11.5px] text-muted-foreground hover:text-foreground">
-          Dismiss
-        </button>
-        <button
-          onClick={onAccept}
-          className="inline-flex items-center gap-1 rounded-md bg-foreground px-2.5 py-1 text-[11.5px] font-medium text-background"
-        >
-          <Check className="h-3 w-3" /> Apply changes
-        </button>
-      </div>
     </div>
   );
 }

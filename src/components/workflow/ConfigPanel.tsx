@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import {
   X, Copy, Trash2, AlertCircle, CheckCircle2, Plus, GripVertical, ChevronDown, Variable,
-  Sparkles, GitBranch, FlaskConical, ArrowUp, ArrowDown,
+  Sparkles, GitBranch, FlaskConical, ArrowUp, ArrowDown, ArrowRight,
   FileSpreadsheet, Loader2, Clock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -103,7 +103,78 @@ function ResizablePanel({ children }: { children: React.ReactNode }) {
 // silently disconnect the example graph's edges mid-demo).
 const NOOP_CHANGE = (_patch: Partial<WorkflowNodeData>) => undefined;
 
+/**
+ * I5 — Pi smart-fill. For an invalid, editable node, returns a fully-valid config +
+ * a canvas subtitle so a single click configures it. Values are chosen to satisfy
+ * each kind's own validators, so once the form remounts (via the fill-key bump) it
+ * re-reads them and reports "Configuration valid". Returns null for kinds with no
+ * sensible auto-fill (start/end never reach this path). Purely additive — only the
+ * editable, currently-invalid path ever calls it.
+ */
+function smartConfigFor(kind: NodeKind): { config: Partial<PresetConfig>; subtitle: string } | null {
+  switch (kind) {
+    case "audience":
+      return {
+        config: { csvKeys: CSV_KEYS, fileName: "sample.csv", phoneField: "phone" },
+        subtitle: "CSV · phone mapped",
+      };
+    case "conditional":
+      return {
+        config: {
+          branches: [
+            { id: "bA", label: "High value", variable: "contact.tier", op: "equals", value: "gold" },
+            { id: "bB", label: "Engaged", variable: "wa.delivery_state", op: "equals", value: "read" },
+          ],
+        },
+        subtitle: "Route on contact.tier",
+      };
+    case "abSplit":
+      return {
+        config: { splitVariants: [{ id: "vA", label: "A", pct: 50 }, { id: "vB", label: "B", pct: 50 }] },
+        subtitle: "50% A · 50% B",
+      };
+    case "delay":
+      return { config: { delayValue: 24, delayUnit: "Hours" }, subtitle: "24h" };
+    case "voiceCall":
+      return {
+        config: {
+          agent: "Aria · Conversational",
+          callStart: "09:00", callEnd: "20:00",
+          timezone: "Asia/Kolkata (IST)",
+          maxAttempts: 3, retryInterval: "15 mins",
+        },
+        subtitle: "Aria · 9am–8pm IST",
+      };
+    case "whatsapp":
+      return {
+        config: {
+          waNumber: "+91 98100 12345 · PiCommerce",
+          waMode: "template",
+          waTemplate: "reactivate_v3 · Marketing",
+        },
+        subtitle: "Template: reactivate_v3",
+      };
+    case "sms":
+      return {
+        config: {
+          smsType: "Promotional", smsFormat: "Text",
+          peId: "1101000000000000", senderId: "PICOMM",
+          smsBody: "Hi {{first_name}}, here's something picked for you. Reply STOP to opt out. — PICOMM",
+        },
+        subtitle: "Promotional · PICOMM",
+      };
+    case "adsCampaign":
+      return { config: {}, subtitle: "WhatsApp CTWA · ready" };
+    default:
+      return null;
+  }
+}
+
 export function ConfigPanel({ node, readOnly, onClose, onChange, onDelete, onDuplicate }: Props) {
+  // I5 — bumping this remounts the per-kind fields so they re-hydrate from a freshly
+  // Pi-filled config (and re-run their own validators). Declared before the early
+  // return to keep hook order stable.
+  const [fillKey, setFillKey] = useState(0);
   if (!node) return null;
   const { data } = node;
   const valid = data.valid !== false;
@@ -115,6 +186,25 @@ export function ConfigPanel({ node, readOnly, onClose, onChange, onDelete, onDup
   const preset = !!data.preset;
   const ro = readOnly || preset;
   const safeChange = preset ? NOOP_CHANGE : onChange;
+
+  // I5 — one-click "Pi: complete this for me", only for an editable node that's still
+  // invalid. Writes smart defaults + flips it valid, then remounts the fields so the
+  // form visibly fills in and re-validates. Never shown for preset/read-only/system nodes.
+  const canPiComplete = !ro && !isSystem && !valid && !!smartConfigFor(data.kind);
+  const piComplete = () => {
+    const smart = smartConfigFor(data.kind);
+    if (!smart) return;
+    onChange({
+      config: { ...data.config, ...smart.config },
+      subtitle: smart.subtitle,
+      valid: true,
+      error: undefined,
+    });
+    setFillKey((k) => k + 1);
+    toast.success("Pi filled smart defaults", {
+      description: `${NODE_LABELS[data.kind]} is ready — review and tweak anything you like.`,
+    });
+  };
 
   return (
     <ResizablePanel>
@@ -143,6 +233,23 @@ export function ConfigPanel({ node, readOnly, onClose, onChange, onDelete, onDup
         </div>
 
         <div className="scrollbar-thin flex-1 overflow-y-auto px-5 py-5 space-y-5">
+          {canPiComplete && (
+            <button
+              onClick={piComplete}
+              className="group flex w-full items-center gap-3 rounded-xl border border-ai/30 bg-ai/[0.04] px-3.5 py-3 text-left transition-colors hover:bg-ai/[0.08]"
+            >
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-ai/10 text-ai">
+                <Sparkles className="h-4 w-4" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-[12.5px] font-medium text-foreground">Pi: complete this for me</p>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">
+                  Fill smart defaults for this {NODE_LABELS[data.kind]} node — you can tweak anything after.
+                </p>
+              </div>
+              <ArrowRight className="h-4 w-4 shrink-0 text-ai transition-transform group-hover:translate-x-0.5" />
+            </button>
+          )}
           <NameField data={data} readOnly={ro} onChange={safeChange} />
           {isSystem ? (
             <div className="flex items-start gap-2.5 rounded-lg bg-muted px-3.5 py-3 text-[13px] text-muted-foreground">
@@ -154,7 +261,7 @@ export function ConfigPanel({ node, readOnly, onClose, onChange, onDelete, onDup
               </p>
             </div>
           ) : (
-            <NodeFields data={data} readOnly={ro} onChange={safeChange} />
+            <NodeFields key={`${node.id}:${fillKey}`} data={data} readOnly={ro} onChange={safeChange} />
           )}
         </div>
 

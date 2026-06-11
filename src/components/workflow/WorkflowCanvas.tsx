@@ -5,10 +5,11 @@ import ReactFlow, {
   type Connection, type Edge, type Node, type NodeMouseHandler,
   type ReactFlowInstance,
 } from "reactflow";
-import { nodeTypes } from "./nodes";
+import { nodeTypes, CanvasModeContext } from "./nodes";
 import type { WorkflowNodeData, NodeKind, CampaignStatus } from "@/lib/campaign-types";
 import { NODE_LABELS } from "@/lib/campaign-types";
 import { EXAMPLE_CAMPAIGNS } from "@/lib/campaign-examples";
+import { getSuggestion } from "@/lib/pi-node-suggestions";
 import { ConfigPanel } from "./ConfigPanel";
 import { AiComposer } from "./AiComposer";
 import { NodePalette } from "./NodePalette";
@@ -26,9 +27,9 @@ const SEED_NODES: Node<WorkflowNodeData>[] = [
         { id: "vB", label: "B · 40%", kind: "variant" },
       ] } },
   { id: "wa", type: "workflow", position: { x: 320, y: 215 },
-    data: { kind: "whatsapp", title: "WhatsApp", subtitle: "Template: reactivate_v3", valid: true } },
+    data: { kind: "whatsapp", title: "WhatsApp", subtitle: "Template: reactivate_v3", valid: true, piHint: "wa_personalize" } },
   { id: "voice", type: "workflow", position: { x: 320, y: 335 },
-    data: { kind: "voiceCall", title: "Voice Call", subtitle: "Conversational reactivation", valid: false, error: "Select voice agent" } },
+    data: { kind: "voiceCall", title: "Voice Call", subtitle: "Conversational reactivation", valid: false, error: "Select voice agent", piHint: "voice_window" } },
   { id: "delay", type: "workflow", position: { x: 0, y: 470 },
     data: { kind: "delay", title: "Delay", subtitle: "24h", valid: true } },
   { id: "end", type: "workflow", position: { x: 0, y: 590 },
@@ -207,6 +208,23 @@ export function WorkflowCanvas({
     [setNodes, onDirty],
   );
 
+  // I3 — confirmed a node-level Pi suggestion: run its real graph transform.
+  // The suggestion mutates nodes/edges (fix an invalid node, rewrite a message,
+  // insert a step) and clears its own hint, so the change lands live on canvas.
+  const applySuggestion = useCallback(
+    ({ nodeId, suggestionId }: { nodeId: string; suggestionId: string }) => {
+      const sug = getSuggestion(suggestionId);
+      if (!sug) return;
+      const next = sug.apply(nodes, edges, nodeId);
+      setNodes(next.nodes);
+      setEdges(next.edges);
+      setSelected(null);
+      onDirty?.();
+      refit();
+    },
+    [nodes, edges, setNodes, setEdges, onDirty, refit],
+  );
+
   const deleteNode = useCallback(
     (id: string) => {
       const target = nodes.find((n) => n.id === id);
@@ -259,11 +277,24 @@ export function WorkflowCanvas({
 
   const defaultEdgeOptions = useMemo(() => ({ type: "smoothstep" as const }), []);
 
+  // I6 — edit focus mode: when a node is selected, spotlight it by dimming everything
+  // else. Suppressed mid-build and during the live run pulse so neither is disrupted.
+  const focusNodeId = aiBuilding || status === "running" ? null : selected?.id ?? null;
+  const displayEdges = useMemo(() => {
+    if (!focusNodeId) return edges;
+    return edges.map((e) =>
+      e.source === focusNodeId || e.target === focusNodeId
+        ? e
+        : { ...e, style: { ...e.style, opacity: 0.12 } },
+    );
+  }, [edges, focusNodeId]);
+
   return (
+    <CanvasModeContext.Provider value={{ showPiTips: !previewOnly, focusNodeId }}>
     <div className="relative h-full w-full">
       <ReactFlow
         nodes={nodes}
-        edges={edges}
+        edges={displayEdges}
         nodeTypes={nodeTypes}
         nodesDraggable={editable}
         nodesConnectable={editable}
@@ -318,6 +349,7 @@ export function WorkflowCanvas({
           nudge={{ label: "Ask Pi to build your campaign", active: autoStartAskPi }}
           autoOpenWizard={askPiOpen}
           onBuildingChange={setAiBuilding}
+          onApplySuggestion={applySuggestion}
           onWizardSkeleton={(skel) => {
             setSelected(null);
             setNodes(skel.nodes);
@@ -335,5 +367,6 @@ export function WorkflowCanvas({
         />
       )}
     </div>
+    </CanvasModeContext.Provider>
   );
 }
