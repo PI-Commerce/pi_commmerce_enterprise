@@ -16,9 +16,12 @@ import { Route as AnalyticsRouteImport } from './routes/analytics'
 import { Route as AgentsRouteImport } from './routes/agents'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as CampaignsIndexRouteImport } from './routes/campaigns.index'
+import { Route as AgentsIndexRouteImport } from './routes/agents.index'
 import { Route as CampaignsIdRouteImport } from './routes/campaigns.$id'
+import { Route as AgentsNewRouteImport } from './routes/agents.new'
 import { Route as AgentsIdRouteImport } from './routes/agents.$id'
 import { Route as CampaignsVersionsIdRouteImport } from './routes/campaigns.versions.$id'
+import { Route as AgentsToolsNewRouteImport } from './routes/agents.tools.new'
 
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
@@ -55,10 +58,20 @@ const CampaignsIndexRoute = CampaignsIndexRouteImport.update({
   path: '/',
   getParentRoute: () => CampaignsRoute,
 } as any)
+const AgentsIndexRoute = AgentsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AgentsRoute,
+} as any)
 const CampaignsIdRoute = CampaignsIdRouteImport.update({
   id: '/$id',
   path: '/$id',
   getParentRoute: () => CampaignsRoute,
+} as any)
+const AgentsNewRoute = AgentsNewRouteImport.update({
+  id: '/new',
+  path: '/new',
+  getParentRoute: () => AgentsRoute,
 } as any)
 const AgentsIdRoute = AgentsIdRouteImport.update({
   id: '/$id',
@@ -70,6 +83,11 @@ const CampaignsVersionsIdRoute = CampaignsVersionsIdRouteImport.update({
   path: '/versions/$id',
   getParentRoute: () => CampaignsRoute,
 } as any)
+const AgentsToolsNewRoute = AgentsToolsNewRouteImport.update({
+  id: '/tools/new',
+  path: '/tools/new',
+  getParentRoute: () => AgentsRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -79,19 +97,24 @@ export interface FileRoutesByFullPath {
   '/integrations': typeof IntegrationsRoute
   '/settings': typeof SettingsRoute
   '/agents/$id': typeof AgentsIdRoute
+  '/agents/new': typeof AgentsNewRoute
   '/campaigns/$id': typeof CampaignsIdRoute
+  '/agents/': typeof AgentsIndexRoute
   '/campaigns/': typeof CampaignsIndexRoute
+  '/agents/tools/new': typeof AgentsToolsNewRoute
   '/campaigns/versions/$id': typeof CampaignsVersionsIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/agents': typeof AgentsRouteWithChildren
   '/analytics': typeof AnalyticsRoute
   '/integrations': typeof IntegrationsRoute
   '/settings': typeof SettingsRoute
   '/agents/$id': typeof AgentsIdRoute
+  '/agents/new': typeof AgentsNewRoute
   '/campaigns/$id': typeof CampaignsIdRoute
+  '/agents': typeof AgentsIndexRoute
   '/campaigns': typeof CampaignsIndexRoute
+  '/agents/tools/new': typeof AgentsToolsNewRoute
   '/campaigns/versions/$id': typeof CampaignsVersionsIdRoute
 }
 export interface FileRoutesById {
@@ -103,8 +126,11 @@ export interface FileRoutesById {
   '/integrations': typeof IntegrationsRoute
   '/settings': typeof SettingsRoute
   '/agents/$id': typeof AgentsIdRoute
+  '/agents/new': typeof AgentsNewRoute
   '/campaigns/$id': typeof CampaignsIdRoute
+  '/agents/': typeof AgentsIndexRoute
   '/campaigns/': typeof CampaignsIndexRoute
+  '/agents/tools/new': typeof AgentsToolsNewRoute
   '/campaigns/versions/$id': typeof CampaignsVersionsIdRoute
 }
 export interface FileRouteTypes {
@@ -117,19 +143,24 @@ export interface FileRouteTypes {
     | '/integrations'
     | '/settings'
     | '/agents/$id'
+    | '/agents/new'
     | '/campaigns/$id'
+    | '/agents/'
     | '/campaigns/'
+    | '/agents/tools/new'
     | '/campaigns/versions/$id'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
-    | '/agents'
     | '/analytics'
     | '/integrations'
     | '/settings'
     | '/agents/$id'
+    | '/agents/new'
     | '/campaigns/$id'
+    | '/agents'
     | '/campaigns'
+    | '/agents/tools/new'
     | '/campaigns/versions/$id'
   id:
     | '__root__'
@@ -140,8 +171,11 @@ export interface FileRouteTypes {
     | '/integrations'
     | '/settings'
     | '/agents/$id'
+    | '/agents/new'
     | '/campaigns/$id'
+    | '/agents/'
     | '/campaigns/'
+    | '/agents/tools/new'
     | '/campaigns/versions/$id'
   fileRoutesById: FileRoutesById
 }
@@ -205,12 +239,26 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CampaignsIndexRouteImport
       parentRoute: typeof CampaignsRoute
     }
+    '/agents/': {
+      id: '/agents/'
+      path: '/'
+      fullPath: '/agents/'
+      preLoaderRoute: typeof AgentsIndexRouteImport
+      parentRoute: typeof AgentsRoute
+    }
     '/campaigns/$id': {
       id: '/campaigns/$id'
       path: '/$id'
       fullPath: '/campaigns/$id'
       preLoaderRoute: typeof CampaignsIdRouteImport
       parentRoute: typeof CampaignsRoute
+    }
+    '/agents/new': {
+      id: '/agents/new'
+      path: '/new'
+      fullPath: '/agents/new'
+      preLoaderRoute: typeof AgentsNewRouteImport
+      parentRoute: typeof AgentsRoute
     }
     '/agents/$id': {
       id: '/agents/$id'
@@ -226,15 +274,28 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CampaignsVersionsIdRouteImport
       parentRoute: typeof CampaignsRoute
     }
+    '/agents/tools/new': {
+      id: '/agents/tools/new'
+      path: '/tools/new'
+      fullPath: '/agents/tools/new'
+      preLoaderRoute: typeof AgentsToolsNewRouteImport
+      parentRoute: typeof AgentsRoute
+    }
   }
 }
 
 interface AgentsRouteChildren {
   AgentsIdRoute: typeof AgentsIdRoute
+  AgentsNewRoute: typeof AgentsNewRoute
+  AgentsIndexRoute: typeof AgentsIndexRoute
+  AgentsToolsNewRoute: typeof AgentsToolsNewRoute
 }
 
 const AgentsRouteChildren: AgentsRouteChildren = {
   AgentsIdRoute: AgentsIdRoute,
+  AgentsNewRoute: AgentsNewRoute,
+  AgentsIndexRoute: AgentsIndexRoute,
+  AgentsToolsNewRoute: AgentsToolsNewRoute,
 }
 
 const AgentsRouteWithChildren =
