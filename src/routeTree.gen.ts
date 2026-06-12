@@ -15,8 +15,10 @@ import { Route as CampaignsRouteImport } from './routes/campaigns'
 import { Route as AnalyticsRouteImport } from './routes/analytics'
 import { Route as AgentsRouteImport } from './routes/agents'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as IntegrationsIndexRouteImport } from './routes/integrations.index'
 import { Route as CampaignsIndexRouteImport } from './routes/campaigns.index'
 import { Route as AgentsIndexRouteImport } from './routes/agents.index'
+import { Route as IntegrationsWhatsappRouteImport } from './routes/integrations.whatsapp'
 import { Route as CampaignsIdRouteImport } from './routes/campaigns.$id'
 import { Route as AgentsNewRouteImport } from './routes/agents.new'
 import { Route as AgentsIdRouteImport } from './routes/agents.$id'
@@ -53,6 +55,11 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const IntegrationsIndexRoute = IntegrationsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => IntegrationsRoute,
+} as any)
 const CampaignsIndexRoute = CampaignsIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -62,6 +69,11 @@ const AgentsIndexRoute = AgentsIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => AgentsRoute,
+} as any)
+const IntegrationsWhatsappRoute = IntegrationsWhatsappRouteImport.update({
+  id: '/whatsapp',
+  path: '/whatsapp',
+  getParentRoute: () => IntegrationsRoute,
 } as any)
 const CampaignsIdRoute = CampaignsIdRouteImport.update({
   id: '/$id',
@@ -94,26 +106,29 @@ export interface FileRoutesByFullPath {
   '/agents': typeof AgentsRouteWithChildren
   '/analytics': typeof AnalyticsRoute
   '/campaigns': typeof CampaignsRouteWithChildren
-  '/integrations': typeof IntegrationsRoute
+  '/integrations': typeof IntegrationsRouteWithChildren
   '/settings': typeof SettingsRoute
   '/agents/$id': typeof AgentsIdRoute
   '/agents/new': typeof AgentsNewRoute
   '/campaigns/$id': typeof CampaignsIdRoute
+  '/integrations/whatsapp': typeof IntegrationsWhatsappRoute
   '/agents/': typeof AgentsIndexRoute
   '/campaigns/': typeof CampaignsIndexRoute
+  '/integrations/': typeof IntegrationsIndexRoute
   '/agents/tools/new': typeof AgentsToolsNewRoute
   '/campaigns/versions/$id': typeof CampaignsVersionsIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/analytics': typeof AnalyticsRoute
-  '/integrations': typeof IntegrationsRoute
   '/settings': typeof SettingsRoute
   '/agents/$id': typeof AgentsIdRoute
   '/agents/new': typeof AgentsNewRoute
   '/campaigns/$id': typeof CampaignsIdRoute
+  '/integrations/whatsapp': typeof IntegrationsWhatsappRoute
   '/agents': typeof AgentsIndexRoute
   '/campaigns': typeof CampaignsIndexRoute
+  '/integrations': typeof IntegrationsIndexRoute
   '/agents/tools/new': typeof AgentsToolsNewRoute
   '/campaigns/versions/$id': typeof CampaignsVersionsIdRoute
 }
@@ -123,13 +138,15 @@ export interface FileRoutesById {
   '/agents': typeof AgentsRouteWithChildren
   '/analytics': typeof AnalyticsRoute
   '/campaigns': typeof CampaignsRouteWithChildren
-  '/integrations': typeof IntegrationsRoute
+  '/integrations': typeof IntegrationsRouteWithChildren
   '/settings': typeof SettingsRoute
   '/agents/$id': typeof AgentsIdRoute
   '/agents/new': typeof AgentsNewRoute
   '/campaigns/$id': typeof CampaignsIdRoute
+  '/integrations/whatsapp': typeof IntegrationsWhatsappRoute
   '/agents/': typeof AgentsIndexRoute
   '/campaigns/': typeof CampaignsIndexRoute
+  '/integrations/': typeof IntegrationsIndexRoute
   '/agents/tools/new': typeof AgentsToolsNewRoute
   '/campaigns/versions/$id': typeof CampaignsVersionsIdRoute
 }
@@ -145,21 +162,24 @@ export interface FileRouteTypes {
     | '/agents/$id'
     | '/agents/new'
     | '/campaigns/$id'
+    | '/integrations/whatsapp'
     | '/agents/'
     | '/campaigns/'
+    | '/integrations/'
     | '/agents/tools/new'
     | '/campaigns/versions/$id'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/analytics'
-    | '/integrations'
     | '/settings'
     | '/agents/$id'
     | '/agents/new'
     | '/campaigns/$id'
+    | '/integrations/whatsapp'
     | '/agents'
     | '/campaigns'
+    | '/integrations'
     | '/agents/tools/new'
     | '/campaigns/versions/$id'
   id:
@@ -173,8 +193,10 @@ export interface FileRouteTypes {
     | '/agents/$id'
     | '/agents/new'
     | '/campaigns/$id'
+    | '/integrations/whatsapp'
     | '/agents/'
     | '/campaigns/'
+    | '/integrations/'
     | '/agents/tools/new'
     | '/campaigns/versions/$id'
   fileRoutesById: FileRoutesById
@@ -184,7 +206,7 @@ export interface RootRouteChildren {
   AgentsRoute: typeof AgentsRouteWithChildren
   AnalyticsRoute: typeof AnalyticsRoute
   CampaignsRoute: typeof CampaignsRouteWithChildren
-  IntegrationsRoute: typeof IntegrationsRoute
+  IntegrationsRoute: typeof IntegrationsRouteWithChildren
   SettingsRoute: typeof SettingsRoute
 }
 
@@ -232,6 +254,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/integrations/': {
+      id: '/integrations/'
+      path: '/'
+      fullPath: '/integrations/'
+      preLoaderRoute: typeof IntegrationsIndexRouteImport
+      parentRoute: typeof IntegrationsRoute
+    }
     '/campaigns/': {
       id: '/campaigns/'
       path: '/'
@@ -245,6 +274,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/agents/'
       preLoaderRoute: typeof AgentsIndexRouteImport
       parentRoute: typeof AgentsRoute
+    }
+    '/integrations/whatsapp': {
+      id: '/integrations/whatsapp'
+      path: '/whatsapp'
+      fullPath: '/integrations/whatsapp'
+      preLoaderRoute: typeof IntegrationsWhatsappRouteImport
+      parentRoute: typeof IntegrationsRoute
     }
     '/campaigns/$id': {
       id: '/campaigns/$id'
@@ -317,12 +353,26 @@ const CampaignsRouteWithChildren = CampaignsRoute._addFileChildren(
   CampaignsRouteChildren,
 )
 
+interface IntegrationsRouteChildren {
+  IntegrationsWhatsappRoute: typeof IntegrationsWhatsappRoute
+  IntegrationsIndexRoute: typeof IntegrationsIndexRoute
+}
+
+const IntegrationsRouteChildren: IntegrationsRouteChildren = {
+  IntegrationsWhatsappRoute: IntegrationsWhatsappRoute,
+  IntegrationsIndexRoute: IntegrationsIndexRoute,
+}
+
+const IntegrationsRouteWithChildren = IntegrationsRoute._addFileChildren(
+  IntegrationsRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AgentsRoute: AgentsRouteWithChildren,
   AnalyticsRoute: AnalyticsRoute,
   CampaignsRoute: CampaignsRouteWithChildren,
-  IntegrationsRoute: IntegrationsRoute,
+  IntegrationsRoute: IntegrationsRouteWithChildren,
   SettingsRoute: SettingsRoute,
 }
 export const routeTree = rootRouteImport

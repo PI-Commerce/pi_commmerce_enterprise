@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import {
+  ChevronLeft,
   ChevronRight,
   Check,
   Phone,
@@ -166,12 +167,18 @@ function CreateAgent() {
 
   return (
     <WizardShell
-      eyebrow="Create agent"
       breadcrumb={
         <>
-          <Link to="/agents" className="text-muted-foreground hover:text-foreground">Agents</Link>
-          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/60" />
-          <span className="font-medium">{draft.name.trim() || "New agent"}</span>
+          <Link
+            to="/agents"
+            className="flex h-8 items-center gap-1 rounded-md px-2 text-[12.5px] text-muted-foreground hover:bg-accent hover:text-foreground"
+            aria-label="Back to agents"
+          >
+            <ChevronLeft className="h-4 w-4" />
+            <span className="hidden sm:inline">Agents</span>
+          </Link>
+          <span className="text-muted-foreground/40">/</span>
+          <span className="truncate text-[13.5px] font-medium">{draft.name.trim() || "New agent"}</span>
         </>
       }
       headerActions={
