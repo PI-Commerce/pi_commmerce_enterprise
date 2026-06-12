@@ -49,7 +49,7 @@ export type RunRow = {
 /* ───────────── Dormant Trader Reactivation ─────────────
  *  Mirrors the campaign-builder DAG exactly:
  *
- *    Start → Audience(12,402) → A/B Split(60/40)
+ *    Start → Audience(12,402) → Channel routing(60/40)
  *                                 ├─ WhatsApp(reactivate_v3)
  *                                 └─ Voice Call(conversational)
  *                                 → Delay(24h) → End
@@ -71,7 +71,7 @@ const dormantR1: RunRow = {
     nodes: [
       { id: "start",    name: "Start",                     kind: "start",    entered: 12402, exited: 12402 },
       { id: "audience", name: "Audience · CSV 12,402",     kind: "audience", entered: 12402, exited: 12402 },
-      { id: "split",    name: "A/B Split · 60/40",         kind: "abSplit",  entered: 12402, exited: 12402 },
+      { id: "split",    name: "Channel routing · 60/40",   kind: "conditional", entered: 12402, exited: 12402 },
       { id: "whatsapp", name: "WhatsApp · reactivate_v3",  kind: "whatsapp", entered: 7441,  exited: 7441  },
       { id: "voice",    name: "Voice Call · Reactivation", kind: "voice",    entered: 4961,  exited: 4961  },
       { id: "delay",    name: "Delay · 24h",               kind: "delay",    entered: 10370, exited: 10370 },
@@ -103,7 +103,7 @@ const dormantR2: RunRow = {
     nodes: [
       { id: "start",    name: "Start",                     kind: "start",    entered: 11840, exited: 11840 },
       { id: "audience", name: "Audience · CSV 11,840",     kind: "audience", entered: 11840, exited: 11840 },
-      { id: "split",    name: "A/B Split · 60/40",         kind: "abSplit",  entered: 11840, exited: 11840 },
+      { id: "split",    name: "Channel routing · 60/40",   kind: "conditional", entered: 11840, exited: 11840 },
       { id: "whatsapp", name: "WhatsApp · reactivate_v3",  kind: "whatsapp", entered: 7104,  exited: 7104  },
       { id: "voice",    name: "Voice Call · Reactivation", kind: "voice",    entered: 4736,  exited: 4736  },
       { id: "delay",    name: "Delay · 24h",               kind: "delay",    entered: 9712,  exited: 9712  },
@@ -135,7 +135,7 @@ const dormantR3: RunRow = {
     nodes: [
       { id: "start",    name: "Start",                     kind: "start",    entered: 12402, exited: 12402 },
       { id: "audience", name: "Audience · CSV 12,402",     kind: "audience", entered: 12402, exited: 12402 },
-      { id: "split",    name: "A/B Split · 60/40",         kind: "abSplit",  entered: 12402, exited: 12402 },
+      { id: "split",    name: "Channel routing · 60/40",   kind: "conditional", entered: 12402, exited: 12402 },
       { id: "whatsapp", name: "WhatsApp · reactivate_v3",  kind: "whatsapp", entered: 7441,  exited: 7441  },
       { id: "voice",    name: "Voice Call · Reactivation", kind: "voice",    entered: 4961,  exited: 4961  },
       { id: "delay",    name: "Delay · 24h",               kind: "delay",    entered: 1620,  exited: 1620  },
@@ -186,7 +186,7 @@ const onboardingR1: RunRow = {
   },
 };
 
-/* ───────────── KYC Drop-off Recovery (Ads + WhatsApp) ───────────── */
+/* ───────────── KYC Drop-off Recovery (WhatsApp + Voice) ───────────── */
 const kycR1: RunRow = {
   id: "r_6988",
   startedAt: "Apr 12 · 18:00",
@@ -199,23 +199,21 @@ const kycR1: RunRow = {
   sankey: {
     nodes: [
       { id: "audience",  name: "Audience · KYC stalled",  kind: "audience",    entered: 9802, exited: 9802 },
-      { id: "ads",       name: "Meta Retargeting Ads",    kind: "ads",         entered: 9802, exited: 9802 },
       { id: "whatsapp",  name: "WhatsApp · KYC Reminder", kind: "whatsapp",    entered: 9802, exited: 8210 },
       { id: "engaged",   name: "Returned to app?",        kind: "conditional", entered: 8210, exited: 8210 },
-      { id: "sms",       name: "SMS · Final Nudge",       kind: "sms",         entered: 4290, exited: 4290 },
+      { id: "voice",     name: "Voice · KYC Assist",      kind: "voice",       entered: 4290, exited: 4290 },
       { id: "converted", name: "KYC Resubmitted",         kind: "end",         entered: 1402, exited: 1402 },
       { id: "dropped",   name: "Dropped Off",             kind: "end",         entered: 8400, exited: 8400 },
     ],
     edges: [
-      { source: "audience", target: "ads",       value: 9802 },
-      { source: "ads",      target: "whatsapp",  value: 9802 },
+      { source: "audience", target: "whatsapp",  value: 9802 },
       { source: "whatsapp", target: "engaged",   value: 8210 },
       { source: "whatsapp", target: "dropped",   value: 1592 },
       { source: "engaged",  target: "converted", value: 920  },
-      { source: "engaged",  target: "sms",       value: 4290 },
+      { source: "engaged",  target: "voice",     value: 4290 },
       { source: "engaged",  target: "dropped",   value: 3000 },
-      { source: "sms",      target: "converted", value: 482  },
-      { source: "sms",      target: "dropped",   value: 3808 },
+      { source: "voice",    target: "converted", value: 482  },
+      { source: "voice",    target: "dropped",   value: 3808 },
     ],
   },
 };

@@ -1138,9 +1138,9 @@ function ActionNodeShell({
   return (
     <>
       {/* In-node A/B experiments are OOS for v1 (scope A4) — the editable builder no longer
-          exposes them (use the standalone A/B Split node instead). Kept read-only so existing
-          example campaigns still render their authored experiment. */}
-      {readOnly && (
+          exposes them. Only shown read-only when an example campaign actually authored an
+          experiment (none do in v1), so clean preset nodes never render an empty toggle. */}
+      {readOnly && abEnabled && (
       <div className="mb-5 rounded-xl border border-border bg-card/40 p-3">
         <div className="flex items-start gap-2.5">
           <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-chart-1/10 text-chart-1">
@@ -1231,9 +1231,9 @@ function ActionNodeShell({
       )}
 
       {/* AI Transformations are OOS for v1 (scope A5) — the editable builder no longer
-          exposes them. Kept read-only so example campaigns still render authored transforms
-          (e.g. Voice transcript → call_disposition). */}
-      {readOnly && (
+          exposes them. Only shown read-only when an example campaign actually authored
+          transforms (none do in v1), so clean preset nodes never render an empty section. */}
+      {readOnly && transforms.length > 0 && (
         <AiTransformationsSection
           readOnly={readOnly}
           transforms={transforms}

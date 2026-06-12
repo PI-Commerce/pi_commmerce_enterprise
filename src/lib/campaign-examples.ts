@@ -26,7 +26,7 @@ const EDGE = "smoothstep" as const;
 
 /* ============================================================== */
 /* Example 1 — Omni-channel React (value-tiered reactivation)     */
-/* Chat AI (WhatsApp) + Voice AI + SMS                            */
+/* Chat AI (WhatsApp) + Voice AI                                  */
 /* ============================================================== */
 
 const EX1_CSV_KEYS = [
@@ -77,28 +77,11 @@ const EX1_NODES: Node<WorkflowNodeData>[] = [
       },
     },
   },
-  // ---- High-LTV track ----
+  // ---- High-LTV track: Chat AI → (drop-off) Voice AI ----
   {
-    id: "split", type: "workflow", position: { x: 400, y: 460 },
+    id: "chat", type: "workflow", position: { x: 384, y: 440 },
     data: {
-      kind: "abSplit", title: "A/B Split", subtitle: "50% A · 50% B", valid: true, preset: true,
-      abTest: { variants: [{ label: "A", pct: 50 }, { label: "B", pct: 50 }] },
-      outputs: [
-        { id: "vA", label: "A · 50%", kind: "variant" },
-        { id: "vB", label: "B · 50%", kind: "variant" },
-      ],
-      config: {
-        splitVariants: [
-          { id: "vA", label: "A", pct: 50 },
-          { id: "vB", label: "B", pct: 50 },
-        ],
-      },
-    },
-  },
-  {
-    id: "chatA", type: "workflow", position: { x: 200, y: 640 },
-    data: {
-      kind: "whatsapp", title: "Chat AI · Variant A", subtitle: "WhatsApp · loyalty opener", valid: true, preset: true,
+      kind: "whatsapp", title: "Chat AI · loyalty", subtitle: "WhatsApp · loyalty opener", valid: true, preset: true,
       outputs: [
         { id: "converted", label: "Converted", kind: "exit" },
         { id: "dropped", label: "Responded, dropped off", kind: "exit" },
@@ -120,38 +103,14 @@ const EX1_NODES: Node<WorkflowNodeData>[] = [
     },
   },
   {
-    id: "chatB", type: "workflow", position: { x: 620, y: 640 },
-    data: {
-      kind: "whatsapp", title: "Chat AI · Variant B", subtitle: "WhatsApp · category opener", valid: true, preset: true,
-      outputs: [
-        { id: "converted", label: "Converted", kind: "exit" },
-        { id: "dropped", label: "Responded, dropped off", kind: "exit" },
-        { id: "default", label: "No response", kind: "default" },
-      ],
-      config: {
-        waNumber: "+91 98100 12345 · PiCommerce",
-        waMode: "template",
-        waTemplate: "winback_v2 · Marketing",
-        waVarMap: [
-          { v: "{{1}}", def: "contact.first_name" },
-          { v: "{{2}}", def: "favorite_category" },
-        ],
-        paths: [
-          { id: "converted", label: "Converted", variable: "button_clicked", op: "equals", value: "true" },
-          { id: "dropped", label: "Responded, dropped off", variable: "session_expired", op: "equals", value: "true" },
-        ],
-      },
-    },
-  },
-  {
-    id: "delay5", type: "workflow", position: { x: 620, y: 880 },
+    id: "delay5", type: "workflow", position: { x: 640, y: 600 },
     data: {
       kind: "delay", title: "Delay · 5 days", subtitle: "Wait 5 days", valid: true, preset: true,
       config: { delayValue: 5, delayUnit: "Days" },
     },
   },
   {
-    id: "voice", type: "workflow", position: { x: 400, y: 1040 },
+    id: "voice", type: "workflow", position: { x: 400, y: 760 },
     data: {
       kind: "voiceCall", title: "Voice AI call", subtitle: "Conversational reactivation", valid: true, preset: true,
       config: {
@@ -168,22 +127,25 @@ const EX1_NODES: Node<WorkflowNodeData>[] = [
       },
     },
   },
-  // ---- Mid-LTV track ----
+  // ---- Mid-LTV track: Chat AI category offer ----
   {
-    id: "sms", type: "workflow", position: { x: 60, y: 460 },
+    id: "chatMid", type: "workflow", position: { x: 40, y: 440 },
     data: {
-      kind: "sms", title: "SMS promo", subtitle: "Promotional offer", valid: true, preset: true,
+      kind: "whatsapp", title: "Chat AI · offer", subtitle: "WhatsApp · category offer", valid: true, preset: true,
       config: {
-        smsType: "Promotional",
-        smsFormat: "Text",
-        peId: "1101234567890123456",
-        senderId: "PICOMM",
-        smsBody: "Hi {{first_name}}, here's ₹{{discount_value}} off your favourite {{favorite_category}}. Shop now — limited time. — PICOMM",
+        waNumber: "+91 98100 12345 · PiCommerce",
+        waMode: "template",
+        waTemplate: "winback_v2 · Marketing",
+        waVarMap: [
+          { v: "{{1}}", def: "contact.first_name" },
+          { v: "{{2}}", def: "favorite_category" },
+          { v: "{{3}}", def: "discount_value" },
+        ],
       },
     },
   },
   {
-    id: "end", type: "workflow", position: { x: 400, y: 1220 },
+    id: "end", type: "workflow", position: { x: 400, y: 940 },
     data: { kind: "end", title: "End", locked: true, valid: true, preset: true },
   },
 ];
@@ -191,24 +153,19 @@ const EX1_NODES: Node<WorkflowNodeData>[] = [
 const EX1_EDGES: Edge[] = [
   { id: "ex1-e1", source: "start", target: "audience", type: EDGE },
   { id: "ex1-e2", source: "audience", target: "tier", type: EDGE },
-  { id: "ex1-e3", source: "tier", sourceHandle: "high_ltv", target: "split", type: EDGE },
-  { id: "ex1-e4", source: "tier", sourceHandle: "mid_ltv", target: "sms", type: EDGE },
-  { id: "ex1-e5", source: "split", sourceHandle: "vA", target: "chatA", type: EDGE },
-  { id: "ex1-e6", source: "split", sourceHandle: "vB", target: "chatB", type: EDGE },
-  { id: "ex1-e7", source: "chatA", sourceHandle: "converted", target: "end", type: EDGE },
-  { id: "ex1-e8", source: "chatA", sourceHandle: "dropped", target: "voice", type: EDGE },
-  { id: "ex1-e9", source: "chatA", sourceHandle: "default", target: "delay5", type: EDGE },
-  { id: "ex1-e10", source: "chatB", sourceHandle: "converted", target: "end", type: EDGE },
-  { id: "ex1-e11", source: "chatB", sourceHandle: "dropped", target: "voice", type: EDGE },
-  { id: "ex1-e12", source: "chatB", sourceHandle: "default", target: "delay5", type: EDGE },
-  { id: "ex1-e13", source: "delay5", target: "voice", type: EDGE },
-  { id: "ex1-e14", source: "voice", target: "end", type: EDGE },
-  { id: "ex1-e15", source: "sms", target: "end", type: EDGE },
+  { id: "ex1-e3", source: "tier", sourceHandle: "high_ltv", target: "chat", type: EDGE },
+  { id: "ex1-e4", source: "tier", sourceHandle: "mid_ltv", target: "chatMid", type: EDGE },
+  { id: "ex1-e5", source: "chat", sourceHandle: "converted", target: "end", type: EDGE },
+  { id: "ex1-e6", source: "chat", sourceHandle: "dropped", target: "voice", type: EDGE },
+  { id: "ex1-e7", source: "chat", sourceHandle: "default", target: "delay5", type: EDGE },
+  { id: "ex1-e8", source: "delay5", target: "voice", type: EDGE },
+  { id: "ex1-e9", source: "voice", target: "end", type: EDGE },
+  { id: "ex1-e10", source: "chatMid", target: "end", type: EDGE },
 ];
 
 /* ============================================================== */
 /* Example 2 — Voice-led win-back (high-value win-back)           */
-/* Voice AI → Chat AI (WhatsApp) → SMS                            */
+/* Voice AI → Chat AI (WhatsApp)                                  */
 /* ============================================================== */
 
 const EX2_FIELDS = [
@@ -254,11 +211,6 @@ const EX2_NODES: Node<WorkflowNodeData>[] = [
         timezone: "Asia/Kolkata (IST)",
         maxAttempts: 2,
         retryInterval: "1 hour",
-        transforms: [
-          { id: "t1", type: "Custom AI Action", input: "call.transcript", output: "call_disposition" },
-          { id: "t2", type: "Custom AI Action", input: "call.transcript", output: "sentiment_score" },
-          { id: "t3", type: "Date Formatting", input: "call.transcript", output: "callback_at" },
-        ],
       },
     },
   },
@@ -317,15 +269,18 @@ const EX2_NODES: Node<WorkflowNodeData>[] = [
     },
   },
   {
-    id: "smsNudge", type: "workflow", position: { x: 60, y: 1120 },
+    id: "chatReminder", type: "workflow", position: { x: 60, y: 1120 },
     data: {
-      kind: "sms", title: "SMS nudge", subtitle: "Reorder reminder", valid: true, preset: true,
+      kind: "whatsapp", title: "Chat AI · reminder", subtitle: "WhatsApp · reorder reminder", valid: true, preset: true,
       config: {
-        smsType: "Promotional",
-        smsFormat: "Text",
-        peId: "1101234567890123456",
-        senderId: "PICOMM",
-        smsBody: "Hi {{first_name}}, still thinking about {{last_item}}? Reorder in one tap: {{reorder_url}} — PICOMM",
+        waNumber: "+91 98100 12345 · PiCommerce",
+        waMode: "template",
+        waTemplate: "reorder_v1 · Marketing",
+        waVarMap: [
+          { v: "{{1}}", def: "contact.first_name" },
+          { v: "{{2}}", def: "last_item" },
+          { v: "{{3}}", def: "reorder_url" },
+        ],
       },
     },
   },
@@ -357,15 +312,16 @@ const EX2_NODES: Node<WorkflowNodeData>[] = [
   },
   // ---- Not-interested path ----
   {
-    id: "smsNI", type: "workflow", position: { x: 720, y: 760 },
+    id: "chatNI", type: "workflow", position: { x: 720, y: 760 },
     data: {
-      kind: "sms", title: "SMS soft offer", subtitle: "Not-interested path", valid: true, preset: true,
+      kind: "whatsapp", title: "Chat AI · soft offer", subtitle: "WhatsApp · not-interested path", valid: true, preset: true,
       config: {
-        smsType: "Promotional",
-        smsFormat: "Text",
-        peId: "1101234567890123456",
-        senderId: "PICOMM",
-        smsBody: "Hi {{first_name}}, here's a little something for whenever you're ready to come back. — PICOMM",
+        waNumber: "+91 98100 12345 · PiCommerce",
+        waMode: "template",
+        waTemplate: "winback_v2 · Marketing",
+        waVarMap: [
+          { v: "{{1}}", def: "contact.first_name" },
+        ],
       },
     },
   },
@@ -397,17 +353,17 @@ const EX2_EDGES: Edge[] = [
   { id: "ex2-e3", source: "voice1", target: "outcome", type: EDGE },
   { id: "ex2-e4", source: "outcome", sourceHandle: "interested", target: "chat", type: EDGE },
   { id: "ex2-e5", source: "outcome", sourceHandle: "callback", target: "callbackDelay", type: EDGE },
-  { id: "ex2-e6", source: "outcome", sourceHandle: "not_interested", target: "smsNI", type: EDGE },
+  { id: "ex2-e6", source: "outcome", sourceHandle: "not_interested", target: "chatNI", type: EDGE },
   { id: "ex2-e7", source: "outcome", sourceHandle: "no_connect", target: "chatNC", type: EDGE },
   { id: "ex2-e8", source: "outcome", sourceHandle: "wrong_number", target: "end", type: EDGE },
   { id: "ex2-e9", source: "chat", sourceHandle: "ordered", target: "end", type: EDGE },
   { id: "ex2-e10", source: "chat", sourceHandle: "needs_help", target: "delay2", type: EDGE },
   { id: "ex2-e11", source: "chat", sourceHandle: "default", target: "end", type: EDGE },
-  { id: "ex2-e12", source: "delay2", target: "smsNudge", type: EDGE },
-  { id: "ex2-e13", source: "smsNudge", target: "end", type: EDGE },
+  { id: "ex2-e12", source: "delay2", target: "chatReminder", type: EDGE },
+  { id: "ex2-e13", source: "chatReminder", target: "end", type: EDGE },
   { id: "ex2-e14", source: "callbackDelay", target: "voice2", type: EDGE },
   { id: "ex2-e15", source: "voice2", target: "end", type: EDGE },
-  { id: "ex2-e16", source: "smsNI", target: "end", type: EDGE },
+  { id: "ex2-e16", source: "chatNI", target: "end", type: EDGE },
   { id: "ex2-e17", source: "chatNC", target: "end", type: EDGE },
 ];
 

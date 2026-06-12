@@ -15,7 +15,7 @@ const primary = [
 
 const secondary = [
   { to: "/integrations", label: "Integrations", icon: Plug },
-  { to: "/settings", label: "Settings", icon: Settings },
+  { to: "/settings", label: "Settings", icon: Settings, disabled: true },
 ] as const;
 
 const STORAGE_KEY = "pc_sidebar_collapsed";
@@ -94,13 +94,37 @@ function NavSection({
   isActive,
   collapsed,
 }: {
-  items: ReadonlyArray<{ to: string; label: string; icon: React.ComponentType<{ className?: string }>; exact?: boolean }>;
+  items: ReadonlyArray<{ to: string; label: string; icon: React.ComponentType<{ className?: string }>; exact?: boolean; disabled?: boolean }>;
   isActive: (to: string, exact?: boolean) => boolean;
   collapsed: boolean;
 }) {
   return (
     <ul className="space-y-0.5">
       {items.map((item) => {
+        if (item.disabled) {
+          return (
+            <li key={item.to}>
+              <div
+                title={collapsed ? `${item.label} · Coming soon` : "Coming soon"}
+                aria-disabled="true"
+                className={cn(
+                  "flex cursor-not-allowed items-center rounded-md text-[13px] text-muted-foreground/40",
+                  collapsed ? "h-9 w-9 justify-center" : "gap-2.5 px-2.5 py-1.5",
+                )}
+              >
+                <item.icon className="h-4 w-4 shrink-0 text-muted-foreground/40" />
+                {!collapsed && (
+                  <>
+                    <span>{item.label}</span>
+                    <span className="ml-auto rounded-full border border-border bg-secondary px-1.5 py-0.5 text-[9.5px] font-medium uppercase tracking-wide text-muted-foreground/70">
+                      Soon
+                    </span>
+                  </>
+                )}
+              </div>
+            </li>
+          );
+        }
         const active = isActive(item.to, item.exact);
         return (
           <li key={item.to}>

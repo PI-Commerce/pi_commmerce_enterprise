@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/tooltip";
 import { Input } from "@/components/ui/input";
 import {
-  Info, Download, Search, MessageCircle, Phone, MessageSquare, Megaphone,
+  Info, Download, Search, MessageCircle, Phone,
   ExternalLink,
 } from "lucide-react";
 import { EChart } from "@/components/analytics/EChart";
@@ -97,11 +97,11 @@ const STATUS_TONE: Record<string, string> = {
   pending: "text-muted-foreground bg-secondary",
 };
 
+// SMS and Ads channels are out of scope for v1 — only the live channels
+// (WhatsApp / Voice) are exposed in Channel analytics.
 const CHANNEL_TABS: { kind: ChannelKind; label: string; icon: typeof MessageCircle; assetLabel: string }[] = [
   { kind: "whatsapp", label: "WhatsApp", icon: MessageCircle,   assetLabel: "WhatsApp Number" },
   { kind: "voice",    label: "Voice",    icon: Phone,           assetLabel: "Voice Agent" },
-  { kind: "sms",      label: "SMS",      icon: MessageSquare,   assetLabel: "Sender ID" },
-  { kind: "ads",      label: "Ads",      icon: Megaphone,       assetLabel: "Ad Campaign" },
 ];
 
 /* ───────────── Channel selection state (lifted, supports deep-link) ─────────────
@@ -133,15 +133,10 @@ function Analytics() {
 
   return (
     <AppShell>
-      <div className="flex items-start justify-between gap-4">
-        <PageHeader
-          title="Analytics"
-          description="Campaign, and node-level performance across your workspace."
-        />
-        <div className="pt-1">
-          <DateRangePicker value={dateRange} onChange={setDateRange} />
-        </div>
-      </div>
+      <PageHeader
+        title="Analytics"
+        description="Campaign, and node-level performance across your workspace."
+      />
       <PageTabs<Tab>
         value={tab}
         onChange={setTab}
@@ -151,8 +146,8 @@ function Analytics() {
         ]}
       />
       {tab === "campaign"
-        ? <CampaignAnalytics goToChannel={goToChannel} dateRange={dateRange} />
-        : <ChannelAnalytics selection={channelSel} onSelectionChange={setChannelSel} dateRange={dateRange} />
+        ? <CampaignAnalytics goToChannel={goToChannel} dateRange={dateRange} onDateRangeChange={setDateRange} />
+        : <ChannelAnalytics selection={channelSel} onSelectionChange={setChannelSel} dateRange={dateRange} onDateRangeChange={setDateRange} />
       }
     </AppShell>
   );
@@ -171,11 +166,12 @@ function runVersionLabel(c: CampaignAnalyticsData, runIndex: number): string {
 
 function CampaignAnalytics({
   goToChannel,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  dateRange: _dateRange,
+  dateRange,
+  onDateRangeChange,
 }: {
   goToChannel: (opts: { kind: ChannelKind; campaignId: string; runId: string; nodeId: string }) => void;
   dateRange: DateRange | undefined;
+  onDateRangeChange: (r: DateRange | undefined) => void;
 }) {
   const [campaignId, setCampaignId] = useState(CAMPAIGNS[0].id);
   const campaign = CAMPAIGNS.find((c) => c.id === campaignId)!;
@@ -236,16 +232,18 @@ function CampaignAnalytics({
             })}
           </SelectContent>
         </Select>
-        <Badge variant="outline" className="ml-auto text-[11px] capitalize">
-          {run.status}
-        </Badge>
+        <div className="ml-auto flex items-center gap-2">
+          <DateRangePicker value={dateRange} onChange={onDateRangeChange} />
+          <Badge variant="outline" className="text-[11px] capitalize">
+            {run.status}
+          </Badge>
+        </div>
       </div>
 
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid grid-cols-3 gap-3">
         <KPI label="Total Leads"      value={run.kpi.totalLeads.toLocaleString()}     info="Total Leads available for the Run, at a point in time." />
         <KPI label="Valid Leads"      value={run.kpi.validLeads.toLocaleString()}     info="Total Leads that were addressable, to enter the campaign workflow." />
         <KPI label="Completed Leads"  value={run.kpi.leadsProcessed.toLocaleString()} info="Total Leads that reached the End Node of the selected Run." />
-        <KPI label="Success Rate"     value={`${run.kpi.successRate.toLocaleString()}%`} info="The success rate, w.r.t. the total Valid Leads that entered the campaign workflow." />
       </div>
 
       <div className="mt-4 rounded-xl border border-border bg-card">
@@ -715,11 +713,12 @@ function deriveChannelValues(kind: ChannelKind, entered: number): Record<string,
 }
 
 function ChannelAnalytics({
-  selection, onSelectionChange, dateRange,
+  selection, onSelectionChange, dateRange, onDateRangeChange,
 }: {
   selection: ChannelSelection;
   onSelectionChange: (s: ChannelSelection) => void;
   dateRange: DateRange | undefined;
+  onDateRangeChange: (r: DateRange | undefined) => void;
 }) {
   const { kind } = selection;
 
@@ -838,8 +837,9 @@ function ChannelAnalytics({
         })}
       </div>
 
-      {/* Standardized filter row: Asset · Campaign · Run · Node — all multi-select with "All" */}
-      <div className="mb-4 grid grid-cols-1 gap-2 md:grid-cols-4">
+      {/* Standardized filter row: Asset · Campaign · Run · Node · Date range — the
+          date filter lives inside the filter row (not at page level). */}
+      <div className="mb-4 grid grid-cols-1 gap-2 md:grid-cols-3 lg:grid-cols-5">
         <FilterField label={tabMeta.assetLabel}>
           <MultiSelect
             options={assets.map((a) => ({ value: a.id, label: a.label }))}
@@ -874,6 +874,9 @@ function ChannelAnalytics({
             onChange={(v) => onSelectionChange({ ...selection, nodeIds: v })}
             allLabel="All Nodes"
           />
+        </FilterField>
+        <FilterField label="Date range">
+          <DateRangePicker value={dateRange} onChange={onDateRangeChange} align="start" className="w-full" />
         </FilterField>
       </div>
 
