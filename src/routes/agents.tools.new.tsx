@@ -12,7 +12,7 @@ import {
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
-  ChevronRight, Plus, Trash2, Upload, Save, Zap,
+  ChevronLeft, ChevronRight, Plus, Trash2, Upload, Save, Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -181,14 +181,19 @@ function RegisterAction() {
 
   return (
     <WizardShell
-      eyebrow="Register action"
       breadcrumb={
         <>
-          <Link to="/agents" search={{ tab: "tools" }} className="text-muted-foreground hover:text-foreground">Agents</Link>
-          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/60" />
-          <Link to="/agents" search={{ tab: "tools" }} className="text-muted-foreground hover:text-foreground">Tools</Link>
-          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/60" />
-          <span className="font-medium">{draft.name.trim() || "Register action"}</span>
+          <Link
+            to="/agents"
+            search={{ tab: "tools" }}
+            className="flex h-8 items-center gap-1 rounded-md px-2 text-[12.5px] text-muted-foreground hover:bg-accent hover:text-foreground"
+            aria-label="Back to tools"
+          >
+            <ChevronLeft className="h-4 w-4" />
+            <span className="hidden sm:inline">Tools</span>
+          </Link>
+          <span className="text-muted-foreground/40">/</span>
+          <span className="truncate text-[13.5px] font-medium">{draft.name.trim() || "Register action"}</span>
         </>
       }
       headerActions={

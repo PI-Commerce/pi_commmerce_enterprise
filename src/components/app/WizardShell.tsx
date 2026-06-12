@@ -1,6 +1,5 @@
 import { Fragment } from "react";
 import { Check, ChevronLeft } from "lucide-react";
-import { AppShell } from "./AppShell";
 import { cn } from "@/lib/utils";
 
 export type WizardStep = { id: string; label: string; hint?: string };
@@ -8,12 +7,12 @@ export type WizardStep = { id: string; label: string; hint?: string };
 /**
  * Shared chrome for full-screen creation wizards (Create agent, Register action).
  * Provides the header, a horizontal stepper bar, scrolling canvas and footer nav so
- * every wizard shares the same UX. The global app sidebar stays visible (via AppShell);
- * progress lives in a top stepper rather than a competing left rail. Step content is
+ * every wizard shares the same UX. Like the campaign builder this is a full-screen
+ * takeover — the global app sidebar is hidden so the flow stays focused; progress
+ * lives in a top stepper rather than a competing left rail. Step content is
  * passed as children; the route owns the draft state, step order and action buttons.
  */
 export function WizardShell({
-  eyebrow,
   breadcrumb,
   badge = "Draft",
   headerActions,
@@ -24,8 +23,6 @@ export function WizardShell({
   footerActions,
   children,
 }: {
-  /** Small uppercase label shown at the start of the stepper, e.g. "Create agent". */
-  eyebrow: string;
   /** Breadcrumb cluster rendered in the header (links + current title). */
   breadcrumb: React.ReactNode;
   /** Status pill shown after the breadcrumb. Pass null to hide. */
@@ -45,11 +42,11 @@ export function WizardShell({
   const current = steps[Math.min(currentIndex, steps.length - 1)];
 
   return (
-    <AppShell bare>
+    <div className="flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground">
       <div className="flex h-full flex-col">
         {/* Top bar */}
-        <header className="flex h-12 shrink-0 items-center justify-between border-b border-border px-4">
-          <div className="flex items-center gap-2 text-sm">
+        <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-border bg-background/90 px-3 backdrop-blur-xl">
+          <div className="flex min-w-0 items-center gap-2">
             {breadcrumb}
             {badge && (
               <span className="ml-2 inline-flex items-center gap-1.5 rounded-full border border-warning/30 bg-warning/10 px-2 py-0.5 text-[11px] font-medium text-warning">
@@ -60,11 +57,9 @@ export function WizardShell({
           {headerActions && <div className="flex items-center gap-1.5">{headerActions}</div>}
         </header>
 
-        {/* Horizontal stepper */}
-        <nav className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-border px-4 py-2.5">
-          <span className="mr-2 hidden shrink-0 text-[10px] font-medium uppercase tracking-wider text-muted-foreground sm:inline">
-            {eyebrow}
-          </span>
+        {/* Horizontal stepper — centered so the progress reads from the middle,
+            coherent with the centered canvas below it. */}
+        <nav className="flex shrink-0 items-center justify-center gap-1 overflow-x-auto border-b border-border px-4 py-2.5">
           {steps.map((s, i) => {
             const active = i === currentIndex;
             const done = i < currentIndex;
@@ -153,6 +148,6 @@ export function WizardShell({
           {footerActions}
         </footer>
       </div>
-    </AppShell>
+    </div>
   );
 }
