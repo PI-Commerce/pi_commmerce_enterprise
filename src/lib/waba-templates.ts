@@ -34,9 +34,14 @@ export const TEMPLATE_CATEGORIES: TemplateCategory[] = ["Marketing", "Utility", 
 export const TEMPLATE_BUTTON_TYPES: TemplateButtonType[] = ["URL", "Phone Number", "Quick Reply", "Link Flow"];
 
 /** Languages offered in the create form (label shown, code stored). */
+// Master label lookup across all supported markets. The actual options shown in
+// the Create Template form are filtered per active country (see useRegion().
+// templateLanguages); this list only needs to resolve every code to a label.
 export const TEMPLATE_LANGUAGES: { code: string; label: string }[] = [
   { code: "en_US", label: "English (US)" },
   { code: "en", label: "English" },
+  { code: "ar", label: "Arabic" },
+  { code: "ur", label: "Urdu" },
   { code: "hi", label: "Hindi" },
   { code: "mr", label: "Marathi" },
   { code: "ta", label: "Tamil" },

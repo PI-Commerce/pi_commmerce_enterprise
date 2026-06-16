@@ -12,8 +12,9 @@ import {
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import type { ConnectedWaba } from "@/lib/waba-onboarding";
+import { useRegion } from "@/lib/region";
 import {
-  SEED_TEMPLATES, TEMPLATE_CATEGORIES, TEMPLATE_LANGUAGES, TEMPLATE_BUTTON_TYPES,
+  SEED_TEMPLATES, TEMPLATE_CATEGORIES, TEMPLATE_BUTTON_TYPES,
   MEDIA_HINTS, languageLabel, fillVariables, variableCount,
   type WaTemplate, type TemplateStatus, type TemplateCategory, type TemplateFormat,
   type TemplateButton, type TemplateButtonType,
@@ -240,6 +241,7 @@ function TemplateForm({ waba, initial, onCancel, onSave }: {
   onCancel: () => void;
   onSave: (t: WaTemplate) => void;
 }) {
+  const { templateLanguages } = useRegion();
   const [wabaId] = useState(waba.waba.id);
   const [category, setCategory] = useState<TemplateCategory | "">(initial?.category ?? "");
   const [language, setLanguage] = useState(initial?.language ?? "");
@@ -333,7 +335,7 @@ function TemplateForm({ waba, initial, onCancel, onSave }: {
                 <Select value={language} onValueChange={setLanguage}>
                   <SelectTrigger><SelectValue placeholder="Select Language" /></SelectTrigger>
                   <SelectContent>
-                    {TEMPLATE_LANGUAGES.map((l) => <SelectItem key={l.code} value={l.code}>{l.label}</SelectItem>)}
+                    {templateLanguages.map((code) => <SelectItem key={code} value={code}>{languageLabel(code)}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </FormField>
