@@ -36,6 +36,8 @@ export type RegionInfo = {
   samplePhone: string;
   /** Demonym used in narrative copy, e.g. "Indian" / "UAE". */
   demonym: string;
+  /** WhatsApp template language codes offered for this market, in display order. */
+  templateLanguages: string[];
 };
 
 const REGIONS: Record<CountryCode, RegionInfo> = {
@@ -52,6 +54,7 @@ const REGIONS: Record<CountryCode, RegionInfo> = {
     countryName: "India",
     samplePhone: "98100 12345",
     demonym: "Indian",
+    templateLanguages: ["en_US", "en", "hi", "mr", "ta", "te", "bn", "gu"],
   },
   AE: {
     country: "AE",
@@ -66,6 +69,7 @@ const REGIONS: Record<CountryCode, RegionInfo> = {
     countryName: "United Arab Emirates",
     samplePhone: "50 123 4567",
     demonym: "UAE",
+    templateLanguages: ["ar", "en_US", "en", "ur", "hi"],
   },
 };
 
