@@ -78,25 +78,35 @@ function WhatsAppManage() {
       </header>
 
       {/* Body */}
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-6xl px-8 py-8">
-          {connection ? (
-            <>
-              <PageTabs<Tab>
-                value={tab}
-                onChange={setTab}
-                tabs={[
-                  { id: "overview", label: "Overview" },
-                  { id: "templates", label: "Templates" },
-                ]}
-              />
+      <div className="min-h-0 flex-1">
+        {connection ? (
+          <div className="flex h-full flex-col">
+            {/* Frozen tabs — stay put while the tab content scrolls underneath */}
+            <div className="shrink-0 px-8 pt-6">
+              <div className="mx-auto max-w-6xl">
+                <PageTabs<Tab>
+                  value={tab}
+                  onChange={setTab}
+                  tabs={[
+                    { id: "overview", label: "Overview" },
+                    { id: "templates", label: "Templates" },
+                  ]}
+                />
+              </div>
+            </div>
+            {/* Tab content fills the rest and manages its own scroll */}
+            <div className="min-h-0 flex-1">
               {tab === "overview" && <WhatsAppOverview data={connection} />}
               {tab === "templates" && <WhatsAppTemplates waba={connection} />}
-            </>
-          ) : (
-            <NotConnected onConnect={() => setSignupOpen(true)} />
-          )}
-        </div>
+            </div>
+          </div>
+        ) : (
+          <div className="h-full overflow-y-auto">
+            <div className="mx-auto max-w-6xl px-8 py-8">
+              <NotConnected onConnect={() => setSignupOpen(true)} />
+            </div>
+          </div>
+        )}
       </div>
 
       <WhatsAppEmbeddedSignup
