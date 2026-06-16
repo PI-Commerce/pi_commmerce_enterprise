@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { ConnectedWaba } from "@/lib/waba-onboarding";
+import { useRegion, localizeTzAbbrev, localizeDialCode } from "@/lib/region";
 
 /**
  * WhatsApp → Overview tab. The connected-state dashboard for the channel: the
@@ -19,8 +20,14 @@ import type { ConnectedWaba } from "@/lib/waba-onboarding";
  * "Last sync".
  */
 export function WhatsAppOverview({ data }: { data: ConnectedWaba }) {
+  const { tzAbbrev, dialCode } = useRegion();
   const [lastSync, setLastSync] = useState(data.connection.lastSync);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Connected-asset metadata is region-sensitive: show the phone with the active
+  // country's dial code and the connection timestamp in its timezone.
+  const phoneDisplay = localizeDialCode(data.phone.display, dialCode);
+  const connectedAt = localizeTzAbbrev(data.connection.connectedAt, tzAbbrev);
 
   const refresh = () => {
     setRefreshing(true);
@@ -48,7 +55,7 @@ export function WhatsAppOverview({ data }: { data: ConnectedWaba }) {
           <AssetCard
             icon={PhoneIcon}
             label="Phone number"
-            title={data.phone.display}
+            title={phoneDisplay}
             id={data.phone.id}
             badge={data.phone.verified ? "Verified" : undefined}
           />
@@ -69,7 +76,7 @@ export function WhatsAppOverview({ data }: { data: ConnectedWaba }) {
         <div className="grid grid-cols-2 gap-x-6 gap-y-6 rounded-xl border border-border bg-card px-6 py-5 sm:grid-cols-4">
           <Stat icon={Activity} label="Status" value={data.connection.status} valueClass="text-success" />
           <Stat icon={ShieldCheck} label="Provisioning" value={data.connection.provisioningStatus} />
-          <Stat icon={Link2} label="Connected at" value={data.connection.connectedAt} />
+          <Stat icon={Link2} label="Connected at" value={connectedAt} />
           <Stat icon={RefreshCw} label="Last sync" value={lastSync} />
         </div>
       </Section>

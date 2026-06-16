@@ -4,6 +4,7 @@ import { MessageCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { WhatsAppEmbeddedSignup } from "./WhatsAppEmbeddedSignup";
 import { useWabaConnection, setWabaConnection } from "@/lib/waba-store";
+import { useRegion, localizeDialCode } from "@/lib/region";
 
 /**
  * WhatsApp Business channel card (Integrations → Channels).
@@ -18,11 +19,12 @@ import { useWabaConnection, setWabaConnection } from "@/lib/waba-store";
  */
 export function WhatsAppCard() {
   const connected = useWabaConnection();
+  const { dialCode } = useRegion();
   const [signupOpen, setSignupOpen] = useState(false);
 
   const isConnected = !!connected;
   const meta = connected
-    ? `${connected.waba.displayName} · ${connected.phone.display}`
+    ? `${connected.waba.displayName} · ${localizeDialCode(connected.phone.display, dialCode)}`
     : "Pi Commerce is your BSP · go live in minutes";
 
   return (
