@@ -117,7 +117,7 @@ export type WorkflowNodeData = {
   /** True for Start / End — UI prevents deletion */
   locked?: boolean;
   /** Analytics overlay: shown inline on the node in Campaign Analytics view */
-  metrics?: { entered: number; exited: number; conversionPct: number };
+  metrics?: { entered: number; exited: number; dropoffPct: number };
   /** Render as a pulsating empty wireframe placeholder (used by Ask Pi build phase) */
   building?: boolean;
   /** Labeled output ports — each becomes its own source handle on the canvas (branches, A/B variants, exit paths). */

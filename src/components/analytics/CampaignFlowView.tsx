@@ -91,7 +91,7 @@ export function CampaignFlowView({
         : n.name.includes(" · ")
           ? n.name.split(" · ").slice(1).join(" · ")
           : undefined;
-      const conversionPct = n.entered > 0 ? (n.exited / n.entered) * 100 : 0;
+      const dropoffPct = n.entered > 0 ? ((n.entered - n.exited) / n.entered) * 100 : 0;
       const showMetrics = n.kind !== "start" && n.kind !== "end";
       return {
         id: n.id,
@@ -107,7 +107,7 @@ export function CampaignFlowView({
           valid: true,
           locked: true,
           metrics: showMetrics
-            ? { entered: n.entered, exited: n.exited, conversionPct }
+            ? { entered: n.entered, exited: n.exited, dropoffPct }
             : undefined,
         },
       };
