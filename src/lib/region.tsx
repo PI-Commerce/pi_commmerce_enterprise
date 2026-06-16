@@ -118,3 +118,12 @@ export function useRegion(): RegionContextValue {
 export function localizeTzAbbrev(text: string, tzAbbrev: string): string {
   return text.replace(/\b(IST|GST|EST|GMT|PST)\b/g, tzAbbrev);
 }
+
+/**
+ * Swap a leading international dial code (e.g. "+91", "+971") in a phone display
+ * for the active region's dial code, keeping the national number intact. Used so
+ * any connected-asset phone reads with the correct country code.
+ */
+export function localizeDialCode(text: string, dialCode: string): string {
+  return text.replace(/^\+\d{1,4}/, dialCode);
+}
