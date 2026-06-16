@@ -249,8 +249,8 @@ export function WorkflowNode({ id, data, selected }: NodeProps<WorkflowNodeData>
             <span className="font-semibold tabular-nums">{data.metrics.exited.toLocaleString()}</span>
           </div>
           <div className="flex flex-col leading-tight">
-            <span className="text-[9px] uppercase tracking-wider text-muted-foreground">Conv</span>
-            <span className="font-semibold tabular-nums">{data.metrics.conversionPct.toFixed(1)}%</span>
+            <span className="text-[9px] uppercase tracking-wider text-muted-foreground">Drop</span>
+            <span className="font-semibold tabular-nums">{data.metrics.dropoffPct.toFixed(1)}%</span>
           </div>
         </div>
       )}

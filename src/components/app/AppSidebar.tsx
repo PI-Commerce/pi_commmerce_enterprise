@@ -5,6 +5,7 @@ import {
   PanelLeftClose, PanelLeftOpen,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useRegion } from "@/lib/region";
 
 const primary = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, exact: true },
@@ -22,6 +23,7 @@ const STORAGE_KEY = "pc_sidebar_collapsed";
 
 export function AppSidebar() {
   const path = useRouterState({ select: (s) => s.location.pathname });
+  const { label: regionLabel, code: regionCode } = useRegion();
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
     return window.localStorage.getItem(STORAGE_KEY) === "1";
@@ -48,7 +50,7 @@ export function AppSidebar() {
         {!collapsed && (
           <div className="min-w-0">
             <p className="truncate text-[13px] font-semibold leading-tight">Pi Commerce</p>
-            <p className="truncate text-[10.5px] text-muted-foreground">ABC Enterprises</p>
+            <p className="truncate text-[10.5px] text-muted-foreground">ABC Enterprises · {regionLabel} ({regionCode})</p>
           </div>
         )}
       </div>

@@ -1,7 +1,15 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { AppShell, PageHeader } from "@/components/app/AppShell";
 import { Button } from "@/components/ui/button";
-import { ArrowUpRight, Megaphone, Bot, Activity, Sparkles, Plus, CheckCircle2, AlertTriangle } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { ArrowUpRight, Megaphone, Bot, Activity, Sparkles, Plus, CheckCircle2, AlertTriangle, Globe } from "lucide-react";
+import { useRegion, COUNTRY_OPTIONS, type CountryCode } from "@/lib/region";
 
 export const Route = createFileRoute("/")({
   component: Dashboard,
@@ -14,20 +22,34 @@ export const Route = createFileRoute("/")({
 });
 
 function Dashboard() {
+  const { country, setCountry } = useRegion();
   return (
     <AppShell>
       <PageHeader
         title="Good morning, Aman"
         description="Here's what's Live across your workspace right now."
         actions={
-          <>
+          <div className="flex items-center gap-2">
+            <Select value={country} onValueChange={(v) => setCountry(v as CountryCode)}>
+              <SelectTrigger className="h-8 w-[150px] gap-1.5 text-xs" aria-label="Country">
+                <Globe className="h-3.5 w-3.5 text-muted-foreground" />
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {COUNTRY_OPTIONS.map((c) => (
+                  <SelectItem key={c.country} value={c.country} className="text-xs">
+                    {c.label} · {c.code}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs">
               <Sparkles className="h-3.5 w-3.5 text-ai" /> Ask Pi
             </Button>
             <Button size="sm" className="h-8 gap-1.5 text-xs" asChild>
               <Link to="/campaigns"><Plus className="h-3.5 w-3.5" /> New campaign</Link>
             </Button>
-          </>
+          </div>
         }
       />
 

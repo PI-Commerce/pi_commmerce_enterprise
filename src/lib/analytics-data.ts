@@ -72,8 +72,8 @@ const dormantR1: RunRow = {
       { id: "start",    name: "Start",                     kind: "start",    entered: 12402, exited: 12402 },
       { id: "audience", name: "Audience · CSV 12,402",     kind: "audience", entered: 12402, exited: 12402 },
       { id: "split",    name: "A/B Split · 60/40",         kind: "abSplit",  entered: 12402, exited: 12402 },
-      { id: "whatsapp", name: "WhatsApp · reactivate_v3",  kind: "whatsapp", entered: 7441,  exited: 7441  },
-      { id: "voice",    name: "Voice Call · Reactivation", kind: "voice",    entered: 4961,  exited: 4961  },
+      { id: "whatsapp", name: "WhatsApp · reactivate_v3",  kind: "whatsapp", entered: 7441,  exited: 6998  }, // 5.9% drop-off (undelivered / no engagement)
+      { id: "voice",    name: "Voice Call · Reactivation", kind: "voice",    entered: 4961,  exited: 3372  }, // 32.0% drop-off (no connect / no answer)
       { id: "delay",    name: "Delay · 24h",               kind: "delay",    entered: 10370, exited: 10370 },
       { id: "end",      name: "End",                       kind: "end",      entered: 10370, exited: 10370 },
     ],
@@ -104,8 +104,8 @@ const dormantR2: RunRow = {
       { id: "start",    name: "Start",                     kind: "start",    entered: 11840, exited: 11840 },
       { id: "audience", name: "Audience · CSV 11,840",     kind: "audience", entered: 11840, exited: 11840 },
       { id: "split",    name: "A/B Split · 60/40",         kind: "abSplit",  entered: 11840, exited: 11840 },
-      { id: "whatsapp", name: "WhatsApp · reactivate_v3",  kind: "whatsapp", entered: 7104,  exited: 7104  },
-      { id: "voice",    name: "Voice Call · Reactivation", kind: "voice",    entered: 4736,  exited: 4736  },
+      { id: "whatsapp", name: "WhatsApp · reactivate_v3",  kind: "whatsapp", entered: 7104,  exited: 6580  }, // 7.4% drop-off
+      { id: "voice",    name: "Voice Call · Reactivation", kind: "voice",    entered: 4736,  exited: 3132  }, // 33.9% drop-off
       { id: "delay",    name: "Delay · 24h",               kind: "delay",    entered: 9712,  exited: 9712  },
       { id: "end",      name: "End",                       kind: "end",      entered: 9712,  exited: 9712  },
     ],
@@ -136,8 +136,8 @@ const dormantR3: RunRow = {
       { id: "start",    name: "Start",                     kind: "start",    entered: 12402, exited: 12402 },
       { id: "audience", name: "Audience · CSV 12,402",     kind: "audience", entered: 12402, exited: 12402 },
       { id: "split",    name: "A/B Split · 60/40",         kind: "abSplit",  entered: 12402, exited: 12402 },
-      { id: "whatsapp", name: "WhatsApp · reactivate_v3",  kind: "whatsapp", entered: 7441,  exited: 7441  },
-      { id: "voice",    name: "Voice Call · Reactivation", kind: "voice",    entered: 4961,  exited: 4961  },
+      { id: "whatsapp", name: "WhatsApp · reactivate_v3",  kind: "whatsapp", entered: 7441,  exited: 412   }, // 94.5% drop-off — template rejected by Meta
+      { id: "voice",    name: "Voice Call · Reactivation", kind: "voice",    entered: 4961,  exited: 1208  }, // 75.6% drop-off — run aborted
       { id: "delay",    name: "Delay · 24h",               kind: "delay",    entered: 1620,  exited: 1620  },
       { id: "end",      name: "End",                       kind: "end",      entered: 1620,  exited: 1620  },
     ],
@@ -169,7 +169,7 @@ const onboardingR1: RunRow = {
       { id: "audience",  name: "New signups · last 24h",  kind: "audience",    entered: 4820, exited: 4820 },
       { id: "whatsapp",  name: "WhatsApp · Welcome",      kind: "whatsapp",    entered: 4820, exited: 4612 },
       { id: "engaged",   name: "KYC started?",            kind: "conditional", entered: 4612, exited: 4612 },
-      { id: "voice",     name: "Voice · KYC Assist",      kind: "voice",       entered: 1632, exited: 1632 },
+      { id: "voice",     name: "Voice · KYC Assist",      kind: "voice",       entered: 1632, exited: 492  }, // 69.9% drop-off (assisted, did not complete)
       { id: "converted", name: "KYC Completed",           kind: "end",         entered: 1840, exited: 1840 },
       { id: "dropped",   name: "Dropped Off",             kind: "end",         entered: 2980, exited: 2980 },
     ],

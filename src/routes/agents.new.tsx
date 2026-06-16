@@ -24,6 +24,7 @@ import {
   Target,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useRegion } from "@/lib/region";
 
 export const Route = createFileRoute("/agents/new")({
   component: CreateAgent,
@@ -311,6 +312,7 @@ function BasicsStep({
   set: <K extends keyof Draft>(k: K, v: Draft[K]) => void;
   toggleIn: (k: "tones", v: string) => void;
 }) {
+  const { demonym } = useRegion();
   return (
     <>
       <SectionTitle title="Basics" desc="How the agent introduces itself and feels to customers." />
@@ -326,7 +328,7 @@ function BasicsStep({
         <Textarea
           value={draft.description}
           onChange={(e) => set("description", e.target.value)}
-          placeholder="A calm, knowledgeable concierge for Indian retail traders. Confident but never pushy."
+          placeholder={`A calm, knowledgeable concierge for ${demonym} retail traders. Confident but never pushy.`}
           className="min-h-24 resize-none text-sm"
         />
       </Field>

@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { PageTabs } from "@/components/app/Tabs";
 import { ChevronRight, Sparkles, Play, Phone, Send, Bot, User, Workflow, MessageCircle, Plus, Copy, Check, Pencil, RotateCcw, FileText } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useRegion } from "@/lib/region";
 
 export const Route = createFileRoute("/agents/$id")({
   component: AgentBuilder,
@@ -44,6 +45,7 @@ const AGENT_CAMPAIGNS: Record<string, CampaignUsage[]> = {
 
 function AgentBuilder() {
   const { id } = Route.useParams();
+  const { aumThreshold } = useRegion();
   const [section, setSection] = useState<Section>("personality");
   const campaigns = AGENT_CAMPAIGNS[id] ?? AGENT_CAMPAIGNS.a_concierge;
 
@@ -266,7 +268,7 @@ function AgentBuilder() {
                   >
                     <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Hand-off rules</p>
                     <Rule title="Negative sentiment" desc="Hand off when sentiment < -0.4 over 2 turns" on />
-                    <Rule title="High-value account" desc="Always escalate for users with AUM > ₹10L" on />
+                    <Rule title="High-value account" desc={`Always escalate for users with AUM > ${aumThreshold}`} on />
                     <Rule title="Compliance trigger" desc="Escalate any mention of disputes / regulator" on />
                     <Rule title="Fallback after retries" desc="Escalate after 3 failed clarifications" />
                   </div>

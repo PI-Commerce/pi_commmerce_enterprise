@@ -8,6 +8,7 @@ import {
   WABA_CATEGORIES, COUNTRIES, PROVISIONING_STEPS, EXISTING_WABAS,
   buildResult, type ConnectedWaba,
 } from "@/lib/waba-onboarding";
+import { useRegion } from "@/lib/region";
 
 /**
  * Meta Embedded Signup — a faithful replica of Meta's real popup.
@@ -51,12 +52,13 @@ export function WhatsAppEmbeddedSignup({
   onComplete: (result: ConnectedWaba) => void;
 }) {
   const [step, setStep] = useState<Step>("auth");
+  const { countryName, country: regionCountry, dialCode, samplePhone } = useRegion();
 
   // Prefilled with Paytm demo values so the flow narrates fast and "Next" is live.
   const [bizName, setBizName] = useState("Paytm Commerce");
   const [bizEmail, setBizEmail] = useState("merchant@paytm.com");
   const [website, setWebsite] = useState("https://paytm.com");
-  const [country, setCountry] = useState("India");
+  const [country, setCountry] = useState(countryName);
 
   const [wabaChoice, setWabaChoice] = useState("__new__");
   const [profileChoice, setProfileChoice] = useState("__new__");
@@ -65,10 +67,19 @@ export function WhatsAppEmbeddedSignup({
   const [displayName, setDisplayName] = useState("Paytm Commerce");
   const [category, setCategory] = useState("Finance and Banking");
 
-  const [countryCode, setCountryCode] = useState("IN +91");
-  const [phoneNumber, setPhoneNumber] = useState("98100 12345");
+  const [countryCode, setCountryCode] = useState(`${regionCountry} ${dialCode}`);
+  const [phoneNumber, setPhoneNumber] = useState(samplePhone);
   const [verifyBy, setVerifyBy] = useState<"sms" | "call">("sms");
   const [otp, setOtp] = useState("");
+
+  // Keep the country-specific prefills in sync with the active workspace country
+  // (also corrects for localStorage hydration, which resolves after first mount).
+  // The country selector lives on the Dashboard, so this never fires mid-signup.
+  useEffect(() => {
+    setCountry(countryName);
+    setCountryCode(`${regionCountry} ${dialCode}`);
+    setPhoneNumber(samplePhone);
+  }, [countryName, regionCountry, dialCode, samplePhone]);
 
   const [provIndex, setProvIndex] = useState(0);
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);

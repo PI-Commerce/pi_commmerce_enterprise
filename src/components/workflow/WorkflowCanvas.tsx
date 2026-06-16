@@ -10,6 +10,7 @@ import type { WorkflowNodeData, NodeKind, CampaignStatus } from "@/lib/campaign-
 import { NODE_LABELS } from "@/lib/campaign-types";
 import { EXAMPLE_CAMPAIGNS } from "@/lib/campaign-examples";
 import { getSuggestion } from "@/lib/pi-node-suggestions";
+import { useRegion, localizeTzAbbrev } from "@/lib/region";
 import { ConfigPanel } from "./ConfigPanel";
 import { AiComposer } from "./AiComposer";
 import { NodePalette } from "./NodePalette";
@@ -91,6 +92,7 @@ export function WorkflowCanvas({
   // Pre-built example campaigns ship their own authored graph; everything else
   // (the existing demo campaigns) falls back to the shared seed graph.
   const example = campaignId ? EXAMPLE_CAMPAIGNS[campaignId] : undefined;
+  const { tzAbbrev } = useRegion();
   const [nodes, setNodes, onNodesChange] = useNodesState(
     isNew ? BLANK_NODES : example?.nodes ?? SEED_NODES,
   );
@@ -104,6 +106,19 @@ export function WorkflowCanvas({
   const refitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const aiBuildingRef = useRef(aiBuilding);
   useEffect(() => { aiBuildingRef.current = aiBuilding; }, [aiBuilding]);
+
+  // Localize region-sensitive node subtitles (e.g. the Voice "Call window … IST"
+  // label) to the active country. Runs on mount and whenever the country
+  // changes; localizeTzAbbrev is idempotent + reversible so toggling is safe.
+  useEffect(() => {
+    setNodes((nds) =>
+      nds.map((n) =>
+        n.data.subtitle && n.data.subtitle !== localizeTzAbbrev(n.data.subtitle, tzAbbrev)
+          ? { ...n, data: { ...n.data, subtitle: localizeTzAbbrev(n.data.subtitle, tzAbbrev) } }
+          : n,
+      ),
+    );
+  }, [tzAbbrev, setNodes]);
 
   const refit = useCallback(() => {
     if (refitTimer.current) clearTimeout(refitTimer.current);

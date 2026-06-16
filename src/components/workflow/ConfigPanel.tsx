@@ -5,6 +5,7 @@ import {
   FileSpreadsheet, Loader2, Clock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useRegion } from "@/lib/region";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -731,6 +732,7 @@ function VoiceCallFields({ config, readOnly, mark, onChange }: { config?: Preset
 }
 
 function VoiceCallCore({ config, readOnly, mark }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void }) {
+  const { tzLabel } = useRegion();
   const [agentSelected, setAgentSelected] = useState(!!config?.agent);
   const varMap = config?.voiceVarMap ?? [
     { v: "{{name}}", def: "contact.first_name" },
@@ -789,7 +791,7 @@ function VoiceCallCore({ config, readOnly, mark }: { config?: PresetConfig; read
           <Field label="End time"><Input disabled={readOnly} type="time" defaultValue={config?.callEnd ?? "20:00"} className="h-9" /></Field>
         </div>
         <Field label="Timezone">
-          <SelectLike disabled={readOnly} options={["Asia/Kolkata (IST)", "Asia/Dubai (GST)", "America/New_York (EST)", "Europe/London (GMT)"]} onPick={() => undefined} defaultValue={config?.timezone ?? "Asia/Kolkata (IST)"} />
+          <SelectLike disabled={readOnly} options={["Asia/Kolkata (IST)", "Asia/Dubai (GST)", "America/New_York (EST)", "Europe/London (GMT)"]} onPick={() => undefined} defaultValue={tzLabel} />
         </Field>
       </Section>
       <Section title="Retry">
@@ -973,6 +975,7 @@ function SmsCore({ config, readOnly, mark }: { config?: PresetConfig; readOnly?:
 
 function AdsCampaignFields({ readOnly, mark }: { readOnly?: boolean; mark: (v: boolean, e?: string) => void }) {
   const [audienceMode, setAudienceMode] = useState<"meta" | "upload">("meta");
+  const { symbol } = useRegion();
   return (
     <>
       <Section title="Platform">
@@ -1025,7 +1028,7 @@ function AdsCampaignFields({ readOnly, mark }: { readOnly?: boolean; mark: (v: b
 
       <Section title="Budget & Schedule">
         <div className="grid grid-cols-2 gap-2">
-          <Field label="Daily budget (₹)" required><Input disabled={readOnly} type="number" placeholder="5000" className="h-9" onChange={() => mark(true)} /></Field>
+          <Field label={`Daily budget (${symbol.trim()})`} required><Input disabled={readOnly} type="number" placeholder="5000" className="h-9" onChange={() => mark(true)} /></Field>
           <Field label="Bid strategy"><SelectLike disabled={readOnly} options={["Lowest cost", "Cost cap", "Bid cap"]} onPick={() => undefined} defaultValue="Lowest cost" /></Field>
         </div>
         <div className="grid grid-cols-2 gap-2">

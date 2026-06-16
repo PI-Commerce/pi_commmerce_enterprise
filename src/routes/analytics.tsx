@@ -253,7 +253,7 @@ function CampaignAnalytics({
           <div>
             <h3 className="text-sm font-semibold">Campaign Flow</h3>
             <p className="text-[11px] text-muted-foreground">
-              Each node shows Entered, Exited and Conversion %. Click a node for details.
+              Each node shows Entered, Exited and Drop-off %. Click a node for details.
             </p>
           </div>
         </div>
@@ -466,10 +466,12 @@ function buildNodeMetrics(node: SankeyNode): { label: string; value: string }[] 
   if (k === "start" || k === "end") return [{ label: "Entered", value: node.entered.toLocaleString() }];
 
   if (k === "voice") {
+    // Realistic, monotonically-decreasing call funnel derived from the base
+    // entering the node (Total Base → Initiated → Connected → Answered).
     const totalBase = node.entered;
-    const initiated = Math.round(totalBase * 0.149);
-    const connected = Math.round(initiated * 0.803);
-    const answered  = Math.round(connected * 0.919);
+    const initiated = Math.round(totalBase * 0.95);
+    const connected = Math.round(totalBase * 0.80);
+    const answered  = Math.round(totalBase * 0.70);
     return [
       { label: "Total Base", value: totalBase.toLocaleString() },
       { label: "Initiated",  value: initiated.toLocaleString() },
@@ -491,13 +493,11 @@ function buildNodeMetrics(node: SankeyNode): { label: string; value: string }[] 
         value: typeof x.value === "number" ? x.value.toLocaleString() : String(x.value),
       }));
   }
-  // audience / conditional / abSplit / delay → common drop-off view only
-  const dropPct = node.entered > 0 ? ((node.entered - node.exited) / node.entered) * 100 : 0;
-  return [
-    { label: "Entered", value: node.entered.toLocaleString() },
-    { label: "Exited",  value: node.exited.toLocaleString() },
-    { label: "Drop-off %", value: `${dropPct.toFixed(1)}%` },
-  ];
+  // audience / conditional / abSplit / delay → no node-specific metrics.
+  // Entered / Exited / Drop-off already live in the Common Metrics block, so a
+  // duplicate tile section here would just repeat it. Conditional / A-B split
+  // still get their Branch Distribution section below.
+  return [];
 }
 
 function NodeDrawer({
@@ -513,7 +513,7 @@ function NodeDrawer({
   const isChannel = !!kind && CHANNEL_KINDS.has(kind);
   const isTerminal = kind === "start" || kind === "end";
   const config = kind && !isTerminal ? NODE_CONFIG_BY_KIND[kind] ?? [] : [];
-  const convPct = node && node.entered > 0 ? (node.exited / node.entered) * 100 : 0;
+  const dropPct = node && node.entered > 0 ? ((node.entered - node.exited) / node.entered) * 100 : 0;
   const nodeMetrics = node ? buildNodeMetrics(node) : [];
 
   // Branch distribution for conditional / A-B split.
@@ -562,7 +562,7 @@ function NodeDrawer({
             <div className="grid grid-cols-3 gap-2">
               <Stat small label="Entered" value={node?.entered.toLocaleString() ?? "—"} info={METRIC_INFO.Entered} />
               <Stat small label="Exited"  value={node?.exited.toLocaleString() ?? "—"} info={METRIC_INFO.Exited} />
-              <Stat small label="Conversion %" value={node ? `${convPct.toFixed(1)}%` : "—"} info={METRIC_INFO["Conversion %"]} />
+              <Stat small label="Drop-off %" value={node ? `${dropPct.toFixed(1)}%` : "—"} info={METRIC_INFO["Drop-off %"]} />
             </div>
           </section>
         )}
