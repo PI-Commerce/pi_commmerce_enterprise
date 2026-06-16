@@ -13,7 +13,16 @@ export type TemplateCategory = "Marketing" | "Utility" | "Authentication";
 export type TemplateFormat = "TEXT" | "IMAGE" | "VIDEO" | "DOCUMENT";
 export type TemplateButtonType = "URL" | "Phone Number" | "Quick Reply" | "Link Flow";
 
-export type TemplateButton = { type: TemplateButtonType; text: string };
+export type TemplateButton = {
+  type: TemplateButtonType;
+  text: string;
+  /** URL buttons: destination + optional dynamic suffix + click tracking. */
+  url?: string;
+  urlSuffix?: string;
+  clickTracking?: boolean;
+  /** Phone Number buttons: national number (dial code is rendered separately). */
+  phone?: string;
+};
 
 export type WaTemplate = {
   id: string;
@@ -32,6 +41,49 @@ export type WaTemplate = {
 export const TEMPLATE_CATEGORIES: TemplateCategory[] = ["Marketing", "Utility", "Authentication"];
 
 export const TEMPLATE_BUTTON_TYPES: TemplateButtonType[] = ["URL", "Phone Number", "Quick Reply", "Link Flow"];
+
+/**
+ * Meta's button rules for message templates (the ones we enforce):
+ *  - up to 10 buttons total
+ *  - at most 1 Phone Number button
+ *  - at most 2 URL buttons
+ *  - at most 1 Flow button
+ *  - Quick Reply buttons fill the remaining slots (up to the total)
+ */
+export const MAX_TEMPLATE_BUTTONS = 10;
+export const BUTTON_TYPE_LIMITS: Record<TemplateButtonType, number> = {
+  "URL": 2,
+  "Phone Number": 1,
+  "Quick Reply": 10,
+  "Link Flow": 1,
+};
+
+const countType = (buttons: TemplateButton[], type: TemplateButtonType) =>
+  buttons.filter((b) => b.type === type).length;
+
+/** Button types that are at their Meta cap given the current buttons (so the
+ *  type picker can disable them). `exclude` skips the row being edited. */
+export function cappedButtonTypes(
+  buttons: TemplateButton[],
+  excludeIndex?: number,
+): Set<TemplateButtonType> {
+  const others = excludeIndex == null ? buttons : buttons.filter((_, i) => i !== excludeIndex);
+  const capped = new Set<TemplateButtonType>();
+  for (const t of TEMPLATE_BUTTON_TYPES) {
+    if (countType(others, t) >= BUTTON_TYPE_LIMITS[t]) capped.add(t);
+  }
+  return capped;
+}
+
+/** Human-readable rule violations for the current button set (empty = valid). */
+export function buttonRuleErrors(buttons: TemplateButton[]): string[] {
+  const errors: string[] = [];
+  if (buttons.length > MAX_TEMPLATE_BUTTONS) errors.push(`Templates allow at most ${MAX_TEMPLATE_BUTTONS} buttons.`);
+  if (countType(buttons, "Phone Number") > 1) errors.push("Only one Phone Number button is allowed.");
+  if (countType(buttons, "URL") > 2) errors.push("At most two URL buttons are allowed.");
+  if (countType(buttons, "Link Flow") > 1) errors.push("Only one Flow button is allowed.");
+  return errors;
+}
 
 /** Languages offered in the create form (label shown, code stored). */
 // Master label lookup across all supported markets. The actual options shown in
@@ -192,4 +244,34 @@ export function variableCount(text: string): number {
   const set = new Set<string>();
   for (const m of text.matchAll(/\{\{(\d+)\}\}/g)) set.add(m[1]);
   return set.size;
+}
+
+/**
+ * Meta's character + variable limits for message templates (the ones we enforce
+ * and surface in the create form).
+ */
+export const TEMPLATE_LIMITS = {
+  nameMax: 512,
+  headerMax: 60,
+  bodyMax: 1024,
+  footerMax: 60,
+  buttonTextMax: 25,
+  /** Header text supports at most one variable. */
+  headerVarsMax: 1,
+  /** Footer text supports no variables. */
+  footerVarsMax: 0,
+  /** Practical cap on body variables. */
+  bodyVarsMax: 10,
+} as const;
+
+/** Required-field errors for the current buttons (missing text / URL / phone). */
+export function buttonFieldErrors(buttons: TemplateButton[]): string[] {
+  const errors: string[] = [];
+  buttons.forEach((b, i) => {
+    const n = i + 1;
+    if (!b.text.trim()) errors.push(`Button ${n}: add button text.`);
+    if (b.type === "URL" && !b.url?.trim()) errors.push(`Button ${n}: add a URL.`);
+    if (b.type === "Phone Number" && !b.phone?.trim()) errors.push(`Button ${n}: add a phone number.`);
+  });
+  return errors;
 }
