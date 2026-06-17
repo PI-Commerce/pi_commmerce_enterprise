@@ -21,7 +21,7 @@ import {
   AlertDialogFooter, AlertDialogTitle, AlertDialogDescription, AlertDialogAction, AlertDialogCancel,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
-import type { WorkflowNodeData, NodeKind, PresetConfig } from "@/lib/campaign-types";
+import type { WorkflowNodeData, NodeKind, PresetConfig, PresetBranch } from "@/lib/campaign-types";
 import { NODE_LABELS, SAMPLE_WORKFLOW_VARIABLES } from "@/lib/campaign-types";
 
 // Collision-free local id generator — Date.now() alone collides on rapid clicks,
@@ -510,13 +510,15 @@ function SchemaFieldsEditor({
 const COMPARISON_OPERATORS = [
   "equals", "not equals", "greater than", "less than",
   "greater than or equal to", "less than or equal to",
+  "between", "not between",
   "contains", "does not contain", "exists", "does not exist",
 ];
 const VALUELESS_OPERATORS = new Set(["exists", "does not exist"]);
+const RANGE_OPERATORS = new Set(["between", "not between"]);
 
 function ConditionalFields({ config, readOnly, mark, onChange }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
   const { symbol } = useRegion();
-  const [branches, setBranches] = useState(() =>
+  const [branches, setBranches] = useState<PresetBranch[]>(() =>
     (config?.branches ?? [
       { id: "bA", label: "High value", variable: "contact.tier", op: "equals", value: "gold" },
       { id: "bB", label: "Engaged", variable: "wa.delivery_state", op: "equals", value: "read" },
@@ -554,7 +556,17 @@ function ConditionalFields({ config, readOnly, mark, onChange }: { config?: Pres
               <VariablePicker value={b.variable} disabled={readOnly} onChange={(v) => update(i, { variable: v })} />
               <div className="grid grid-cols-2 gap-1.5">
                 <SelectLike disabled={readOnly} options={COMPARISON_OPERATORS} defaultValue={b.op} onPick={(v) => update(i, { op: v })} />
-                <Input value={b.value} disabled={readOnly || VALUELESS_OPERATORS.has(b.op)} onChange={(e) => update(i, { value: e.target.value })} className="h-9 text-sm" placeholder={VALUELESS_OPERATORS.has(b.op) ? "—" : "Value"} />
+                {RANGE_OPERATORS.has(b.op) ? (
+                  // Range operators take two bounds — show "[min] and [max]"
+                  // inline. Both values are inclusive (matches the "50–80" reading).
+                  <div className="flex items-center gap-1">
+                    <Input value={b.value} disabled={readOnly} onChange={(e) => update(i, { value: e.target.value })} className="h-9 text-sm" placeholder="Min" />
+                    <span className="px-0.5 text-[11px] text-muted-foreground">and</span>
+                    <Input value={b.value2 ?? ""} disabled={readOnly} onChange={(e) => update(i, { value2: e.target.value })} className="h-9 text-sm" placeholder="Max" />
+                  </div>
+                ) : (
+                  <Input value={b.value} disabled={readOnly || VALUELESS_OPERATORS.has(b.op)} onChange={(e) => update(i, { value: e.target.value })} className="h-9 text-sm" placeholder={VALUELESS_OPERATORS.has(b.op) ? "—" : "Value"} />
+                )}
               </div>
             </div>
           </div>

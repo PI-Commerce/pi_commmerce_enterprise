@@ -410,11 +410,16 @@ const sAud = (subtitle: string, keys: string[]): Spec => ({
 
 const sCond = (
   id: string, title: string, variable: string,
-  branches: { id: string; label: string; op?: string; value?: string }[],
+  branches: { id: string; label: string; op?: string; value?: string; value2?: string }[],
 ): Spec => ({
   id, kind: "conditional", title, subtitle: `Route on ${variable}`,
   outputs: branches.map((b) => ({ id: b.id, label: b.label, kind: "branch" as NodeOutputKind })),
-  config: { branches: branches.map((b) => ({ id: b.id, label: b.label, variable, op: b.op ?? "equals", value: b.value ?? b.id })) },
+  config: { branches: branches.map((b) => ({
+    id: b.id, label: b.label, variable,
+    op: b.op ?? "equals",
+    value: b.value ?? b.id,
+    ...(b.value2 !== undefined ? { value2: b.value2 } : {}),
+  })) },
 });
 
 // A true A/B *split* node: splits traffic into separate variant outputs, each
@@ -491,7 +496,7 @@ const C_LEADQUAL = buildCampaign("BFSI · Lead Qualification", [
   sAud("CSV · new leads", ["lead_score", "product", "preferred_lang"]),
   sCond("score", "Lead score branch", "lead_score", [
     { id: "hot", label: "Hot lead (>80)", op: "greater than", value: "80" },
-    { id: "warm", label: "Warm lead (50–80)", op: "greater than or equal to", value: "50" },
+    { id: "warm", label: "Warm lead (50–80)", op: "between", value: "50", value2: "80" },
     { id: "cold", label: "Cold lead (<50)", op: "less than", value: "50" },
   ]),
   // hot
@@ -635,9 +640,9 @@ const C_COLLECT = buildCampaign("BFSI · Collections", [
   sStart(),
   sAud("CSV · delinquent borrowers", ["dpd", "amount_due", "loan_id"]),
   sCond("dpd", "DPD branch", "days_past_due", [
-    { id: "early", label: "1–30 DPD", value: "1-30" },
-    { id: "mid", label: "31–90 DPD", value: "31-90" },
-    { id: "late", label: "90+ DPD", value: "90+" },
+    { id: "early", label: "1–30 DPD", op: "between", value: "1", value2: "30" },
+    { id: "mid",   label: "31–90 DPD", op: "between", value: "31", value2: "90" },
+    { id: "late",  label: "90+ DPD",  op: "greater than", value: "90" },
   ]),
   sWa("waRem", "WhatsApp reminder", "WhatsApp · payment reminder", "collections_reminder_v1"),
   sWa("plEarly", "Payment link", "WhatsApp · pay now", "payment_link_v1"),
