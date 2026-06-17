@@ -68,10 +68,35 @@ const PASS_RATE: Record<SankeyNodeKind, number> = {
   voice: 0.72, whatsapp: 0.82, sms: 0.9, ads: 0.95,
 };
 
+/** Stable string hash for deterministic per-node variance. */
+function hashStr(s: string): number {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+  return Math.abs(h);
+}
+
+/** Per-node pass rate: the kind's base rate plus a deterministic ±8% wobble
+ *  keyed off the node id, plus small semantic adjustments (follow-ups / final
+ *  calls / reminders drop a bit more; qualification / welcome / intro a bit
+ *  less). Keeps every node's drop-off realistic and distinct without breaking
+ *  funnel conservation. Pure-structural nodes (start/audience/conditional/
+ *  abSplit/delay/end) always pass 100%. */
+function nodePassRate(kind: SankeyNodeKind, id: string, title: string, salt: string): number {
+  const base = PASS_RATE[kind] ?? 1;
+  if (base >= 1) return 1;
+  const noise = ((hashStr(salt + ":" + id) % 17) - 8) / 100; // -0.08..+0.08
+  const t = title.toLowerCase();
+  let bump = 0;
+  if (/follow[- ]?up|final|escalat|reminder|nudge/.test(t)) bump -= 0.06;
+  if (/qualif|welcome|intro|alert|first/.test(t))           bump += 0.04;
+  return Math.max(0.5, Math.min(0.97, base + noise + bump));
+}
+
 /** Propagate `base` leads through an example graph into a consistent run. */
 function deriveRun(ex: ExampleCampaign, base: number, runId: string, startedAt: string): RunRow {
   const { nodes, edges } = ex;
   const kindOf = new Map<string, SankeyNodeKind>(nodes.map((n) => [n.id, KIND_TO_SANKEY[n.data.kind]]));
+  const titleOf = new Map<string, string>(nodes.map((n) => [n.id, n.data.title]));
   const incoming = new Map<string, string[]>();
   const outIdx = new Map<string, number[]>();
   nodes.forEach((n) => { incoming.set(n.id, []); outIdx.set(n.id, []); });
@@ -100,7 +125,8 @@ function deriveRun(ex: ExampleCampaign, base: number, runId: string, startedAt: 
     const enteredCount = Math.round(ent);
     entered.set(id, enteredCount);
     const kind = kindOf.get(id)!;
-    const exitedCount = Math.round(enteredCount * (PASS_RATE[kind] ?? 1));
+    const rate = nodePassRate(kind, id, titleOf.get(id) ?? "", runId);
+    const exitedCount = Math.round(enteredCount * rate);
     exited.set(id, exitedCount);
 
     const outs = outIdx.get(id) ?? [];
