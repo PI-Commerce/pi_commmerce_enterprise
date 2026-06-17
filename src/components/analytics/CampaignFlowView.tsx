@@ -37,6 +37,20 @@ export function CampaignFlowView({
   const { rawNodes, rawEdges } = useMemo(() => {
     const idToNode = new Map(run.sankey.nodes.map((n) => [n.id, n] as const));
 
+    // Group each node's outgoing edges by source handle (value + label), so a
+    // WhatsApp node's outcome split can be shown ON the node (not just the drawer).
+    const outByNode = new Map<string, Map<string, { value: number; label?: string }>>();
+    run.sankey.edges.forEach((e) => {
+      if (!e.sourceHandle) return;
+      let m = outByNode.get(e.source);
+      if (!m) { m = new Map(); outByNode.set(e.source, m); }
+      const prev = m.get(e.sourceHandle);
+      if (prev) prev.value += e.value;
+      else m.set(e.sourceHandle, { value: e.value, label: e.handleLabel });
+    });
+    // Nodes that render per-handle output rows (≥2 distinct outcome handles).
+    const handleNodeIds = new Set<string>();
+
     const rawNodes: Node<WorkflowNodeData>[] = run.sankey.nodes.map((n) => {
       const isConverted = n.kind === "end" && /convert|complete|resubmit/i.test(n.name);
       const isDropped   = n.kind === "end" && !isConverted;
@@ -48,6 +62,22 @@ export function CampaignFlowView({
           : undefined;
       const dropoffPct = n.entered > 0 ? ((n.entered - n.exited) / n.entered) * 100 : 0;
       const showMetrics = n.kind !== "start" && n.kind !== "end";
+
+      // WhatsApp outcome distribution shown inline as labeled output handles.
+      let outputs: WorkflowNodeData["outputs"];
+      if (n.kind === "whatsapp") {
+        const m = outByNode.get(n.id);
+        if (m && m.size >= 2) {
+          const total = [...m.values()].reduce((s, v) => s + v.value, 0) || 1;
+          outputs = [...m.entries()].map(([h, v]) => ({
+            id: h,
+            label: `${v.label ?? h} · ${Math.round((v.value / total) * 100)}%`,
+            kind: "outcome" as const,
+          }));
+          handleNodeIds.add(n.id);
+        }
+      }
+
       return {
         id: n.id,
         type: "workflow",
@@ -61,6 +91,7 @@ export function CampaignFlowView({
           subtitle,
           valid: true,
           locked: true,
+          outputs,
           metrics: showMetrics
             ? { entered: n.entered, exited: n.exited, dropoffPct }
             : undefined,
@@ -76,6 +107,8 @@ export function CampaignFlowView({
       return {
         id: `e_${i}`,
         source: e.source,
+        // Anchor to the matching outcome handle only when the node renders them.
+        sourceHandle: handleNodeIds.has(e.source) ? e.sourceHandle ?? undefined : undefined,
         target: e.target,
         type: "routed",
         animated: false,

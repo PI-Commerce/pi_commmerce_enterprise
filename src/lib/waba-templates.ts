@@ -229,6 +229,155 @@ export const SEED_TEMPLATES: WaTemplate[] = [
     footer: "Paytm Commerce",
     buttons: [{ type: "URL", text: "Start shopping" }],
   },
+
+  /* ---- Journey templates: referenced by the example campaign library
+   *      (campaign-examples.ts). A deliberate mix — text-only (no flow branch),
+   *      single tracked button (URL / Quick Reply), and two-button templates
+   *      that produce the full 4-way outcome split. Resolved by `name`. ---- */
+
+  // BFSI · Lead Qualification
+  { id: "10248298000101", name: "application_link_v1", category: "Utility", language: "en", format: "TEXT", status: "Approved", createdAt: "14 Jun 2026",
+    body: "Hi {{1}}, your {{2}} application is ready to submit. Tap below to complete it in under 2 minutes.", footer: "Paytm Money",
+    buttons: [{ type: "URL", text: "Apply now" }] },
+  { id: "10248298000102", name: "lead_urgency_v1", category: "Marketing", language: "en", format: "TEXT", status: "Approved", createdAt: "14 Jun 2026",
+    body: "{{1}}, your eligibility for {{2}} expires soon. Speak to an advisor before the window closes.", footer: "Paytm Money",
+    buttons: [{ type: "URL", text: "Talk to an advisor" }] },
+  { id: "10248298000103", name: "lead_offer_v1", category: "Marketing", language: "en", format: "TEXT", status: "Approved", createdAt: "14 Jun 2026",
+    body: "Good news {{1}} — you're pre-approved for {{2}}. View your personalised offer below.", footer: "Paytm Money",
+    buttons: [{ type: "URL", text: "View offer" }, { type: "Quick Reply", text: "Not now" }] },
+  { id: "10248298000104", name: "lead_followup_v1", category: "Utility", language: "en", format: "TEXT", status: "Approved", createdAt: "14 Jun 2026",
+    body: "Hi {{1}}, just following up on your {{2}} application. Reply here if you have any questions — we're happy to help.", footer: "Paytm Money" },
+  { id: "10248298000105", name: "awareness_v1", category: "Marketing", language: "en", format: "TEXT", status: "Approved", createdAt: "14 Jun 2026",
+    body: "Hi {{1}}, did you know Paytm Money offers commission-free investing? Here's a quick guide to get you started.", footer: "Paytm Money" },
+
+  // BFSI · Insurance Renewal
+  { id: "10248298000201", name: "renewal_link_v1", category: "Utility", language: "en", format: "TEXT", status: "Approved", createdAt: "13 Jun 2026",
+    body: "Hi {{1}}, your {{2}} policy renews on {{3}}. Renew now to keep your cover active without a break.", footer: "Paytm Insurance",
+    buttons: [{ type: "URL", text: "Renew now" }] },
+  { id: "10248298000202", name: "renewal_benefits_v1", category: "Marketing", language: "en", format: "TEXT", status: "Approved", createdAt: "13 Jun 2026",
+    body: "{{1}}, renewing your {{2}} keeps your no-claim bonus and adds {{3}} new benefits this year.", footer: "Paytm Insurance",
+    buttons: [{ type: "Quick Reply", text: "See benefits" }] },
+  { id: "10248298000203", name: "renewal_savings_v1", category: "Marketing", language: "en", format: "TEXT", status: "Approved", createdAt: "13 Jun 2026",
+    body: "{{1}}, renew your {{2}} early and save ₹{{3}} this year. Lock in the lower premium now.", footer: "Paytm Insurance",
+    buttons: [{ type: "URL", text: "Renew & save" }, { type: "Quick Reply", text: "Remind me later" }] },
+  { id: "10248298000204", name: "renewal_followup_v1", category: "Utility", language: "en", format: "TEXT", status: "Approved", createdAt: "13 Jun 2026",
+    body: "Hi {{1}}, a quick reminder that your {{2}} policy is still pending renewal. Let us know if you'd like help.", footer: "Paytm Insurance" },
+
+  // BFSI · Upsell / Cross-Sell
+  { id: "10248298000301", name: "offer_apply_v1", category: "Utility", language: "en", format: "TEXT", status: "Approved", createdAt: "12 Jun 2026",
+    body: "Hi {{1}}, your pre-approved {{2}} offer is ready. Complete your application below to activate it.", footer: "Paytm Money",
+    buttons: [{ type: "URL", text: "Apply now" }] },
+  { id: "10248298000302", name: "upsell_offer_v1", category: "Marketing", language: "en", format: "TEXT", status: "Approved", createdAt: "12 Jun 2026",
+    body: "{{1}}, unlock {{2}} with an upgrade tailored to your usage. See what's included below.", footer: "Paytm Money",
+    buttons: [{ type: "URL", text: "Upgrade now" }, { type: "Quick Reply", text: "Maybe later" }] },
+  { id: "10248298000303", name: "upsell_urgency_v1", category: "Marketing", language: "en", format: "TEXT", status: "Approved", createdAt: "12 Jun 2026",
+    body: "{{1}}, your upgrade offer for {{2}} ends {{3}}. Upgrade now before it's gone.", footer: "Paytm Money",
+    buttons: [{ type: "URL", text: "Upgrade now" }] },
+
+  // BFSI · Collections
+  { id: "10248298000401", name: "collections_reminder_v1", category: "Utility", language: "en", format: "TEXT", status: "Approved", createdAt: "11 Jun 2026",
+    body: "Hi {{1}}, a gentle reminder that ₹{{2}} for {{3}} is now due. Clearing it today helps you avoid late charges.", footer: "Paytm" },
+  { id: "10248298000402", name: "payment_link_v1", category: "Utility", language: "en", format: "TEXT", status: "Approved", createdAt: "11 Jun 2026",
+    body: "Hi {{1}}, your payment of ₹{{2}} for {{3}} is pending. Pay securely via the link below.", footer: "Paytm",
+    buttons: [{ type: "URL", text: "Pay now" }] },
+
+  // Retail · Activation
+  { id: "10248298000501", name: "cart_link_v1", category: "Marketing", language: "en", format: "TEXT", status: "Approved", createdAt: "10 Jun 2026",
+    body: "Hi {{1}}, your cart is ready. Complete your order in a tap and we'll get it on its way.", footer: "Reply STOP to opt out",
+    buttons: [{ type: "URL", text: "Complete order" }] },
+  { id: "10248298000502", name: "activation_discount_v1", category: "Marketing", language: "en", format: "TEXT", status: "Approved", createdAt: "10 Jun 2026",
+    body: "Welcome {{1}}! Here's {{2}}% off your first order. Shop now before it expires on {{3}}.", footer: "Reply STOP to opt out",
+    buttons: [{ type: "URL", text: "Shop now" }, { type: "Quick Reply", text: "Not now" }] },
+  { id: "10248298000503", name: "activation_free_delivery_v1", category: "Marketing", language: "en", format: "TEXT", status: "Approved", createdAt: "10 Jun 2026",
+    body: "{{1}}, enjoy free delivery on your first order this week. Tap to start shopping.", footer: "Reply STOP to opt out",
+    buttons: [{ type: "URL", text: "Order now" }] },
+
+  // Retail · Reward Expiry
+  { id: "10248298000601", name: "redemption_link_v1", category: "Marketing", language: "en", format: "TEXT", status: "Approved", createdAt: "09 Jun 2026",
+    body: "Hi {{1}}, you have {{2}} reward points expiring on {{3}}. Redeem them before they're gone.", footer: "Paytm",
+    buttons: [{ type: "URL", text: "Redeem now" }] },
+  { id: "10248298000602", name: "reward_final_v1", category: "Marketing", language: "en", format: "TEXT", status: "Approved", createdAt: "09 Jun 2026",
+    body: "Last chance {{1}} — your {{2}} reward points expire tonight. Don't let them go to waste.", footer: "Paytm" },
+  { id: "10248298000603", name: "reward_urgency_v1", category: "Marketing", language: "en", format: "TEXT", status: "Approved", createdAt: "09 Jun 2026",
+    body: "{{1}}, your {{2}} points expire in {{3}} days. Redeem now for instant savings.", footer: "Paytm",
+    buttons: [{ type: "URL", text: "Redeem now" }] },
+  { id: "10248298000604", name: "reward_offer_v1", category: "Marketing", language: "en", format: "TEXT", status: "Approved", createdAt: "09 Jun 2026",
+    body: "{{1}}, turn your {{2}} points into ₹{{3}} off your next order. Redeem below.", footer: "Paytm",
+    buttons: [{ type: "URL", text: "Redeem now" }, { type: "Quick Reply", text: "Not interested" }] },
+
+  // Retail · Winback
+  { id: "10248298000701", name: "purchase_link_v1", category: "Marketing", language: "en", format: "TEXT", status: "Approved", createdAt: "08 Jun 2026",
+    body: "Hi {{1}}, the {{2}} you liked is back in your reach. Buy now and we'll ship it today.", footer: "Reply STOP to opt out",
+    buttons: [{ type: "URL", text: "Buy now" }] },
+  { id: "10248298000702", name: "winback_cashback_v1", category: "Marketing", language: "en", format: "TEXT", status: "Approved", createdAt: "08 Jun 2026",
+    body: "We miss you {{1}}! Come back for ₹{{2}} cashback on your next order. Claim it below.", footer: "Reply STOP to opt out",
+    buttons: [{ type: "URL", text: "Claim cashback" }, { type: "Quick Reply", text: "No thanks" }] },
+  { id: "10248298000703", name: "winback_discount_v1", category: "Marketing", language: "en", format: "TEXT", status: "Approved", createdAt: "08 Jun 2026",
+    body: "{{1}}, here's {{2}}% off to welcome you back. Shop your favourites before {{3}}.", footer: "Reply STOP to opt out",
+    buttons: [{ type: "URL", text: "Shop now" }] },
+
+  // Retail · Subscription Conversion
+  { id: "10248298000801", name: "subscription_link_v1", category: "Utility", language: "en", format: "TEXT", status: "Approved", createdAt: "07 Jun 2026",
+    body: "Hi {{1}}, subscribe to {{2}} and never run out. Set it up in a tap below.", footer: "Paytm Commerce",
+    buttons: [{ type: "URL", text: "Subscribe now" }] },
+  { id: "10248298000802", name: "subscription_extra_v1", category: "Marketing", language: "en", format: "TEXT", status: "Approved", createdAt: "07 Jun 2026",
+    body: "{{1}}, subscribe to {{2}} and get an extra {{3}}% off every delivery. Here's how it works.", footer: "Paytm Commerce",
+    buttons: [{ type: "URL", text: "Subscribe" }, { type: "Quick Reply", text: "Tell me more" }] },
+  { id: "10248298000803", name: "subscription_urgency_v1", category: "Marketing", language: "en", format: "TEXT", status: "Approved", createdAt: "07 Jun 2026",
+    body: "{{1}}, your intro price for {{2}} ends {{3}}. Lock in the lower rate by subscribing today.", footer: "Paytm Commerce",
+    buttons: [{ type: "URL", text: "Subscribe now" }] },
+
+  // Retail · Seasonal Sale
+  { id: "10248298000901", name: "sale_link_v1", category: "Marketing", language: "en", format: "TEXT", status: "Approved", createdAt: "06 Jun 2026",
+    body: "Hi {{1}}, our {{2}} sale is live with up to {{3}}% off. Shop the best deals now.", footer: "T&C apply",
+    buttons: [{ type: "URL", text: "Shop the sale" }] },
+  { id: "10248298000902", name: "seasonal_trends_v1", category: "Marketing", language: "en", format: "TEXT", status: "Approved", createdAt: "06 Jun 2026",
+    body: "{{1}}, this season's top picks are here. Explore the trends everyone's shopping.", footer: "T&C apply",
+    buttons: [{ type: "URL", text: "Shop now" }, { type: "Quick Reply", text: "Just browsing" }] },
+  { id: "10248298000903", name: "seasonal_limited_v1", category: "Marketing", language: "en", format: "TEXT", status: "Approved", createdAt: "06 Jun 2026",
+    body: "{{1}}, our {{2}} edit is limited and selling fast. Grab yours before it's gone on {{3}}.", footer: "T&C apply",
+    buttons: [{ type: "URL", text: "Shop now" }] },
+  { id: "10248298000904", name: "sale_reminder_v1", category: "Marketing", language: "en", format: "TEXT", status: "Approved", createdAt: "06 Jun 2026",
+    body: "Hi {{1}}, our {{2}} sale ends tonight. Don't miss your chance to save on the items you've been eyeing." },
+
+  // D2C · Order Confirmation
+  { id: "10248298001001", name: "availability_link_v1", category: "Utility", language: "en", format: "TEXT", status: "Approved", createdAt: "05 Jun 2026",
+    body: "Hi {{1}}, before we ship — please confirm {{2}} is available at your address using the link below.", footer: "Paytm Commerce",
+    buttons: [{ type: "URL", text: "Check availability" }] },
+  { id: "10248298001002", name: "order_confirm_v1", category: "Utility", language: "en", format: "TEXT", status: "Approved", createdAt: "05 Jun 2026",
+    body: "Hi {{1}}, your order {{2}} is confirmed. We'll notify you as soon as it ships. Thank you for shopping with us.", footer: "Paytm Commerce" },
+
+  // D2C · Outbound Sales
+  { id: "10248298001101", name: "outbound_variety_v1", category: "Marketing", language: "en", format: "TEXT", status: "Approved", createdAt: "04 Jun 2026",
+    body: "Hi {{1}}, discover our full range of {{2}} — something for every need. Explore the collection below.", footer: "Reply STOP to opt out",
+    buttons: [{ type: "URL", text: "Explore range" }, { type: "Quick Reply", text: "Not now" }] },
+  { id: "10248298001102", name: "outbound_offers_v1", category: "Marketing", language: "en", format: "TEXT", status: "Approved", createdAt: "04 Jun 2026",
+    body: "{{1}}, this week's offers on {{2}} are live. See what's on sale before it ends.", footer: "Reply STOP to opt out",
+    buttons: [{ type: "URL", text: "View offers" }] },
+
+  // D2C · Cart Abandonment
+  { id: "10248298001201", name: "cart_discount_v1", category: "Marketing", language: "en", format: "TEXT", status: "Approved", createdAt: "03 Jun 2026",
+    body: "Still thinking it over {{1}}? Here's {{2}}% off to complete your order. Offer ends {{3}}.", footer: "Reply STOP to opt out",
+    buttons: [{ type: "URL", text: "Claim offer" }, { type: "Quick Reply", text: "Not now" }] },
+  { id: "10248298001202", name: "cart_free_shipping_v1", category: "Marketing", language: "en", format: "TEXT", status: "Approved", createdAt: "03 Jun 2026",
+    body: "{{1}}, your cart qualifies for free shipping today. Complete your order before the offer expires.", footer: "Reply STOP to opt out",
+    buttons: [{ type: "URL", text: "Complete order" }] },
+
+  // E-commerce · Price Drop
+  { id: "10248298001301", name: "pricedrop_pct_v1", category: "Marketing", language: "en", format: "TEXT", status: "Approved", createdAt: "02 Jun 2026",
+    body: "Good news {{1}} — {{2}} just dropped {{3}}% in price. Grab it now before stock runs out.", footer: "Reply STOP to opt out",
+    buttons: [{ type: "URL", text: "Buy now" }, { type: "Quick Reply", text: "Watch item" }] },
+  { id: "10248298001302", name: "pricedrop_amount_v1", category: "Marketing", language: "en", format: "TEXT", status: "Approved", createdAt: "02 Jun 2026",
+    body: "{{1}}, the {{2}} on your wishlist is now ₹{{3}} cheaper. Buy now while the price lasts.", footer: "Reply STOP to opt out",
+    buttons: [{ type: "URL", text: "Buy now" }] },
+
+  // E-commerce · Back In Stock
+  { id: "10248298001401", name: "backinstock_scarcity_v1", category: "Marketing", language: "en", format: "TEXT", status: "Approved", createdAt: "01 Jun 2026",
+    body: "{{1}}, the {{2}} you wanted is back — but only {{3}} left. Buy now before it sells out again.", footer: "Reply STOP to opt out",
+    buttons: [{ type: "URL", text: "Buy now" }, { type: "Quick Reply", text: "Remind me" }] },
+  { id: "10248298001402", name: "backinstock_popularity_v1", category: "Marketing", language: "en", format: "TEXT", status: "Approved", createdAt: "01 Jun 2026",
+    body: "Great news {{1}}! The popular {{2}} is back in stock. Thousands grabbed it last time — get yours now.", footer: "Reply STOP to opt out",
+    buttons: [{ type: "URL", text: "Buy now" }] },
 ];
 
 /** Replace {{1}}, {{2}}… with sample params (for the live preview). */
