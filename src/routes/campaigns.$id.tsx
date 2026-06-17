@@ -46,11 +46,13 @@ function CampaignBuilder() {
     isNew ? [] : VERSION_HISTORY[id] ? [...VERSION_HISTORY[id]] : [],
   );
 
-  // Move to "ready" automatically when everything validates
+  // Move to "ready" automatically when everything validates — but keep example
+  // campaigns at their authored status (the two retained originals stay in draft).
   useEffect(() => {
+    if (example) return;
     if (status === "draft" && total > 0 && validCount === total) setStatus("ready");
     if (status === "ready" && validCount < total) setStatus("draft");
-  }, [validCount, total, status]);
+  }, [validCount, total, status, example]);
 
   // Unsaved changes guard — surface as a bottom-right toast with Leave / Stay
   // actions instead of the native confirm dialog. (PRD §6.5 exit warning.)

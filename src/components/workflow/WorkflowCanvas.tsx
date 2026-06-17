@@ -1,15 +1,18 @@
 import { useCallback, useMemo, useState, useEffect, useRef } from "react";
 import ReactFlow, {
-  Background, BackgroundVariant, Controls, MiniMap,
+  Background, BackgroundVariant, Controls, ControlButton, MiniMap,
   addEdge, useEdgesState, useNodesState, getNodesBounds,
   type Connection, type Edge, type Node, type NodeMouseHandler,
   type ReactFlowInstance,
 } from "reactflow";
+import { Wand2 } from "lucide-react";
 import { nodeTypes } from "./nodes";
+import { edgeTypes } from "./edges";
 import type { WorkflowNodeData, NodeKind, CampaignStatus } from "@/lib/campaign-types";
 import { NODE_LABELS } from "@/lib/campaign-types";
 import { EXAMPLE_CAMPAIGNS } from "@/lib/campaign-examples";
-import { useRegion, localizeTzAbbrev } from "@/lib/region";
+import { elkLayout, type Point } from "@/lib/flow-layout";
+import { useRegion, localizeTzAbbrev, localizeCurrency } from "@/lib/region";
 import { ConfigPanel } from "./ConfigPanel";
 import { AiComposer } from "./AiComposer";
 import { NodePalette } from "./NodePalette";
@@ -91,7 +94,7 @@ export function WorkflowCanvas({
   // Pre-built example campaigns ship their own authored graph; everything else
   // (the existing demo campaigns) falls back to the shared seed graph.
   const example = campaignId ? EXAMPLE_CAMPAIGNS[campaignId] : undefined;
-  const { tzAbbrev } = useRegion();
+  const { tzAbbrev, symbol } = useRegion();
   const [nodes, setNodes, onNodesChange] = useNodesState(
     isNew ? BLANK_NODES : example?.nodes ?? SEED_NODES,
   );
@@ -101,23 +104,38 @@ export function WorkflowCanvas({
   const [selected, setSelected] = useState<{ id: string; data: WorkflowNodeData } | null>(null);
   const [askPiOpen, setAskPiOpen] = useState(false);
   const [aiBuilding, setAiBuilding] = useState(false);
+  // ELK runs async at render-time; hide the graph until the initial layout lands
+  // so we never flash positionless nodes stacked at the origin. Blank new
+  // campaigns (just a Start node) need no initial layout, so they show at once.
+  const [layingOut, setLayingOut] = useState(!isNew);
   const rfRef = useRef<ReactFlowInstance | null>(null);
   const refitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const aiBuildingRef = useRef(aiBuilding);
   useEffect(() => { aiBuildingRef.current = aiBuilding; }, [aiBuilding]);
+  // Keep live nodes/edges in refs so the run-once layout effect reads current
+  // state without re-triggering on every change.
+  const nodesRef = useRef(nodes); nodesRef.current = nodes;
+  const edgesRef = useRef(edges); edgesRef.current = edges;
+  const didLayoutRef = useRef(false);
 
-  // Localize region-sensitive node subtitles (e.g. the Voice "Call window … IST"
-  // label) to the active country. Runs on mount and whenever the country
-  // changes; localizeTzAbbrev is idempotent + reversible so toggling is safe.
+  // Localize region-sensitive node text — timezone abbreviations (e.g. the Voice
+  // "Call window … IST" subtitle) and currency symbols in conditional labels
+  // (e.g. "> ₹25,000") — to the active country, on both the subtitle and the
+  // output port labels. Runs on mount and whenever the country changes; the
+  // localizers are reversible so toggling is safe.
   useEffect(() => {
+    const fix = (t: string) => localizeCurrency(localizeTzAbbrev(t, tzAbbrev), symbol);
     setNodes((nds) =>
-      nds.map((n) =>
-        n.data.subtitle && n.data.subtitle !== localizeTzAbbrev(n.data.subtitle, tzAbbrev)
-          ? { ...n, data: { ...n.data, subtitle: localizeTzAbbrev(n.data.subtitle, tzAbbrev) } }
-          : n,
-      ),
+      nds.map((n) => {
+        const nextSub = n.data.subtitle != null ? fix(n.data.subtitle) : n.data.subtitle;
+        const nextOuts = n.data.outputs?.map((o) => ({ ...o, label: fix(o.label) }));
+        const subChanged = nextSub !== n.data.subtitle;
+        const outsChanged = !!nextOuts && nextOuts.some((o, i) => o.label !== n.data.outputs![i].label);
+        if (!subChanged && !outsChanged) return n;
+        return { ...n, data: { ...n.data, subtitle: nextSub, outputs: nextOuts ?? n.data.outputs } };
+      }),
     );
-  }, [tzAbbrev, setNodes]);
+  }, [tzAbbrev, symbol, setNodes]);
 
   const refit = useCallback(() => {
     if (refitTimer.current) clearTimeout(refitTimer.current);
@@ -139,6 +157,26 @@ export function WorkflowCanvas({
   useEffect(() => {
     refit();
   }, [aiBuilding, refit]);
+
+  // Initial ELK layout for the example/seed graph (runs once on mount). Blank
+  // new campaigns and AI-built graphs are laid out elsewhere, so skip those.
+  useEffect(() => {
+    if (didLayoutRef.current || isNew) return;
+    didLayoutRef.current = true;
+    let cancelled = false;
+    (async () => {
+      const laid = await elkLayout(nodesRef.current, edgesRef.current);
+      if (cancelled) return;
+      setNodes(laid.nodes);
+      setEdges(laid.edges);
+      // Reveal ReactFlow only now — mounting it with the laid-out graph lets the
+      // `fitView` prop do its nodesInitialized-aware fit (centered), instead of
+      // a premature manual fit against unmeasured nodes that pins the graph to a
+      // corner.
+      setLayingOut(false);
+    })();
+    return () => { cancelled = true; };
+  }, [isNew, setNodes, setEdges]);
 
   // Auto-launch Ask Pi for brand-new campaigns
   useEffect(() => {
@@ -272,14 +310,34 @@ export function WorkflowCanvas({
     [setNodes, onDirty],
   );
 
-  const defaultEdgeOptions = useMemo(() => ({ type: "smoothstep" as const }), []);
+  const defaultEdgeOptions = useMemo(() => ({ type: "routed" as const }), []);
+
+  // One-click clean-up: re-run the ELK left-to-right layout on the current
+  // graph (positions + routed edge lanes), then fit it to the viewport.
+  const autoArrange = useCallback(async () => {
+    const rf = rfRef.current;
+    if (!rf) return;
+    const ns = rf.getNodes() as Node<WorkflowNodeData>[];
+    const es = rf.getEdges();
+    if (ns.length === 0) return;
+    const laid = await elkLayout(ns, es);
+    const posById = new Map(laid.nodes.map((n) => [n.id, n.position] as const));
+    const ptsById = new Map(laid.edges.map((e) => [e.id, (e.data?.points as Point[] | undefined) ?? []] as const));
+    setNodes((nds) => nds.map((n) => ({ ...n, position: posById.get(n.id) ?? n.position })));
+    setEdges((eds) => eds.map((e) => ({ ...e, type: "routed", data: { ...(e.data ?? {}), points: ptsById.get(e.id) ?? [] } })));
+    onDirty?.();
+    setTimeout(() => rfRef.current?.fitView({ padding: 0.2, duration: 400 }), 60);
+  }, [setNodes, setEdges, onDirty]);
 
   return (
     <div className="relative h-full w-full">
+      {layingOut && <div className="absolute inset-0" aria-hidden />}
+      {!layingOut && (
       <ReactFlow
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         nodesDraggable={editable}
         nodesConnectable={editable}
         elementsSelectable={!aiBuilding}
@@ -304,7 +362,13 @@ export function WorkflowCanvas({
       >
 
         <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="var(--canvas-dot)" />
-        <Controls position="bottom-left" showInteractive={false} />
+        <Controls position="bottom-left" showInteractive={false}>
+          {editable && (
+            <ControlButton onClick={autoArrange} title="Auto-arrange & fit">
+              <Wand2 />
+            </ControlButton>
+          )}
+        </Controls>
         <MiniMap
           position="bottom-right"
           pannable
@@ -315,6 +379,7 @@ export function WorkflowCanvas({
           nodeBorderRadius={4}
         />
       </ReactFlow>
+      )}
 
       {!previewOnly && <NodePalette onAdd={addNode} disabled={!editable} />}
 

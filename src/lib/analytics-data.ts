@@ -3,6 +3,8 @@
  *  every branch ratio is a believable real-world drop-off, and KPIs roll up
  *  from the leaf totals. Reviewers should be able to add up edges by hand.
  */
+import { EXAMPLE_CAMPAIGNS, type ExampleCampaign } from "./campaign-examples";
+import type { NodeKind } from "./campaign-types";
 
 export type ChannelKind = "whatsapp" | "voice" | "sms" | "ads";
 
@@ -46,183 +48,106 @@ export type RunRow = {
   sankey: { nodes: SankeyNode[]; edges: SankeyEdge[] };
 };
 
-/* ───────────── Dormant Trader Reactivation ─────────────
- *  Mirrors the campaign-builder DAG exactly:
- *
- *    Start → Audience(12,402) → Channel routing(60/40)
- *                                 ├─ WhatsApp(reactivate_v3)
- *                                 └─ Voice Call(conversational)
- *                                 → Delay(24h) → End
- *
- *  Edge values are the absolute users who progressed; percentages on the
- *  Sankey come from value / source.exited so each label reads as a real
- *  channel KPI (delivery %, connect %, etc.).
+/* ───────────── Generated from the example campaign library ─────────────
+ *  Analytics is contextual to the same 16 example campaigns shown in the
+ *  Campaigns table. For each authored builder graph we synthesize one run by
+ *  propagating an audience base through the DAG: structural nodes pass everyone
+ *  through, channel nodes apply a realistic drop-off, and branch/variant ports
+ *  split the flow. Numbers stay internally consistent (a node's inflow == the
+ *  sum of its incoming edges).
  */
-const dormantR1: RunRow = {
-  id: "\u200B",
-  startedAt: "Today · 12:04",
-  status: "running",
-  audience: 12402,
-  totalLeads: 4000,
-  leadsProcessed: 1840,
-  successRate: 25,
-  kpi: { totalLeads: 4000, validLeads: 3990, leadsProcessed: 1840, successRate: 25 },
-  sankey: {
-    nodes: [
-      { id: "start",    name: "Start",                     kind: "start",    entered: 12402, exited: 12402 },
-      { id: "audience", name: "Audience · CSV 12,402",     kind: "audience", entered: 12402, exited: 12402 },
-      { id: "split",    name: "Channel routing · 60/40",   kind: "conditional", entered: 12402, exited: 12402 },
-      { id: "whatsapp", name: "WhatsApp · reactivate_v3",  kind: "whatsapp", entered: 7441,  exited: 6998  }, // 5.9% drop-off (undelivered / no engagement)
-      { id: "voice",    name: "Voice Call · Reactivation", kind: "voice",    entered: 4961,  exited: 3372  }, // 32.0% drop-off (no connect / no answer)
-      { id: "delay",    name: "Delay · 24h",               kind: "delay",    entered: 10370, exited: 10370 },
-      { id: "end",      name: "End",                       kind: "end",      entered: 10370, exited: 10370 },
-    ],
-    edges: [
-      { source: "start",    target: "audience", value: 12402 },
-      { source: "audience", target: "split",    value: 12402 },
-      { source: "split",    target: "whatsapp", value: 7441  }, // 60% A
-      { source: "split",    target: "voice",    value: 4961  }, // 40% B
-      { source: "whatsapp", target: "delay",    value: 6998  }, // 94.0% delivered
-      { source: "voice",    target: "delay",    value: 3372  }, // 68.0% connected
-      { source: "delay",    target: "end",      value: 10370 },
-    ],
-  },
+
+const KIND_TO_SANKEY: Record<NodeKind, SankeyNodeKind> = {
+  start: "start", end: "end", audience: "audience", conditional: "conditional",
+  abSplit: "abSplit", delay: "delay", voiceCall: "voice", whatsapp: "whatsapp",
+  sms: "sms", adsCampaign: "ads",
 };
 
-// Run 8420: completed earlier today, smaller batch, slightly worse delivery
-const dormantR2: RunRow = {
-  id: "r_8420",
-  startedAt: "Today · 06:00",
-  status: "completed",
-  audience: 11840,
-  totalLeads: 3750,
-  leadsProcessed: 1620,
-  successRate: 24,
-  kpi: { totalLeads: 3750, validLeads: 3702, leadsProcessed: 1620, successRate: 24 },
-  sankey: {
-    nodes: [
-      { id: "start",    name: "Start",                     kind: "start",    entered: 11840, exited: 11840 },
-      { id: "audience", name: "Audience · CSV 11,840",     kind: "audience", entered: 11840, exited: 11840 },
-      { id: "split",    name: "Channel routing · 60/40",   kind: "conditional", entered: 11840, exited: 11840 },
-      { id: "whatsapp", name: "WhatsApp · reactivate_v3",  kind: "whatsapp", entered: 7104,  exited: 6580  }, // 7.4% drop-off
-      { id: "voice",    name: "Voice Call · Reactivation", kind: "voice",    entered: 4736,  exited: 3132  }, // 33.9% drop-off
-      { id: "delay",    name: "Delay · 24h",               kind: "delay",    entered: 9712,  exited: 9712  },
-      { id: "end",      name: "End",                       kind: "end",      entered: 9712,  exited: 9712  },
-    ],
-    edges: [
-      { source: "start",    target: "audience", value: 11840 },
-      { source: "audience", target: "split",    value: 11840 },
-      { source: "split",    target: "whatsapp", value: 7104  },
-      { source: "split",    target: "voice",    value: 4736  },
-      { source: "whatsapp", target: "delay",    value: 6580  }, // 92.6% delivered
-      { source: "voice",    target: "delay",    value: 3132  }, // 66.1% connected
-      { source: "delay",    target: "end",      value: 9712  },
-    ],
-  },
+const PASS_RATE: Record<SankeyNodeKind, number> = {
+  start: 1, audience: 1, conditional: 1, abSplit: 1, delay: 1, end: 1,
+  voice: 0.72, whatsapp: 0.82, sms: 0.9, ads: 0.95,
 };
 
-// Run 8418: failed mid-run — WhatsApp template was rejected by Meta
-const dormantR3: RunRow = {
-  id: "r_8418",
-  startedAt: "Yesterday · 18:30",
-  status: "failed",
-  audience: 12402,
-  totalLeads: 1620,
-  leadsProcessed: 0,
-  successRate: 0,
-  kpi: { totalLeads: 1620, validLeads: 410, leadsProcessed: 0, successRate: 0 },
-  sankey: {
-    nodes: [
-      { id: "start",    name: "Start",                     kind: "start",    entered: 12402, exited: 12402 },
-      { id: "audience", name: "Audience · CSV 12,402",     kind: "audience", entered: 12402, exited: 12402 },
-      { id: "split",    name: "Channel routing · 60/40",   kind: "conditional", entered: 12402, exited: 12402 },
-      { id: "whatsapp", name: "WhatsApp · reactivate_v3",  kind: "whatsapp", entered: 7441,  exited: 412   }, // 94.5% drop-off — template rejected by Meta
-      { id: "voice",    name: "Voice Call · Reactivation", kind: "voice",    entered: 4961,  exited: 1208  }, // 75.6% drop-off — run aborted
-      { id: "delay",    name: "Delay · 24h",               kind: "delay",    entered: 1620,  exited: 1620  },
-      { id: "end",      name: "End",                       kind: "end",      entered: 1620,  exited: 1620  },
-    ],
-    edges: [
-      { source: "start",    target: "audience", value: 12402 },
-      { source: "audience", target: "split",    value: 12402 },
-      { source: "split",    target: "whatsapp", value: 7441  },
-      { source: "split",    target: "voice",    value: 4961  },
-      { source: "whatsapp", target: "delay",    value: 412   }, // 5.5% delivered — template rejected
-      { source: "voice",    target: "delay",    value: 1208  }, // 24.4% connected — run aborted
-      { source: "delay",    target: "end",      value: 1620  },
-    ],
-  },
-};
+/** Propagate `base` leads through an example graph into a consistent run. */
+function deriveRun(ex: ExampleCampaign, base: number, runId: string, startedAt: string): RunRow {
+  const { nodes, edges } = ex;
+  const kindOf = new Map<string, SankeyNodeKind>(nodes.map((n) => [n.id, KIND_TO_SANKEY[n.data.kind]]));
+  const incoming = new Map<string, string[]>();
+  const outIdx = new Map<string, number[]>();
+  nodes.forEach((n) => { incoming.set(n.id, []); outIdx.set(n.id, []); });
+  edges.forEach((e, i) => { incoming.get(e.target)?.push(e.source); outIdx.get(e.source)?.push(i); });
 
+  // Topological order (parents before children) via post-order DFS on incoming.
+  const order: string[] = [];
+  const seen = new Set<string>();
+  const visit = (id: string) => {
+    if (seen.has(id)) return;
+    seen.add(id);
+    (incoming.get(id) ?? []).forEach(visit);
+    order.push(id);
+  };
+  nodes.forEach((n) => visit(n.id));
 
-/* ───────────── New Trader Onboarding (simpler 2-channel flow) ───────────── */
-const onboardingR1: RunRow = {
-  id: "r_7102",
-  startedAt: "Today · 09:10",
-  status: "completed",
-  audience: 4820,
-  totalLeads: 4612,
-  leadsProcessed: 1840,
-  successRate: 15,
-  kpi: { totalLeads: 4612, validLeads: 2980, leadsProcessed: 1840, successRate: 15 },
-  sankey: {
-    nodes: [
-      { id: "audience",  name: "New signups · last 24h",  kind: "audience",    entered: 4820, exited: 4820 },
-      { id: "whatsapp",  name: "WhatsApp · Welcome",      kind: "whatsapp",    entered: 4820, exited: 4612 },
-      { id: "engaged",   name: "KYC started?",            kind: "conditional", entered: 4612, exited: 4612 },
-      { id: "voice",     name: "Voice · KYC Assist",      kind: "voice",       entered: 1632, exited: 492  }, // 69.9% drop-off (assisted, did not complete)
-      { id: "converted", name: "KYC Completed",           kind: "end",         entered: 1840, exited: 1840 },
-      { id: "dropped",   name: "Dropped Off",             kind: "end",         entered: 2980, exited: 2980 },
-    ],
-    edges: [
-      { source: "audience", target: "whatsapp",  value: 4820 },
-      { source: "whatsapp", target: "engaged",   value: 4612 },
-      { source: "whatsapp", target: "dropped",   value: 208  },
-      { source: "engaged",  target: "converted", value: 1348 },  // KYC started from WA
-      { source: "engaged",  target: "voice",     value: 1632 },  // KYC started but stalled → voice assist
-      { source: "engaged",  target: "dropped",   value: 1632 },  // ignored
-      { source: "voice",    target: "converted", value: 492  },
-      { source: "voice",    target: "dropped",   value: 1140 },
-    ],
-  },
-};
+  const entered = new Map<string, number>();
+  const exited = new Map<string, number>();
+  const edgeValue = new Map<number, number>();
 
-/* ───────────── KYC Drop-off Recovery (WhatsApp + Voice) ───────────── */
-const kycR1: RunRow = {
-  id: "r_6988",
-  startedAt: "Apr 12 · 18:00",
-  status: "completed",
-  audience: 9802,
-  totalLeads: 8210,
-  leadsProcessed: 1402,
-  successRate: 18,
-  kpi: { totalLeads: 8210, validLeads: 3920, leadsProcessed: 1402, successRate: 18 },
-  sankey: {
-    nodes: [
-      { id: "audience",  name: "Audience · KYC stalled",  kind: "audience",    entered: 9802, exited: 9802 },
-      { id: "whatsapp",  name: "WhatsApp · KYC Reminder", kind: "whatsapp",    entered: 9802, exited: 8210 },
-      { id: "engaged",   name: "Returned to app?",        kind: "conditional", entered: 8210, exited: 8210 },
-      { id: "voice",     name: "Voice · KYC Assist",      kind: "voice",       entered: 4290, exited: 482  }, // 88.8% drop-off (assisted, did not resubmit)
-      { id: "converted", name: "KYC Resubmitted",         kind: "end",         entered: 1402, exited: 1402 },
-      { id: "dropped",   name: "Dropped Off",             kind: "end",         entered: 8400, exited: 8400 },
-    ],
-    edges: [
-      { source: "audience", target: "whatsapp",  value: 9802 },
-      { source: "whatsapp", target: "engaged",   value: 8210 },
-      { source: "whatsapp", target: "dropped",   value: 1592 },
-      { source: "engaged",  target: "converted", value: 920  },
-      { source: "engaged",  target: "voice",     value: 4290 },
-      { source: "engaged",  target: "dropped",   value: 3000 },
-      { source: "voice",    target: "converted", value: 482  },
-      { source: "voice",    target: "dropped",   value: 3808 },
-    ],
-  },
-};
+  for (const id of order) {
+    const ins = incoming.get(id) ?? [];
+    const ent = ins.length === 0
+      ? base
+      : edges.reduce((s, e, i) => (e.target === id ? s + (edgeValue.get(i) ?? 0) : s), 0);
+    const enteredCount = Math.round(ent);
+    entered.set(id, enteredCount);
+    const kind = kindOf.get(id)!;
+    const exitedCount = Math.round(enteredCount * (PASS_RATE[kind] ?? 1));
+    exited.set(id, exitedCount);
 
-export const CAMPAIGNS: CampaignAnalytics[] = [
-  { id: "c_001", name: "Dormant Trader Reactivation", runs: [dormantR1, dormantR2, dormantR3] },
-  { id: "c_002", name: "New Trader Onboarding",        runs: [onboardingR1] },
-  { id: "c_004", name: "KYC Drop-off Recovery",        runs: [kycR1] },
-];
+    const outs = outIdx.get(id) ?? [];
+    if (outs.length === 0) continue;
+    // Group outgoing edges by source port handle.
+    const groups = new Map<string, number[]>();
+    outs.forEach((i) => {
+      const h = edges[i].sourceHandle ?? "__default__";
+      if (!groups.has(h)) groups.set(h, []);
+      groups.get(h)!.push(i);
+    });
+    const groupArr = [...groups.values()];
+    const G = groupArr.length;
+    const equal = kind === "abSplit" || G === 1;
+    const denom = G * (G + 1) / 2;
+    groupArr.forEach((arr, gi) => {
+      const w = equal ? 1 / G : (G - gi) / denom;
+      const groupTotal = exitedCount * w;
+      arr.forEach((i) => edgeValue.set(i, Math.round(groupTotal / arr.length)));
+    });
+  }
+
+  const sankeyNodes: SankeyNode[] = nodes.map((n) => ({
+    id: n.id, name: n.data.title, kind: kindOf.get(n.id)!,
+    entered: entered.get(n.id) ?? 0, exited: exited.get(n.id) ?? 0,
+  }));
+  const sankeyEdges: SankeyEdge[] = edges.map((e, i) => ({
+    source: e.source, target: e.target, value: edgeValue.get(i) ?? 0,
+  }));
+
+  const completed = sankeyNodes.filter((n) => n.kind === "end").reduce((s, n) => s + n.entered, 0);
+  const validLeads = Math.round(base * 0.98);
+  const successRate = base > 0 ? Math.round((completed / base) * 100) : 0;
+
+  return {
+    id: runId, startedAt, status: "completed", audience: base,
+    totalLeads: base, leadsProcessed: completed, successRate,
+    kpi: { totalLeads: base, validLeads, leadsProcessed: completed, successRate },
+    sankey: { nodes: sankeyNodes, edges: sankeyEdges },
+  };
+}
+
+export const CAMPAIGNS: CampaignAnalytics[] = Object.entries(EXAMPLE_CAMPAIGNS).map(([id, ex], i) => ({
+  id,
+  name: ex.name,
+  runs: [deriveRun(ex, 9000 + i * 600, `r_${id}`, "Today · 09:00")],
+}));
 export const NODE_METRICS: Partial<Record<
   SankeyNodeKind,
   { label: string; value: number }[]

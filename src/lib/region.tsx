@@ -131,3 +131,12 @@ export function localizeTzAbbrev(text: string, tzAbbrev: string): string {
 export function localizeDialCode(text: string, dialCode: string): string {
   return text.replace(/^\+\d{1,4}/, dialCode);
 }
+
+/**
+ * Swap a currency symbol/code (₹ or "AED") in a label for the active region's
+ * symbol, leaving the amount intact. Matches either form so toggling country is
+ * reversible (e.g. "> ₹25,000" ⇄ "> AED 25,000").
+ */
+export function localizeCurrency(text: string, symbol: string): string {
+  return text.replace(/₹\s?|AED\s?/g, symbol);
+}

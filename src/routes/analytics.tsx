@@ -302,7 +302,7 @@ function LeadsTable({ run, restrictToNodeIds, title = "Lead Analytics", hideStag
   title?: string;
   hideStage?: boolean;
 }) {
-  const allLeads = useMemo(() => generateLeads(run), [run]);
+  const allLeads = useMemo(() => generateLeads(run, run.kpi.validLeads), [run]);
   const scoped = useMemo(
     () => (restrictToNodeIds ? allLeads.filter((l) => restrictToNodeIds.includes(l.stageNodeId)) : allLeads),
     [allLeads, restrictToNodeIds],
@@ -533,7 +533,7 @@ function NodeDrawer({
 
   return (
     <Sheet open={open} onOpenChange={(v) => !v && onClose()}>
-      <SheetContent className="w-[460px] overflow-y-auto sm:max-w-[460px]">
+      <SheetContent className="w-[460px] max-w-[92vw] overflow-y-auto overflow-x-hidden sm:max-w-[460px]">
         <SheetHeader>
           <div className="flex items-center gap-2">
             <span className="h-2.5 w-2.5 rounded-full" style={{ background: kind ? NODE_COLOR[kind] : "" }} />
@@ -628,11 +628,13 @@ function MiniFunnel({ metrics, color }: { metrics: { label: string; value: numbe
     backgroundColor: "transparent",
     tooltip: { trigger: "item", formatter: "{b}: {c}" },
     series: [{
-      type: "funnel", left: "5%", right: "5%", top: 8, bottom: 8,
+      type: "funnel", left: "5%", right: "5%", top: 8, bottom: 8, width: "90%",
       sort: "none", gap: 2,
       funnelAlign: "center",
       minSize: "30%", maxSize: "100%",
-      label: { fontSize: 11, formatter: "{b}  {c}" },
+      // Labels render INSIDE the segments so they never overflow the narrow drawer.
+      label: { position: "inside", fontSize: 10, color: "#fff", formatter: "{b} · {c}", overflow: "truncate" },
+      labelLayout: { hideOverlap: true },
       itemStyle: { borderColor: "transparent", color },
       data: metrics.map((m, i) => ({ name: m.label, value: m.value, itemStyle: { color, opacity: 1 - i * 0.13 } })),
     }],
