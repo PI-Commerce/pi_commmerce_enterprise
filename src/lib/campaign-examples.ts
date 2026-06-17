@@ -17,6 +17,7 @@ import type {
   CampaignStatus, WorkflowNodeData, NodeKind, NodeOutput, NodeOutputKind,
   PresetConfig, PresetVarMap,
 } from "./campaign-types";
+import { whatsappOutputs, resolveWaTemplate } from "./wa-outputs";
 
 export type ExampleCampaign = {
   name: string;
@@ -86,21 +87,18 @@ const EX1_NODES: Node<WorkflowNodeData>[] = [
     data: {
       kind: "whatsapp", title: "Chat AI · loyalty", subtitle: "WhatsApp · loyalty opener", valid: true, preset: true,
       outputs: [
-        { id: "converted", label: "Converted", kind: "exit" },
-        { id: "dropped", label: "Responded, dropped off", kind: "exit" },
-        { id: "default", label: "No response", kind: "default" },
+        { id: "btn_0", label: "Complete purchase", kind: "outcome" },
+        { id: "btn_1", label: "Not interested", kind: "outcome" },
+        { id: "reply_received", label: "Replied (no button)", kind: "outcome" },
+        { id: "session_expired", label: "Session expired (24h)", kind: "outcome" },
       ],
       config: {
         waNumber: "+91 98100 12345 · PiCommerce",
         waMode: "template",
-        waTemplate: "reactivate_v3 · Marketing",
+        waTemplate: "10248300981244",
         waVarMap: [
           { v: "{{1}}", def: "contact.first_name" },
           { v: "{{2}}", def: "favorite_category" },
-        ],
-        paths: [
-          { id: "converted", label: "Converted", variable: "button_clicked", op: "equals", value: "true" },
-          { id: "dropped", label: "Responded, dropped off", variable: "session_expired", op: "equals", value: "true" },
         ],
       },
     },
@@ -158,9 +156,10 @@ const EX1_EDGES: Edge[] = [
   { id: "ex1-e2", source: "audience", target: "tier", type: EDGE },
   { id: "ex1-e3", source: "tier", sourceHandle: "high_ltv", target: "chat", type: EDGE },
   { id: "ex1-e4", source: "tier", sourceHandle: "mid_ltv", target: "chatMid", type: EDGE },
-  { id: "ex1-e5", source: "chat", sourceHandle: "converted", target: "end", type: EDGE },
-  { id: "ex1-e6", source: "chat", sourceHandle: "dropped", target: "voice", type: EDGE },
-  { id: "ex1-e7", source: "chat", sourceHandle: "default", target: "delay5", type: EDGE },
+  { id: "ex1-e5", source: "chat", sourceHandle: "btn_0", target: "end", type: EDGE },
+  { id: "ex1-e6", source: "chat", sourceHandle: "session_expired", target: "voice", type: EDGE },
+  { id: "ex1-e7", source: "chat", sourceHandle: "reply_received", target: "delay5", type: EDGE },
+  { id: "ex1-e5b", source: "chat", sourceHandle: "btn_1", target: "delay5", type: EDGE },
   { id: "ex1-e8", source: "delay5", target: "voice", type: EDGE },
   { id: "ex1-e9", source: "voice", target: "end", type: EDGE },
   { id: "ex1-e10", source: "chatMid", target: "end", type: EDGE },
@@ -245,21 +244,18 @@ const EX2_NODES: Node<WorkflowNodeData>[] = [
     data: {
       kind: "whatsapp", title: "Chat AI · order assist", subtitle: "WhatsApp · interested path", valid: true, preset: true,
       outputs: [
-        { id: "ordered", label: "Ordered", kind: "exit" },
-        { id: "needs_help", label: "Needs help / no response", kind: "exit" },
-        { id: "default", label: "Fallthrough", kind: "default" },
+        { id: "btn_0", label: "Pay now", kind: "outcome" },
+        { id: "btn_1", label: "Remind me later", kind: "outcome" },
+        { id: "reply_received", label: "Replied (no button)", kind: "outcome" },
+        { id: "session_expired", label: "Session expired (24h)", kind: "outcome" },
       ],
       config: {
         waNumber: "+91 98100 12345 · PiCommerce",
         waMode: "template",
-        waTemplate: "reactivate_v3 · Marketing",
+        waTemplate: "10248301338871",
         waVarMap: [
           { v: "{{1}}", def: "contact.first_name" },
           { v: "{{2}}", def: "last_item" },
-        ],
-        paths: [
-          { id: "ordered", label: "Ordered", variable: "button_clicked", op: "equals", value: "true" },
-          { id: "needs_help", label: "Needs help / no response", variable: "session_expired", op: "equals", value: "true" },
         ],
       },
     },
@@ -359,9 +355,10 @@ const EX2_EDGES: Edge[] = [
   { id: "ex2-e6", source: "outcome", sourceHandle: "not_interested", target: "chatNI", type: EDGE },
   { id: "ex2-e7", source: "outcome", sourceHandle: "no_connect", target: "chatNC", type: EDGE },
   { id: "ex2-e8", source: "outcome", sourceHandle: "wrong_number", target: "end", type: EDGE },
-  { id: "ex2-e9", source: "chat", sourceHandle: "ordered", target: "end", type: EDGE },
-  { id: "ex2-e10", source: "chat", sourceHandle: "needs_help", target: "delay2", type: EDGE },
-  { id: "ex2-e11", source: "chat", sourceHandle: "default", target: "end", type: EDGE },
+  { id: "ex2-e9", source: "chat", sourceHandle: "btn_0", target: "end", type: EDGE },
+  { id: "ex2-e10", source: "chat", sourceHandle: "session_expired", target: "delay2", type: EDGE },
+  { id: "ex2-e11", source: "chat", sourceHandle: "reply_received", target: "end", type: EDGE },
+  { id: "ex2-e9b", source: "chat", sourceHandle: "btn_1", target: "delay2", type: EDGE },
   { id: "ex2-e12", source: "delay2", target: "chatReminder", type: EDGE },
   { id: "ex2-e13", source: "chatReminder", target: "end", type: EDGE },
   { id: "ex2-e14", source: "callbackDelay", target: "voice2", type: EDGE },
@@ -444,16 +441,20 @@ const sVoice = (id: string, title: string, subtitle?: string, cfg?: Partial<Pres
   },
 });
 
+// Library WhatsApp sends are linear "advance onward" steps: a single output
+// (a lead leaves once a reply arrives or the session window expires). Branching
+// is shown in the two showcase campaigns (EX1/EX2) and in the live builder.
 const sWa = (
   id: string, title: string, subtitle: string, template: string,
-  opts?: { vars?: PresetVarMap[]; exits?: { id: string; label: string; kind?: NodeOutputKind }[] },
+  opts?: { vars?: PresetVarMap[] },
 ): Spec => ({
   id, kind: "whatsapp", title, subtitle,
-  outputs: opts?.exits?.map((e) => ({ id: e.id, label: e.label, kind: (e.kind ?? "exit") as NodeOutputKind })),
+  // Outputs derive from the template's buttons: button templates expand to
+  // per-button + reply + session handles; text-only templates stay collapsed
+  // (single advance handle) since the Type-1 split toggle defaults off.
+  outputs: whatsappOutputs(resolveWaTemplate(template), false),
   config: {
     waNumber: "+91 98100 12345 · PiCommerce", waMode: "template", waTemplate: template, waVarMap: opts?.vars ?? NAME_VAR,
-    paths: opts?.exits?.filter((e) => (e.kind ?? "exit") !== "default")
-      .map((e) => ({ id: e.id, label: e.label, variable: "button_clicked", op: "equals", value: "true" })),
   },
 });
 
@@ -485,7 +486,22 @@ function buildCampaign(name: string, specs: Spec[], edges: SpecEdge[]): ExampleC
       locked: s.locked, outputs: s.outputs, abTest: s.abTest, config: s.config,
     },
   }));
-  const rawEdges: Edge[] = edges.map((e, i) => ({ id: `e${i}`, source: e.from, target: e.to, sourceHandle: e.port, type: EDGE }));
+  // Expand outcome handles: a node with >=2 outputs (e.g. a button WhatsApp node)
+  // whose journey defines a single port-less onward edge gets that edge fanned to
+  // every outcome handle → same target, so each handle is wired (valid) and the
+  // analytics funnel can split traffic across all branches. Collapsed single-handle
+  // nodes and already-ported edges (conditional/abSplit) are untouched.
+  const outputsById = new Map(rawNodes.map((n) => [n.id, n.data.outputs ?? []]));
+  const rawEdges: Edge[] = [];
+  let ei = 0;
+  edges.forEach((e) => {
+    const outs = outputsById.get(e.from) ?? [];
+    if (!e.port && outs.length >= 2) {
+      outs.forEach((o) => rawEdges.push({ id: `e${ei++}`, source: e.from, target: e.to, sourceHandle: o.id, type: EDGE }));
+    } else {
+      rawEdges.push({ id: `e${ei++}`, source: e.from, target: e.to, sourceHandle: e.port, type: EDGE });
+    }
+  });
   const { nodes, edges: laidEdges } = assemble(rawNodes, rawEdges);
   return { name, status: "ready", nodes, edges: laidEdges };
 }

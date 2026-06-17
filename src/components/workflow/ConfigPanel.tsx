@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, createContext, useContext } from "react";
 import {
   X, Copy, Trash2, AlertCircle, CheckCircle2, Plus, GripVertical, ChevronDown, Variable,
   Sparkles, GitBranch, FlaskConical, ArrowUp, ArrowDown,
@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import {
-  Select, SelectTrigger, SelectValue, SelectContent, SelectItem, SelectGroup, SelectLabel,
+  Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
 } from "@/components/ui/select";
 
 import { Label } from "@/components/ui/label";
@@ -21,8 +21,14 @@ import {
   AlertDialogFooter, AlertDialogTitle, AlertDialogDescription, AlertDialogAction, AlertDialogCancel,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
-import type { WorkflowNodeData, NodeKind, PresetConfig, PresetBranch } from "@/lib/campaign-types";
+import type { WorkflowNodeData, NodeKind, PresetConfig, PresetBranch, NodeOutput } from "@/lib/campaign-types";
 import { NODE_LABELS, SAMPLE_WORKFLOW_VARIABLES } from "@/lib/campaign-types";
+import { SEED_TEMPLATES } from "@/lib/waba-templates";
+import { whatsappOutputs, resolveWaTemplate, completedOutput } from "@/lib/wa-outputs";
+
+/** Per-node outcome variables (e.g. `<nodeId>.session_expired`) contributed by the
+ *  action nodes present in the flow — merged into the Conditional variable picker. */
+const ExtraVariablesContext = createContext<{ key: string; source: string }[]>([]);
 
 // Collision-free local id generator — Date.now() alone collides on rapid clicks,
 // producing duplicate React keys and duplicate canvas handle ids.
@@ -36,6 +42,8 @@ type Props = {
   onChange: (patch: Partial<WorkflowNodeData>) => void;
   onDelete: () => void;
   onDuplicate: () => void;
+  /** Outcome variables exposed by other action nodes in the flow (for the Conditional picker). */
+  extraVariables?: { key: string; source: string }[];
 };
 
 const MIN_PANEL_W = 360;
@@ -104,7 +112,7 @@ function ResizablePanel({ children }: { children: React.ReactNode }) {
 // silently disconnect the example graph's edges mid-demo).
 const NOOP_CHANGE = (_patch: Partial<WorkflowNodeData>) => undefined;
 
-export function ConfigPanel({ node, readOnly, onClose, onChange, onDelete, onDuplicate }: Props) {
+export function ConfigPanel({ node, readOnly, onClose, onChange, onDelete, onDuplicate, extraVariables }: Props) {
   if (!node) return null;
   const { data } = node;
   const valid = data.valid !== false;
@@ -120,6 +128,7 @@ export function ConfigPanel({ node, readOnly, onClose, onChange, onDelete, onDup
   const safeChange = preset ? NOOP_CHANGE : onChange;
 
   return (
+    <ExtraVariablesContext.Provider value={extraVariables ?? []}>
     <ResizablePanel>
         <div className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
           <div className="min-w-0">
@@ -200,6 +209,7 @@ export function ConfigPanel({ node, readOnly, onClose, onChange, onDelete, onDup
           </div>
         )}
     </ResizablePanel>
+    </ExtraVariablesContext.Provider>
   );
 }
 
@@ -712,6 +722,7 @@ function VoiceCallCore({ config, readOnly, mark }: { config?: PresetConfig; read
           </Field>
         </div>
       </Section>
+      <ActionAdvanceBanner kind="voiceCall" />
     </>
   );
 }
@@ -738,15 +749,27 @@ function StepChip({ n, done, muted }: { n: number; done?: boolean; muted?: boole
 function WhatsAppFields({ config, readOnly, mark, onChange }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
   return (
     <ActionNodeShell kind="whatsapp" config={config} readOnly={readOnly} mark={mark} onChange={onChange}
-      renderCore={(coreMark) => <WhatsAppCore config={config} readOnly={readOnly} mark={coreMark} />} />
+      renderCore={(coreMark) => <WhatsAppCore config={config} readOnly={readOnly} mark={coreMark} onChange={onChange} />} />
   );
 }
 
-function WhatsAppCore({ config, readOnly, mark }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void }) {
+const APPROVED_TEMPLATES = SEED_TEMPLATES.filter((t) => t.status === "Approved");
+
+function WhatsAppCore({
+  config, readOnly, mark, onChange,
+}: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
   const [mode, setMode] = useState<"template" | "freeform">(config?.waMode ?? "template");
-  const [templateSelected, setTemplateSelected] = useState(!!config?.waTemplate);
+  const [templateId, setTemplateId] = useState(config?.waTemplate ?? "");
   const [numberSelected, setNumberSelected] = useState(!!config?.waNumber);
   const [contentReady, setContentReady] = useState(!!config?.waTemplate || !!config?.waBody);
+  const [splitOutcomes, setSplitOutcomes] = useState(config?.waSplitOutcomes ?? false);
+  const template = resolveWaTemplate(templateId);
+  const templateSelected = !!template;
+  const hasButtons = mode !== "freeform" && !!template
+    && (template.buttons ?? []).some((b) => b.type === "URL" || b.type === "Quick Reply" || b.type === "Link Flow");
+  // Type 1 = no branchable buttons; its outcomes only split when the toggle is on.
+  const isType1 = !hasButtons;
+
   const waVarMap = config?.waVarMap ?? [
     { v: "{{1}}", def: "contact.first_name" },
     { v: "{{2}}", def: "ai.intent" },
@@ -755,6 +778,17 @@ function WhatsAppCore({ config, readOnly, mark }: { config?: PresetConfig; readO
   useEffect(() => {
     mark(numberSelected && contentReady, numberSelected ? undefined : "Select a connected WhatsApp number");
   }, [numberSelected, contentReady]);
+
+  // Publish the canvas handles (derived from template buttons + the Type-1 split
+  // toggle) AND persist the config so the node restores correctly when reopened.
+  useEffect(() => {
+    const outs = mode === "freeform" ? whatsappOutputs(undefined, splitOutcomes) : whatsappOutputs(template, splitOutcomes);
+    onChange({
+      outputs: outs,
+      config: { ...config, waMode: mode, waTemplate: templateId, waSplitOutcomes: splitOutcomes },
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, templateId, splitOutcomes]);
 
   return (
     <>
@@ -788,21 +822,38 @@ function WhatsAppCore({ config, readOnly, mark }: { config?: PresetConfig; readO
                   Approved template <span className="text-destructive">*</span>
                 </Label>
               </div>
-              <SelectLike
+              <Select
+                value={templateId || undefined}
                 disabled={readOnly}
-                options={["reactivate_v3 · Marketing", "onboarding_v1 · Utility", "winback_v2 · Marketing"]}
-                defaultValue={config?.waTemplate}
-                onPick={() => { setTemplateSelected(true); setContentReady(true); }}
-                placeholder="Choose template…"
-              />
-              <div className="rounded-lg border border-border bg-muted/30 p-3 text-[12px]">
-                <p className="mb-1 text-[10.5px] uppercase tracking-wider text-muted-foreground">Preview</p>
-                <p className="text-foreground">Hi <span className="text-ai">{`{{1}}`}</span>, we noticed you haven't traded <span className="text-ai">{`{{2}}`}</span> in a while. Tap below to explore latest insights.</p>
-                <div className="mt-2 flex gap-1.5">
-                  <span className="rounded border border-border bg-background px-2 py-1 text-[11px]">Explore now</span>
-                  <span className="rounded border border-border bg-background px-2 py-1 text-[11px]">Not interested</span>
+                onValueChange={(id) => { setTemplateId(id); setContentReady(true); }}
+              >
+                <SelectTrigger className="h-9 text-sm">
+                  <SelectValue placeholder="Choose template…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {/* Preset/legacy configs may reference a template name not in the
+                      registry — surface it so the node still reads as configured. */}
+                  {templateId && !template && (
+                    <SelectItem value={templateId}>{templateId} · legacy</SelectItem>
+                  )}
+                  {APPROVED_TEMPLATES.map((t) => (
+                    <SelectItem key={t.id} value={t.id}>{t.name} · {t.category}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {template && (
+                <div className="rounded-lg border border-border bg-muted/30 p-3 text-[12px]">
+                  <p className="mb-1 text-[10.5px] uppercase tracking-wider text-muted-foreground">Preview</p>
+                  <p className="text-foreground">{template.body}</p>
+                  {template.buttons && template.buttons.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {template.buttons.map((b, i) => (
+                        <span key={i} className="rounded border border-border bg-background px-2 py-1 text-[11px]">{b.text}</span>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              </div>
+              )}
             </div>
 
             <div className="border-t border-border/60" />
@@ -840,6 +891,24 @@ function WhatsAppCore({ config, readOnly, mark }: { config?: PresetConfig; readO
           </Field>
         </Section>
       )}
+
+      {/* Type-1 only: opt in to splitting reply vs. session into separate paths.
+          Type-2 (button) nodes always expose their outcomes, so the toggle is hidden. */}
+      {isType1 && (
+        <Section title="Outcome paths">
+          <div className="flex items-start justify-between gap-3 rounded-lg border border-border bg-card/40 px-3 py-2.5">
+            <div className="min-w-0">
+              <p className="text-[12px] font-medium">Split reply &amp; session into separate paths</p>
+              <p className="mt-0.5 text-[11px] text-muted-foreground">
+                Off: one output advances every lead onward. On: route “replied” and “session expired” separately.
+              </p>
+            </div>
+            <Switch checked={splitOutcomes} disabled={readOnly} onCheckedChange={setSplitOutcomes} />
+          </div>
+        </Section>
+      )}
+
+      <ActionAdvanceBanner kind="whatsapp" type1={isType1} split={splitOutcomes} />
     </>
   );
 }
@@ -876,6 +945,7 @@ function SmsCore({ config, readOnly, mark }: { config?: PresetConfig; readOnly?:
           <p className="mt-1 text-[10.5px] text-muted-foreground">Use @ to insert a variable. Media not supported.</p>
         </Field>
       </Section>
+      <ActionAdvanceBanner kind="sms" />
     </>
   );
 }
@@ -1019,9 +1089,12 @@ function VariablePicker({
 }: { value?: string; defaultValue?: string; disabled?: boolean; onChange: (v: string) => void }) {
   const [v, setV] = useState(value ?? defaultValue ?? "");
   useEffect(() => { if (value !== undefined) setV(value); }, [value]);
+  // Outcome variables from other action nodes in the flow (e.g. `<id>.session_expired`).
+  const extraVariables = useContext(ExtraVariablesContext);
+  const allVariables = [...extraVariables, ...SAMPLE_WORKFLOW_VARIABLES];
   // Preset/upstream variables (e.g. lifetime_order_value, call_disposition) aren't in
   // the sample list — surface the current value as its own option so it still renders.
-  const isCustom = !!v && !SAMPLE_WORKFLOW_VARIABLES.some((s) => s.key === v);
+  const isCustom = !!v && !allVariables.some((s) => s.key === v);
   return (
     <div className="relative">
       <Variable className="pointer-events-none absolute left-2.5 top-1/2 z-10 h-3 w-3 -translate-y-1/2 text-ai" />
@@ -1035,7 +1108,7 @@ function VariablePicker({
               {v} <span className="text-muted-foreground">· upstream</span>
             </SelectItem>
           )}
-          {SAMPLE_WORKFLOW_VARIABLES.map((s) => (
+          {allVariables.map((s) => (
             <SelectItem key={s.key} value={s.key} className="font-mono text-[12px]">
               {s.key} <span className="text-muted-foreground">· {s.source}</span>
             </SelectItem>
@@ -1084,14 +1157,6 @@ function PlatformChip({ active, disabled, children }: { active?: boolean; disabl
 
 type ActionKind = "voiceCall" | "whatsapp" | "sms";
 
-const EXIT_VARIABLES_BY_KIND: Record<ActionKind, string[]> = {
-  voiceCall: ["disposition", "call_connected", "call_duration", "retry_exhausted"],
-  whatsapp: ["reply_received", "button_clicked", "session_expired", "delivery_status"],
-  sms: ["delivered", "clicked", "retry_exhausted"],
-};
-
-const EXIT_OPERATORS = COMPARISON_OPERATORS;
-
 const AI_TRANSFORMATION_TYPES = [
   "Custom AI Action", "Translate", "Transliterate", "Numerical Parsing",
   "Numerical Transcription", "Currency Formatting", "Currency Transcription",
@@ -1099,10 +1164,6 @@ const AI_TRANSFORMATION_TYPES = [
 ];
 
 type AiTransform = { id: string; type: string; input: string; output: string; open: boolean };
-// One condition = one output path/edge. No AND/OR — each route is a single check
-// (e.g. reply_received → Voice Call, button_clicked → Follow-up), matching how the
-// flow branches visually on the canvas.
-type ExitPath = { id: string; label: string; variable: string; op: string; value: string };
 type Variant = { id: string; label: string; pct: number; open: boolean };
 
 function ActionNodeShell({
@@ -1118,7 +1179,6 @@ function ActionNodeShell({
   const [transforms, setTransforms] = useState<AiTransform[]>(
     () => (config?.transforms ?? []).map((t) => ({ ...t, open: false })),
   );
-  const [paths, setPaths] = useState<ExitPath[]>(config?.paths ?? []);
 
   // A/B experiment is the top-level mode switch: off → one config; on → per-variant config only.
   const [abEnabled, setAbEnabled] = useState(config?.abEnabled ?? false);
@@ -1136,15 +1196,11 @@ function ActionNodeShell({
     if (abEnabled) mark(abOk, abOk ? undefined : `Variant traffic must total 100% (currently ${total}%)`);
   }, [abEnabled, abOk, total]);
 
-  // Publish exit paths as labeled output handles on the canvas node (+ an implicit default/fallthrough).
+  // Voice / SMS advance through a single "Completed" output; WhatsApp outputs are
+  // derived from the selected template's buttons (published by WhatsAppCore).
   useEffect(() => {
-    onChange({
-      outputs: paths.length === 0 ? [] : [
-        ...paths.map((p, i) => ({ id: p.id, label: p.label || `Path ${i + 1}`, kind: "exit" as const })),
-        { id: "default", label: "Default / fallthrough", kind: "default" as const },
-      ],
-    });
-  }, [paths]);
+    if (kind === "voiceCall" || kind === "sms") onChange({ outputs: completedOutput() });
+  }, [kind]);
 
   // Surface the A/B experiment on the canvas node as a badge.
   useEffect(() => {
@@ -1244,7 +1300,7 @@ function ActionNodeShell({
             <Plus className="mr-1 h-3 w-3" /> Add variant
           </Button>
           <p className="text-[11px] text-muted-foreground">
-            Maximum 2 variants (A/B only). Variant is assigned before execution; Exit Conditions evaluate after the assigned variant completes.
+            Maximum 2 variants (A/B only). Variant is assigned before execution; the node advances once the assigned variant completes.
           </p>
         </div>
       )}
@@ -1259,15 +1315,31 @@ function ActionNodeShell({
           setTransforms={setTransforms}
         />
       )}
-
-      <ExitConditionsSection
-        kind={kind}
-        readOnly={readOnly}
-        paths={paths}
-        setPaths={setPaths}
-        transformOutputs={transforms.map((t) => t.output).filter(Boolean)}
-      />
     </>
+  );
+}
+
+/* --------------------------- Advance banner --------------------------- */
+
+/** Static, non-editable explainer of when a lead advances off an action node.
+ *  Replaces the old (editable) Exit Conditions section — branching is now done
+ *  with a downstream Conditional node. */
+function ActionAdvanceBanner({ kind, type1, split }: { kind: ActionKind; type1?: boolean; split?: boolean }) {
+  const text =
+    kind === "voiceCall"
+      ? "Leads advance when the call concludes or retries are exhausted. Branch on the outcome with a Conditional node downstream."
+      : kind === "sms"
+        ? "Leads advance once the message is sent. Branch on the outcome with a Conditional node downstream."
+        : type1
+          ? split
+            ? "Leads branch on whether a reply arrived or the 24-hour session window expired — wire each output."
+            : "Leads advance to the next step once a reply is received or the 24-hour session window expires."
+          : "Leads advance when a button is tapped, a reply is received, or the 24-hour session window expires. Each button is its own output on the canvas — connect an edge from every button.";
+  return (
+    <div className="mt-4 flex items-start gap-2 rounded-md border border-dashed border-border bg-muted/30 px-2.5 py-2 text-[11px] text-muted-foreground">
+      <GitBranch className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+      <span>{text}</span>
+    </div>
   );
 }
 
@@ -1397,152 +1469,3 @@ function AiTransformationsSection({
     </CollapsibleSection>
   );
 }
-
-/* --------------------------- Exit Conditions --------------------------- */
-
-function ExitConditionsSection({
-  kind, readOnly, paths, setPaths, transformOutputs,
-}: {
-  kind: ActionKind;
-  readOnly?: boolean;
-  paths: ExitPath[];
-  setPaths: React.Dispatch<React.SetStateAction<ExitPath[]>>;
-  transformOutputs: string[];
-}) {
-  const exitVars = EXIT_VARIABLES_BY_KIND[kind];
-
-  const addPath = () => setPaths((ps) => [...ps, {
-    id: uid("p"),
-    label: `Path ${ps.length + 1}`,
-    variable: exitVars[0],
-    op: "equals",
-    value: "",
-  }]);
-
-  return (
-    <CollapsibleSection
-      title="Exit Conditions"
-      icon={GitBranch}
-      defaultOpen
-      badge={paths.length || undefined}
-      headerRight={
-        <Button size="sm" variant="ghost" disabled={readOnly} onClick={(e) => { e.stopPropagation(); addPath(); }} className="h-7 gap-1 px-2 text-[11px]">
-          <Plus className="h-3 w-3" /> Add
-        </Button>
-      }
-    >
-      <p className="mb-2 text-[11px] text-muted-foreground">
-        Each route below becomes its own output on the canvas — connect an edge from each to send matching leads onward. Anything matching none leaves through <span className="font-medium text-foreground">Default / fallthrough</span>.
-      </p>
-
-      {paths.length === 0 ? (
-        <div className="space-y-2">
-          <div className="flex items-center gap-2.5 rounded-lg border border-border bg-muted/30 px-3 py-2.5">
-            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-border bg-background text-muted-foreground">
-              <ArrowDown className="h-3.5 w-3.5" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-[12px] font-medium text-foreground">Single default path</p>
-              <p className="text-[11px] text-muted-foreground">
-                {kind === "whatsapp"
-                  ? "Everyone leaves through one output once the reply is received or the session expires."
-                  : "Everyone leaves through one output once this node completes."}
-              </p>
-            </div>
-          </div>
-          <Button size="sm" variant="outline" disabled={readOnly} onClick={addPath} className="h-8 w-full text-xs">
-            <Plus className="mr-1 h-3 w-3" /> Add exit condition to branch the flow
-          </Button>
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {paths.map((p, pi) => (
-            <div key={p.id} className="rounded-lg border border-border bg-background p-2.5 space-y-2">
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] font-medium text-muted-foreground">→</span>
-                <Input
-                  value={p.label}
-                  disabled={readOnly}
-                  onChange={(e) => setPaths((ps) => ps.map((x) => x.id === p.id ? { ...x, label: e.target.value } : x))}
-                  className="h-7 flex-1 text-xs font-medium"
-                  placeholder="Route name (labels the output)"
-                />
-                <button
-                  disabled={readOnly}
-                  onClick={() => setPaths((ps) => ps.filter((x) => x.id !== p.id))}
-                  className="shrink-0 text-muted-foreground hover:text-destructive"
-                  aria-label="Remove route"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              </div>
-              <ExitVariablePicker
-                exitVars={exitVars}
-                transformOutputs={transformOutputs}
-                value={p.variable}
-                disabled={readOnly}
-                onChange={(v) => setPaths((ps) => ps.map((x) => x.id === p.id ? { ...x, variable: v } : x))}
-              />
-              <div className="grid grid-cols-2 gap-1.5">
-                <SelectLike
-                  disabled={readOnly}
-                  options={EXIT_OPERATORS}
-                  defaultValue={p.op}
-                  onPick={(v) => setPaths((ps) => ps.map((x) => x.id === p.id ? { ...x, op: v } : x))}
-                />
-                <Input
-                  value={p.value}
-                  disabled={readOnly || VALUELESS_OPERATORS.has(p.op)}
-                  onChange={(e) => setPaths((ps) => ps.map((x) => x.id === p.id ? { ...x, value: e.target.value } : x))}
-                  placeholder={VALUELESS_OPERATORS.has(p.op) ? "—" : "Value"}
-                  className="h-9 text-sm"
-                />
-              </div>
-              <p className="text-[10.5px] text-muted-foreground">
-                Output handle: <span className="font-mono">→ {p.label || `Path ${pi + 1}`}</span>
-              </p>
-            </div>
-          ))}
-        </div>
-      )}
-    </CollapsibleSection>
-  );
-}
-
-function ExitVariablePicker({
-  exitVars, transformOutputs, value, disabled, onChange,
-}: {
-  exitVars: string[];
-  transformOutputs: string[];
-  value: string;
-  disabled?: boolean;
-  onChange: (v: string) => void;
-}) {
-  return (
-    <div className="relative">
-      <Variable className="pointer-events-none absolute left-2.5 top-1/2 z-10 h-3 w-3 -translate-y-1/2 text-ai" />
-      <Select value={value || undefined} disabled={disabled} onValueChange={onChange}>
-        <SelectTrigger className="h-9 pl-7 font-mono text-[12px]">
-          <SelectValue placeholder="Select variable…" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectGroup>
-            <SelectLabel>Node outputs</SelectLabel>
-            {exitVars.map((v) => <SelectItem key={v} value={v} className="font-mono text-[12px]">{v}</SelectItem>)}
-          </SelectGroup>
-          {transformOutputs.length > 0 && (
-            <SelectGroup>
-              <SelectLabel>Transformation outputs</SelectLabel>
-              {transformOutputs.map((v) => <SelectItem key={v} value={v} className="font-mono text-[12px]">{v}</SelectItem>)}
-            </SelectGroup>
-          )}
-          <SelectGroup>
-            <SelectLabel>Workflow variables</SelectLabel>
-            {SAMPLE_WORKFLOW_VARIABLES.map((s) => <SelectItem key={s.key} value={s.key} className="font-mono text-[12px]">{s.key}</SelectItem>)}
-          </SelectGroup>
-        </SelectContent>
-      </Select>
-    </div>
-  );
-}
-

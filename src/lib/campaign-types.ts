@@ -34,7 +34,7 @@ export type CampaignStatus =
 export type RetryPolicy = { maxRetries: number; backoffSeconds: number };
 
 /** A labeled output port on a node — rendered as its own source handle on the canvas. */
-export type NodeOutputKind = "branch" | "variant" | "exit" | "default";
+export type NodeOutputKind = "branch" | "variant" | "outcome" | "default";
 export type NodeOutput = { id: string; label: string; kind: NodeOutputKind };
 
 /**
@@ -50,7 +50,6 @@ export type PresetSchemaField = { id: string; name: string; type: "String" | "Nu
 export type PresetBranch = { id: string; label: string; variable: string; op: string; value: string; value2?: string };
 export type PresetSplitVariant = { id: string; label: string; pct: number };
 export type PresetTransform = { id: string; type: string; input: string; output: string };
-export type PresetExitPath = { id: string; label: string; variable: string; op: string; value: string };
 export type PresetVarMap = { v: string; def: string };
 
 export type PresetConfig = {
@@ -73,7 +72,6 @@ export type PresetConfig = {
   splitVariants?: PresetSplitVariant[];
   // ---- Action shell (voice / whatsapp / sms) ----
   transforms?: PresetTransform[];
-  paths?: PresetExitPath[];
   abEnabled?: boolean;
   abVariants?: PresetSplitVariant[];
   // ---- Voice Call core ----
@@ -87,7 +85,10 @@ export type PresetConfig = {
   // ---- WhatsApp core ----
   waNumber?: string;
   waMode?: "template" | "freeform";
+  /** A {@link WaTemplate} id or name from the template registry. Unresolved values fall back to a no-button (Type 1) node. */
   waTemplate?: string;
+  /** Type-1 (no-button) only: when true, splits into reply_received + session_expired handles; when false (default) the node has a single "advance" output. */
+  waSplitOutcomes?: boolean;
   waVarMap?: PresetVarMap[];
   waBody?: string;
   // ---- SMS core ----

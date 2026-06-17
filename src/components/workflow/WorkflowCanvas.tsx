@@ -10,6 +10,7 @@ import { nodeTypes } from "./nodes";
 import { edgeTypes } from "./edges";
 import type { WorkflowNodeData, NodeKind, CampaignStatus } from "@/lib/campaign-types";
 import { NODE_LABELS } from "@/lib/campaign-types";
+import { whatsappOutputs, completedOutput, deriveNodeOutcomeVariables } from "@/lib/wa-outputs";
 import { EXAMPLE_CAMPAIGNS } from "@/lib/campaign-examples";
 import { elkLayout, type Point } from "@/lib/flow-layout";
 import { useRegion, localizeTzAbbrev, localizeCurrency } from "@/lib/region";
@@ -30,7 +31,7 @@ const SEED_NODES: Node<WorkflowNodeData>[] = [
         { id: "vB", label: "B · 40%", kind: "variant" },
       ] } },
   { id: "wa", type: "workflow", position: { x: 320, y: 215 },
-    data: { kind: "whatsapp", title: "WhatsApp", subtitle: "Template: reactivate_v3", valid: true } },
+    data: { kind: "whatsapp", title: "WhatsApp", subtitle: "Send WhatsApp message", valid: true, outputs: whatsappOutputs(undefined) } },
   { id: "voice", type: "workflow", position: { x: 320, y: 335 },
     data: { kind: "voiceCall", title: "Voice Call", subtitle: "Conversational reactivation", valid: false, error: "Select voice agent" } },
   { id: "delay", type: "workflow", position: { x: 0, y: 470 },
@@ -56,9 +57,9 @@ const DEFAULT_NODE_DATA: Record<NodeKind, Partial<WorkflowNodeData>> = {
   conditional: { subtitle: "Route on variable", valid: false, error: "Add a branch" },
   abSplit: { subtitle: "Split traffic", valid: false, error: "Set split %" },
   delay: { subtitle: "Wait", valid: false, error: "Set duration" },
-  voiceCall: { subtitle: "AI voice outreach", valid: false, error: "Select agent" },
-  whatsapp: { subtitle: "Send WhatsApp message", valid: false, error: "Pick template" },
-  sms: { subtitle: "Send SMS", valid: false, error: "Add message body" },
+  voiceCall: { subtitle: "AI voice outreach", valid: false, error: "Select agent", outputs: completedOutput() },
+  whatsapp: { subtitle: "Send WhatsApp message", valid: false, error: "Pick template", outputs: whatsappOutputs(undefined) },
+  sms: { subtitle: "Send SMS", valid: false, error: "Add message body", outputs: completedOutput() },
   
   adsCampaign: { subtitle: "WhatsApp CTWA ad", valid: false, error: "Complete setup" },
 };
@@ -192,6 +193,49 @@ export function WorkflowCanvas({
     const valid = nodes.filter((n) => n.data.valid !== false).length;
     onValidityChange?.(valid, total);
   }, [nodes, onValidityChange]);
+
+  // Each WhatsApp template-button output must be wired onward (it's a real branch
+  // a lead can take). Only enforced in the editable builder — preset/read-only
+  // example graphs are authored complete. Keyed on a signature of the button
+  // outputs + edge wiring (NOT valid/error) so the effect's own valid/error
+  // writes don't re-trigger it into an infinite update loop.
+  const waButtonWiringSig = useMemo(() => {
+    const waPart = nodes
+      .filter((n) => n.data.kind === "whatsapp")
+      .map((n) => n.id + ":" + (n.data.outputs ?? []).filter((o) => o.id.startsWith("btn_")).map((o) => o.id).join(","))
+      .join("|");
+    const edgePart = edges.map((e) => e.source + ">" + (e.sourceHandle ?? "")).join("|");
+    return waPart + "#" + edgePart;
+  }, [nodes, edges]);
+
+  useEffect(() => {
+    if (!editable) return;
+    setNodes((nds) => {
+      let changed = false;
+      const next = nds.map((n) => {
+        if (n.data.kind !== "whatsapp") return n;
+        const buttonOuts = (n.data.outputs ?? []).filter((o) => o.id.startsWith("btn_"));
+        const unwired = buttonOuts.find((o) => !edges.some((e) => e.source === n.id && (e.sourceHandle ?? null) === o.id));
+        const error = unwired ? `Button '${unwired.label}' isn't connected` : undefined;
+        // Don't override a pre-existing config error (e.g. "Pick template").
+        const hadButtonError = (n.data.error ?? "").startsWith("Button '");
+        if (error) {
+          if (n.data.error === error && n.data.valid === false) return n;
+          changed = true;
+          return { ...n, data: { ...n.data, valid: false, error } };
+        }
+        if (hadButtonError) {
+          changed = true;
+          return { ...n, data: { ...n.data, valid: true, error: undefined } };
+        }
+        return n;
+      });
+      return changed ? next : nds;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [waButtonWiringSig, editable, setNodes]);
+
+  const outcomeVariables = useMemo(() => deriveNodeOutcomeVariables(nodes), [nodes]);
 
   // Simulated execution pulse for running state
   useEffect(() => {
@@ -384,12 +428,14 @@ export function WorkflowCanvas({
       {!previewOnly && <NodePalette onAdd={addNode} disabled={!editable} />}
 
       <ConfigPanel
+        key={selected?.id}
         node={aiBuilding ? null : selected}
         readOnly={!editable}
         onClose={() => setSelected(null)}
         onChange={(patch) => selected && updateNodeData(selected.id, patch)}
         onDelete={() => selected && deleteNode(selected.id)}
         onDuplicate={() => selected && duplicateNode(selected.id)}
+        extraVariables={outcomeVariables.filter((v) => !selected || !v.key.startsWith(`${selected.id}.`))}
       />
 
       {!previewOnly && (

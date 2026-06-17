@@ -531,6 +531,27 @@ function NodeDrawer({
     });
   }, [node, kind, run]);
 
+  // Outcome distribution for WhatsApp nodes that expose ≥2 handles (button
+  // templates, or Type-1 nodes with the split toggle on). Grouped by handle.
+  const waOutcomeDist = useMemo(() => {
+    if (!node || kind !== "whatsapp") return [];
+    const out = run.sankey.edges.filter((e) => e.source === node.id);
+    const byHandle = new Map<string, { label: string; target: string; value: number }>();
+    out.forEach((e) => {
+      const h = e.sourceHandle ?? "__advance__";
+      const tgt = run.sankey.nodes.find((n) => n.id === e.target);
+      const prev = byHandle.get(h);
+      const label = e.handleLabel
+        ?? (h === "session_expired" ? "Session expired" : h === "reply_received" ? "Replied" : h === "__advance__" ? "Advance" : h);
+      if (prev) prev.value += e.value;
+      else byHandle.set(h, { label, target: tgt?.name.split(" · ")[0] ?? e.target, value: e.value });
+    });
+    const rows = [...byHandle.values()];
+    if (rows.length < 2) return [];
+    const total = rows.reduce((s, r) => s + r.value, 0) || 1;
+    return rows.map((r) => ({ ...r, pct: (r.value / total) * 100 }));
+  }, [node, kind, run]);
+
   return (
     <Sheet open={open} onOpenChange={(v) => !v && onClose()}>
       <SheetContent className="w-[460px] max-w-[92vw] overflow-y-auto overflow-x-hidden sm:max-w-[460px]">
@@ -593,6 +614,23 @@ function NodeDrawer({
             <h4 className="mb-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Branch Distribution</h4>
             <div className="divide-y divide-border rounded-lg border border-border bg-card">
               {branchDist.map((b) => (
+                <div key={b.label} className="flex items-center justify-between gap-3 px-3 py-2 text-[12px]">
+                  <span className="font-medium">{b.label}</span>
+                  <span className="text-muted-foreground">→ {b.target}</span>
+                  <span className="ml-auto font-mono tabular-nums">{b.value.toLocaleString()}</span>
+                  <span className="w-12 text-right font-medium tabular-nums">{b.pct.toFixed(1)}%</span>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* Outcome distribution — WhatsApp nodes with multiple handles */}
+        {waOutcomeDist.length > 0 && (
+          <section className="mt-5">
+            <h4 className="mb-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Outcome Distribution</h4>
+            <div className="divide-y divide-border rounded-lg border border-border bg-card">
+              {waOutcomeDist.map((b) => (
                 <div key={b.label} className="flex items-center justify-between gap-3 px-3 py-2 text-[12px]">
                   <span className="font-medium">{b.label}</span>
                   <span className="text-muted-foreground">→ {b.target}</span>

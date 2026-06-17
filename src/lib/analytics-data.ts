@@ -28,7 +28,7 @@ export type SankeyNode = {
   exited: number;
 };
 
-export type SankeyEdge = { source: string; target: string; value: number };
+export type SankeyEdge = { source: string; target: string; value: number; sourceHandle?: string; handleLabel?: string };
 
 export type CampaignAnalytics = {
   id: string;
@@ -92,6 +92,16 @@ function nodePassRate(kind: SankeyNodeKind, id: string, title: string, salt: str
   return Math.max(0.5, Math.min(0.97, base + noise + bump));
 }
 
+/** Semantic base weight for a WhatsApp outcome handle — session expiry (no
+ *  engagement) is the largest slice, button taps moderate, freeform replies the
+ *  smallest. Per-(run, node, handle) noise keeps the split varied and realistic. */
+function waHandleBaseWeight(handle: string): number {
+  if (handle === "session_expired") return 1.7;
+  if (handle === "reply_received") return 0.8;
+  if (handle.startsWith("btn_")) return 1.1;
+  return 1;
+}
+
 /** Propagate `base` leads through an example graph into a consistent run. */
 function deriveRun(ex: ExampleCampaign, base: number, runId: string, startedAt: string): RunRow {
   const { nodes, edges } = ex;
@@ -138,12 +148,20 @@ function deriveRun(ex: ExampleCampaign, base: number, runId: string, startedAt: 
       if (!groups.has(h)) groups.set(h, []);
       groups.get(h)!.push(i);
     });
+    const handleIds = [...groups.keys()];
     const groupArr = [...groups.values()];
     const G = groupArr.length;
     const equal = kind === "abSplit" || G === 1;
     const denom = G * (G + 1) / 2;
+    // WhatsApp outcomes split by semantic weight (session/reply/button) with a
+    // deterministic per-(run,node,handle) wobble; conditional branches keep the
+    // top-to-bottom triangular weighting; A/B and single-output split evenly.
+    const waWeights = kind === "whatsapp" && !equal
+      ? handleIds.map((h) => waHandleBaseWeight(h) * (1 + ((hashStr(runId + ":" + id + ":" + h) % 17) - 8) / 100))
+      : null;
+    const waSum = waWeights ? waWeights.reduce((a, b) => a + b, 0) || 1 : 1;
     groupArr.forEach((arr, gi) => {
-      const w = equal ? 1 / G : (G - gi) / denom;
+      const w = equal ? 1 / G : waWeights ? waWeights[gi] / waSum : (G - gi) / denom;
       const groupTotal = exitedCount * w;
       arr.forEach((i) => edgeValue.set(i, Math.round(groupTotal / arr.length)));
     });
@@ -153,8 +171,14 @@ function deriveRun(ex: ExampleCampaign, base: number, runId: string, startedAt: 
     id: n.id, name: n.data.title, kind: kindOf.get(n.id)!,
     entered: entered.get(n.id) ?? 0, exited: exited.get(n.id) ?? 0,
   }));
+  // Map (nodeId, handleId) → the node's output label, so the drawer can show a
+  // named outcome distribution (button text / "Replied" / "Session expired").
+  const outputLabel = new Map<string, string>();
+  nodes.forEach((n) => (n.data.outputs ?? []).forEach((o) => outputLabel.set(n.id + ":" + o.id, o.label)));
   const sankeyEdges: SankeyEdge[] = edges.map((e, i) => ({
     source: e.source, target: e.target, value: edgeValue.get(i) ?? 0,
+    sourceHandle: e.sourceHandle ?? undefined,
+    handleLabel: e.sourceHandle ? outputLabel.get(e.source + ":" + e.sourceHandle) : undefined,
   }));
 
   const completed = sankeyNodes.filter((n) => n.kind === "end").reduce((s, n) => s + n.entered, 0);
