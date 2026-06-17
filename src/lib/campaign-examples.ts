@@ -512,13 +512,12 @@ const C_LEADQUAL = buildCampaign("BFSI · Lead Qualification", [
   ]),
   sVoice("vfuHot", "Voice AI follow-up", "Reattempt · 1 retry", { maxAttempts: 1 }),
   // warm
-  sWa("wqual", "WhatsApp qualification", "WhatsApp · qualify", "lead_qualify_v1"),
-  sAbSplit("ab", "A/B split", "A/B · Urgency vs Offer", [
+  sAbSplit("ab", "A/B split", "Qualification · Urgency vs Offer", [
     { id: "vA", label: "Urgency" },
     { id: "vB", label: "Offer" },
   ]),
-  sWa("abA", "WhatsApp · Urgency", "Variant · Urgency", "lead_urgency_v1"),
-  sWa("abB", "WhatsApp · Offer", "Variant · Offer", "lead_offer_v1"),
+  sWa("abA", "WhatsApp qualification · Urgency", "Variant · Urgency angle", "lead_urgency_v1"),
+  sWa("abB", "WhatsApp qualification · Offer", "Variant · Offer angle", "lead_offer_v1"),
   sWa("appWarm", "Application link", "WhatsApp · apply now", "application_link_v1"),
   sDelay("d1", 23, "Hours"),
   sWa("wfu", "WhatsApp follow-up", "WhatsApp · nudge", "lead_followup_v1"),
@@ -535,7 +534,7 @@ const C_LEADQUAL = buildCampaign("BFSI · Lead Qualification", [
   ed("score", "vqual", "hot"), ed("vqual", "hotInt"),
   ed("hotInt", "waApp", "yes"), ed("hotInt", "end", "no"),
   ed("waApp", "hotConv"), ed("hotConv", "end", "conv"), ed("hotConv", "vfuHot", "no"), ed("vfuHot", "end"),
-  ed("score", "wqual", "warm"), ed("wqual", "ab"),
+  ed("score", "ab", "warm"),
   ed("ab", "abA", "vA"), ed("ab", "abB", "vB"),
   ed("abA", "appWarm"), ed("abB", "appWarm"),
   ed("appWarm", "d1"), ed("d1", "wfu"), ed("wfu", "warmConv"),
@@ -559,14 +558,13 @@ const C_RENEWAL = buildCampaign("BFSI · Insurance Renewal", [
     { id: "no", label: "Not renewed", value: "pending" },
   ]),
   sVoice("vfuHigh", "Voice AI follow-up", "Reattempt · 1 retry", { maxAttempts: 1 }),
-  // low — A/B split into two genuinely different messages, then converge
-  sAbSplit("abLow", "A/B split", "A/B · Benefits vs Savings", [
+  // low — the renewal reminder IS the A/B test (one message, two copy variants)
+  sAbSplit("abLow", "A/B split", "Renewal reminder · Benefits vs Savings", [
     { id: "vA", label: "Benefits", pct: 50 },
     { id: "vB", label: "Savings", pct: 50 },
   ]),
-  sWa("waBenefits", "WhatsApp · Benefits", "WhatsApp · benefits angle", "renewal_benefits_v1"),
-  sWa("waSavings", "WhatsApp · Savings", "WhatsApp · savings angle", "renewal_savings_v1"),
-  sWa("waRem", "WhatsApp renewal reminder", "WhatsApp · reminder", "renewal_reminder_v1"),
+  sWa("waBenefits", "WhatsApp renewal reminder · Benefits", "Variant · Benefits angle", "renewal_benefits_v1"),
+  sWa("waSavings", "WhatsApp renewal reminder · Savings", "Variant · Savings angle", "renewal_savings_v1"),
   sDelay("d1", 23, "Hours"),
   sWa("wfu", "WhatsApp follow-up", "WhatsApp · nudge", "renewal_followup_v1"),
   sCond("rcLow", "Renewed?", "renewal_status", [
@@ -584,8 +582,8 @@ const C_RENEWAL = buildCampaign("BFSI · Insurance Renewal", [
   // low — A/B split → two messages → converge on reminder → delay → follow-up → renewed?
   ed("prem", "abLow", "low"),
   ed("abLow", "waBenefits", "vA"), ed("abLow", "waSavings", "vB"),
-  ed("waBenefits", "waRem"), ed("waSavings", "waRem"),
-  ed("waRem", "d1"), ed("d1", "wfu"), ed("wfu", "rcLow"),
+  ed("waBenefits", "d1"), ed("waSavings", "d1"),
+  ed("d1", "wfu"), ed("wfu", "rcLow"),
   ed("rcLow", "end", "yes"),
   ed("rcLow", "vFinal", "no"), ed("vFinal", "rlFinal"), ed("rlFinal", "end"),
 ]);
@@ -607,14 +605,14 @@ const C_UPSELL = buildCampaign("BFSI · Upsell / Cross-Sell", [
   ]),
   sVoice("vfuHigh", "Voice AI follow-up", "Reattempt · 1 retry", { maxAttempts: 1 }),
   // borrower
-  sWa("waOffer", "WhatsApp personalized offer", "WhatsApp · offer", "personalized_offer_v1",
-    { vars: [{ v: "{{1}}", def: "contact.first_name" }, { v: "{{2}}", def: "product_held" }] }),
-  sAbSplit("ab", "A/B split", "A/B · Offer vs Urgency", [
+  sAbSplit("ab", "A/B split", "Personalized offer · Offer vs Urgency", [
     { id: "vA", label: "Offer" },
     { id: "vB", label: "Urgency" },
   ]),
-  sWa("abA", "WhatsApp · Offer", "Variant · Offer", "upsell_offer_v1"),
-  sWa("abB", "WhatsApp · Urgency", "Variant · Urgency", "upsell_urgency_v1"),
+  sWa("abA", "WhatsApp personalized offer · Offer", "Variant · Offer angle", "upsell_offer_v1",
+    { vars: [{ v: "{{1}}", def: "contact.first_name" }, { v: "{{2}}", def: "product_held" }] }),
+  sWa("abB", "WhatsApp personalized offer · Urgency", "Variant · Urgency angle", "upsell_urgency_v1",
+    { vars: [{ v: "{{1}}", def: "contact.first_name" }, { v: "{{2}}", def: "product_held" }] }),
   sDelay("d1", 23, "Hours"),
   sWa("waRem", "WhatsApp reminder + application link", "WhatsApp · apply now", "offer_apply_v1"),
   sCond("convLow", "Conversion check", "application_status", [
@@ -628,7 +626,7 @@ const C_UPSELL = buildCampaign("BFSI · Upsell / Cross-Sell", [
   ed("start", "aud"), ed("aud", "type"),
   ed("type", "vOffer", "high_bal"), ed("vOffer", "appHigh"), ed("appHigh", "convHigh"),
   ed("convHigh", "end", "conv"), ed("convHigh", "vfuHigh", "no"), ed("vfuHigh", "end"),
-  ed("type", "waOffer", "borrower"), ed("waOffer", "ab"),
+  ed("type", "ab", "borrower"),
   ed("ab", "abA", "vA"), ed("ab", "abB", "vB"),
   ed("abA", "d1"), ed("abB", "d1"),
   ed("d1", "waRem"), ed("waRem", "convLow"),
@@ -682,13 +680,12 @@ const C_ACTIVATION = buildCampaign("Retail · Activation", [
     { id: "no", label: "Not converted", value: "pending" },
   ]),
   sVoice("vfuHigh", "Voice AI follow-up", "Reattempt · 1 retry", { maxAttempts: 1 }),
-  sWa("waWelcome", "WhatsApp welcome offer", "WhatsApp · welcome offer", "welcome_offer_v1"),
-  sAbSplit("ab", "A/B split", "A/B · Discount vs Free delivery", [
+  sAbSplit("ab", "A/B split", "Welcome offer · Discount vs Free delivery", [
     { id: "vA", label: "Discount" },
     { id: "vB", label: "Free delivery" },
   ]),
-  sWa("abA", "WhatsApp · Discount", "Variant · Discount", "activation_discount_v1"),
-  sWa("abB", "WhatsApp · Free delivery", "Variant · Free delivery", "activation_free_delivery_v1"),
+  sWa("abA", "WhatsApp welcome offer · Discount", "Variant · Discount angle", "activation_discount_v1"),
+  sWa("abB", "WhatsApp welcome offer · Free delivery", "Variant · Free delivery angle", "activation_free_delivery_v1"),
   sWa("cartLow", "Cart link", "WhatsApp · complete order", "cart_link_v1"),
   sDelay("d1", 23, "Hours"),
   sWa("waRem", "WhatsApp reminder + cart link", "WhatsApp · complete order", "cart_link_v1"),
@@ -703,7 +700,7 @@ const C_ACTIVATION = buildCampaign("Retail · Activation", [
   ed("start", "aud"), ed("aud", "intent"),
   ed("intent", "vBuy", "high"), ed("vBuy", "cartHigh"), ed("cartHigh", "orderHigh"),
   ed("orderHigh", "end", "conv"), ed("orderHigh", "vfuHigh", "no"), ed("vfuHigh", "end"),
-  ed("intent", "waWelcome", "low"), ed("waWelcome", "ab"),
+  ed("intent", "ab", "low"),
   ed("ab", "abA", "vA"), ed("ab", "abB", "vB"),
   ed("abA", "cartLow"), ed("abB", "cartLow"),
   ed("cartLow", "d1"), ed("d1", "waRem"), ed("waRem", "orderLow"),
@@ -725,13 +722,12 @@ const C_REWARD = buildCampaign("Retail · Reward Expiry", [
     { id: "no", label: "Not redeemed", value: "pending" },
   ]),
   sWa("finalHigh", "WhatsApp final reminder", "WhatsApp · last chance", "reward_final_v1"),
-  sWa("waAlert", "WhatsApp expiry alert", "WhatsApp · points expiring", "reward_expiry_v1"),
-  sAbSplit("ab", "A/B split", "A/B · Urgency vs Offer", [
+  sAbSplit("ab", "A/B split", "Expiry alert · Urgency vs Offer", [
     { id: "vA", label: "Urgency" },
     { id: "vB", label: "Offer" },
   ]),
-  sWa("abA", "WhatsApp · Urgency", "Variant · Urgency", "reward_urgency_v1"),
-  sWa("abB", "WhatsApp · Offer", "Variant · Offer", "reward_offer_v1"),
+  sWa("abA", "WhatsApp expiry alert · Urgency", "Variant · Urgency angle", "reward_urgency_v1"),
+  sWa("abB", "WhatsApp expiry alert · Offer", "Variant · Offer angle", "reward_offer_v1"),
   sWa("redLow", "Redemption link", "WhatsApp · redeem now", "redemption_link_v1"),
   sDelay("d1", 23, "Hours"),
   sWa("waRem2", "WhatsApp reminder", "WhatsApp · redeem now", "redemption_link_v1"),
@@ -745,7 +741,7 @@ const C_REWARD = buildCampaign("Retail · Reward Expiry", [
   ed("start", "aud"), ed("aud", "points"),
   ed("points", "vRem", "high"), ed("vRem", "redHigh"), ed("redHigh", "redCheck"),
   ed("redCheck", "end", "yes"), ed("redCheck", "finalHigh", "no"), ed("finalHigh", "end"),
-  ed("points", "waAlert", "low"), ed("waAlert", "ab"),
+  ed("points", "ab", "low"),
   ed("ab", "abA", "vA"), ed("ab", "abB", "vB"),
   ed("abA", "redLow"), ed("abB", "redLow"),
   ed("redLow", "d1"), ed("d1", "waRem2"), ed("waRem2", "redCheck2"),
@@ -767,13 +763,12 @@ const C_WINBACK = buildCampaign("Retail · Winback", [
     { id: "no", label: "Not purchased", value: "pending" },
   ]),
   sVoice("vfuHigh", "Voice AI follow-up", "Reattempt · 1 retry", { maxAttempts: 1 }),
-  sWa("waOffer", "WhatsApp offer", "WhatsApp · winback offer", "winback_offer_v1"),
-  sAbSplit("ab", "A/B split", "A/B · Cashback vs Discount", [
+  sAbSplit("ab", "A/B split", "Winback offer · Cashback vs Discount", [
     { id: "vA", label: "Cashback" },
     { id: "vB", label: "Discount" },
   ]),
-  sWa("abA", "WhatsApp · Cashback", "Variant · Cashback", "winback_cashback_v1"),
-  sWa("abB", "WhatsApp · Discount", "Variant · Discount", "winback_discount_v1"),
+  sWa("abA", "WhatsApp winback offer · Cashback", "Variant · Cashback angle", "winback_cashback_v1"),
+  sWa("abB", "WhatsApp winback offer · Discount", "Variant · Discount angle", "winback_discount_v1"),
   sWa("purLow", "Purchase link", "WhatsApp · shop now", "purchase_link_v1"),
   sDelay("d1", 23, "Hours"),
   sCond("purchased", "Purchased?", "order_status", [
@@ -786,7 +781,7 @@ const C_WINBACK = buildCampaign("Retail · Winback", [
   ed("start", "aud"), ed("aud", "cltv"),
   ed("cltv", "vCall", "high"), ed("vCall", "purHigh"), ed("purHigh", "purCheck"),
   ed("purCheck", "end", "yes"), ed("purCheck", "vfuHigh", "no"), ed("vfuHigh", "end"),
-  ed("cltv", "waOffer", "mid"), ed("waOffer", "ab"),
+  ed("cltv", "ab", "mid"),
   ed("ab", "abA", "vA"), ed("ab", "abB", "vB"),
   ed("abA", "purLow"), ed("abB", "purLow"),
   ed("purLow", "d1"), ed("d1", "purchased"),
@@ -808,13 +803,12 @@ const C_SUBSCRIPTION = buildCampaign("Retail · Subscription Conversion", [
     { id: "no", label: "Not subscribed", value: "pending" },
   ]),
   sVoice("vRemHigh", "Voice AI reminder", "Reattempt · 1 retry", { maxAttempts: 1 }),
-  sWa("waBenefits", "WhatsApp benefits", "WhatsApp · subscription benefits", "subscription_benefits_v1"),
-  sAbSplit("ab", "A/B split", "A/B · Extra benefits vs Urgency", [
+  sAbSplit("ab", "A/B split", "Subscription benefits · Extra vs Urgency", [
     { id: "vA", label: "Extra benefits" },
     { id: "vB", label: "Urgency" },
   ]),
-  sWa("abA", "WhatsApp · Extra benefits", "Variant · Extra benefits", "subscription_extra_v1"),
-  sWa("abB", "WhatsApp · Urgency", "Variant · Urgency", "subscription_urgency_v1"),
+  sWa("abA", "WhatsApp subscription benefits · Extra", "Variant · Extra benefits angle", "subscription_extra_v1"),
+  sWa("abB", "WhatsApp subscription benefits · Urgency", "Variant · Urgency angle", "subscription_urgency_v1"),
   sWa("subLow", "Subscription link", "WhatsApp · subscribe", "subscription_link_v1"),
   sDelay("d1", 23, "Hours"),
   sCond("subCheckLow", "Subscribed?", "subscription_status", [
@@ -827,7 +821,7 @@ const C_SUBSCRIPTION = buildCampaign("Retail · Subscription Conversion", [
   ed("start", "aud"), ed("aud", "orders"),
   ed("orders", "vPitch", "high"), ed("vPitch", "subHigh"), ed("subHigh", "subCheckHigh"),
   ed("subCheckHigh", "end", "yes"), ed("subCheckHigh", "vRemHigh", "no"), ed("vRemHigh", "end"),
-  ed("orders", "waBenefits", "low"), ed("waBenefits", "ab"),
+  ed("orders", "ab", "low"),
   ed("ab", "abA", "vA"), ed("ab", "abB", "vB"),
   ed("abA", "subLow"), ed("abB", "subLow"),
   ed("subLow", "d1"), ed("d1", "subCheckLow"),
@@ -849,13 +843,12 @@ const C_SEASONAL = buildCampaign("Retail · Seasonal Sale", [
     { id: "no", label: "Not purchased", value: "pending" },
   ]),
   sVoice("vfuVip", "Voice AI follow-up", "Reattempt · 1 retry", { maxAttempts: 1 }),
-  sWa("waAnnounce", "WhatsApp sale announcement", "WhatsApp · sale is live", "sale_announce_v1"),
-  sAbSplit("ab", "A/B split", "A/B · Trends vs Limited period", [
+  sAbSplit("ab", "A/B split", "Sale announcement · Trends vs Limited period", [
     { id: "vA", label: "Trends" },
     { id: "vB", label: "Limited period" },
   ]),
-  sWa("abA", "WhatsApp · Trends", "Variant · Trends", "seasonal_trends_v1"),
-  sWa("abB", "WhatsApp · Limited period", "Variant · Limited period offer", "seasonal_limited_v1"),
+  sWa("abA", "WhatsApp sale announcement · Trends", "Variant · Trends angle", "seasonal_trends_v1"),
+  sWa("abB", "WhatsApp sale announcement · Limited period", "Variant · Limited period angle", "seasonal_limited_v1"),
   sDelay("d1", 23, "Hours"),
   sCond("clicked", "Clicked?", "link_clicked", [
     { id: "yes", label: "Yes", value: "true" },
@@ -873,7 +866,7 @@ const C_SEASONAL = buildCampaign("Retail · Seasonal Sale", [
   ed("start", "aud"), ed("aud", "vip"),
   ed("vip", "vEarly", "vip"), ed("vEarly", "saleVip"), ed("saleVip", "purVip"),
   ed("purVip", "end", "yes"), ed("purVip", "vfuVip", "no"), ed("vfuVip", "end"),
-  ed("vip", "waAnnounce", "regular"), ed("waAnnounce", "ab"),
+  ed("vip", "ab", "regular"),
   ed("ab", "abA", "vA"), ed("ab", "abB", "vB"),
   ed("abA", "d1"), ed("abB", "d1"),
   ed("d1", "clicked"),
@@ -933,13 +926,12 @@ const C_OUTBOUND = buildCampaign("D2C · Outbound Sales", [
     { id: "no", label: "Not converted", value: "pending" },
   ]),
   sVoice("vfuHigh", "Voice AI follow-up", "Reattempt · 1 retry", { maxAttempts: 1 }),
-  sWa("waIntro", "WhatsApp product intro", "WhatsApp · product intro", "product_intro_v1"),
-  sAbSplit("ab", "A/B split", "A/B · Variety vs Offers", [
+  sAbSplit("ab", "A/B split", "Product intro · Variety vs Offers", [
     { id: "vA", label: "Variety" },
     { id: "vB", label: "Offers" },
   ]),
-  sWa("abA", "WhatsApp · Variety", "Variant · Variety", "outbound_variety_v1"),
-  sWa("abB", "WhatsApp · Offers", "Variant · Offers", "outbound_offers_v1"),
+  sWa("abA", "WhatsApp product intro · Variety", "Variant · Variety angle", "outbound_variety_v1"),
+  sWa("abB", "WhatsApp product intro · Offers", "Variant · Offers angle", "outbound_offers_v1"),
   sCond("intMed", "Interested?", "reply_intent", [
     { id: "yes", label: "Yes", value: "interested" },
     { id: "no", label: "No", value: "not_interested" },
@@ -958,7 +950,7 @@ const C_OUTBOUND = buildCampaign("D2C · Outbound Sales", [
   ed("intent", "vDisc", "high"), ed("vDisc", "intHigh"),
   ed("intHigh", "purHigh", "yes"), ed("intHigh", "end", "no"),
   ed("purHigh", "convHigh"), ed("convHigh", "end", "conv"), ed("convHigh", "vfuHigh", "no"), ed("vfuHigh", "end"),
-  ed("intent", "waIntro", "medium"), ed("waIntro", "ab"),
+  ed("intent", "ab", "medium"),
   ed("ab", "abA", "vA"), ed("ab", "abB", "vB"),
   ed("abA", "intMed"), ed("abB", "intMed"),
   ed("intMed", "purMed", "yes"), ed("intMed", "end", "no"),
@@ -981,13 +973,12 @@ const C_CART = buildCampaign("D2C · Cart Abandonment", [
     { id: "no", label: "Not purchased", value: "pending" },
   ]),
   sVoice("vRemHigh", "Voice AI reminder", "Reattempt · 1 retry", { maxAttempts: 1 }),
-  sWa("waRem", "WhatsApp reminder + purchase link", "WhatsApp · complete purchase", "cart_link_v1"),
-  sAbSplit("ab", "A/B split", "A/B · Discount vs Free shipping", [
+  sAbSplit("ab", "A/B split", "Cart reminder · Discount vs Free shipping", [
     { id: "vA", label: "Discount" },
     { id: "vB", label: "Free shipping" },
   ]),
-  sWa("abA", "WhatsApp · Discount", "Variant · Discount", "cart_discount_v1"),
-  sWa("abB", "WhatsApp · Free shipping", "Variant · Free shipping", "cart_free_shipping_v1"),
+  sWa("abA", "WhatsApp cart reminder · Discount", "Variant · Discount angle", "cart_discount_v1"),
+  sWa("abB", "WhatsApp cart reminder · Free shipping", "Variant · Free shipping angle", "cart_free_shipping_v1"),
   sWa("cartLow", "Purchase link", "WhatsApp · complete purchase", "cart_link_v1"),
   sDelay("d1", 23, "Hours"),
   sCond("purLow", "Purchased?", "order_status", [
@@ -1000,7 +991,7 @@ const C_CART = buildCampaign("D2C · Cart Abandonment", [
   ed("start", "aud"), ed("aud", "cart"),
   ed("cart", "vRec", "high"), ed("vRec", "cartHigh"), ed("cartHigh", "purHigh"),
   ed("purHigh", "end", "yes"), ed("purHigh", "vRemHigh", "no"), ed("vRemHigh", "end"),
-  ed("cart", "waRem", "low"), ed("waRem", "ab"),
+  ed("cart", "ab", "low"),
   ed("ab", "abA", "vA"), ed("ab", "abB", "vB"),
   ed("abA", "cartLow"), ed("abB", "cartLow"),
   ed("cartLow", "d1"), ed("d1", "purLow"),
@@ -1022,13 +1013,12 @@ const C_PRICEDROP = buildCampaign("E-commerce · Price Drop", [
     { id: "no", label: "Not purchased", value: "pending" },
   ]),
   sVoice("vfuHigh", "Voice AI follow-up", "Reattempt · 1 retry", { maxAttempts: 1 }),
-  sWa("waAlert", "WhatsApp price drop alert", "WhatsApp · price dropped", "price_drop_v1"),
-  sAbSplit("ab", "A/B split", "A/B · % off vs Save ₹xx", [
+  sAbSplit("ab", "A/B split", "Price-drop alert · % off vs Save ₹xx", [
     { id: "vA", label: "% off" },
     { id: "vB", label: "Save ₹xx" },
   ]),
-  sWa("abA", "WhatsApp · % off", "Variant · % off", "pricedrop_pct_v1"),
-  sWa("abB", "WhatsApp · Save ₹xx", "Variant · Save ₹xx", "pricedrop_amount_v1"),
+  sWa("abA", "WhatsApp price-drop alert · % off", "Variant · % off angle", "pricedrop_pct_v1"),
+  sWa("abB", "WhatsApp price-drop alert · Save ₹xx", "Variant · Save ₹xx angle", "pricedrop_amount_v1"),
   sWa("purLow", "Purchase link", "WhatsApp · buy now", "purchase_link_v1"),
   sDelay("d1", 23, "Hours"),
   sCond("purchased", "Purchased?", "order_status", [
@@ -1041,7 +1031,7 @@ const C_PRICEDROP = buildCampaign("E-commerce · Price Drop", [
   ed("start", "aud"), ed("aud", "value"),
   ed("value", "vAlert", "high"), ed("vAlert", "purHigh"), ed("purHigh", "purCheck"),
   ed("purCheck", "end", "yes"), ed("purCheck", "vfuHigh", "no"), ed("vfuHigh", "end"),
-  ed("value", "waAlert", "low"), ed("waAlert", "ab"),
+  ed("value", "ab", "low"),
   ed("ab", "abA", "vA"), ed("ab", "abB", "vB"),
   ed("abA", "purLow"), ed("abB", "purLow"),
   ed("purLow", "d1"), ed("d1", "purchased"),
@@ -1063,13 +1053,12 @@ const C_BACKINSTOCK = buildCampaign("E-commerce · Back In Stock", [
     { id: "no", label: "Not purchased", value: "pending" },
   ]),
   sVoice("vfuMem", "Voice AI follow-up", "Reattempt · 1 retry", { maxAttempts: 1 }),
-  sWa("waStock", "WhatsApp back-in-stock", "WhatsApp · back in stock", "back_in_stock_v1"),
-  sAbSplit("ab", "A/B split", "A/B · Scarcity vs Popularity", [
+  sAbSplit("ab", "A/B split", "Back-in-stock · Scarcity vs Popularity", [
     { id: "vA", label: "Scarcity" },
     { id: "vB", label: "Popularity" },
   ]),
-  sWa("abA", "WhatsApp · Scarcity", "Variant · Scarcity", "backinstock_scarcity_v1"),
-  sWa("abB", "WhatsApp · Popularity", "Variant · Popularity", "backinstock_popularity_v1"),
+  sWa("abA", "WhatsApp back-in-stock · Scarcity", "Variant · Scarcity angle", "backinstock_scarcity_v1"),
+  sWa("abB", "WhatsApp back-in-stock · Popularity", "Variant · Popularity angle", "backinstock_popularity_v1"),
   sWa("cartNon", "Cart link", "WhatsApp · add to cart", "cart_link_v1"),
   sDelay("d1", 23, "Hours"),
   sCond("purNon", "Purchased?", "order_status", [
@@ -1082,7 +1071,7 @@ const C_BACKINSTOCK = buildCampaign("E-commerce · Back In Stock", [
   ed("start", "aud"), ed("aud", "loyalty"),
   ed("loyalty", "vAlert", "member"), ed("vAlert", "cartMem"), ed("cartMem", "purMem"),
   ed("purMem", "end", "yes"), ed("purMem", "vfuMem", "no"), ed("vfuMem", "end"),
-  ed("loyalty", "waStock", "non"), ed("waStock", "ab"),
+  ed("loyalty", "ab", "non"),
   ed("ab", "abA", "vA"), ed("ab", "abB", "vB"),
   ed("abA", "cartNon"), ed("abB", "cartNon"),
   ed("cartNon", "d1"), ed("d1", "purNon"),
