@@ -85,7 +85,7 @@ const EX1_NODES: Node<WorkflowNodeData>[] = [
   {
     id: "chat", type: "workflow", position: { x: 384, y: 440 },
     data: {
-      kind: "whatsapp", title: "Chat AI · loyalty", subtitle: "WhatsApp · loyalty opener", valid: true, preset: true,
+      kind: "whatsapp", title: "Chat AI · loyalty", subtitle: "WhatsApp · loyalty opener", valid: true, preset: true, piHint: "wa_personalize",
       outputs: [
         { id: "btn_0", label: "Complete purchase", kind: "outcome" },
         { id: "btn_1", label: "Not interested", kind: "outcome" },
@@ -242,7 +242,7 @@ const EX2_NODES: Node<WorkflowNodeData>[] = [
   {
     id: "chat", type: "workflow", position: { x: 120, y: 760 },
     data: {
-      kind: "whatsapp", title: "Chat AI · order assist", subtitle: "WhatsApp · interested path", valid: true, preset: true,
+      kind: "whatsapp", title: "Chat AI · order assist", subtitle: "WhatsApp · interested path", valid: true, preset: true, piHint: "wa_personalize",
       outputs: [
         { id: "btn_0", label: "Pay now", kind: "outcome" },
         { id: "btn_1", label: "Remind me later", kind: "outcome" },
