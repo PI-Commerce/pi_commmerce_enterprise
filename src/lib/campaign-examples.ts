@@ -13,7 +13,10 @@
  * `campaigns.index.tsx` and the `$id` route param.
  */
 import type { Edge, Node } from "reactflow";
-import type { CampaignStatus, WorkflowNodeData } from "./campaign-types";
+import type {
+  CampaignStatus, WorkflowNodeData, NodeKind, NodeOutput, NodeOutputKind,
+  PresetConfig, PresetVarMap,
+} from "./campaign-types";
 
 export type ExampleCampaign = {
   name: string;
@@ -22,11 +25,11 @@ export type ExampleCampaign = {
   edges: Edge[];
 };
 
-const EDGE = "smoothstep" as const;
+const EDGE = "routed" as const;
 
 /* ============================================================== */
 /* Example 1 — Omni-channel React (value-tiered reactivation)     */
-/* Chat AI (WhatsApp) + Voice AI + SMS                            */
+/* Chat AI (WhatsApp) + Voice AI                                  */
 /* ============================================================== */
 
 const EX1_CSV_KEYS = [
@@ -77,28 +80,11 @@ const EX1_NODES: Node<WorkflowNodeData>[] = [
       },
     },
   },
-  // ---- High-LTV track ----
+  // ---- High-LTV track: Chat AI → (drop-off) Voice AI ----
   {
-    id: "split", type: "workflow", position: { x: 400, y: 460 },
+    id: "chat", type: "workflow", position: { x: 384, y: 440 },
     data: {
-      kind: "abSplit", title: "A/B Split", subtitle: "50% A · 50% B", valid: true, preset: true,
-      abTest: { variants: [{ label: "A", pct: 50 }, { label: "B", pct: 50 }] },
-      outputs: [
-        { id: "vA", label: "A · 50%", kind: "variant" },
-        { id: "vB", label: "B · 50%", kind: "variant" },
-      ],
-      config: {
-        splitVariants: [
-          { id: "vA", label: "A", pct: 50 },
-          { id: "vB", label: "B", pct: 50 },
-        ],
-      },
-    },
-  },
-  {
-    id: "chatA", type: "workflow", position: { x: 200, y: 640 },
-    data: {
-      kind: "whatsapp", title: "Chat AI · Variant A", subtitle: "WhatsApp · loyalty opener", valid: true, preset: true,
+      kind: "whatsapp", title: "Chat AI · loyalty", subtitle: "WhatsApp · loyalty opener", valid: true, preset: true,
       outputs: [
         { id: "converted", label: "Converted", kind: "exit" },
         { id: "dropped", label: "Responded, dropped off", kind: "exit" },
@@ -120,38 +106,14 @@ const EX1_NODES: Node<WorkflowNodeData>[] = [
     },
   },
   {
-    id: "chatB", type: "workflow", position: { x: 620, y: 640 },
-    data: {
-      kind: "whatsapp", title: "Chat AI · Variant B", subtitle: "WhatsApp · category opener", valid: true, preset: true,
-      outputs: [
-        { id: "converted", label: "Converted", kind: "exit" },
-        { id: "dropped", label: "Responded, dropped off", kind: "exit" },
-        { id: "default", label: "No response", kind: "default" },
-      ],
-      config: {
-        waNumber: "+91 98100 12345 · PiCommerce",
-        waMode: "template",
-        waTemplate: "winback_v2 · Marketing",
-        waVarMap: [
-          { v: "{{1}}", def: "contact.first_name" },
-          { v: "{{2}}", def: "favorite_category" },
-        ],
-        paths: [
-          { id: "converted", label: "Converted", variable: "button_clicked", op: "equals", value: "true" },
-          { id: "dropped", label: "Responded, dropped off", variable: "session_expired", op: "equals", value: "true" },
-        ],
-      },
-    },
-  },
-  {
-    id: "delay5", type: "workflow", position: { x: 620, y: 880 },
+    id: "delay5", type: "workflow", position: { x: 640, y: 600 },
     data: {
       kind: "delay", title: "Delay · 5 days", subtitle: "Wait 5 days", valid: true, preset: true,
       config: { delayValue: 5, delayUnit: "Days" },
     },
   },
   {
-    id: "voice", type: "workflow", position: { x: 400, y: 1040 },
+    id: "voice", type: "workflow", position: { x: 400, y: 760 },
     data: {
       kind: "voiceCall", title: "Voice AI call", subtitle: "Conversational reactivation", valid: true, preset: true,
       config: {
@@ -168,22 +130,25 @@ const EX1_NODES: Node<WorkflowNodeData>[] = [
       },
     },
   },
-  // ---- Mid-LTV track ----
+  // ---- Mid-LTV track: Chat AI category offer ----
   {
-    id: "sms", type: "workflow", position: { x: 60, y: 460 },
+    id: "chatMid", type: "workflow", position: { x: 40, y: 440 },
     data: {
-      kind: "sms", title: "SMS promo", subtitle: "Promotional offer", valid: true, preset: true,
+      kind: "whatsapp", title: "Chat AI · offer", subtitle: "WhatsApp · category offer", valid: true, preset: true,
       config: {
-        smsType: "Promotional",
-        smsFormat: "Text",
-        peId: "1101234567890123456",
-        senderId: "PICOMM",
-        smsBody: "Hi {{first_name}}, here's ₹{{discount_value}} off your favourite {{favorite_category}}. Shop now — limited time. — PICOMM",
+        waNumber: "+91 98100 12345 · PiCommerce",
+        waMode: "template",
+        waTemplate: "winback_v2 · Marketing",
+        waVarMap: [
+          { v: "{{1}}", def: "contact.first_name" },
+          { v: "{{2}}", def: "favorite_category" },
+          { v: "{{3}}", def: "discount_value" },
+        ],
       },
     },
   },
   {
-    id: "end", type: "workflow", position: { x: 400, y: 1220 },
+    id: "end", type: "workflow", position: { x: 400, y: 940 },
     data: { kind: "end", title: "End", locked: true, valid: true, preset: true },
   },
 ];
@@ -191,24 +156,19 @@ const EX1_NODES: Node<WorkflowNodeData>[] = [
 const EX1_EDGES: Edge[] = [
   { id: "ex1-e1", source: "start", target: "audience", type: EDGE },
   { id: "ex1-e2", source: "audience", target: "tier", type: EDGE },
-  { id: "ex1-e3", source: "tier", sourceHandle: "high_ltv", target: "split", type: EDGE },
-  { id: "ex1-e4", source: "tier", sourceHandle: "mid_ltv", target: "sms", type: EDGE },
-  { id: "ex1-e5", source: "split", sourceHandle: "vA", target: "chatA", type: EDGE },
-  { id: "ex1-e6", source: "split", sourceHandle: "vB", target: "chatB", type: EDGE },
-  { id: "ex1-e7", source: "chatA", sourceHandle: "converted", target: "end", type: EDGE },
-  { id: "ex1-e8", source: "chatA", sourceHandle: "dropped", target: "voice", type: EDGE },
-  { id: "ex1-e9", source: "chatA", sourceHandle: "default", target: "delay5", type: EDGE },
-  { id: "ex1-e10", source: "chatB", sourceHandle: "converted", target: "end", type: EDGE },
-  { id: "ex1-e11", source: "chatB", sourceHandle: "dropped", target: "voice", type: EDGE },
-  { id: "ex1-e12", source: "chatB", sourceHandle: "default", target: "delay5", type: EDGE },
-  { id: "ex1-e13", source: "delay5", target: "voice", type: EDGE },
-  { id: "ex1-e14", source: "voice", target: "end", type: EDGE },
-  { id: "ex1-e15", source: "sms", target: "end", type: EDGE },
+  { id: "ex1-e3", source: "tier", sourceHandle: "high_ltv", target: "chat", type: EDGE },
+  { id: "ex1-e4", source: "tier", sourceHandle: "mid_ltv", target: "chatMid", type: EDGE },
+  { id: "ex1-e5", source: "chat", sourceHandle: "converted", target: "end", type: EDGE },
+  { id: "ex1-e6", source: "chat", sourceHandle: "dropped", target: "voice", type: EDGE },
+  { id: "ex1-e7", source: "chat", sourceHandle: "default", target: "delay5", type: EDGE },
+  { id: "ex1-e8", source: "delay5", target: "voice", type: EDGE },
+  { id: "ex1-e9", source: "voice", target: "end", type: EDGE },
+  { id: "ex1-e10", source: "chatMid", target: "end", type: EDGE },
 ];
 
 /* ============================================================== */
 /* Example 2 — Voice-led win-back (high-value win-back)           */
-/* Voice AI → Chat AI (WhatsApp) → SMS                            */
+/* Voice AI → Chat AI (WhatsApp)                                  */
 /* ============================================================== */
 
 const EX2_FIELDS = [
@@ -254,11 +214,6 @@ const EX2_NODES: Node<WorkflowNodeData>[] = [
         timezone: "Asia/Kolkata (IST)",
         maxAttempts: 2,
         retryInterval: "1 hour",
-        transforms: [
-          { id: "t1", type: "Custom AI Action", input: "call.transcript", output: "call_disposition" },
-          { id: "t2", type: "Custom AI Action", input: "call.transcript", output: "sentiment_score" },
-          { id: "t3", type: "Date Formatting", input: "call.transcript", output: "callback_at" },
-        ],
       },
     },
   },
@@ -317,15 +272,18 @@ const EX2_NODES: Node<WorkflowNodeData>[] = [
     },
   },
   {
-    id: "smsNudge", type: "workflow", position: { x: 60, y: 1120 },
+    id: "chatReminder", type: "workflow", position: { x: 60, y: 1120 },
     data: {
-      kind: "sms", title: "SMS nudge", subtitle: "Reorder reminder", valid: true, preset: true,
+      kind: "whatsapp", title: "Chat AI · reminder", subtitle: "WhatsApp · reorder reminder", valid: true, preset: true,
       config: {
-        smsType: "Promotional",
-        smsFormat: "Text",
-        peId: "1101234567890123456",
-        senderId: "PICOMM",
-        smsBody: "Hi {{first_name}}, still thinking about {{last_item}}? Reorder in one tap: {{reorder_url}} — PICOMM",
+        waNumber: "+91 98100 12345 · PiCommerce",
+        waMode: "template",
+        waTemplate: "reorder_v1 · Marketing",
+        waVarMap: [
+          { v: "{{1}}", def: "contact.first_name" },
+          { v: "{{2}}", def: "last_item" },
+          { v: "{{3}}", def: "reorder_url" },
+        ],
       },
     },
   },
@@ -357,15 +315,16 @@ const EX2_NODES: Node<WorkflowNodeData>[] = [
   },
   // ---- Not-interested path ----
   {
-    id: "smsNI", type: "workflow", position: { x: 720, y: 760 },
+    id: "chatNI", type: "workflow", position: { x: 720, y: 760 },
     data: {
-      kind: "sms", title: "SMS soft offer", subtitle: "Not-interested path", valid: true, preset: true,
+      kind: "whatsapp", title: "Chat AI · soft offer", subtitle: "WhatsApp · not-interested path", valid: true, preset: true,
       config: {
-        smsType: "Promotional",
-        smsFormat: "Text",
-        peId: "1101234567890123456",
-        senderId: "PICOMM",
-        smsBody: "Hi {{first_name}}, here's a little something for whenever you're ready to come back. — PICOMM",
+        waNumber: "+91 98100 12345 · PiCommerce",
+        waMode: "template",
+        waTemplate: "winback_v2 · Marketing",
+        waVarMap: [
+          { v: "{{1}}", def: "contact.first_name" },
+        ],
       },
     },
   },
@@ -397,31 +356,758 @@ const EX2_EDGES: Edge[] = [
   { id: "ex2-e3", source: "voice1", target: "outcome", type: EDGE },
   { id: "ex2-e4", source: "outcome", sourceHandle: "interested", target: "chat", type: EDGE },
   { id: "ex2-e5", source: "outcome", sourceHandle: "callback", target: "callbackDelay", type: EDGE },
-  { id: "ex2-e6", source: "outcome", sourceHandle: "not_interested", target: "smsNI", type: EDGE },
+  { id: "ex2-e6", source: "outcome", sourceHandle: "not_interested", target: "chatNI", type: EDGE },
   { id: "ex2-e7", source: "outcome", sourceHandle: "no_connect", target: "chatNC", type: EDGE },
   { id: "ex2-e8", source: "outcome", sourceHandle: "wrong_number", target: "end", type: EDGE },
   { id: "ex2-e9", source: "chat", sourceHandle: "ordered", target: "end", type: EDGE },
   { id: "ex2-e10", source: "chat", sourceHandle: "needs_help", target: "delay2", type: EDGE },
   { id: "ex2-e11", source: "chat", sourceHandle: "default", target: "end", type: EDGE },
-  { id: "ex2-e12", source: "delay2", target: "smsNudge", type: EDGE },
-  { id: "ex2-e13", source: "smsNudge", target: "end", type: EDGE },
+  { id: "ex2-e12", source: "delay2", target: "chatReminder", type: EDGE },
+  { id: "ex2-e13", source: "chatReminder", target: "end", type: EDGE },
   { id: "ex2-e14", source: "callbackDelay", target: "voice2", type: EDGE },
   { id: "ex2-e15", source: "voice2", target: "end", type: EDGE },
-  { id: "ex2-e16", source: "smsNI", target: "end", type: EDGE },
+  { id: "ex2-e16", source: "chatNI", target: "end", type: EDGE },
   { id: "ex2-e17", source: "chatNC", target: "end", type: EDGE },
 ];
 
-export const EXAMPLE_CAMPAIGNS: Record<string, ExampleCampaign> = {
-  c_ex1: {
-    name: "Example 1 (Omni-channel React)",
-    status: "ready",
-    nodes: EX1_NODES,
-    edges: EX1_EDGES,
-  },
-  c_ex2: {
-    name: "Example 2 (Voice-led win-back)",
-    status: "ready",
-    nodes: EX2_NODES,
-    edges: EX2_EDGES,
-  },
+/* ============================================================== */
+/* Sales-team example library — 14 journeys.                      */
+/*                                                                */
+/* Authored from compact specs + node factories; positions are    */
+/* auto-laid-out (longest-path depth → y, siblings spread on x).   */
+/* Every node carries preset:true so the builder opens it in the   */
+/* real (now interactive) editor, hydrated from config. Currency   */
+/* and timezone strings in labels/subtitles are localized to the   */
+/* active country at render time (see WorkflowCanvas).             */
+/* ============================================================== */
+
+type Spec = {
+  id: string;
+  kind: NodeKind;
+  title: string;
+  subtitle?: string;
+  locked?: boolean;
+  outputs?: NodeOutput[];
+  abTest?: { variants: { label: string; pct: number }[] };
+  config?: PresetConfig;
 };
+type SpecEdge = { from: string; to: string; port?: string };
+
+const NAME_VAR: PresetVarMap[] = [{ v: "{{1}}", def: "contact.first_name" }];
+
+/* ---- node factories ---------------------------------------------------- */
+
+const sStart = (): Spec => ({ id: "start", kind: "start", title: "Start", locked: true });
+const sEnd = (id = "end"): Spec => ({ id, kind: "end", title: "End", locked: true });
+
+const sAud = (subtitle: string, keys: string[]): Spec => ({
+  id: "aud", kind: "audience", title: "Audience", subtitle,
+  config: {
+    audienceMode: "csv", fileName: "audience.csv", primaryKey: "customer_id", phoneCol: "phone",
+    csvKeys: ["customer_id", "phone", "first_name", ...keys], rowCount: "—",
+  },
+});
+
+const sCond = (
+  id: string, title: string, variable: string,
+  branches: { id: string; label: string; op?: string; value?: string }[],
+): Spec => ({
+  id, kind: "conditional", title, subtitle: `Route on ${variable}`,
+  outputs: branches.map((b) => ({ id: b.id, label: b.label, kind: "branch" as NodeOutputKind })),
+  config: { branches: branches.map((b) => ({ id: b.id, label: b.label, variable, op: b.op ?? "equals", value: b.value ?? b.id })) },
+});
+
+// A true A/B *split* node: splits traffic into separate variant outputs, each
+// wired to its own downstream node. Use this (not sAb) when the variants are
+// genuinely different messages/paths rather than one message tested two ways.
+const sAbSplit = (
+  id: string, title: string, subtitle: string,
+  variants: { id: string; label: string; pct?: number }[],
+): Spec => ({
+  id, kind: "abSplit", title, subtitle,
+  outputs: variants.map((v) => ({ id: v.id, label: `${v.label} · ${v.pct ?? 50}%`, kind: "variant" as NodeOutputKind })),
+  config: { splitVariants: variants.map((v) => ({ id: v.id, label: v.label, pct: v.pct ?? 50 })) },
+});
+
+const sVoice = (id: string, title: string, subtitle?: string, cfg?: Partial<PresetConfig>): Spec => ({
+  id, kind: "voiceCall", title, subtitle,
+  config: {
+    agent: "Aria · Conversational",
+    voiceVarMap: [{ v: "{{name}}", def: "contact.first_name" }, { v: "{{phone}}", def: "contact.phone" }],
+    callStart: "10:00", callEnd: "19:00", timezone: "Asia/Kolkata (IST)", maxAttempts: 2, retryInterval: "1 hour",
+    ...cfg,
+  },
+});
+
+const sWa = (
+  id: string, title: string, subtitle: string, template: string,
+  opts?: { vars?: PresetVarMap[]; exits?: { id: string; label: string; kind?: NodeOutputKind }[] },
+): Spec => ({
+  id, kind: "whatsapp", title, subtitle,
+  outputs: opts?.exits?.map((e) => ({ id: e.id, label: e.label, kind: (e.kind ?? "exit") as NodeOutputKind })),
+  config: {
+    waNumber: "+91 98100 12345 · PiCommerce", waMode: "template", waTemplate: template, waVarMap: opts?.vars ?? NAME_VAR,
+    paths: opts?.exits?.filter((e) => (e.kind ?? "exit") !== "default")
+      .map((e) => ({ id: e.id, label: e.label, variable: "button_clicked", op: "equals", value: "true" })),
+  },
+});
+
+const sDelay = (id: string, value: number, unit: "Minutes" | "Hours" | "Days"): Spec => ({
+  id, kind: "delay", title: `Delay · ${value} ${unit.toLowerCase()}`, subtitle: `Wait ${value} ${unit.toLowerCase()}`,
+  config: { delayValue: value, delayUnit: unit },
+});
+
+const ed = (from: string, to: string, port?: string): SpecEdge => ({ from, to, port });
+
+/* ---- assembly: tag edges as routed; layout runs at render-time (ELK) ----- */
+
+/** Examples ship positionless — ELK is async and runs when a graph is actually
+ *  rendered (see `elkLayout` + WorkflowCanvas/CampaignFlowView). Here we only
+ *  mark edges as the `routed` type. Single End per campaign (terminals are NOT
+ *  fanned out — that violates the PRD). */
+function assemble(rawNodes: Node<WorkflowNodeData>[], rawEdges: Edge[]): { nodes: Node<WorkflowNodeData>[]; edges: Edge[] } {
+  return {
+    nodes: rawNodes,
+    edges: rawEdges.map((e) => ({ ...e, type: EDGE })),
+  };
+}
+
+function buildCampaign(name: string, specs: Spec[], edges: SpecEdge[]): ExampleCampaign {
+  const rawNodes: Node<WorkflowNodeData>[] = specs.map((s) => ({
+    id: s.id, type: "workflow", position: { x: 0, y: 0 },
+    data: {
+      kind: s.kind, title: s.title, subtitle: s.subtitle, valid: true, preset: true,
+      locked: s.locked, outputs: s.outputs, abTest: s.abTest, config: s.config,
+    },
+  }));
+  const rawEdges: Edge[] = edges.map((e, i) => ({ id: `e${i}`, source: e.from, target: e.to, sourceHandle: e.port, type: EDGE }));
+  const { nodes, edges: laidEdges } = assemble(rawNodes, rawEdges);
+  return { name, status: "ready", nodes, edges: laidEdges };
+}
+
+/* ---- 1. BFSI · Lead Qualification -------------------------------------- */
+const C_LEADQUAL = buildCampaign("BFSI · Lead Qualification", [
+  sStart(),
+  sAud("CSV · new leads", ["lead_score", "product", "preferred_lang"]),
+  sCond("score", "Lead score branch", "lead_score", [
+    { id: "hot", label: "Hot lead (>80)", op: "greater than", value: "80" },
+    { id: "warm", label: "Warm lead (50–80)", op: "greater than or equal to", value: "50" },
+    { id: "cold", label: "Cold lead (<50)", op: "less than", value: "50" },
+  ]),
+  // hot
+  sVoice("vqual", "Voice AI qualification", "Conversational qualification"),
+  sCond("hotInt", "Interested?", "call_disposition", [
+    { id: "yes", label: "Yes", value: "interested" },
+    { id: "no", label: "No", value: "not_interested" },
+  ]),
+  sWa("waApp", "WhatsApp application link", "WhatsApp · apply now", "application_link_v1"),
+  sCond("hotConv", "Conversion check", "application_status", [
+    { id: "conv", label: "Converted", value: "approved" },
+    { id: "no", label: "Not converted", value: "pending" },
+  ]),
+  sVoice("vfuHot", "Voice AI follow-up", "Reattempt · 1 retry", { maxAttempts: 1 }),
+  // warm
+  sWa("wqual", "WhatsApp qualification", "WhatsApp · qualify", "lead_qualify_v1"),
+  sAbSplit("ab", "A/B split", "A/B · Urgency vs Offer", [
+    { id: "vA", label: "Urgency" },
+    { id: "vB", label: "Offer" },
+  ]),
+  sWa("abA", "WhatsApp · Urgency", "Variant · Urgency", "lead_urgency_v1"),
+  sWa("abB", "WhatsApp · Offer", "Variant · Offer", "lead_offer_v1"),
+  sWa("appWarm", "Application link", "WhatsApp · apply now", "application_link_v1"),
+  sDelay("d1", 23, "Hours"),
+  sWa("wfu", "WhatsApp follow-up", "WhatsApp · nudge", "lead_followup_v1"),
+  sCond("warmConv", "Conversion check", "application_status", [
+    { id: "conv", label: "Converted", value: "approved" },
+    { id: "no", label: "Not converted", value: "pending" },
+  ]),
+  sVoice("vfuWarm", "Voice AI follow-up", "Reattempt · 1 retry", { maxAttempts: 1 }),
+  // cold
+  sWa("aware", "WhatsApp awareness content", "WhatsApp · awareness", "awareness_v1"),
+  sEnd(),
+], [
+  ed("start", "aud"), ed("aud", "score"),
+  ed("score", "vqual", "hot"), ed("vqual", "hotInt"),
+  ed("hotInt", "waApp", "yes"), ed("hotInt", "end", "no"),
+  ed("waApp", "hotConv"), ed("hotConv", "end", "conv"), ed("hotConv", "vfuHot", "no"), ed("vfuHot", "end"),
+  ed("score", "wqual", "warm"), ed("wqual", "ab"),
+  ed("ab", "abA", "vA"), ed("ab", "abB", "vB"),
+  ed("abA", "appWarm"), ed("abB", "appWarm"),
+  ed("appWarm", "d1"), ed("d1", "wfu"), ed("wfu", "warmConv"),
+  ed("warmConv", "end", "conv"), ed("warmConv", "vfuWarm", "no"), ed("vfuWarm", "end"),
+  ed("score", "aware", "cold"), ed("aware", "end"),
+]);
+
+/* ---- 2. BFSI · Insurance Renewal --------------------------------------- */
+const C_RENEWAL = buildCampaign("BFSI · Insurance Renewal", [
+  sStart(),
+  sAud("CSV · policies expiring in 30 days", ["premium", "policy_no", "expiry_date"]),
+  sCond("prem", "Premium branch", "premium", [
+    { id: "high", label: "> ₹25,000", op: "greater than", value: "25000" },
+    { id: "low", label: "≤ ₹25,000", op: "less than or equal to", value: "25000" },
+  ]),
+  // high
+  sVoice("vCons", "Voice AI renewal consultation", "Renewal advisory call"),
+  sWa("rlHigh", "Renewal link", "WhatsApp · renew now", "renewal_link_v1"),
+  sCond("rcHigh", "Renewal check", "renewal_status", [
+    { id: "yes", label: "Renewed", value: "renewed" },
+    { id: "no", label: "Not renewed", value: "pending" },
+  ]),
+  sVoice("vfuHigh", "Voice AI follow-up", "Reattempt · 1 retry", { maxAttempts: 1 }),
+  // low — A/B split into two genuinely different messages, then converge
+  sAbSplit("abLow", "A/B split", "A/B · Benefits vs Savings", [
+    { id: "vA", label: "Benefits", pct: 50 },
+    { id: "vB", label: "Savings", pct: 50 },
+  ]),
+  sWa("waBenefits", "WhatsApp · Benefits", "WhatsApp · benefits angle", "renewal_benefits_v1"),
+  sWa("waSavings", "WhatsApp · Savings", "WhatsApp · savings angle", "renewal_savings_v1"),
+  sWa("waRem", "WhatsApp renewal reminder", "WhatsApp · reminder", "renewal_reminder_v1"),
+  sDelay("d1", 23, "Hours"),
+  sWa("wfu", "WhatsApp follow-up", "WhatsApp · nudge", "renewal_followup_v1"),
+  sCond("rcLow", "Renewed?", "renewal_status", [
+    { id: "yes", label: "Yes", value: "renewed" },
+    { id: "no", label: "No", value: "pending" },
+  ]),
+  sVoice("vFinal", "Voice AI final renewal call", "Final attempt"),
+  sWa("rlFinal", "Renewal link", "WhatsApp · renew now", "renewal_link_v1"),
+  sEnd(),
+], [
+  ed("start", "aud"), ed("aud", "prem"),
+  // high — Voice consult → renewal link → renewed?
+  ed("prem", "vCons", "high"), ed("vCons", "rlHigh"), ed("rlHigh", "rcHigh"),
+  ed("rcHigh", "end", "yes"), ed("rcHigh", "vfuHigh", "no"), ed("vfuHigh", "end"),
+  // low — A/B split → two messages → converge on reminder → delay → follow-up → renewed?
+  ed("prem", "abLow", "low"),
+  ed("abLow", "waBenefits", "vA"), ed("abLow", "waSavings", "vB"),
+  ed("waBenefits", "waRem"), ed("waSavings", "waRem"),
+  ed("waRem", "d1"), ed("d1", "wfu"), ed("wfu", "rcLow"),
+  ed("rcLow", "end", "yes"),
+  ed("rcLow", "vFinal", "no"), ed("vFinal", "rlFinal"), ed("rlFinal", "end"),
+]);
+
+/* ---- 3. BFSI · Upsell / Cross-Sell ------------------------------------- */
+const C_UPSELL = buildCampaign("BFSI · Upsell / Cross-Sell", [
+  sStart(),
+  sAud("CSV · existing customers", ["customer_type", "balance", "product_held"]),
+  sCond("type", "Customer type branch", "customer_type", [
+    { id: "high_bal", label: "High balance", value: "high_balance" },
+    { id: "borrower", label: "Borrower / card user", value: "borrower" },
+  ]),
+  // high balance
+  sVoice("vOffer", "Voice AI offer discussion", "Personalized offer call"),
+  sWa("appHigh", "WhatsApp application link", "WhatsApp · apply now", "offer_apply_v1"),
+  sCond("convHigh", "Conversion check", "application_status", [
+    { id: "conv", label: "Converted", value: "approved" },
+    { id: "no", label: "Not converted", value: "pending" },
+  ]),
+  sVoice("vfuHigh", "Voice AI follow-up", "Reattempt · 1 retry", { maxAttempts: 1 }),
+  // borrower
+  sWa("waOffer", "WhatsApp personalized offer", "WhatsApp · offer", "personalized_offer_v1",
+    { vars: [{ v: "{{1}}", def: "contact.first_name" }, { v: "{{2}}", def: "product_held" }] }),
+  sAbSplit("ab", "A/B split", "A/B · Offer vs Urgency", [
+    { id: "vA", label: "Offer" },
+    { id: "vB", label: "Urgency" },
+  ]),
+  sWa("abA", "WhatsApp · Offer", "Variant · Offer", "upsell_offer_v1"),
+  sWa("abB", "WhatsApp · Urgency", "Variant · Urgency", "upsell_urgency_v1"),
+  sDelay("d1", 23, "Hours"),
+  sWa("waRem", "WhatsApp reminder + application link", "WhatsApp · apply now", "offer_apply_v1"),
+  sCond("convLow", "Conversion check", "application_status", [
+    { id: "conv", label: "Converted", value: "approved" },
+    { id: "no", label: "Not converted", value: "pending" },
+  ]),
+  sVoice("vfuLow", "Voice AI follow-up", "Reattempt · 1 retry", { maxAttempts: 1 }),
+  sWa("appLow", "Application link", "WhatsApp · apply now", "offer_apply_v1"),
+  sEnd(),
+], [
+  ed("start", "aud"), ed("aud", "type"),
+  ed("type", "vOffer", "high_bal"), ed("vOffer", "appHigh"), ed("appHigh", "convHigh"),
+  ed("convHigh", "end", "conv"), ed("convHigh", "vfuHigh", "no"), ed("vfuHigh", "end"),
+  ed("type", "waOffer", "borrower"), ed("waOffer", "ab"),
+  ed("ab", "abA", "vA"), ed("ab", "abB", "vB"),
+  ed("abA", "d1"), ed("abB", "d1"),
+  ed("d1", "waRem"), ed("waRem", "convLow"),
+  ed("convLow", "end", "conv"), ed("convLow", "vfuLow", "no"), ed("vfuLow", "appLow"), ed("appLow", "end"),
+]);
+
+/* ---- 4. BFSI · Collections --------------------------------------------- */
+const C_COLLECT = buildCampaign("BFSI · Collections", [
+  sStart(),
+  sAud("CSV · delinquent borrowers", ["dpd", "amount_due", "loan_id"]),
+  sCond("dpd", "DPD branch", "days_past_due", [
+    { id: "early", label: "1–30 DPD", value: "1-30" },
+    { id: "mid", label: "31–90 DPD", value: "31-90" },
+    { id: "late", label: "90+ DPD", value: "90+" },
+  ]),
+  sWa("waRem", "WhatsApp reminder", "WhatsApp · payment reminder", "collections_reminder_v1"),
+  sWa("plEarly", "Payment link", "WhatsApp · pay now", "payment_link_v1"),
+  sVoice("vColl", "Voice AI collections call", "Collections call"),
+  sWa("plMid", "Payment link", "WhatsApp · pay now", "payment_link_v1"),
+  sVoice("vEsc", "Voice AI escalated call", "Escalated collections"),
+  sWa("plLate", "Payment link", "WhatsApp · pay now", "payment_link_v1"),
+  sDelay("d1", 23, "Hours"),
+  sCond("paid", "Paid?", "payment_status", [
+    { id: "yes", label: "Yes", value: "paid" },
+    { id: "no", label: "No", value: "unpaid" },
+  ]),
+  sVoice("vfu", "Voice AI follow-up", "Reattempt · 1 retry", { maxAttempts: 1 }),
+  sWa("plFu", "WhatsApp payment link", "WhatsApp · pay now", "payment_link_v1"),
+  sEnd(),
+], [
+  ed("start", "aud"), ed("aud", "dpd"),
+  ed("dpd", "waRem", "early"), ed("waRem", "plEarly"), ed("plEarly", "d1"),
+  ed("dpd", "vColl", "mid"), ed("vColl", "plMid"), ed("plMid", "d1"),
+  ed("dpd", "vEsc", "late"), ed("vEsc", "plLate"), ed("plLate", "d1"),
+  ed("d1", "paid"), ed("paid", "end", "yes"),
+  ed("paid", "vfu", "no"), ed("vfu", "plFu"), ed("plFu", "end"),
+]);
+
+/* ---- 5. Retail · Activation -------------------------------------------- */
+const C_ACTIVATION = buildCampaign("Retail · Activation", [
+  sStart(),
+  sAud("CSV · newly registered users", ["intent", "fav_category"]),
+  sCond("intent", "Intent branch", "intent", [
+    { id: "high", label: "High intent", value: "high" },
+    { id: "low", label: "Low intent", value: "low" },
+  ]),
+  sVoice("vBuy", "Voice AI assisted purchase", "Guided first purchase"),
+  sWa("cartHigh", "Cart link", "WhatsApp · complete order", "cart_link_v1"),
+  sCond("orderHigh", "Order check", "order_status", [
+    { id: "conv", label: "Converted", value: "placed" },
+    { id: "no", label: "Not converted", value: "pending" },
+  ]),
+  sVoice("vfuHigh", "Voice AI follow-up", "Reattempt · 1 retry", { maxAttempts: 1 }),
+  sWa("waWelcome", "WhatsApp welcome offer", "WhatsApp · welcome offer", "welcome_offer_v1"),
+  sAbSplit("ab", "A/B split", "A/B · Discount vs Free delivery", [
+    { id: "vA", label: "Discount" },
+    { id: "vB", label: "Free delivery" },
+  ]),
+  sWa("abA", "WhatsApp · Discount", "Variant · Discount", "activation_discount_v1"),
+  sWa("abB", "WhatsApp · Free delivery", "Variant · Free delivery", "activation_free_delivery_v1"),
+  sWa("cartLow", "Cart link", "WhatsApp · complete order", "cart_link_v1"),
+  sDelay("d1", 23, "Hours"),
+  sWa("waRem", "WhatsApp reminder + cart link", "WhatsApp · complete order", "cart_link_v1"),
+  sCond("orderLow", "Conversion check", "order_status", [
+    { id: "conv", label: "Converted", value: "placed" },
+    { id: "no", label: "Not converted", value: "pending" },
+  ]),
+  sVoice("vfuLow", "Voice AI follow-up", "Reattempt · 1 retry", { maxAttempts: 1 }),
+  sWa("appLow", "Cart link", "WhatsApp · complete order", "cart_link_v1"),
+  sEnd(),
+], [
+  ed("start", "aud"), ed("aud", "intent"),
+  ed("intent", "vBuy", "high"), ed("vBuy", "cartHigh"), ed("cartHigh", "orderHigh"),
+  ed("orderHigh", "end", "conv"), ed("orderHigh", "vfuHigh", "no"), ed("vfuHigh", "end"),
+  ed("intent", "waWelcome", "low"), ed("waWelcome", "ab"),
+  ed("ab", "abA", "vA"), ed("ab", "abB", "vB"),
+  ed("abA", "cartLow"), ed("abB", "cartLow"),
+  ed("cartLow", "d1"), ed("d1", "waRem"), ed("waRem", "orderLow"),
+  ed("orderLow", "end", "conv"), ed("orderLow", "vfuLow", "no"), ed("vfuLow", "appLow"), ed("appLow", "end"),
+]);
+
+/* ---- 6. Retail · Reward Expiry ----------------------------------------- */
+const C_REWARD = buildCampaign("Retail · Reward Expiry", [
+  sStart(),
+  sAud("CSV · reward members", ["points", "tier"]),
+  sCond("points", "Points branch", "reward_points", [
+    { id: "high", label: "> 1000 points", op: "greater than", value: "1000" },
+    { id: "low", label: "≤ 1000 points", op: "less than or equal to", value: "1000" },
+  ]),
+  sVoice("vRem", "Voice AI reminder", "Reward reminder call"),
+  sWa("redHigh", "Redemption link", "WhatsApp · redeem now", "redemption_link_v1"),
+  sCond("redCheck", "Redemption check", "redemption_status", [
+    { id: "yes", label: "Redeemed", value: "redeemed" },
+    { id: "no", label: "Not redeemed", value: "pending" },
+  ]),
+  sWa("finalHigh", "WhatsApp final reminder", "WhatsApp · last chance", "reward_final_v1"),
+  sWa("waAlert", "WhatsApp expiry alert", "WhatsApp · points expiring", "reward_expiry_v1"),
+  sAbSplit("ab", "A/B split", "A/B · Urgency vs Offer", [
+    { id: "vA", label: "Urgency" },
+    { id: "vB", label: "Offer" },
+  ]),
+  sWa("abA", "WhatsApp · Urgency", "Variant · Urgency", "reward_urgency_v1"),
+  sWa("abB", "WhatsApp · Offer", "Variant · Offer", "reward_offer_v1"),
+  sWa("redLow", "Redemption link", "WhatsApp · redeem now", "redemption_link_v1"),
+  sDelay("d1", 23, "Hours"),
+  sWa("waRem2", "WhatsApp reminder", "WhatsApp · redeem now", "redemption_link_v1"),
+  sCond("redCheck2", "Redemption check", "redemption_status", [
+    { id: "yes", label: "Redeemed", value: "redeemed" },
+    { id: "no", label: "Not redeemed", value: "pending" },
+  ]),
+  sWa("finalLow", "WhatsApp final reminder", "WhatsApp · last chance", "reward_final_v1"),
+  sEnd(),
+], [
+  ed("start", "aud"), ed("aud", "points"),
+  ed("points", "vRem", "high"), ed("vRem", "redHigh"), ed("redHigh", "redCheck"),
+  ed("redCheck", "end", "yes"), ed("redCheck", "finalHigh", "no"), ed("finalHigh", "end"),
+  ed("points", "waAlert", "low"), ed("waAlert", "ab"),
+  ed("ab", "abA", "vA"), ed("ab", "abB", "vB"),
+  ed("abA", "redLow"), ed("abB", "redLow"),
+  ed("redLow", "d1"), ed("d1", "waRem2"), ed("waRem2", "redCheck2"),
+  ed("redCheck2", "end", "yes"), ed("redCheck2", "finalLow", "no"), ed("finalLow", "end"),
+]);
+
+/* ---- 7. Retail · Winback ----------------------------------------------- */
+const C_WINBACK = buildCampaign("Retail · Winback", [
+  sStart(),
+  sAud("CSV · lapsed customers", ["cltv", "last_order_days"]),
+  sCond("cltv", "CLTV branch", "cltv", [
+    { id: "high", label: "High CLTV", value: "high" },
+    { id: "mid", label: "Medium / low", value: "medium_low" },
+  ]),
+  sVoice("vCall", "Voice AI winback call", "Winback call"),
+  sWa("purHigh", "Purchase link", "WhatsApp · shop now", "purchase_link_v1"),
+  sCond("purCheck", "Purchase check", "order_status", [
+    { id: "yes", label: "Purchased", value: "placed" },
+    { id: "no", label: "Not purchased", value: "pending" },
+  ]),
+  sVoice("vfuHigh", "Voice AI follow-up", "Reattempt · 1 retry", { maxAttempts: 1 }),
+  sWa("waOffer", "WhatsApp offer", "WhatsApp · winback offer", "winback_offer_v1"),
+  sAbSplit("ab", "A/B split", "A/B · Cashback vs Discount", [
+    { id: "vA", label: "Cashback" },
+    { id: "vB", label: "Discount" },
+  ]),
+  sWa("abA", "WhatsApp · Cashback", "Variant · Cashback", "winback_cashback_v1"),
+  sWa("abB", "WhatsApp · Discount", "Variant · Discount", "winback_discount_v1"),
+  sWa("purLow", "Purchase link", "WhatsApp · shop now", "purchase_link_v1"),
+  sDelay("d1", 23, "Hours"),
+  sCond("purchased", "Purchased?", "order_status", [
+    { id: "yes", label: "Yes", value: "placed" },
+    { id: "no", label: "No", value: "pending" },
+  ]),
+  sVoice("vfuLow", "Voice AI follow-up", "Reattempt · 1 retry", { maxAttempts: 1 }),
+  sEnd(),
+], [
+  ed("start", "aud"), ed("aud", "cltv"),
+  ed("cltv", "vCall", "high"), ed("vCall", "purHigh"), ed("purHigh", "purCheck"),
+  ed("purCheck", "end", "yes"), ed("purCheck", "vfuHigh", "no"), ed("vfuHigh", "end"),
+  ed("cltv", "waOffer", "mid"), ed("waOffer", "ab"),
+  ed("ab", "abA", "vA"), ed("ab", "abB", "vB"),
+  ed("abA", "purLow"), ed("abB", "purLow"),
+  ed("purLow", "d1"), ed("d1", "purchased"),
+  ed("purchased", "end", "yes"), ed("purchased", "vfuLow", "no"), ed("vfuLow", "end"),
+]);
+
+/* ---- 8. Retail · Subscription Conversion ------------------------------- */
+const C_SUBSCRIPTION = buildCampaign("Retail · Subscription Conversion", [
+  sStart(),
+  sAud("CSV · repeat buyers", ["order_count", "fav_category"]),
+  sCond("orders", "Order count branch", "order_count", [
+    { id: "high", label: "> 3 orders", op: "greater than", value: "3" },
+    { id: "low", label: "≤ 3 orders", op: "less than or equal to", value: "3" },
+  ]),
+  sVoice("vPitch", "Voice AI subscription pitch", "Subscription pitch call"),
+  sWa("subHigh", "Subscription link", "WhatsApp · subscribe", "subscription_link_v1"),
+  sCond("subCheckHigh", "Subscription check", "subscription_status", [
+    { id: "yes", label: "Subscribed", value: "active" },
+    { id: "no", label: "Not subscribed", value: "pending" },
+  ]),
+  sVoice("vRemHigh", "Voice AI reminder", "Reattempt · 1 retry", { maxAttempts: 1 }),
+  sWa("waBenefits", "WhatsApp benefits", "WhatsApp · subscription benefits", "subscription_benefits_v1"),
+  sAbSplit("ab", "A/B split", "A/B · Extra benefits vs Urgency", [
+    { id: "vA", label: "Extra benefits" },
+    { id: "vB", label: "Urgency" },
+  ]),
+  sWa("abA", "WhatsApp · Extra benefits", "Variant · Extra benefits", "subscription_extra_v1"),
+  sWa("abB", "WhatsApp · Urgency", "Variant · Urgency", "subscription_urgency_v1"),
+  sWa("subLow", "Subscription link", "WhatsApp · subscribe", "subscription_link_v1"),
+  sDelay("d1", 23, "Hours"),
+  sCond("subCheckLow", "Subscribed?", "subscription_status", [
+    { id: "yes", label: "Yes", value: "active" },
+    { id: "no", label: "No", value: "pending" },
+  ]),
+  sVoice("vRemLow", "Voice AI reminder", "Reattempt · 1 retry", { maxAttempts: 1 }),
+  sEnd(),
+], [
+  ed("start", "aud"), ed("aud", "orders"),
+  ed("orders", "vPitch", "high"), ed("vPitch", "subHigh"), ed("subHigh", "subCheckHigh"),
+  ed("subCheckHigh", "end", "yes"), ed("subCheckHigh", "vRemHigh", "no"), ed("vRemHigh", "end"),
+  ed("orders", "waBenefits", "low"), ed("waBenefits", "ab"),
+  ed("ab", "abA", "vA"), ed("ab", "abB", "vB"),
+  ed("abA", "subLow"), ed("abB", "subLow"),
+  ed("subLow", "d1"), ed("d1", "subCheckLow"),
+  ed("subCheckLow", "end", "yes"), ed("subCheckLow", "vRemLow", "no"), ed("vRemLow", "end"),
+]);
+
+/* ---- 9. Retail · Seasonal Sale ----------------------------------------- */
+const C_SEASONAL = buildCampaign("Retail · Seasonal Sale", [
+  sStart(),
+  sAud("CSV · eligible customers", ["is_vip", "fav_category"]),
+  sCond("vip", "VIP branch", "is_vip", [
+    { id: "vip", label: "VIP", value: "true" },
+    { id: "regular", label: "Regular", value: "false" },
+  ]),
+  sVoice("vEarly", "Voice AI early access", "Early access call"),
+  sWa("saleVip", "Sale link", "WhatsApp · shop the sale", "sale_link_v1"),
+  sCond("purVip", "Purchase check", "order_status", [
+    { id: "yes", label: "Purchased", value: "placed" },
+    { id: "no", label: "Not purchased", value: "pending" },
+  ]),
+  sVoice("vfuVip", "Voice AI follow-up", "Reattempt · 1 retry", { maxAttempts: 1 }),
+  sWa("waAnnounce", "WhatsApp sale announcement", "WhatsApp · sale is live", "sale_announce_v1"),
+  sAbSplit("ab", "A/B split", "A/B · Trends vs Limited period", [
+    { id: "vA", label: "Trends" },
+    { id: "vB", label: "Limited period" },
+  ]),
+  sWa("abA", "WhatsApp · Trends", "Variant · Trends", "seasonal_trends_v1"),
+  sWa("abB", "WhatsApp · Limited period", "Variant · Limited period offer", "seasonal_limited_v1"),
+  sDelay("d1", 23, "Hours"),
+  sCond("clicked", "Clicked?", "link_clicked", [
+    { id: "yes", label: "Yes", value: "true" },
+    { id: "no", label: "No", value: "false" },
+  ]),
+  sWa("saleReg", "Sale link", "WhatsApp · shop the sale", "sale_link_v1"),
+  sCond("purReg", "Purchase check", "order_status", [
+    { id: "yes", label: "Purchased", value: "placed" },
+    { id: "no", label: "Not purchased", value: "pending" },
+  ]),
+  sVoice("vfuReg", "Voice AI follow-up", "Reattempt · 1 retry", { maxAttempts: 1 }),
+  sWa("waRem", "WhatsApp reminder message", "WhatsApp · last chance", "sale_reminder_v1"),
+  sEnd(),
+], [
+  ed("start", "aud"), ed("aud", "vip"),
+  ed("vip", "vEarly", "vip"), ed("vEarly", "saleVip"), ed("saleVip", "purVip"),
+  ed("purVip", "end", "yes"), ed("purVip", "vfuVip", "no"), ed("vfuVip", "end"),
+  ed("vip", "waAnnounce", "regular"), ed("waAnnounce", "ab"),
+  ed("ab", "abA", "vA"), ed("ab", "abB", "vB"),
+  ed("abA", "d1"), ed("abB", "d1"),
+  ed("d1", "clicked"),
+  ed("clicked", "saleReg", "yes"), ed("saleReg", "purReg"),
+  ed("purReg", "end", "yes"), ed("purReg", "vfuReg", "no"), ed("vfuReg", "end"),
+  ed("clicked", "waRem", "no"), ed("waRem", "end"),
+]);
+
+/* ---- 10. D2C · Order Confirmation -------------------------------------- */
+const C_ORDERCONF = buildCampaign("D2C · Order Confirmation", [
+  sStart(),
+  sAud("CSV · new orders", ["payment_type", "order_id"]),
+  sCond("pay", "Payment type branch", "payment_type", [
+    { id: "cod", label: "COD", value: "cod" },
+    { id: "prepaid", label: "Prepaid", value: "prepaid" },
+  ]),
+  sVoice("vConf", "Voice AI confirmation", "Order confirmation call"),
+  sWa("availCod", "WhatsApp availability check link", "WhatsApp · confirm availability", "availability_link_v1"),
+  sCond("confCod", "Confirmed?", "order_confirmed", [
+    { id: "yes", label: "Yes", value: "true" },
+    { id: "no", label: "No", value: "false" },
+  ]),
+  sVoice("vfuCod", "Voice AI follow-up", "Reattempt · 1 retry", { maxAttempts: 1 }),
+  sWa("waConf", "WhatsApp confirmation", "WhatsApp · order confirmed", "order_confirm_v1"),
+  sDelay("d1", 23, "Hours"),
+  sCond("confPre", "Confirmed?", "order_confirmed", [
+    { id: "yes", label: "Yes", value: "true" },
+    { id: "no", label: "No", value: "false" },
+  ]),
+  sWa("availPre", "WhatsApp availability check link", "WhatsApp · confirm availability", "availability_link_v1"),
+  sVoice("vfuPre", "Voice AI follow-up", "Reattempt · 1 retry", { maxAttempts: 1 }),
+  sEnd(),
+], [
+  ed("start", "aud"), ed("aud", "pay"),
+  ed("pay", "vConf", "cod"), ed("vConf", "availCod"), ed("availCod", "confCod"),
+  ed("confCod", "end", "yes"), ed("confCod", "vfuCod", "no"), ed("vfuCod", "end"),
+  ed("pay", "waConf", "prepaid"), ed("waConf", "d1"), ed("d1", "confPre"),
+  ed("confPre", "end", "yes"), ed("confPre", "availPre", "no"), ed("availPre", "vfuPre"), ed("vfuPre", "end"),
+]);
+
+/* ---- 11. D2C · Outbound Sales ------------------------------------------ */
+const C_OUTBOUND = buildCampaign("D2C · Outbound Sales", [
+  sStart(),
+  sAud("CSV · lead audience", ["intent", "product"]),
+  sCond("intent", "Intent branch", "intent", [
+    { id: "high", label: "High intent", value: "high" },
+    { id: "medium", label: "Medium intent", value: "medium" },
+  ]),
+  sVoice("vDisc", "Voice AI discovery call", "Discovery call"),
+  sCond("intHigh", "Interested?", "call_disposition", [
+    { id: "yes", label: "Yes", value: "interested" },
+    { id: "no", label: "No", value: "not_interested" },
+  ]),
+  sWa("purHigh", "WhatsApp purchase link", "WhatsApp · buy now", "purchase_link_v1"),
+  sCond("convHigh", "Conversion check", "order_status", [
+    { id: "conv", label: "Converted", value: "placed" },
+    { id: "no", label: "Not converted", value: "pending" },
+  ]),
+  sVoice("vfuHigh", "Voice AI follow-up", "Reattempt · 1 retry", { maxAttempts: 1 }),
+  sWa("waIntro", "WhatsApp product intro", "WhatsApp · product intro", "product_intro_v1"),
+  sAbSplit("ab", "A/B split", "A/B · Variety vs Offers", [
+    { id: "vA", label: "Variety" },
+    { id: "vB", label: "Offers" },
+  ]),
+  sWa("abA", "WhatsApp · Variety", "Variant · Variety", "outbound_variety_v1"),
+  sWa("abB", "WhatsApp · Offers", "Variant · Offers", "outbound_offers_v1"),
+  sCond("intMed", "Interested?", "reply_intent", [
+    { id: "yes", label: "Yes", value: "interested" },
+    { id: "no", label: "No", value: "not_interested" },
+  ]),
+  sWa("purMed", "Purchase link", "WhatsApp · buy now", "purchase_link_v1"),
+  sDelay("d1", 23, "Hours"),
+  sCond("purchased", "Purchased?", "order_status", [
+    { id: "yes", label: "Yes", value: "placed" },
+    { id: "no", label: "No", value: "pending" },
+  ]),
+  sVoice("vfuMed", "Voice AI follow-up", "Reattempt · 1 retry", { maxAttempts: 1 }),
+  sWa("purMed2", "Purchase link", "WhatsApp · buy now", "purchase_link_v1"),
+  sEnd(),
+], [
+  ed("start", "aud"), ed("aud", "intent"),
+  ed("intent", "vDisc", "high"), ed("vDisc", "intHigh"),
+  ed("intHigh", "purHigh", "yes"), ed("intHigh", "end", "no"),
+  ed("purHigh", "convHigh"), ed("convHigh", "end", "conv"), ed("convHigh", "vfuHigh", "no"), ed("vfuHigh", "end"),
+  ed("intent", "waIntro", "medium"), ed("waIntro", "ab"),
+  ed("ab", "abA", "vA"), ed("ab", "abB", "vB"),
+  ed("abA", "intMed"), ed("abB", "intMed"),
+  ed("intMed", "purMed", "yes"), ed("intMed", "end", "no"),
+  ed("purMed", "d1"), ed("d1", "purchased"),
+  ed("purchased", "end", "yes"), ed("purchased", "vfuMed", "no"), ed("vfuMed", "purMed2"), ed("purMed2", "end"),
+]);
+
+/* ---- 12. D2C · Cart Abandonment ---------------------------------------- */
+const C_CART = buildCampaign("D2C · Cart Abandonment", [
+  sStart(),
+  sAud("CSV · cart abandoners", ["cart_value", "cart_items"]),
+  sCond("cart", "Cart value branch", "cart_value", [
+    { id: "high", label: "> ₹5,000", op: "greater than", value: "5000" },
+    { id: "low", label: "≤ ₹5,000", op: "less than or equal to", value: "5000" },
+  ]),
+  sVoice("vRec", "Voice AI recovery call", "Cart recovery call"),
+  sWa("cartHigh", "Cart link", "WhatsApp · complete purchase", "cart_link_v1"),
+  sCond("purHigh", "Purchase check", "order_status", [
+    { id: "yes", label: "Purchased", value: "placed" },
+    { id: "no", label: "Not purchased", value: "pending" },
+  ]),
+  sVoice("vRemHigh", "Voice AI reminder", "Reattempt · 1 retry", { maxAttempts: 1 }),
+  sWa("waRem", "WhatsApp reminder + purchase link", "WhatsApp · complete purchase", "cart_link_v1"),
+  sAbSplit("ab", "A/B split", "A/B · Discount vs Free shipping", [
+    { id: "vA", label: "Discount" },
+    { id: "vB", label: "Free shipping" },
+  ]),
+  sWa("abA", "WhatsApp · Discount", "Variant · Discount", "cart_discount_v1"),
+  sWa("abB", "WhatsApp · Free shipping", "Variant · Free shipping", "cart_free_shipping_v1"),
+  sWa("cartLow", "Purchase link", "WhatsApp · complete purchase", "cart_link_v1"),
+  sDelay("d1", 23, "Hours"),
+  sCond("purLow", "Purchased?", "order_status", [
+    { id: "yes", label: "Yes", value: "placed" },
+    { id: "no", label: "No", value: "pending" },
+  ]),
+  sVoice("vRemLow", "Voice AI reminder", "Reattempt · 1 retry", { maxAttempts: 1 }),
+  sEnd(),
+], [
+  ed("start", "aud"), ed("aud", "cart"),
+  ed("cart", "vRec", "high"), ed("vRec", "cartHigh"), ed("cartHigh", "purHigh"),
+  ed("purHigh", "end", "yes"), ed("purHigh", "vRemHigh", "no"), ed("vRemHigh", "end"),
+  ed("cart", "waRem", "low"), ed("waRem", "ab"),
+  ed("ab", "abA", "vA"), ed("ab", "abB", "vB"),
+  ed("abA", "cartLow"), ed("abB", "cartLow"),
+  ed("cartLow", "d1"), ed("d1", "purLow"),
+  ed("purLow", "end", "yes"), ed("purLow", "vRemLow", "no"), ed("vRemLow", "end"),
+]);
+
+/* ---- 13. E-commerce · Price Drop --------------------------------------- */
+const C_PRICEDROP = buildCampaign("E-commerce · Price Drop", [
+  sStart(),
+  sAud("CSV · users who wishlisted", ["product_value", "product_id"]),
+  sCond("value", "Product value branch", "product_value", [
+    { id: "high", label: "> ₹10,000", op: "greater than", value: "10000" },
+    { id: "low", label: "≤ ₹10,000", op: "less than or equal to", value: "10000" },
+  ]),
+  sVoice("vAlert", "Voice AI price drop alert", "Price drop call"),
+  sWa("purHigh", "Purchase link", "WhatsApp · buy now", "purchase_link_v1"),
+  sCond("purCheck", "Purchase check", "order_status", [
+    { id: "yes", label: "Purchased", value: "placed" },
+    { id: "no", label: "Not purchased", value: "pending" },
+  ]),
+  sVoice("vfuHigh", "Voice AI follow-up", "Reattempt · 1 retry", { maxAttempts: 1 }),
+  sWa("waAlert", "WhatsApp price drop alert", "WhatsApp · price dropped", "price_drop_v1"),
+  sAbSplit("ab", "A/B split", "A/B · % off vs Save ₹xx", [
+    { id: "vA", label: "% off" },
+    { id: "vB", label: "Save ₹xx" },
+  ]),
+  sWa("abA", "WhatsApp · % off", "Variant · % off", "pricedrop_pct_v1"),
+  sWa("abB", "WhatsApp · Save ₹xx", "Variant · Save ₹xx", "pricedrop_amount_v1"),
+  sWa("purLow", "Purchase link", "WhatsApp · buy now", "purchase_link_v1"),
+  sDelay("d1", 23, "Hours"),
+  sCond("purchased", "Purchased?", "order_status", [
+    { id: "yes", label: "Yes", value: "placed" },
+    { id: "no", label: "No", value: "pending" },
+  ]),
+  sVoice("vfuLow", "Voice AI follow-up", "Reattempt · 1 retry", { maxAttempts: 1 }),
+  sEnd(),
+], [
+  ed("start", "aud"), ed("aud", "value"),
+  ed("value", "vAlert", "high"), ed("vAlert", "purHigh"), ed("purHigh", "purCheck"),
+  ed("purCheck", "end", "yes"), ed("purCheck", "vfuHigh", "no"), ed("vfuHigh", "end"),
+  ed("value", "waAlert", "low"), ed("waAlert", "ab"),
+  ed("ab", "abA", "vA"), ed("ab", "abB", "vB"),
+  ed("abA", "purLow"), ed("abB", "purLow"),
+  ed("purLow", "d1"), ed("d1", "purchased"),
+  ed("purchased", "end", "yes"), ed("purchased", "vfuLow", "no"), ed("vfuLow", "end"),
+]);
+
+/* ---- 14. E-commerce · Back In Stock ------------------------------------ */
+const C_BACKINSTOCK = buildCampaign("E-commerce · Back In Stock", [
+  sStart(),
+  sAud("CSV · notify-me audience", ["loyalty_member", "product_id"]),
+  sCond("loyalty", "Loyalty branch", "loyalty_member", [
+    { id: "member", label: "Loyalty subscriber", value: "true" },
+    { id: "non", label: "Not subscribed", value: "false" },
+  ]),
+  sVoice("vAlert", "Voice AI alert", "Back-in-stock call"),
+  sWa("cartMem", "Cart link", "WhatsApp · add to cart", "cart_link_v1"),
+  sCond("purMem", "Purchase check", "order_status", [
+    { id: "yes", label: "Purchased", value: "placed" },
+    { id: "no", label: "Not purchased", value: "pending" },
+  ]),
+  sVoice("vfuMem", "Voice AI follow-up", "Reattempt · 1 retry", { maxAttempts: 1 }),
+  sWa("waStock", "WhatsApp back-in-stock", "WhatsApp · back in stock", "back_in_stock_v1"),
+  sAbSplit("ab", "A/B split", "A/B · Scarcity vs Popularity", [
+    { id: "vA", label: "Scarcity" },
+    { id: "vB", label: "Popularity" },
+  ]),
+  sWa("abA", "WhatsApp · Scarcity", "Variant · Scarcity", "backinstock_scarcity_v1"),
+  sWa("abB", "WhatsApp · Popularity", "Variant · Popularity", "backinstock_popularity_v1"),
+  sWa("cartNon", "Cart link", "WhatsApp · add to cart", "cart_link_v1"),
+  sDelay("d1", 23, "Hours"),
+  sCond("purNon", "Purchased?", "order_status", [
+    { id: "yes", label: "Yes", value: "placed" },
+    { id: "no", label: "No", value: "pending" },
+  ]),
+  sVoice("vfuNon", "Voice AI follow-up", "Reattempt · 1 retry", { maxAttempts: 1 }),
+  sEnd(),
+], [
+  ed("start", "aud"), ed("aud", "loyalty"),
+  ed("loyalty", "vAlert", "member"), ed("vAlert", "cartMem"), ed("cartMem", "purMem"),
+  ed("purMem", "end", "yes"), ed("purMem", "vfuMem", "no"), ed("vfuMem", "end"),
+  ed("loyalty", "waStock", "non"), ed("waStock", "ab"),
+  ed("ab", "abA", "vA"), ed("ab", "abB", "vB"),
+  ed("abA", "cartNon"), ed("abB", "cartNon"),
+  ed("cartNon", "d1"), ed("d1", "purNon"),
+  ed("purNon", "end", "yes"), ed("purNon", "vfuNon", "no"), ed("vfuNon", "end"),
+]);
+
+const EX1_LAID = assemble(EX1_NODES, EX1_EDGES);
+const EX2_LAID = assemble(EX2_NODES, EX2_EDGES);
+
+export const EXAMPLE_CAMPAIGNS: Record<string, ExampleCampaign> = {
+  // The two retained originals are left in draft — newest at the top, still being
+  // configured — so the library doesn't read as a wall of identical "ready" rows.
+  c_ex1: { name: "Omni-channel React", status: "draft", nodes: EX1_LAID.nodes, edges: EX1_LAID.edges },
+  c_ex2: { name: "Voice-led win-back", status: "draft", nodes: EX2_LAID.nodes, edges: EX2_LAID.edges },
+  c_ex3: C_LEADQUAL,
+  c_ex4: C_RENEWAL,
+  c_ex5: C_UPSELL,
+  c_ex6: C_COLLECT,
+  c_ex7: C_ACTIVATION,
+  c_ex8: C_REWARD,
+  c_ex9: C_WINBACK,
+  c_ex10: C_SUBSCRIPTION,
+  c_ex11: C_SEASONAL,
+  c_ex12: C_ORDERCONF,
+  c_ex13: C_OUTBOUND,
+  c_ex14: C_CART,
+  c_ex15: C_PRICEDROP,
+  c_ex16: C_BACKINSTOCK,
+};
+
+/** Names + status for the campaigns list (kept in sync with the registry above). */
+export const EXAMPLE_CAMPAIGN_NAMES: { id: string; name: string; status: CampaignStatus }[] =
+  Object.entries(EXAMPLE_CAMPAIGNS).map(([id, c]) => ({ id, name: c.name, status: c.status }));

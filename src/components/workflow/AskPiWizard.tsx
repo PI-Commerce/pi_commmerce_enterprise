@@ -3,6 +3,7 @@ import type { Edge, Node } from "reactflow";
 import { Sparkles, ArrowRight, Check, Loader2, ChevronLeft, Pencil } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { WorkflowNodeData } from "@/lib/campaign-types";
+import { elkLayout } from "@/lib/flow-layout";
 
 /* -------------------------------------------------------- */
 /* Question schema                                           */
@@ -162,7 +163,12 @@ export function buildPlan(answers: Record<string, string>): AskPiPlan {
     edges.push({ id: "e_fb_end",  source: "fallback", target: "end" });
   }
 
-  return { nodes, edges, name: GOAL_NAMES[goal] ?? "AI-built campaign" };
+  // Plan ships positionless + routed edges; the build phase runs the async ELK
+  // layout (see the building effect) so the animation and the materialized
+  // canvas match the rest of the builder.
+  const routedEdges = edges.map((e) => ({ ...e, type: "routed" as const }));
+
+  return { nodes, edges: routedEdges, name: GOAL_NAMES[goal] ?? "AI-built campaign" };
 }
 
 export function buildSkeleton(plan: AskPiPlan): AskPiPlan {
@@ -235,18 +241,28 @@ export function AskPiWizardBody({
 
   useEffect(() => {
     if (!active || phase !== "building") return;
-    const plan = draftPlan ?? buildPlan(answers);
-    onSkeleton(buildSkeleton(plan));
-    const tick = setInterval(() => {
-      setBuildStepIdx((i) => Math.min(i + 1, BUILD_STEPS.length - 1));
-    }, 900);
-    const finish = setTimeout(() => {
-      if (finishedRef.current) return;
-      finishedRef.current = true;
-      onBuild(plan);
-      setPhase("done");
-    }, 5000);
-    return () => { clearInterval(tick); clearTimeout(finish); };
+    let cancelled = false;
+    let tick: ReturnType<typeof setInterval> | undefined;
+    let finish: ReturnType<typeof setTimeout> | undefined;
+    (async () => {
+      const base = draftPlan ?? buildPlan(answers);
+      // Run the async ELK layout once, then drive both the skeleton animation
+      // and the final build off the laid-out graph so they line up cleanly.
+      const laid = await elkLayout(base.nodes, base.edges);
+      if (cancelled) return;
+      const plan = { ...base, nodes: laid.nodes, edges: laid.edges };
+      onSkeleton(buildSkeleton(plan));
+      tick = setInterval(() => {
+        setBuildStepIdx((i) => Math.min(i + 1, BUILD_STEPS.length - 1));
+      }, 900);
+      finish = setTimeout(() => {
+        if (finishedRef.current) return;
+        finishedRef.current = true;
+        onBuild(plan);
+        setPhase("done");
+      }, 5000);
+    })();
+    return () => { cancelled = true; if (tick) clearInterval(tick); if (finish) clearTimeout(finish); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, phase]);
 

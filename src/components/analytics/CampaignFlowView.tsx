@@ -1,12 +1,14 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import ReactFlow, {
   Background, BackgroundVariant, Controls,
   type Edge, type Node, type NodeMouseHandler,
 } from "reactflow";
 import "reactflow/dist/style.css";
 import { nodeTypes } from "@/components/workflow/nodes";
+import { edgeTypes } from "@/components/workflow/edges";
 import type { WorkflowNodeData, NodeKind } from "@/lib/campaign-types";
 import type { RunRow, SankeyNode, SankeyNodeKind } from "@/lib/analytics-data";
+import { elkLayout } from "@/lib/flow-layout";
 
 /** Map analytics SankeyNodeKind → Campaign Builder NodeKind so we can reuse
  *  the same visual node component the user designs the campaign with. */
@@ -23,54 +25,6 @@ const KIND_MAP: Record<SankeyNodeKind, NodeKind> = {
   end:         "end",
 };
 
-/** BFS layered layout: column = longest path from root, row = slot in column. */
-function layout(nodes: SankeyNode[], edges: { source: string; target: string }[]) {
-  const idToNode = new Map(nodes.map((n) => [n.id, n] as const));
-  const incoming = new Map<string, string[]>();
-  const outgoing = new Map<string, string[]>();
-  nodes.forEach((n) => { incoming.set(n.id, []); outgoing.set(n.id, []); });
-  edges.forEach((e) => {
-    outgoing.get(e.source)?.push(e.target);
-    incoming.get(e.target)?.push(e.source);
-  });
-
-  // Longest-path depth so end nodes always sit to the right of every predecessor.
-  const depth = new Map<string, number>();
-  function computeDepth(id: string, seen = new Set<string>()): number {
-    if (depth.has(id)) return depth.get(id)!;
-    if (seen.has(id)) return 0;
-    seen.add(id);
-    const parents = incoming.get(id) ?? [];
-    const d = parents.length === 0 ? 0 : Math.max(...parents.map((p) => computeDepth(p, seen) + 1));
-    depth.set(id, d);
-    return d;
-  }
-  nodes.forEach((n) => computeDepth(n.id));
-
-  // Group by depth, sort end-terminals to bottom of their column
-  const cols = new Map<number, string[]>();
-  nodes.forEach((n) => {
-    const d = depth.get(n.id)!;
-    if (!cols.has(d)) cols.set(d, []);
-    cols.get(d)!.push(n.id);
-  });
-
-  const COL_W = 260;   // horizontal slot spacing
-  const ROW_H = 160;   // vertical depth spacing (taller for inline metrics row)
-
-  const positions = new Map<string, { x: number; y: number }>();
-  cols.forEach((ids, depthLevel) => {
-    ids.sort((a, b) => {
-      const ka = idToNode.get(a)!.kind === "end" ? 1 : 0;
-      const kb = idToNode.get(b)!.kind === "end" ? 1 : 0;
-      return ka - kb;
-    });
-    const offset = -((ids.length - 1) * COL_W) / 2;
-    ids.forEach((id, i) => positions.set(id, { x: offset + i * COL_W, y: depthLevel * ROW_H }));
-  });
-  return positions;
-}
-
 export function CampaignFlowView({
   run,
   onNodeClick,
@@ -78,11 +32,12 @@ export function CampaignFlowView({
   run: RunRow;
   onNodeClick: (n: SankeyNode) => void;
 }) {
-  const { nodes, edges } = useMemo(() => {
-    const positions = layout(run.sankey.nodes, run.sankey.edges);
+  // Build the positionless graph (matching the campaign builder visuals), then
+  // lay it out with the async ELK layout at render-time.
+  const { rawNodes, rawEdges } = useMemo(() => {
     const idToNode = new Map(run.sankey.nodes.map((n) => [n.id, n] as const));
 
-    const rfNodes: Node<WorkflowNodeData>[] = run.sankey.nodes.map((n) => {
+    const rawNodes: Node<WorkflowNodeData>[] = run.sankey.nodes.map((n) => {
       const isConverted = n.kind === "end" && /convert|complete|resubmit/i.test(n.name);
       const isDropped   = n.kind === "end" && !isConverted;
       const title = isConverted ? "Converted" : isDropped ? "End" : n.name.split(" · ")[0];
@@ -96,7 +51,7 @@ export function CampaignFlowView({
       return {
         id: n.id,
         type: "workflow",
-        position: positions.get(n.id) ?? { x: 0, y: 0 },
+        position: { x: 0, y: 0 },
         draggable: false,
         selectable: false,
         connectable: false,
@@ -113,8 +68,7 @@ export function CampaignFlowView({
       };
     });
 
-
-    const rfEdges: Edge[] = run.sankey.edges.map((e, i) => {
+    const rawEdges: Edge[] = run.sankey.edges.map((e, i) => {
       const tgt = idToNode.get(e.target);
       const isDrop = tgt?.kind === "end" && !/convert|complete|resubmit/i.test(tgt?.name ?? "");
       const isConv = tgt?.kind === "end" && /convert|complete|resubmit/i.test(tgt?.name ?? "");
@@ -123,26 +77,42 @@ export function CampaignFlowView({
         id: `e_${i}`,
         source: e.source,
         target: e.target,
-        type: "smoothstep",
+        type: "routed",
         animated: false,
         style: { stroke, strokeWidth: 1.5 },
       } satisfies Edge;
     });
 
-
-    return { nodes: rfNodes, edges: rfEdges };
+    return { rawNodes, rawEdges };
   }, [run]);
+
+  const [layout, setLayout] = useState<{ nodes: Node<WorkflowNodeData>[]; edges: Edge[] } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setLayout(null);
+    // elkLayout preserves each edge's colored `style`; it only fills position +
+    // routed bend-points, so converted/dropped strokes survive.
+    elkLayout(rawNodes, rawEdges).then((laid) => {
+      if (!cancelled) setLayout(laid);
+    });
+    return () => { cancelled = true; };
+  }, [rawNodes, rawEdges]);
 
   const handleNodeClick: NodeMouseHandler = (_evt, n) => {
     const data = run.sankey.nodes.find((x) => x.id === n.id);
     if (data) onNodeClick(data);
   };
 
+  // Mount ReactFlow only once ELK has positioned the graph, so `fitView` runs
+  // with real coordinates (and re-runs whenever the selected run changes).
+  if (!layout) return <div className="h-full w-full" />;
+
   return (
     <ReactFlow
-      nodes={nodes}
-      edges={edges}
+      nodes={layout.nodes}
+      edges={layout.edges}
       nodeTypes={nodeTypes}
+      edgeTypes={edgeTypes}
       onNodeClick={handleNodeClick}
       fitView
       fitViewOptions={{ padding: 0.18 }}
@@ -154,7 +124,7 @@ export function CampaignFlowView({
       minZoom={0.3}
       maxZoom={1.5}
       proOptions={{ hideAttribution: true }}
-      defaultEdgeOptions={{ type: "smoothstep" }}
+      defaultEdgeOptions={{ type: "routed" }}
     >
       <Background variant={BackgroundVariant.Dots} gap={20} size={1} />
       <Controls showInteractive={false} className="!shadow-none" />

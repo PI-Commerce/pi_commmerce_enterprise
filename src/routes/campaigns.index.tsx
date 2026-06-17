@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AppShell, PageHeader } from "@/components/app/AppShell";
 import { PageTabs } from "@/components/app/Tabs";
 import { Button } from "@/components/ui/button";
@@ -20,11 +20,12 @@ import {
   Plus, Search, MoreHorizontal, Copy, Workflow,
   CircleDashed, CircleCheck, CircleX, CirclePause, CircleDot,
   Pause, Play, X, Square, ArrowUp, ArrowDown, ChevronsUpDown, Check,
-  Upload, Download, FileSpreadsheet, Database,
+  Upload, Download, FileSpreadsheet, Database, ChevronLeft, ChevronRight,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { STATUS_TONE, type CampaignStatus } from "@/lib/campaign-types";
+import { EXAMPLE_CAMPAIGN_NAMES } from "@/lib/campaign-examples";
 import { CreateRunDialog, type CampaignOption, type CreateRunPayload } from "@/components/workflow/CreateRunDialog";
 import { CSV_LIBRARY, makeCsvAsset, type CsvAsset } from "@/lib/data-library";
 
@@ -60,16 +61,25 @@ type CampaignRow = {
 const NOW = Date.now();
 const M = 60_000, H = 60 * M, D = 24 * H;
 
-const INITIAL: CampaignRow[] = [
-  { id: "c_ex1", name: "Example 1 (Omni-channel React)", state: "ready", createdAt: "Today · 09:00", createdAtTs: NOW - 1 * H, lastEdited: "1m ago", lastEditedTs: NOW - 1 * M, runType: "one-time", lastRun: "—" },
-  { id: "c_ex2", name: "Example 2 (Voice-led win-back)",  state: "ready", createdAt: "Today · 09:00", createdAtTs: NOW - 1 * H, lastEdited: "2m ago", lastEditedTs: NOW - 2 * M, runType: "one-time", lastRun: "—" },
-  { id: "c_001", name: "Dormant Trader Reactivation", state: "running", createdAt: "Mar 02, 2026 · 09:14", createdAtTs: Date.parse("2026-03-02T09:14:00"), lastEdited: "4m ago",     lastEditedTs: NOW - 4 * M,   runType: "recurring", lastRun: "running", lastRunAt: "Today · 12:04", lastRunTs: NOW - 30 * M, lastRunId: "\u200B" },
-  { id: "c_002", name: "New Trader Onboarding",       state: "running",  createdAt: "Feb 18, 2026 · 16:02", createdAtTs: Date.parse("2026-02-18T16:02:00"), lastEdited: "1h ago",     lastEditedTs: NOW - 1 * H,   runType: "recurring", lastRun: "completed", lastRunAt: "Today · 11:50", lastRunTs: NOW - 50 * M, lastRunId: "r_8420" },
-  { id: "c_003", name: "High-Value Win-Back",         state: "paused",   createdAt: "Feb 04, 2026 · 11:30", createdAtTs: Date.parse("2026-02-04T11:30:00"), lastEdited: "2h ago",     lastEditedTs: NOW - 2 * H,   runType: "recurring", lastRun: "paused",  lastRunAt: "Today · 11:32", lastRunTs: NOW - 70 * M, lastRunId: "r_8418" },
-  { id: "c_004", name: "KYC Drop-off Recovery",       state: "ready",    createdAt: "Jan 22, 2026 · 10:45", createdAtTs: Date.parse("2026-01-22T10:45:00"), lastEdited: "Yesterday",  lastEditedTs: NOW - 1 * D,   runType: "one-time",  lastRun: "—" },
-  { id: "c_005", name: "Festive Cashback Push",       state: "draft",    createdAt: "Jan 10, 2026 · 14:20", createdAtTs: Date.parse("2026-01-10T14:20:00"), lastEdited: "3d ago",     lastEditedTs: NOW - 3 * D,   runType: "one-time",  lastRun: "—" },
-  { id: "c_006", name: "Inactive Premium Outreach",   state: "paused",   createdAt: "Dec 15, 2025 · 08:11", createdAtTs: Date.parse("2025-12-15T08:11:00"), lastEdited: "Apr 12",     lastEditedTs: Date.parse("2026-04-12T12:00:00"), runType: "one-time",  lastRun: "failed", lastRunAt: "Apr 12 · 18:00", lastRunTs: Date.parse("2026-04-12T18:00:00"), lastRunId: "r_7188" },
-];
+// Sales-team example library — the showcase campaigns shown at the top of the
+// table. Names + ids come straight from the authored graphs so they stay in sync
+// and are searchable by their chosen names. Sub-second stagger keeps them ordered
+// (and above the demo campaigns) under the default "last edited" sort.
+const EXAMPLE_ROWS: CampaignRow[] = EXAMPLE_CAMPAIGN_NAMES.map((e, i) => ({
+  id: e.id,
+  name: e.name,
+  state: e.status,
+  createdAt: "Today · 09:00",
+  createdAtTs: NOW - 1 * H,
+  lastEdited: "just now",
+  lastEditedTs: NOW - (i + 1) * 1000,
+  runType: "one-time" as RunType,
+  lastRun: "—" as LastRunStatus,
+}));
+
+// Only the sales-team example library is shown — older demo campaigns were
+// retired so the platform stays contextual to these examples end-to-end.
+const INITIAL: CampaignRow[] = [...EXAMPLE_ROWS];
 
 const STATES: CampaignStatus[] = ["draft", "ready", "running", "paused"];
 
@@ -112,14 +122,14 @@ type RunRow = {
 };
 
 const RUNS: RunRow[] = [
-  { id: "\u200B", campaign: "Dormant Trader Reactivation", status: "running",    runType: "one-time",  triggerMode: "manual", startedAt: "Today, 12:04 PM",   completedAt: "ongoing",         leadsProcessed: 630,  leadsTotal: 1500 },
-  { id: "r_8420", campaign: "New Trader Onboarding",       status: "running",    runType: "recurring", triggerMode: "api",    startedAt: "Today, 11:50 AM",   completedAt: "ongoing",         leadsProcessed: 1200 },
-  { id: "r_8419", campaign: "KYC Drop-off Recovery",       status: "queued",     runType: "one-time",  triggerMode: "manual", startedAt: "Today, 11:48 AM",   completedAt: "ongoing",         leadsProcessed: 0,    leadsTotal: 820 },
-  { id: "r_8418", campaign: "High-Value Win-Back",         status: "paused",     runType: "one-time",  triggerMode: "manual", startedAt: "Today, 11:32 AM",   completedAt: "ongoing",         leadsProcessed: 412,  leadsTotal: 750 },
-  { id: "r_8417", campaign: "Dormant Trader Reactivation", status: "completed",  runType: "one-time",  triggerMode: "manual", startedAt: "Today, 10:00 AM",   completedAt: "Today, 11:14 AM", leadsProcessed: 1500, leadsTotal: 1500 },
-  { id: "r_8416", campaign: "Festive Cashback Push",       status: "scheduled",  runType: "one-time",  triggerMode: "manual", startedAt: "Tomorrow, 09:00 AM",completedAt: "ongoing",         leadsProcessed: 0,    leadsTotal: 3200 },
-  { id: "r_8415", campaign: "Inactive Premium Outreach",   status: "terminated", runType: "one-time",  triggerMode: "api",    startedAt: "Yesterday, 04:20 PM",completedAt: "Yesterday, 04:38 PM", leadsProcessed: 240 },
-  { id: "r_8414", campaign: "New Trader Onboarding",       status: "completed",  runType: "recurring", triggerMode: "api",    startedAt: "Yesterday, 09:00 AM",completedAt: "Yesterday, 10:12 AM", leadsProcessed: 980 },
+  { id: "\u200B", campaign: "BFSI · Lead Qualification", status: "running",    runType: "one-time",  triggerMode: "manual", startedAt: "Today, 12:04 PM",   completedAt: "ongoing",         leadsProcessed: 630,  leadsTotal: 1500 },
+  { id: "r_8420", campaign: "Retail · Activation",       status: "running",    runType: "recurring", triggerMode: "api",    startedAt: "Today, 11:50 AM",   completedAt: "ongoing",         leadsProcessed: 1200 },
+  { id: "r_8419", campaign: "BFSI · Collections",       status: "queued",     runType: "one-time",  triggerMode: "manual", startedAt: "Today, 11:48 AM",   completedAt: "ongoing",         leadsProcessed: 0,    leadsTotal: 820 },
+  { id: "r_8418", campaign: "Retail · Winback",         status: "paused",     runType: "one-time",  triggerMode: "manual", startedAt: "Today, 11:32 AM",   completedAt: "ongoing",         leadsProcessed: 412,  leadsTotal: 750 },
+  { id: "r_8417", campaign: "D2C · Cart Abandonment", status: "completed",  runType: "one-time",  triggerMode: "manual", startedAt: "Today, 10:00 AM",   completedAt: "Today, 11:14 AM", leadsProcessed: 1500, leadsTotal: 1500 },
+  { id: "r_8416", campaign: "Retail · Seasonal Sale",       status: "scheduled",  runType: "one-time",  triggerMode: "manual", startedAt: "Tomorrow, 09:00 AM",completedAt: "ongoing",         leadsProcessed: 0,    leadsTotal: 3200 },
+  { id: "r_8415", campaign: "BFSI · Insurance Renewal",   status: "terminated", runType: "one-time",  triggerMode: "api",    startedAt: "Yesterday, 04:20 PM",completedAt: "Yesterday, 04:38 PM", leadsProcessed: 240 },
+  { id: "r_8414", campaign: "E-commerce · Price Drop",       status: "completed",  runType: "recurring", triggerMode: "api",    startedAt: "Yesterday, 09:00 AM",completedAt: "Yesterday, 10:12 AM", leadsProcessed: 980 },
 ];
 
 type Tab = "data" | "campaigns" | "runs";
@@ -202,6 +212,16 @@ function CampaignList() {
       }
     }
   });
+
+  // Pagination for the campaigns table.
+  const C_PAGE_SIZE = 8;
+  const [cPage, setCPage] = useState(1);
+  useEffect(() => { setCPage(1); }, [query, fState, fRunType, sortKey, sortDir]);
+  const cTotalPages = Math.max(1, Math.ceil(sorted.length / C_PAGE_SIZE));
+  const cPageSafe = Math.min(cPage, cTotalPages);
+  const pageRows = sorted.slice((cPageSafe - 1) * C_PAGE_SIZE, cPageSafe * C_PAGE_SIZE);
+  const cRangeStart = sorted.length === 0 ? 0 : (cPageSafe - 1) * C_PAGE_SIZE + 1;
+  const cRangeEnd = Math.min(cPageSafe * C_PAGE_SIZE, sorted.length);
 
 
   const filteredRuns = RUNS.filter((r) => {
@@ -326,7 +346,7 @@ function CampaignList() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {sorted.map((c) => {
+                  {pageRows.map((c) => {
                     const LR = LAST_RUN_META[c.lastRun];
                     return (
                       <tr key={c.id} className="transition-colors hover:bg-accent/30">
@@ -401,6 +421,35 @@ function CampaignList() {
                   })}
                 </tbody>
               </table>
+            </div>
+          )}
+
+          {filtered.length > 0 && (
+            <div className="mt-3 flex items-center justify-between gap-3">
+              <p className="text-[12px] text-muted-foreground">
+                Showing {cRangeStart}–{cRangeEnd} of {sorted.length} campaigns
+              </p>
+              {cTotalPages > 1 && (
+                <div className="flex items-center gap-1.5">
+                  <Button
+                    variant="outline" size="sm"
+                    className="h-7 gap-1 px-2 text-xs"
+                    disabled={cPageSafe <= 1}
+                    onClick={() => setCPage((p) => Math.max(1, p - 1))}
+                  >
+                    <ChevronLeft className="h-3.5 w-3.5" /> Prev
+                  </Button>
+                  <span className="px-1 text-[12px] tabular-nums text-muted-foreground">Page {cPageSafe} of {cTotalPages}</span>
+                  <Button
+                    variant="outline" size="sm"
+                    className="h-7 gap-1 px-2 text-xs"
+                    disabled={cPageSafe >= cTotalPages}
+                    onClick={() => setCPage((p) => Math.min(cTotalPages, p + 1))}
+                  >
+                    Next <ChevronRight className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              )}
             </div>
           )}
         </>

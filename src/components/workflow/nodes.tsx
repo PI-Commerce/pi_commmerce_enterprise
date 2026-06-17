@@ -93,16 +93,16 @@ export function WorkflowNode({ id, data, selected }: NodeProps<WorkflowNodeData>
         )}
       >
         {!isTerminal && (
-          <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-2 !border-background !bg-ai/40" />
+          <Handle type="target" position={Position.Left} className="!h-2 !w-2 !border-2 !border-background !bg-ai/40" />
         )}
         {!isTerminal && (
-          <Handle type="source" position={Position.Bottom} className="!h-2 !w-2 !border-2 !border-background !bg-ai/40" />
+          <Handle type="source" position={Position.Right} className="!h-2 !w-2 !border-2 !border-background !bg-ai/40" />
         )}
         {isTerminal && data.kind !== "start" && (
-          <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-2 !border-background !bg-ai/40" />
+          <Handle type="target" position={Position.Left} className="!h-2 !w-2 !border-2 !border-background !bg-ai/40" />
         )}
         {isTerminal && data.kind !== "end" && (
-          <Handle type="source" position={Position.Bottom} className="!h-2 !w-2 !border-2 !border-background !bg-ai/40" />
+          <Handle type="source" position={Position.Right} className="!h-2 !w-2 !border-2 !border-background !bg-ai/40" />
         )}
         <div className="absolute inset-0 overflow-hidden rounded-[inherit]">
           <div className="askpi-skeleton-shimmer h-full w-full" />
@@ -149,10 +149,10 @@ export function WorkflowNode({ id, data, selected }: NodeProps<WorkflowNodeData>
         <Icon className="h-3.5 w-3.5" strokeWidth={2.5} />
         <span className="max-w-[180px] truncate">{label}</span>
         {data.kind !== "start" && (
-          <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-2 !border-background !bg-muted-foreground/60" />
+          <Handle type="target" position={Position.Left} className="!h-2 !w-2 !border-2 !border-background !bg-muted-foreground/60" />
         )}
         {data.kind !== "end" && (
-          <Handle type="source" position={Position.Bottom} className="!h-2 !w-2 !border-2 !border-background !bg-muted-foreground/60" />
+          <Handle type="source" position={Position.Right} className="!h-2 !w-2 !border-2 !border-background !bg-muted-foreground/60" />
         )}
       </div>
     );
@@ -214,7 +214,7 @@ export function WorkflowNode({ id, data, selected }: NodeProps<WorkflowNodeData>
         </div>
       )}
 
-      <Handle type="target" position={Position.Top} className="!h-2 !w-2 !border-2 !border-background !bg-muted-foreground/50" />
+      <Handle type="target" position={Position.Left} className="!h-2 !w-2 !border-2 !border-background !bg-muted-foreground/50" />
 
       <div className="flex items-start gap-2.5 p-3">
         <div className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-lg", tone)}>
@@ -287,7 +287,7 @@ export function WorkflowNode({ id, data, selected }: NodeProps<WorkflowNodeData>
           ))}
         </div>
       ) : (
-        <Handle type="source" position={Position.Bottom} className="!h-2 !w-2 !border-2 !border-background !bg-muted-foreground/50" />
+        <Handle type="source" position={Position.Right} className="!h-2 !w-2 !border-2 !border-background !bg-muted-foreground/50" />
       )}
     </div>
   );

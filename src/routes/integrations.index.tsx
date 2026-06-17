@@ -26,8 +26,8 @@ function Integrations() {
         onChange={setTab}
         tabs={[
           { id: "channels", label: "Channels" },
-          { id: "crm", label: "CRMs" },
-          { id: "developer", label: "Developer" },
+          { id: "crm", label: "CRMs", disabled: true },
+          { id: "developer", label: "Developer", disabled: true },
         ]}
       />
       {tab === "channels" && <Channels />}

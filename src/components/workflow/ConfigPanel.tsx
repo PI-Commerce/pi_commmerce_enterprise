@@ -5,7 +5,7 @@ import {
   FileSpreadsheet, Loader2, Clock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useRegion } from "@/lib/region";
+import { useRegion, localizeCurrency } from "@/lib/region";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -180,12 +180,14 @@ export function ConfigPanel({ node, readOnly, onClose, onChange, onDelete, onDup
   const { data } = node;
   const valid = data.valid !== false;
   const isSystem = data.kind === "start" || data.kind === "end";
-  // Preset/example nodes render the *real* editor for this kind, but read-only and
-  // hydrated from data.config — so it looks exactly like a configured node. We force
-  // read-only and neuter onChange so the stateful sub-components can't overwrite the
-  // authored outputs/abTest (and disconnect the example graph's edges) on mount.
+  // Preset/example nodes render the *real* editor for this kind, hydrated from
+  // data.config — so it looks fully configured AND its dropdowns/inputs are live
+  // (the user can open and explore them). We only neuter onChange so the stateful
+  // sub-components can't overwrite the authored outputs/abTest (and disconnect the
+  // example graph's edges) — field edits stay local to the panel. Snapshot mode
+  // (Version History) still passes readOnly to lock everything down.
   const preset = !!data.preset;
-  const ro = readOnly || preset;
+  const ro = readOnly;
   const safeChange = preset ? NOOP_CHANGE : onChange;
 
   // I5 — one-click "Pi: complete this for me", only for an editable node that's still
@@ -266,7 +268,7 @@ export function ConfigPanel({ node, readOnly, onClose, onChange, onDelete, onDup
           )}
         </div>
 
-        {!isSystem && (
+        {!isSystem && !preset && (
           <div className="flex items-center justify-between border-t border-border px-5 py-3">
             <div className="flex items-center gap-1">
               {!data.locked && !ro && (
@@ -620,10 +622,13 @@ const COMPARISON_OPERATORS = [
 const VALUELESS_OPERATORS = new Set(["exists", "does not exist"]);
 
 function ConditionalFields({ config, readOnly, mark, onChange }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
-  const [branches, setBranches] = useState(config?.branches ?? [
-    { id: "bA", label: "High value", variable: "contact.tier", op: "equals", value: "gold" },
-    { id: "bB", label: "Engaged", variable: "wa.delivery_state", op: "equals", value: "read" },
-  ]);
+  const { symbol } = useRegion();
+  const [branches, setBranches] = useState(() =>
+    (config?.branches ?? [
+      { id: "bA", label: "High value", variable: "contact.tier", op: "equals", value: "gold" },
+      { id: "bB", label: "Engaged", variable: "wa.delivery_state", op: "equals", value: "read" },
+    ]).map((b) => ({ ...b, label: localizeCurrency(b.label, symbol) })),
+  );
   const update = (i: number, patch: Partial<typeof branches[number]>) => {
     setBranches((b) => b.map((x, idx) => idx === i ? { ...x, ...patch } : x));
     mark(true);
@@ -1247,10 +1252,9 @@ function ActionNodeShell({
 
   return (
     <>
-      {/* In-node A/B experiments are OOS for v1 (scope A4) — the editable builder no longer
-          exposes them (use the standalone A/B Split node instead). Kept read-only so existing
-          example campaigns still render their authored experiment. */}
-      {readOnly && (
+      {/* A/B experiment summary — shown whenever a node has A/B enabled (example
+          campaigns author it). Clean nodes (abEnabled false) never render a toggle. */}
+      {abEnabled && (
       <div className="mb-5 rounded-xl border border-border bg-card/40 p-3">
         <div className="flex items-start gap-2.5">
           <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-chart-1/10 text-chart-1">
@@ -1341,9 +1345,9 @@ function ActionNodeShell({
       )}
 
       {/* AI Transformations are OOS for v1 (scope A5) — the editable builder no longer
-          exposes them. Kept read-only so example campaigns still render authored transforms
-          (e.g. Voice transcript → call_disposition). */}
-      {readOnly && (
+          exposes them. Only shown read-only when an example campaign actually authored
+          transforms (none do in v1), so clean preset nodes never render an empty section. */}
+      {readOnly && transforms.length > 0 && (
         <AiTransformationsSection
           readOnly={readOnly}
           transforms={transforms}
