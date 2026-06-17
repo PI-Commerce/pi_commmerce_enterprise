@@ -47,7 +47,7 @@ export type NodeOutput = { id: string; label: string; kind: NodeOutputKind };
  * example node "looks fully configured" without a bespoke summary card.
  */
 export type PresetSchemaField = { id: string; name: string; type: "String" | "Number" | "Boolean" };
-export type PresetBranch = { id: string; label: string; variable: string; op: string; value: string };
+export type PresetBranch = { id: string; label: string; variable: string; op: string; value: string; value2?: string };
 export type PresetSplitVariant = { id: string; label: string; pct: number };
 export type PresetTransform = { id: string; type: string; input: string; output: string };
 export type PresetExitPath = { id: string; label: string; variable: string; op: string; value: string };
