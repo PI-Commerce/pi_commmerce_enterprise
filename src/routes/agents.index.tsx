@@ -16,6 +16,7 @@ import {
 import { Plus, Phone, MessageCircle, Wrench, Search, MoreHorizontal, Workflow, Archive, Copy, Check, KeyRound, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { TOOLS, AUTH_LABEL, TYPE_LABEL, STATUS_LABEL, type ToolType } from "@/lib/tool-registry";
 
 export const Route = createFileRoute("/agents/")({
   component: Agents,
@@ -53,7 +54,7 @@ function Agents() {
         onChange={setTab}
         tabs={[
           { id: "builder", label: "Builder", count: INITIAL_AGENTS.length },
-          { id: "tools", label: "Tools", count: INITIAL_TOOLS.length },
+          { id: "tools", label: "Tools", count: TOOLS.length },
         ]}
       />
 
@@ -245,48 +246,15 @@ function StatusTag({ status }: { status: AgentStatus }) {
   );
 }
 
-type ToolHealth = "ok" | "warn";
-type ToolStatus = "configured" | "setup";
-type ToolAuth = "apiKey" | "bearer" | "oauth2" | "none";
-
-type Tool = {
-  handle: string;
-  name: string;
-  scope: string;
-  health: ToolHealth;
-  usage: string;
-  status: ToolStatus;
-  auth: ToolAuth;
-  baseUrl: string;
-};
-
-const INITIAL_TOOLS: Tool[] = [
-  { handle: "send_whatsapp", name: "Send WhatsApp", scope: "messaging:send", health: "ok", usage: "12.4K / day", status: "configured", auth: "apiKey", baseUrl: "https://graph.facebook.com/v19.0" },
-  { handle: "send_sms", name: "Send SMS", scope: "messaging:send", health: "ok", usage: "3.1K / day", status: "configured", auth: "apiKey", baseUrl: "https://api.twilio.com/2010-04-01" },
-  { handle: "place_call", name: "Telephony · Place call", scope: "voice:dial", health: "ok", usage: "820 / day", status: "configured", auth: "bearer", baseUrl: "https://api.telephony.pi/v1" },
-  { handle: "crm_query", name: "CRM Query", scope: "crm:read", health: "ok", usage: "48K / day", status: "configured", auth: "oauth2", baseUrl: "https://api.crm.pi/v2" },
-  { handle: "push_audience", name: "Meta Ads · Push audience", scope: "ads:write", health: "warn", usage: "120 / day", status: "configured", auth: "oauth2", baseUrl: "https://graph.facebook.com/v19.0" },
-  { handle: "customer_context", name: "Fetch Customer Context", scope: "internal:read", health: "ok", usage: "210K / day", status: "configured", auth: "none", baseUrl: "https://internal.pi/context" },
-  { handle: "order_lookup", name: "Order lookup", scope: "orders:read", health: "ok", usage: "9.4K / day", status: "configured", auth: "apiKey", baseUrl: "https://api.orders.pi/v1" },
-  { handle: "refund_initiate", name: "Refund · initiate", scope: "payments:write", health: "ok", usage: "82 / day", status: "configured", auth: "bearer", baseUrl: "https://api.payments.pi/v1" },
-  { handle: "knowledge_lookup", name: "Knowledge lookup", scope: "kb:read", health: "ok", usage: "180K / day", status: "configured", auth: "none", baseUrl: "https://kb.pi/search" },
-];
-
-const AUTH_LABEL: Record<ToolAuth, string> = {
-  apiKey: "API key",
-  bearer: "Bearer token",
-  oauth2: "OAuth 2.0",
-  none: "No auth",
-};
-
 function Tools() {
-  const [tools] = useState<Tool[]>(INITIAL_TOOLS);
   const [query, setQuery] = useState("");
-  const [fHealth, setFHealth] = useState<"all" | ToolHealth>("all");
+  const [fHealth, setFHealth] = useState<"all" | "ok" | "warn">("all");
+  const [fType, setFType] = useState<"all" | ToolType>("all");
 
-  const filtered = tools.filter((t) => {
+  const filtered = TOOLS.filter((t) => {
     if (fHealth !== "all" && t.health !== fHealth) return false;
-    if (query && !t.name.toLowerCase().includes(query.toLowerCase()) && !t.scope.toLowerCase().includes(query.toLowerCase()) && !t.handle.toLowerCase().includes(query.toLowerCase())) return false;
+    if (fType !== "all" && t.type !== fType) return false;
+    if (query && !t.handle.toLowerCase().includes(query.toLowerCase()) && !t.description.toLowerCase().includes(query.toLowerCase())) return false;
     return true;
   });
 
@@ -298,10 +266,20 @@ function Tools() {
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search by name, handle or scope…"
+            placeholder="Search by tool name or description…"
             className="h-8 pl-8 text-xs"
           />
         </div>
+        <FilterSelect
+          label="Type"
+          value={fType}
+          onChange={(v) => setFType(v as typeof fType)}
+          options={[
+            { value: "all", label: "All" },
+            { value: "http", label: "HTTP API" },
+            { value: "mcp", label: "MCP" },
+          ]}
+        />
         <FilterSelect
           label="Health"
           value={fHealth}
@@ -313,7 +291,7 @@ function Tools() {
           ]}
         />
         <Button size="sm" className="ml-auto h-8 gap-1.5 text-xs" asChild>
-          <Link to="/agents/tools/new"><Plus className="h-3.5 w-3.5" /> Add tool</Link>
+          <Link to="/agents/tools/new" search={{ tool: undefined }}><Plus className="h-3.5 w-3.5" /> Add tool</Link>
         </Button>
       </div>
 
@@ -327,29 +305,36 @@ function Tools() {
             <thead>
               <tr className="border-b border-border bg-secondary/30 text-[11px] uppercase tracking-wider text-muted-foreground">
                 <th className="px-4 py-2.5 text-left font-medium">Tool</th>
-                <th className="px-4 py-2.5 text-left font-medium">Prompt handle</th>
+                <th className="px-4 py-2.5 text-left font-medium">Type</th>
                 <th className="px-4 py-2.5 text-left font-medium">Auth</th>
+                <th className="px-4 py-2.5 text-left font-medium">Health</th>
                 <th className="px-4 py-2.5 text-left font-medium">Status</th>
-                <th className="px-4 py-2.5 text-right font-medium">Usage</th>
+                <th className="px-4 py-2.5 text-left font-medium">Created</th>
+                <th className="px-4 py-2.5 text-left font-medium">Updated</th>
                 <th className="w-10 px-2 py-2.5" />
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {filtered.map((t) => (
-                <tr key={t.handle} className="transition-colors hover:bg-accent/30">
+                <tr key={t.handle} className="group transition-colors hover:bg-accent/30">
                   <td className="px-4 py-3">
-                    <div className="flex items-center gap-2 font-medium">
-                      <span className="flex h-6 w-6 items-center justify-center rounded-md bg-accent text-foreground">
+                    <div className="flex items-center gap-2.5">
+                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-accent text-foreground">
                         <Wrench className="h-3.5 w-3.5" />
                       </span>
                       <div className="min-w-0">
-                        <span>{t.name}</span>
-                        <p className="font-mono text-[11px] text-muted-foreground">{t.scope}</p>
+                        <HandleChip handle={t.handle} />
+                        <p className="mt-1 truncate text-[11.5px] text-muted-foreground">{t.description}</p>
                       </div>
                     </div>
                   </td>
                   <td className="px-4 py-3">
-                    <HandleChip handle={t.handle} />
+                    <span className={cn(
+                      "inline-flex items-center rounded-md border px-1.5 py-0.5 text-[11px] font-medium",
+                      t.type === "mcp" ? "border-ai/30 bg-ai/10 text-ai" : "border-border bg-secondary/40 text-muted-foreground",
+                    )}>
+                      {TYPE_LABEL[t.type]}
+                    </span>
                   </td>
                   <td className="px-4 py-3">
                     <span className="inline-flex items-center gap-1.5 text-[12px] text-muted-foreground">
@@ -358,21 +343,26 @@ function Tools() {
                     </span>
                   </td>
                   <td className="px-4 py-3">
-                    {t.status === "configured" ? (
-                      <span className={cn("inline-flex items-center gap-1.5 text-[12px]", t.health === "ok" ? "text-success" : "text-warning")}>
-                        <span className={cn("h-1.5 w-1.5 rounded-full", t.health === "ok" ? "bg-success" : "bg-warning")} />
-                        {t.health === "ok" ? "Configured" : "Degraded"}
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1.5 text-[12px] text-warning">
-                        <span className="h-1.5 w-1.5 rounded-full bg-warning" />
-                        Needs setup
-                      </span>
-                    )}
+                    <span
+                      title="Based on recent calls"
+                      className={cn("inline-flex items-center gap-1.5 text-[12px]", t.health === "ok" ? "text-success" : "text-warning")}
+                    >
+                      <span className={cn("h-1.5 w-1.5 rounded-full", t.health === "ok" ? "bg-success" : "bg-warning")} />
+                      {t.health === "ok" ? "Healthy" : "Degraded"}
+                    </span>
                   </td>
-                  <td className="px-4 py-3 text-right font-mono text-[12px] text-muted-foreground">{t.usage}</td>
+                  <td className="px-4 py-3">
+                    <span className={cn(
+                      "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium",
+                      t.status === "live" ? "border-success/30 bg-success/10 text-success" : "border-border bg-secondary text-muted-foreground",
+                    )}>
+                      {STATUS_LABEL[t.status]}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-[12px] text-muted-foreground">{t.createdAt}</td>
+                  <td className="px-4 py-3 text-[12px] text-muted-foreground">{t.updatedAt}</td>
                   <td className="px-2 py-3 text-right">
-                    <Link to="/agents/tools/new" className="inline-flex items-center gap-1 text-[12px] text-foreground hover:underline">
+                    <Link to="/agents/tools/new" search={{ tool: t.handle }} className="inline-flex items-center gap-1 text-[12px] text-muted-foreground opacity-0 transition-opacity hover:underline group-hover:opacity-100">
                       <Pencil className="h-3 w-3" /> Edit
                     </Link>
                   </td>

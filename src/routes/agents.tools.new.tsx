@@ -1,7 +1,6 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
-import { WizardShell } from "@/components/app/WizardShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -10,717 +9,637 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
-  ChevronLeft, ChevronRight, Plus, Trash2, Upload, Save, Zap,
+  ChevronLeft, Plus, Trash2, Save, Zap, Lock, Wand2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  getTool, type ToolDef, type ToolType, type ToolSource, type ToolDataType, type ToolParamIn,
+} from "@/lib/tool-registry";
 
 export const Route = createFileRoute("/agents/tools/new")({
-  component: RegisterAction,
+  component: ToolEditor,
+  validateSearch: (s: Record<string, unknown>): { tool?: string } => ({
+    tool: typeof s.tool === "string" ? s.tool : undefined,
+  }),
   head: () => ({
     meta: [
-      { title: "Register action · Pi Commerce Enterprise" },
-      { name: "description", content: "Register an HTTP API action in the tool registry." },
+      { title: "Tool · Pi Commerce Enterprise" },
+      { name: "description", content: "Register an HTTP API or MCP tool in the registry." },
     ],
   }),
 });
 
 /* --------------------------------------------------------- */
-/* Types & data                                              */
+/* Types & seed                                              */
 /* --------------------------------------------------------- */
 
-type DataType = "String" | "Number" | "Boolean" | "Object" | "Array";
-type FieldType = "Variable" | "Constant";
-type SchemaField = {
+const DATA_TYPES: ToolDataType[] = ["String", "Number", "Boolean", "Object", "Array"];
+const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
+
+const SOURCE_OPTIONS: { value: ToolSource; label: string }[] = [
+  { value: "agent", label: "Agent-generated" },
+  { value: "campaign", label: "Campaign variable" },
+  { value: "constant", label: "Constant" },
+];
+
+type EditorInput = {
   id: string;
   key: string;
-  dataType: DataType;
-  type: FieldType;
+  dataType: ToolDataType;
+  source: ToolSource;
   value: string;
   description: string;
-  transformation: string;
 };
-type AuthMode = "none" | "jwt" | "rsa";
-type TransformType = "Constant" | "Expression" | "Template";
-type CustomOutputField = {
-  id: string;
-  key: string;
-  description: string;
-  transformType: TransformType;
-  logic: string;
-};
-type SchemaListKey = "headers" | "requestBody" | "queryParams" | "pathParams" | "output";
+type EditorOutput = { id: string; path: string; varName: string; description: string };
+type PathMeta = { source: ToolSource; dataType: ToolDataType; value: string; description: string };
 
-type ActionDraft = {
-  name: string;
+type JwtAlg = "HS256" | "HS512" | "RS256" | "RS512";
+type JwtFieldType = "Variable" | "JWT" | "Bearer" | "Constant" | "Random Generator" | "Secret Manager" | "SSO";
+type JwtClaim = { id: string; key: string; dataType: ToolDataType; type: JwtFieldType; value: string; description: string };
+type JwtConfig = {
+  alg: JwtAlg;
+  addTo: "header" | "query";
+  keyName: string;
+  secret: string;
+  claims: JwtClaim[];
+  headerFields: JwtClaim[];
+};
+const JWT_ALGS: JwtAlg[] = ["HS256", "HS512", "RS256", "RS512"];
+const JWT_FIELD_TYPES: JwtFieldType[] = ["Variable", "JWT", "Bearer", "Constant", "Random Generator", "Secret Manager", "SSO"];
+
+type ToolDraft = {
+  handle: string;
   description: string;
-  actionType: string;
-  httpUri: string;
+  type: ToolType;
+  method: string;
+  url: string;
   connectTimeout: string;
   responseTimeout: string;
-  auth: AuthMode;
-  jwtToken: string;
-  rsaKey: string;
-  headers: SchemaField[];
-  requestBody: SchemaField[];
-  queryParams: SchemaField[];
-  pathParams: SchemaField[];
-  output: SchemaField[];
-  customOutput: CustomOutputField[];
+  auth: "none" | "jwt";
+  jwt: JwtConfig;
+  headers: EditorInput[];
+  query: EditorInput[];
+  body: EditorInput[];
+  pathMeta: Record<string, PathMeta>;
+  outputs: EditorOutput[];
+  mcpTransport: "http" | "sse";
+  locked: boolean;
 };
 
-const DATA_TYPES: DataType[] = ["String", "Number", "Boolean", "Object", "Array"];
-const FIELD_TYPES: FieldType[] = ["Variable", "Constant"];
-const TRANSFORM_TYPES: TransformType[] = ["Constant", "Expression", "Template"];
-const ACTION_TYPES = ["HTTP API", "gRPC", "Internal function"] as const;
+let seq = 0;
+const uid = (p: string) => `${p}_${++seq}_${Date.now().toString(36)}`;
+const newInput = (over: Partial<EditorInput> = {}): EditorInput =>
+  ({ id: uid("in"), key: "", dataType: "String", source: "agent", value: "", description: "", ...over });
+const newClaim = (): JwtClaim => ({ id: uid("claim"), key: "", dataType: "String", type: "Constant", value: "", description: "" });
 
-const STEPS = [
-  { id: "details", label: "Details", hint: "Name & type" },
-  { id: "definition", label: "Definition", hint: "Endpoint & auth" },
-  { id: "inputschema", label: "Input Schema", hint: "Request fields" },
-  { id: "outputschema", label: "Output Schema", hint: "Response mapping" },
-] as const;
-type TabId = (typeof STEPS)[number]["id"];
+const DEFAULT_JWT: JwtConfig = { alg: "HS256", addTo: "header", keyName: "Authorization", secret: "", claims: [], headerFields: [] };
 
-let fieldSeq = 0;
-const newField = (): SchemaField => ({
-  id: `f_${++fieldSeq}_${Date.now().toString(36)}`,
-  key: "",
-  dataType: "String",
-  type: "Constant",
-  value: "",
-  description: "",
-  transformation: "",
-});
-const newCustomField = (): CustomOutputField => ({
-  id: `c_${++fieldSeq}_${Date.now().toString(36)}`,
-  key: "",
-  description: "",
-  transformType: "Constant",
-  logic: "",
-});
+function blankDraft(): ToolDraft {
+  return {
+    handle: "", description: "", type: "http", method: "POST", url: "",
+    connectTimeout: "1000", responseTimeout: "1000",
+    auth: "none", jwt: { ...DEFAULT_JWT },
+    headers: [], query: [], body: [], pathMeta: {}, outputs: [],
+    mcpTransport: "http", locked: false,
+  };
+}
 
-const INITIAL: ActionDraft = {
-  name: "",
-  description: "",
-  actionType: "HTTP API",
-  httpUri: "",
-  connectTimeout: "20000",
-  responseTimeout: "20000",
-  auth: "none",
-  jwtToken: "",
-  rsaKey: "",
-  headers: [],
-  requestBody: [],
-  queryParams: [],
-  pathParams: [],
-  output: [],
-  customOutput: [],
+/** Seed the editor from a registry tool when editing an existing one. */
+function draftFromTool(t: ToolDef): ToolDraft {
+  const d = blankDraft();
+  d.handle = t.handle;
+  d.description = t.description;
+  d.type = t.type;
+  d.method = t.method ?? "POST";
+  d.url = t.url ?? "";
+  d.auth = t.auth === "jwt" ? "jwt" : "none";
+  d.mcpTransport = t.transport ?? "http";
+  d.locked = true; // existing tools already have outputs mapped
+  for (const inp of t.inputs) {
+    if (inp.in === "path") {
+      d.pathMeta[inp.key] = { source: inp.source, dataType: inp.dataType, value: inp.value ?? "", description: inp.description };
+    } else {
+      const where = inp.in === "header" ? "headers" : inp.in === "query" ? "query" : "body";
+      const row = newInput({ key: inp.key, dataType: inp.dataType, source: inp.source, value: inp.value ?? "", description: inp.description });
+      d[where].push(row);
+    }
+  }
+  d.outputs = t.outputs.map((o) => ({ id: uid("out"), path: o.path, varName: o.varName, description: o.description }));
+  return d;
+}
+
+/* --------------------------------------------------------- */
+/* cURL parsing + sample response                            */
+/* --------------------------------------------------------- */
+
+function parseCurl(text: string): { method?: string; url?: string; headers: [string, string][]; bodyKeys: string[] } | null {
+  if (!/curl\s/i.test(text)) return null;
+  const headers: [string, string][] = [];
+  const mMethod = text.match(/-X\s+([A-Z]+)/i);
+  const mUrl = text.match(/curl\s+(?:-[A-Za-z]+\s+(?:'[^']*'|"[^"]*"|\S+)\s+)*?['"]?(https?:\/\/[^\s'"]+)['"]?/i)
+    ?? text.match(/(https?:\/\/[^\s'"]+)/i);
+  for (const m of text.matchAll(/-H\s+'([^']+)'|-H\s+"([^"]+)"/g)) {
+    const raw = m[1] ?? m[2] ?? "";
+    const i = raw.indexOf(":");
+    if (i > 0) headers.push([raw.slice(0, i).trim(), raw.slice(i + 1).trim()]);
+  }
+  let bodyKeys: string[] = [];
+  const mData = text.match(/(?:--data-raw|--data|-d)\s+'([\s\S]*?)'|(?:--data-raw|--data|-d)\s+"([\s\S]*?)"/);
+  if (mData) {
+    const body = mData[1] ?? mData[2] ?? "";
+    try { bodyKeys = Object.keys(JSON.parse(body)); } catch { /* not json */ }
+  }
+  const method = mMethod ? mMethod[1].toUpperCase() : mData ? "POST" : undefined;
+  return { method, url: mUrl?.[1], headers, bodyKeys };
+}
+
+const SAMPLE_RESPONSE = {
+  status: "ok",
+  data: {
+    id: "ord_8842",
+    delivered_status: "in_transit",
+    eta: "2026-06-20",
+    total: 249900,
+    currency: "INR",
+  },
 };
 
+function leafPaths(obj: unknown, prefix = "$"): { path: string; preview: string }[] {
+  if (!obj || typeof obj !== "object") return [{ path: prefix, preview: String(obj) }];
+  const out: { path: string; preview: string }[] = [];
+  for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+    const p = `${prefix}.${k}`;
+    if (v && typeof v === "object" && !Array.isArray(v)) out.push(...leafPaths(v, p));
+    else out.push({ path: p, preview: Array.isArray(v) ? "[…]" : String(v) });
+  }
+  return out;
+}
+
+const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9_]/g, "_");
+
 /* --------------------------------------------------------- */
-/* Wizard shell                                              */
+/* Page                                                      */
 /* --------------------------------------------------------- */
 
-function RegisterAction() {
+function ToolEditor() {
   const navigate = useNavigate();
-  const [draft, setDraft] = useState<ActionDraft>(INITIAL);
-  const [tab, setTab] = useState<TabId>("details");
+  const { tool: editHandle } = Route.useSearch();
+  const existing = editHandle ? getTool(editHandle) : undefined;
+  const [draft, setDraft] = useState<ToolDraft>(() => (existing ? draftFromTool(existing) : blankDraft()));
 
-  const idx = STEPS.findIndex((t) => t.id === tab);
-  const isLast = idx === STEPS.length - 1;
-
-  const set = <K extends keyof ActionDraft>(key: K, value: ActionDraft[K]) =>
+  const set = <K extends keyof ToolDraft>(key: K, value: ToolDraft[K]) =>
     setDraft((d) => ({ ...d, [key]: value }));
 
-  const addField = (listKey: SchemaListKey) =>
-    setDraft((d) => ({ ...d, [listKey]: [...d[listKey], newField()] }));
-  const updateField = (listKey: SchemaListKey, id: string, patch: Partial<SchemaField>) =>
+  const pathKeys = useMemo(
+    () => Array.from(draft.url.matchAll(/\{([^}]+)\}/g)).map((m) => m[1]),
+    [draft.url],
+  );
+
+  const isHttp = draft.type === "http";
+  const definitionDone = draft.handle.trim().length > 1 && draft.url.trim().length > 4;
+
+  const close = () => navigate({ to: "/agents", search: { tab: "tools" } });
+
+  const applyCurl = (text: string) => {
+    const parsed = parseCurl(text);
+    if (!parsed) { toast.error("Couldn't read that", { description: "Paste a full curl command." }); return; }
     setDraft((d) => ({
       ...d,
-      [listKey]: d[listKey].map((f) => (f.id === id ? { ...f, ...patch } : f)),
+      method: parsed.method ?? d.method,
+      url: parsed.url ?? d.url,
+      headers: parsed.headers.length
+        ? parsed.headers.map(([k, v]) => newInput({ key: k, source: "constant", value: v, description: "" }))
+        : d.headers,
+      body: parsed.bodyKeys.length
+        ? parsed.bodyKeys.map((k) => newInput({ key: k, source: "agent", description: "" }))
+        : d.body,
     }));
-  const removeField = (listKey: SchemaListKey, id: string) =>
-    setDraft((d) => ({ ...d, [listKey]: d[listKey].filter((f) => f.id !== id) }));
-
-  const addCustomField = () =>
-    setDraft((d) => ({ ...d, customOutput: [...d.customOutput, newCustomField()] }));
-  const updateCustomField = (id: string, patch: Partial<CustomOutputField>) =>
-    setDraft((d) => ({
-      ...d,
-      customOutput: d.customOutput.map((f) => (f.id === id ? { ...f, ...patch } : f)),
-    }));
-  const removeCustomField = (id: string) =>
-    setDraft((d) => ({ ...d, customOutput: d.customOutput.filter((f) => f.id !== id) }));
-
-  const canAdvance = (): boolean => {
-    if (tab === "details") return draft.name.trim().length > 1;
-    return true;
-  };
-
-  const goTo = (i: number) => setTab(STEPS[Math.max(0, Math.min(STEPS.length - 1, i))].id);
-  const back = () => goTo(idx - 1);
-  const next = () => {
-    if (canAdvance()) goTo(idx + 1);
+    toast.success("Parsed cURL", { description: "Method, URL, headers and body filled in." });
   };
 
   const saveDraft = () => {
-    toast.success(`${draft.name.trim() || "Untitled action"} saved as draft`, {
-      description: "You can finish registering it later.",
-    });
-    navigate({ to: "/agents", search: { tab: "tools" } });
+    toast.success(`${draft.handle.trim() || "Untitled tool"} saved as draft`, { description: "Finish it later." });
+    close();
   };
-
-  const register = () => {
-    toast.success(`${draft.name.trim() || "New action"} registered`, {
-      description: `${draft.actionType} action is available in the tool registry.`,
+  const saveTool = () => {
+    toast.success(`${draft.handle.trim() || "New tool"} saved`, {
+      description: `${draft.type === "mcp" ? "MCP" : "HTTP API"} tool is available in the registry.`,
     });
-    navigate({ to: "/agents", search: { tab: "tools" } });
+    close();
   };
 
   return (
-    <WizardShell
-      breadcrumb={
-        <>
+    <div className="flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground">
+      {/* Header */}
+      <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-border bg-background/90 px-3 backdrop-blur-xl">
+        <div className="flex min-w-0 items-center gap-2">
           <Link
-            to="/agents"
-            search={{ tab: "tools" }}
+            to="/agents" search={{ tab: "tools" }}
             className="flex h-8 items-center gap-1 rounded-md px-2 text-[12.5px] text-muted-foreground hover:bg-accent hover:text-foreground"
-            aria-label="Back to tools"
           >
             <ChevronLeft className="h-4 w-4" />
             <span className="hidden sm:inline">Tools</span>
           </Link>
           <span className="text-muted-foreground/40">/</span>
-          <span className="truncate text-[13.5px] font-medium">{draft.name.trim() || "Register action"}</span>
-        </>
-      }
-      headerActions={
-        <>
-          <Button variant="ghost" size="sm" className="h-8 text-xs" asChild>
-            <Link to="/agents" search={{ tab: "tools" }}>Cancel</Link>
-          </Button>
+          <span className="truncate font-mono text-[13.5px] font-medium">{draft.handle.trim() || (existing ? existing.handle : "New tool")}</span>
+          <span className="ml-2 inline-flex items-center gap-1.5 rounded-full border border-warning/30 bg-warning/10 px-2 py-0.5 text-[11px] font-medium text-warning">
+            <span className="h-1.5 w-1.5 rounded-full bg-warning" /> {existing ? "Editing" : "Draft"}
+          </span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={close}>Cancel</Button>
           <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={saveDraft}>
             <Save className="h-3.5 w-3.5" /> Save as draft
           </Button>
-        </>
-      }
-      steps={STEPS.map((s) => ({ id: s.id, label: s.label, hint: s.hint }))}
-      currentIndex={idx}
-      onStepSelect={goTo}
-      onBack={back}
-      footerActions={
-        isLast ? (
-          <Button size="sm" className="h-8 gap-1.5 text-xs" disabled={draft.name.trim().length < 2} onClick={register}>
-            <Plus className="h-3.5 w-3.5" /> Register action
-          </Button>
-        ) : (
-          <Button size="sm" className="h-8 gap-1.5 text-xs" disabled={!canAdvance()} onClick={next}>
-            Continue <ChevronRight className="h-3.5 w-3.5" />
-          </Button>
-        )
-      }
-    >
-      {tab === "details" && <DetailsTab draft={draft} set={set} />}
-      {tab === "definition" && <DefinitionTab draft={draft} set={set} />}
-      {tab === "inputschema" && (
-        <InputSchemaTab draft={draft} addField={addField} updateField={updateField} removeField={removeField} />
-      )}
-      {tab === "outputschema" && (
-        <OutputSchemaTab
-          draft={draft}
-          addField={addField}
-          updateField={updateField}
-          removeField={removeField}
-          addCustomField={addCustomField}
-          updateCustomField={updateCustomField}
-          removeCustomField={removeCustomField}
-        />
-      )}
-    </WizardShell>
-  );
-}
+        </div>
+      </header>
 
-/* --------------------------------------------------------- */
-/* Tab 1 — Details                                           */
-/* --------------------------------------------------------- */
+      {/* Body */}
+      <section className="flex min-h-0 flex-1 flex-col overflow-y-auto px-8 py-8">
+        <div className="mx-auto w-full max-w-3xl space-y-5">
 
-function DetailsTab({
-  draft, set,
-}: {
-  draft: ActionDraft;
-  set: <K extends keyof ActionDraft>(key: K, value: ActionDraft[K]) => void;
-}) {
-  return (
-    <>
-      <TabHeading title="Action Details" desc="Identify the action." />
+          {/* 1 · Tool Details */}
+          <Card title="Tool Details" desc="Identify the tool. The name is how agents reference it in a prompt.">
+            <FormField label="Tool name" required>
+              <Input
+                value={draft.handle}
+                onChange={(e) => set("handle", slug(e.target.value))}
+                placeholder="e.g. order_lookup"
+                className="h-9 font-mono text-sm"
+              />
+              <p className="text-[11px] text-muted-foreground">Lowercase, no spaces — referenced as <span className="font-mono">@{draft.handle || "tool_name"}</span>.</p>
+            </FormField>
+            <FormField label="Description">
+              <Textarea
+                value={draft.description}
+                onChange={(e) => set("description", e.target.value)}
+                placeholder="Look up a customer's latest order and delivery status"
+                className="min-h-[60px] text-sm"
+              />
+            </FormField>
+            <FormField label="Tool type">
+              <div className="grid grid-cols-2 gap-2">
+                {(["http", "mcp"] as ToolType[]).map((tt) => (
+                  <button
+                    key={tt}
+                    onClick={() => set("type", tt)}
+                    className={cn(
+                      "rounded-lg border px-3 py-2.5 text-left text-[13px] transition-colors",
+                      draft.type === tt ? "border-foreground bg-accent" : "border-border hover:bg-accent/40",
+                    )}
+                  >
+                    <span className="font-medium">{tt === "http" ? "HTTP API" : "MCP"}</span>
+                    <span className="mt-0.5 block text-[11px] text-muted-foreground">
+                      {tt === "http" ? "Call a REST endpoint" : "Connect a Model Context Protocol server"}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </FormField>
+          </Card>
 
-      <FormField label="Action name" required>
-        <Input
-          value={draft.name}
-          onChange={(e) => set("name", e.target.value)}
-          placeholder="e.g. hotel_update"
-          className="h-9 font-mono text-sm"
-        />
-      </FormField>
+          {/* 2 · Definition */}
+          {isHttp ? (
+            <Card title="Definition" desc="Endpoint, timeouts and authorization.">
+              <div className="space-y-1.5">
+                <Label className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Endpoint</Label>
+                <div className="flex gap-2">
+                  <Select value={draft.method} onValueChange={(v) => set("method", v)}>
+                    <SelectTrigger className="h-9 w-28 text-sm"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {METHODS.map((m) => <SelectItem key={m} value={m} className="text-sm">{m}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <Input
+                    value={draft.url}
+                    onChange={(e) => set("url", e.target.value)}
+                    placeholder="https://api.example.com/v1/orders/{order_id}"
+                    className="h-9 flex-1 font-mono text-xs"
+                  />
+                </div>
+                <p className="text-[11px] text-muted-foreground">Wrap path variables in <span className="font-mono">{"{braces}"}</span> — they appear automatically under Input Schema.</p>
+              </div>
 
-      <FormField label="Description">
-        <Textarea
-          value={draft.description}
-          onChange={(e) => set("description", e.target.value)}
-          placeholder="Update details of a hotel booking"
-          className="min-h-[72px] text-sm"
-        />
-      </FormField>
+              <CurlBox onParse={applyCurl} />
 
-      <FormField label="Action type">
-        <Select value={draft.actionType} onValueChange={(v) => set("actionType", v)}>
-          <SelectTrigger className="h-9 w-full max-w-xs text-sm"><SelectValue placeholder="Select action type" /></SelectTrigger>
-          <SelectContent>
-            {ACTION_TYPES.map((t) => (
-              <SelectItem key={t} value={t} className="text-sm">{t}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </FormField>
-    </>
-  );
-}
+              <div className="grid grid-cols-2 gap-3">
+                <FormField label="Connect timeout (ms)"><Input value={draft.connectTimeout} onChange={(e) => set("connectTimeout", e.target.value)} className="h-9 font-mono text-xs" /></FormField>
+                <FormField label="Response timeout (ms)"><Input value={draft.responseTimeout} onChange={(e) => set("responseTimeout", e.target.value)} className="h-9 font-mono text-xs" /></FormField>
+              </div>
 
-/* --------------------------------------------------------- */
-/* Tab 2 — Definition                                        */
-/* --------------------------------------------------------- */
+              <div className="space-y-3">
+                <Label className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Authorization</Label>
+                <RadioGroup value={draft.auth} onValueChange={(v) => set("auth", v as "none" | "jwt")} className="grid grid-cols-2 gap-2">
+                  {([["none", "No Auth"], ["jwt", "JWT Bearer"]] as ["none" | "jwt", string][]).map(([val, label]) => (
+                    <label key={val} className={cn(
+                      "flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2.5 text-[13px] transition-colors",
+                      draft.auth === val ? "border-foreground bg-accent" : "border-border hover:bg-accent/40",
+                    )}>
+                      <RadioGroupItem value={val} /> {label}
+                    </label>
+                  ))}
+                </RadioGroup>
+                {draft.auth === "none" ? (
+                  <p className="rounded-lg border border-border bg-secondary/30 px-3 py-2.5 text-[12px] text-muted-foreground">
+                    No authentication sent with the request.
+                  </p>
+                ) : (
+                  <JwtFields jwt={draft.jwt} onChange={(patch) => set("jwt", { ...draft.jwt, ...patch })} />
+                )}
+              </div>
+            </Card>
+          ) : (
+            <Card title="MCP Server" desc="Connect a Model Context Protocol server.">
+              <FormField label="Server URL" required>
+                <Input value={draft.url} onChange={(e) => set("url", e.target.value)} placeholder="https://mcp.example.com/sse" className="h-9 font-mono text-xs" />
+              </FormField>
+              <div className="grid grid-cols-2 gap-3">
+                <FormField label="Transport">
+                  <Select value={draft.mcpTransport} onValueChange={(v) => set("mcpTransport", v as "http" | "sse")}>
+                    <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="http" className="text-sm">Streamable HTTP</SelectItem>
+                      <SelectItem value="sse" className="text-sm">SSE</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </FormField>
+                <FormField label="Authorization">
+                  <Select value={draft.auth} onValueChange={(v) => set("auth", v as "none" | "jwt")}>
+                    <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none" className="text-sm">No Auth</SelectItem>
+                      <SelectItem value="jwt" className="text-sm">JWT Bearer</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </FormField>
+              </div>
+              {draft.auth === "jwt" && <JwtFields jwt={draft.jwt} onChange={(patch) => set("jwt", { ...draft.jwt, ...patch })} />}
+              <McpToolsBlock url={draft.url} />
+            </Card>
+          )}
 
-function DefinitionTab({
-  draft, set,
-}: {
-  draft: ActionDraft;
-  set: <K extends keyof ActionDraft>(key: K, value: ActionDraft[K]) => void;
-}) {
-  const [sub, setSub] = useState<"common" | "producer">("common");
+          {/* 3 · Input Schema (HTTP only) */}
+          {isHttp && (
+            <Card title="Input Schema" desc="Parameters the tool sends. Each is filled by the agent, mapped from the campaign, or fixed.">
+              <InputSchema
+                draft={draft}
+                pathKeys={pathKeys}
+                setRows={(where, rows) => set(where, rows)}
+                setPathMeta={(k, patch) => setDraft((d) => ({ ...d, pathMeta: { ...d.pathMeta, [k]: { ...defaultPathMeta(d.pathMeta[k]), ...patch } } }))}
+              />
+            </Card>
+          )}
 
-  return (
-    <>
-      <div className="flex items-center justify-between">
-        <TabHeading title="Action Definition" desc="Endpoint, timeouts and authorization." />
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-8 gap-1.5 text-xs"
-          onClick={() => toast.info("Import", { description: "Paste an OpenAPI / cURL definition to auto-fill mapping." })}
-        >
-          <Upload className="h-3.5 w-3.5" /> Import
+          {/* 4 · Output Schema (HTTP only, gated) */}
+          {isHttp && (
+            <OutputSchema
+              draft={draft}
+              definitionDone={definitionDone}
+              onLock={() => { set("locked", true); toast.success("Request saved", { description: "You can now fetch a live response and map outputs." }); }}
+              onAddOutput={(path) => setDraft((d) => d.outputs.some((o) => o.path === path) ? d : ({ ...d, outputs: [...d.outputs, { id: uid("out"), path, varName: slug(path.split(".").pop() || "field"), description: "" }] }))}
+              onUpdateOutput={(id, patch) => setDraft((d) => ({ ...d, outputs: d.outputs.map((o) => o.id === id ? { ...o, ...patch } : o) }))}
+              onRemoveOutput={(id) => setDraft((d) => ({ ...d, outputs: d.outputs.filter((o) => o.id !== id) }))}
+            />
+          )}
+        </div>
+      </section>
+
+      {/* Footer — centered actions */}
+      <footer className="flex h-14 shrink-0 items-center justify-center gap-3 border-t border-border px-4">
+        <Button variant="outline" size="sm" className="h-8 px-4 text-xs" onClick={close}>Cancel</Button>
+        <Button size="sm" className="h-8 gap-1.5 px-4 text-xs" disabled={draft.handle.trim().length < 2} onClick={saveTool}>
+          <Plus className="h-3.5 w-3.5" /> Save tool
         </Button>
-      </div>
+      </footer>
+    </div>
+  );
+}
 
-      {/* Input mapping · Common / Producer */}
-      <div className="space-y-3">
-        <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Input Mapping</p>
-        <SubTabs
-          tabs={[{ id: "common", label: "Common" }, { id: "producer", label: "Producer" }]}
-          value={sub}
-          onChange={(v) => setSub(v as typeof sub)}
-        />
+function defaultPathMeta(m?: PathMeta): PathMeta {
+  return m ?? { source: "agent", dataType: "String", value: "", description: "" };
+}
 
-        {sub === "common" ? (
+/* --------------------------------------------------------- */
+/* Input schema (tabs + path block)                          */
+/* --------------------------------------------------------- */
+
+const IN_TABS: { id: Exclude<ToolParamIn, "path">; label: string }[] = [
+  { id: "header", label: "Headers" },
+  { id: "query", label: "Query" },
+  { id: "body", label: "Body" },
+];
+
+function InputSchema({
+  draft, pathKeys, setRows, setPathMeta,
+}: {
+  draft: ToolDraft;
+  pathKeys: string[];
+  setRows: (where: "headers" | "query" | "body", rows: EditorInput[]) => void;
+  setPathMeta: (k: string, patch: Partial<PathMeta>) => void;
+}) {
+  const [tab, setTab] = useState<"header" | "query" | "body">("body");
+  const listKey = tab === "header" ? "headers" : tab; // body|query|headers
+  const rows = draft[listKey as "headers" | "query" | "body"];
+
+  const add = () => setRows(listKey as "headers" | "query" | "body", [...rows, newInput()]);
+  const update = (id: string, patch: Partial<EditorInput>) =>
+    setRows(listKey as "headers" | "query" | "body", rows.map((r) => r.id === id ? { ...r, ...patch } : r));
+  const remove = (id: string) =>
+    setRows(listKey as "headers" | "query" | "body", rows.filter((r) => r.id !== id));
+
+  return (
+    <div className="space-y-4">
+      {/* Path params — auto-detected from the URL */}
+      {pathKeys.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Path · auto-detected from URL</p>
           <div className="overflow-hidden rounded-lg border border-border">
             <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border bg-secondary/30 text-[10.5px] uppercase tracking-wider text-muted-foreground">
-                  <th className="w-1/3 px-3 py-2 text-left font-medium">Keys</th>
-                  <th className="px-3 py-2 text-left font-medium">Value</th>
-                </tr>
-              </thead>
               <tbody className="divide-y divide-border">
-                <KeyValueRow label="httpUri" value={draft.httpUri} placeholder="https://api.example.com/v1/hotel/update" mono onChange={(v) => set("httpUri", v)} />
-                <KeyValueRow label="connectTimeout" value={draft.connectTimeout} onChange={(v) => set("connectTimeout", v)} />
-                <KeyValueRow label="responseTimeout" value={draft.responseTimeout} onChange={(v) => set("responseTimeout", v)} />
+                {pathKeys.map((k) => {
+                  const m = defaultPathMeta(draft.pathMeta[k]);
+                  return (
+                    <tr key={k} className="align-middle">
+                      <td className="w-40 px-3 py-2 font-mono text-[12px] text-foreground">{k}</td>
+                      <td className="px-2 py-2">
+                        <SourceSelect value={m.source} onChange={(source) => setPathMeta(k, { source })} />
+                      </td>
+                      <td className="px-2 py-2">
+                        <Input value={valueFor(m)} onChange={(e) => setPathMeta(k, { value: e.target.value })} placeholder={placeholderFor(m.source)} className="h-8 font-mono text-xs" />
+                      </td>
+                      <td className="px-3 py-2">
+                        <Input value={m.description} onChange={(e) => setPathMeta(k, { description: e.target.value })} placeholder="Description" className="h-8 text-xs" />
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
-        ) : (
-          <div className="rounded-lg border border-dashed border-border bg-card/40 px-4 py-8 text-center text-[12px] text-muted-foreground">
-            No producer-specific configuration for this action.
-          </div>
-        )}
-      </div>
-
-      {/* Authorization */}
-      <div className="space-y-3">
-        <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Authorization</p>
-        <RadioGroup value={draft.auth} onValueChange={(v) => set("auth", v as AuthMode)} className="grid grid-cols-3 gap-2">
-          {([
-            ["none", "No Auth"],
-            ["jwt", "JWT Bearer"],
-            ["rsa", "RSA Digital Signature"],
-          ] as [AuthMode, string][]).map(([val, label]) => (
-            <label
-              key={val}
-              className={cn(
-                "flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2.5 text-[13px] transition-colors",
-                draft.auth === val ? "border-foreground bg-accent" : "border-border hover:bg-accent/40",
-              )}
-            >
-              <RadioGroupItem value={val} />
-              {label}
-            </label>
-          ))}
-        </RadioGroup>
-
-        {draft.auth === "none" && (
-          <p className="rounded-lg border border-border bg-secondary/30 px-3 py-2.5 text-[12px] text-muted-foreground">
-            No authentication required for this endpoint.
-          </p>
-        )}
-        {draft.auth === "jwt" && (
-          <FormField label="Bearer token">
-            <Input
-              value={draft.jwtToken}
-              onChange={(e) => set("jwtToken", e.target.value)}
-              type="password"
-              placeholder="Paste JWT or reference a secret"
-              className="h-9 font-mono text-xs"
-            />
-            <p className="text-[11px] text-muted-foreground">Stored encrypted in your workspace vault — never exposed to the model.</p>
-          </FormField>
-        )}
-        {draft.auth === "rsa" && (
-          <FormField label="Private key (PEM)">
-            <Textarea
-              value={draft.rsaKey}
-              onChange={(e) => set("rsaKey", e.target.value)}
-              placeholder="-----BEGIN PRIVATE KEY-----"
-              className="min-h-[96px] font-mono text-xs"
-            />
-            <p className="text-[11px] text-muted-foreground">Used to sign each request. Stored encrypted in your workspace vault.</p>
-          </FormField>
-        )}
-      </div>
-    </>
-  );
-}
-
-/* --------------------------------------------------------- */
-/* Tab 3 — Input Schema                                      */
-/* --------------------------------------------------------- */
-
-const INPUT_SUBTABS: { id: SchemaListKey; label: string }[] = [
-  { id: "headers", label: "Headers" },
-  { id: "requestBody", label: "Request Body" },
-  { id: "queryParams", label: "Query Parameters" },
-  { id: "pathParams", label: "Path Parameters" },
-];
-
-const SUBTAB_COPY: Record<string, string> = {
-  headers: "Key-value headers sent with every request.",
-  requestBody: "Fields serialized into the request body.",
-  queryParams: "Parameters appended to the request URL.",
-  pathParams: "Values interpolated into the path template.",
-};
-
-function InputSchemaTab({
-  draft, addField, updateField, removeField,
-}: {
-  draft: ActionDraft;
-  addField: (k: SchemaListKey) => void;
-  updateField: (k: SchemaListKey, id: string, patch: Partial<SchemaField>) => void;
-  removeField: (k: SchemaListKey, id: string) => void;
-}) {
-  const [sub, setSub] = useState<SchemaListKey>("headers");
-
-  return (
-    <>
-      <TabHeading title="Input Schema" desc="Define the fields the agent supplies when calling this action." />
-      <div className="space-y-3">
-        <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Input Mapping</p>
-        <SubTabs
-          tabs={INPUT_SUBTABS.map((t) => ({ id: t.id, label: t.label, count: draft[t.id].length }))}
-          value={sub}
-          onChange={(v) => setSub(v as SchemaListKey)}
-        />
-        <FieldTable
-          rows={draft[sub]}
-          description={SUBTAB_COPY[sub]}
-          onAdd={() => addField(sub)}
-          onChange={(id, patch) => updateField(sub, id, patch)}
-          onRemove={(id) => removeField(sub, id)}
-        />
-      </div>
-    </>
-  );
-}
-
-/* --------------------------------------------------------- */
-/* Interactive field table                                   */
-/* --------------------------------------------------------- */
-
-function FieldTable({
-  title, description, rows, onAdd, onChange, onRemove,
-  variant = "input", addLabel = "Add Field", headerAction,
-}: {
-  title?: string;
-  description?: string;
-  rows: SchemaField[];
-  onAdd: () => void;
-  onChange: (id: string, patch: Partial<SchemaField>) => void;
-  onRemove: (id: string) => void;
-  variant?: "input" | "output";
-  addLabel?: string;
-  headerAction?: React.ReactNode;
-}) {
-  const showType = variant === "input";
-  const colCount = showType ? 8 : 7;
-  return (
-    <div className="space-y-2.5">
-      {(title || headerAction) && (
-        <div className="flex items-center justify-between gap-3">
-          {title ? <TabHeading title={title} desc={description} /> : <span />}
-          {headerAction}
         </div>
       )}
-      {!title && description && <p className="text-[12px] text-muted-foreground">{description}</p>}
 
-      <div className="overflow-x-auto rounded-lg border border-border">
-        <table className={cn("w-full text-sm", showType ? "min-w-[760px]" : "min-w-[680px]")}>
-          <thead>
-            <tr className="border-b border-border bg-secondary/30 text-[10.5px] uppercase tracking-wider text-muted-foreground">
-              <th className="w-8 px-2 py-2" />
-              <th className="px-2 py-2 text-left font-medium">Keys</th>
-              <th className="px-2 py-2 text-left font-medium">Data type</th>
-              {showType && <th className="px-2 py-2 text-left font-medium">Type</th>}
-              <th className="px-2 py-2 text-left font-medium">Value</th>
-              <th className="px-2 py-2 text-left font-medium">Description</th>
-              <th className="px-2 py-2 text-left font-medium">Transformation</th>
-              <th className="w-9 px-2 py-2" />
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {rows.length === 0 ? (
-              <tr>
-                <td colSpan={colCount} className="px-3 py-8 text-center text-[12px] text-muted-foreground">
-                  No fields yet. Add one to define the schema.
-                </td>
+      <div className="space-y-2">
+        <SubTabs tabs={IN_TABS.map((t) => ({ id: t.id, label: t.label, count: draft[t.id === "header" ? "headers" : t.id].length }))} value={tab} onChange={(v) => setTab(v as typeof tab)} />
+        <div className="overflow-x-auto rounded-lg border border-border">
+          <table className="w-full min-w-[640px] text-sm">
+            <thead>
+              <tr className="border-b border-border bg-secondary/30 text-[10.5px] uppercase tracking-wider text-muted-foreground">
+                <th className="px-2 py-2 text-left font-medium">Key</th>
+                <th className="px-2 py-2 text-left font-medium">Type</th>
+                <th className="px-2 py-2 text-left font-medium">Source</th>
+                <th className="px-2 py-2 text-left font-medium">Value / slot</th>
+                <th className="px-2 py-2 text-left font-medium">Description</th>
+                <th className="w-9 px-2 py-2" />
               </tr>
-            ) : (
-              rows.map((f) => (
-                <tr key={f.id} className="align-middle">
-                  <td className="px-2 py-1.5 text-center">
-                    <Checkbox className="translate-y-0.5" />
-                  </td>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {rows.length === 0 ? (
+                <tr><td colSpan={6} className="px-3 py-7 text-center text-[12px] text-muted-foreground">No {tab} params yet.</td></tr>
+              ) : rows.map((r) => (
+                <tr key={r.id} className="align-middle">
+                  <td className="px-2 py-1.5"><Input value={r.key} onChange={(e) => update(r.id, { key: e.target.value })} placeholder="key" className="h-8 min-w-[110px] font-mono text-xs" /></td>
                   <td className="px-2 py-1.5">
-                    <Input
-                      value={f.key}
-                      onChange={(e) => onChange(f.id, { key: e.target.value })}
-                      placeholder="Key name"
-                      className="h-8 min-w-[120px] font-mono text-xs"
-                    />
-                  </td>
-                  <td className="px-2 py-1.5">
-                    <Select value={f.dataType} onValueChange={(v) => onChange(f.id, { dataType: v as DataType })}>
-                      <SelectTrigger className="h-8 w-[104px] text-xs"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        {DATA_TYPES.map((t) => <SelectItem key={t} value={t} className="text-xs">{t}</SelectItem>)}
-                      </SelectContent>
+                    <Select value={r.dataType} onValueChange={(v) => update(r.id, { dataType: v as ToolDataType })}>
+                      <SelectTrigger className="h-8 w-[96px] text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>{DATA_TYPES.map((t) => <SelectItem key={t} value={t} className="text-xs">{t}</SelectItem>)}</SelectContent>
                     </Select>
                   </td>
-                  {showType && (
-                    <td className="px-2 py-1.5">
-                      <Select value={f.type} onValueChange={(v) => onChange(f.id, { type: v as FieldType })}>
-                        <SelectTrigger className="h-8 w-[108px] text-xs"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          {FIELD_TYPES.map((t) => <SelectItem key={t} value={t} className="text-xs">{t}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    </td>
-                  )}
-                  <td className="px-2 py-1.5">
-                    <Input
-                      value={f.value}
-                      onChange={(e) => onChange(f.id, { value: e.target.value })}
-                      placeholder={variant === "output" ? "$.response.path" : f.type === "Variable" ? "variable_name" : "Enter value"}
-                      className="h-8 min-w-[120px] font-mono text-xs"
-                    />
-                  </td>
-                  <td className="px-2 py-1.5">
-                    <Input
-                      value={f.description}
-                      onChange={(e) => onChange(f.id, { description: e.target.value })}
-                      placeholder="Add"
-                      className="h-8 min-w-[120px] text-xs"
-                    />
-                  </td>
-                  <td className="px-2 py-1.5">
-                    <Input
-                      value={f.transformation}
-                      onChange={(e) => onChange(f.id, { transformation: e.target.value })}
-                      placeholder="Add"
-                      className="h-8 min-w-[110px] font-mono text-xs"
-                    />
-                  </td>
+                  <td className="px-2 py-1.5"><SourceSelect value={r.source} onChange={(source) => update(r.id, { source })} /></td>
+                  <td className="px-2 py-1.5"><Input value={valueFor(r)} onChange={(e) => update(r.id, { value: e.target.value })} placeholder={placeholderFor(r.source)} disabled={r.source === "agent"} className="h-8 min-w-[120px] font-mono text-xs disabled:opacity-50" /></td>
+                  <td className="px-2 py-1.5"><Input value={r.description} onChange={(e) => update(r.id, { description: e.target.value })} placeholder="Description" className="h-8 min-w-[120px] text-xs" /></td>
                   <td className="px-2 py-1.5 text-center">
-                    <button
-                      onClick={() => onRemove(f.id)}
-                      className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-                      title="Remove field"
-                    >
+                    <button onClick={() => remove(r.id)} className="rounded-md p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" title="Remove">
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
                   </td>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={add}><Plus className="h-3.5 w-3.5" /> Add {tab} param</Button>
       </div>
-
-      <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={onAdd}>
-        <Plus className="h-3.5 w-3.5" /> {addLabel}
-      </Button>
     </div>
   );
 }
 
-/* --------------------------------------------------------- */
-/* Tab 4 — Output Schema                                      */
-/* --------------------------------------------------------- */
+function valueFor(r: { source: ToolSource; value: string }): string {
+  return r.source === "agent" ? "" : r.value;
+}
+function placeholderFor(source: ToolSource): string {
+  return source === "constant" ? "fixed value" : source === "campaign" ? "audience column" : "filled by agent";
+}
 
-function OutputSchemaTab({
-  draft, addField, updateField, removeField,
-  addCustomField, updateCustomField, removeCustomField,
-}: {
-  draft: ActionDraft;
-  addField: (k: SchemaListKey) => void;
-  updateField: (k: SchemaListKey, id: string, patch: Partial<SchemaField>) => void;
-  removeField: (k: SchemaListKey, id: string) => void;
-  addCustomField: () => void;
-  updateCustomField: (id: string, patch: Partial<CustomOutputField>) => void;
-  removeCustomField: (id: string) => void;
-}) {
+function SourceSelect({ value, onChange }: { value: ToolSource; onChange: (v: ToolSource) => void }) {
   return (
-    <>
-      <TabHeading title="Output Schema" desc="Map fields from the API response into variables the agent can use." />
+    <Select value={value} onValueChange={(v) => onChange(v as ToolSource)}>
+      <SelectTrigger className="h-8 w-[150px] text-xs"><SelectValue /></SelectTrigger>
+      <SelectContent>{SOURCE_OPTIONS.map((o) => <SelectItem key={o.value} value={o.value} className="text-xs">{o.label}</SelectItem>)}</SelectContent>
+    </Select>
+  );
+}
 
-      <FieldTable
-        title="Output Mapping"
-        description="Extract values from the response payload by path."
-        rows={draft.output}
-        variant="output"
-        addLabel="Add Output Field"
-        headerAction={
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8 shrink-0 gap-1.5 text-xs"
-            onClick={() => toast.info("Fetch Live Response", { description: "Call the endpoint once to infer the response shape." })}
-          >
-            <Zap className="h-3.5 w-3.5" /> Fetch Live Response
+/* --------------------------------------------------------- */
+/* Output schema (gated)                                     */
+/* --------------------------------------------------------- */
+
+function OutputSchema({
+  draft, definitionDone, onLock, onAddOutput, onUpdateOutput, onRemoveOutput,
+}: {
+  draft: ToolDraft;
+  definitionDone: boolean;
+  onLock: () => void;
+  onAddOutput: (path: string) => void;
+  onUpdateOutput: (id: string, patch: Partial<EditorOutput>) => void;
+  onRemoveOutput: (id: string) => void;
+}) {
+  const [fetched, setFetched] = useState(draft.outputs.length > 0);
+  const leaves = useMemo(() => leafPaths(SAMPLE_RESPONSE), []);
+  const chosen = new Set(draft.outputs.map((o) => o.path));
+
+  if (!draft.locked) {
+    return (
+      <Card title="Output Schema" desc="Map response fields into variables the agent can use.">
+        <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-border bg-card/40 px-4 py-8 text-center">
+          <Lock className="h-5 w-5 text-muted-foreground" />
+          <p className="max-w-sm text-[12.5px] text-muted-foreground">
+            Lock the request above first — outputs are read by calling the endpoint with your input schema.
+          </p>
+          <Button size="sm" className="h-8 gap-1.5 text-xs" disabled={!definitionDone} onClick={onLock}>
+            <Save className="h-3.5 w-3.5" /> Save &amp; enable output mapping
           </Button>
-        }
-        onAdd={() => addField("output")}
-        onChange={(id, patch) => updateField("output", id, patch)}
-        onRemove={(id) => removeField("output", id)}
-      />
+          {!definitionDone && <p className="text-[11px] text-muted-foreground">Add a tool name and endpoint to enable this.</p>}
+        </div>
+      </Card>
+    );
+  }
 
-      <CustomOutputTable
-        rows={draft.customOutput}
-        onAdd={addCustomField}
-        onChange={updateCustomField}
-        onRemove={removeCustomField}
-      />
-    </>
-  );
-}
-
-function CustomOutputTable({
-  rows, onAdd, onChange, onRemove,
-}: {
-  rows: CustomOutputField[];
-  onAdd: () => void;
-  onChange: (id: string, patch: Partial<CustomOutputField>) => void;
-  onRemove: (id: string) => void;
-}) {
   return (
-    <div className="space-y-2.5 pt-2">
-      <TabHeading title="Custom Output Mapping" desc="Derive new fields with transformation logic." />
-
-      <div className="overflow-x-auto rounded-lg border border-border">
-        <table className="w-full min-w-[680px] text-sm">
-          <thead>
-            <tr className="border-b border-border bg-secondary/30 text-[10.5px] uppercase tracking-wider text-muted-foreground">
-              <th className="w-8 px-2 py-2" />
-              <th className="px-2 py-2 text-left font-medium">Keys</th>
-              <th className="px-2 py-2 text-left font-medium">Description</th>
-              <th className="px-2 py-2 text-left font-medium">Transformation type</th>
-              <th className="px-2 py-2 text-left font-medium">Transformation logic</th>
-              <th className="w-9 px-2 py-2" />
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {rows.length === 0 ? (
-              <tr>
-                <td colSpan={6} className="px-3 py-8 text-center text-[12px] text-muted-foreground">
-                  No custom fields yet. Add one to compute a derived value.
-                </td>
-              </tr>
-            ) : (
-              rows.map((f) => (
-                <tr key={f.id} className="align-middle">
-                  <td className="px-2 py-1.5 text-center">
-                    <Checkbox className="translate-y-0.5" />
-                  </td>
-                  <td className="px-2 py-1.5">
-                    <Input
-                      value={f.key}
-                      onChange={(e) => onChange(f.id, { key: e.target.value })}
-                      placeholder="Key name"
-                      className="h-8 min-w-[120px] font-mono text-xs"
-                    />
-                  </td>
-                  <td className="px-2 py-1.5">
-                    <Input
-                      value={f.description}
-                      onChange={(e) => onChange(f.id, { description: e.target.value })}
-                      placeholder="Add"
-                      className="h-8 min-w-[120px] text-xs"
-                    />
-                  </td>
-                  <td className="px-2 py-1.5">
-                    <Select value={f.transformType} onValueChange={(v) => onChange(f.id, { transformType: v as TransformType })}>
-                      <SelectTrigger className="h-8 w-[120px] text-xs"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        {TRANSFORM_TYPES.map((t) => <SelectItem key={t} value={t} className="text-xs">{t}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                  </td>
-                  <td className="px-2 py-1.5">
-                    <Input
-                      value={f.logic}
-                      onChange={(e) => onChange(f.id, { logic: e.target.value })}
-                      placeholder="Enter transformation logic"
-                      className="h-8 min-w-[160px] font-mono text-xs"
-                    />
-                  </td>
-                  <td className="px-2 py-1.5 text-center">
-                    <button
-                      onClick={() => onRemove(f.id)}
-                      className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-                      title="Remove field"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+    <Card title="Output Schema" desc="Fetch a sample response, then click fields to expose them as variables.">
+      <div className="flex items-center justify-between">
+        <p className="text-[12px] text-muted-foreground">{draft.outputs.length} variable{draft.outputs.length === 1 ? "" : "s"} exposed</p>
+        <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => setFetched(true)}>
+          <Zap className="h-3.5 w-3.5" /> Fetch live response
+        </Button>
       </div>
 
-      <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={onAdd}>
-        <Plus className="h-3.5 w-3.5" /> Add Custom Output Field
-      </Button>
-    </div>
+      {fetched && (
+        <div className="rounded-lg border border-border bg-secondary/20 p-2">
+          <p className="px-1 pb-1.5 text-[10.5px] uppercase tracking-wider text-muted-foreground">Response · click a field to expose it</p>
+          <div className="space-y-0.5">
+            {leaves.map((l) => {
+              const on = chosen.has(l.path);
+              return (
+                <button
+                  key={l.path}
+                  onClick={() => onAddOutput(l.path)}
+                  disabled={on}
+                  className={cn(
+                    "flex w-full items-center justify-between gap-3 rounded-md px-2 py-1.5 text-left text-xs transition-colors",
+                    on ? "cursor-default bg-success/10" : "hover:bg-accent",
+                  )}
+                >
+                  <span className="font-mono text-foreground">{l.path}</span>
+                  <span className="flex items-center gap-2">
+                    <span className="font-mono text-muted-foreground">{l.preview}</span>
+                    {on ? <span className="text-[10px] text-success">added</span> : <Plus className="h-3 w-3 text-muted-foreground" />}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {draft.outputs.length > 0 && (
+        <div className="overflow-hidden rounded-lg border border-border">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border bg-secondary/30 text-[10.5px] uppercase tracking-wider text-muted-foreground">
+                <th className="px-2 py-2 text-left font-medium">Path</th>
+                <th className="px-2 py-2 text-left font-medium">Variable</th>
+                <th className="px-2 py-2 text-left font-medium">Description</th>
+                <th className="w-9 px-2 py-2" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {draft.outputs.map((o) => (
+                <tr key={o.id} className="align-middle">
+                  <td className="px-2 py-1.5 font-mono text-[11.5px] text-muted-foreground">{o.path}</td>
+                  <td className="px-2 py-1.5"><Input value={o.varName} onChange={(e) => onUpdateOutput(o.id, { varName: slug(e.target.value) })} className="h-8 min-w-[120px] font-mono text-xs" /></td>
+                  <td className="px-2 py-1.5"><Input value={o.description} onChange={(e) => onUpdateOutput(o.id, { description: e.target.value })} placeholder="Description" className="h-8 min-w-[140px] text-xs" /></td>
+                  <td className="px-2 py-1.5 text-center">
+                    <button onClick={() => onRemoveOutput(o.id)} className="rounded-md p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" title="Remove"><Trash2 className="h-3.5 w-3.5" /></button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Card>
   );
 }
 
@@ -728,11 +647,14 @@ function CustomOutputTable({
 /* Small shared pieces                                       */
 /* --------------------------------------------------------- */
 
-function TabHeading({ title, desc }: { title: string; desc?: string }) {
+function Card({ title, desc, children }: { title: string; desc?: string; children: React.ReactNode }) {
   return (
-    <div>
-      <h2 className="text-[15px] font-semibold">{title}</h2>
-      {desc && <p className="mt-0.5 text-[12.5px] text-muted-foreground">{desc}</p>}
+    <div className="space-y-4 rounded-xl border border-border bg-card p-5">
+      <div>
+        <h2 className="text-[15px] font-semibold">{title}</h2>
+        {desc && <p className="mt-0.5 text-[12.5px] text-muted-foreground">{desc}</p>}
+      </div>
+      {children}
     </div>
   );
 }
@@ -748,31 +670,19 @@ function FormField({ label, required, children }: { label: string; required?: bo
   );
 }
 
-function SubTabs({
-  tabs, value, onChange,
-}: {
-  tabs: { id: string; label: string; count?: number }[];
-  value: string;
-  onChange: (v: string) => void;
-}) {
+function SubTabs({ tabs, value, onChange }: { tabs: { id: string; label: string; count?: number }[]; value: string; onChange: (v: string) => void }) {
   return (
     <div className="inline-flex flex-wrap items-center gap-1 rounded-lg border border-border bg-secondary/30 p-1">
       {tabs.map((t) => {
         const active = t.id === value;
         return (
-          <button
-            key={t.id}
-            onClick={() => onChange(t.id)}
-            className={cn(
-              "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[12.5px] transition-colors",
-              active ? "bg-card font-medium text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
-            )}
-          >
+          <button key={t.id} onClick={() => onChange(t.id)} className={cn(
+            "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[12.5px] transition-colors",
+            active ? "bg-card font-medium text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+          )}>
             {t.label}
             {typeof t.count === "number" && t.count > 0 && (
-              <span className={cn("rounded-full px-1.5 text-[10px]", active ? "bg-accent text-foreground" : "bg-muted text-muted-foreground")}>
-                {t.count}
-              </span>
+              <span className={cn("rounded-full px-1.5 text-[10px]", active ? "bg-accent text-foreground" : "bg-muted text-muted-foreground")}>{t.count}</span>
             )}
           </button>
         );
@@ -781,26 +691,162 @@ function SubTabs({
   );
 }
 
-function KeyValueRow({
-  label, value, placeholder, mono, onChange,
+const SAMPLE_MCP_TOOLS = [
+  { name: "search_kb", description: "Semantic search across the knowledge base", inputs: "query, top_k" },
+  { name: "get_article", description: "Fetch a KB article by id", inputs: "article_id" },
+  { name: "list_categories", description: "List available KB categories", inputs: "—" },
+  { name: "summarize", description: "Summarize a passage for the agent", inputs: "text, max_tokens" },
+];
+
+function McpToolsBlock({ url }: { url: string }) {
+  const [tools, setTools] = useState<typeof SAMPLE_MCP_TOOLS | null>(null);
+  return (
+    <div className="space-y-2 rounded-lg border border-dashed border-border bg-card/40 p-3">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-[12px] text-muted-foreground">
+          {tools ? `${tools.length} tools available on this server` : "Discover the tools this server exposes to agents."}
+        </p>
+        <Button
+          variant="outline" size="sm" className="h-8 shrink-0 gap-1.5 text-xs"
+          disabled={url.trim().length < 5}
+          onClick={() => { setTools(SAMPLE_MCP_TOOLS); toast.success("Tools fetched", { description: `${SAMPLE_MCP_TOOLS.length} tools discovered on the MCP server.` }); }}
+        >
+          <Zap className="h-3.5 w-3.5" /> Fetch available tools
+        </Button>
+      </div>
+      {tools && (
+        <div className="overflow-hidden rounded-lg border border-border bg-background">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border bg-secondary/30 text-[10.5px] uppercase tracking-wider text-muted-foreground">
+                <th className="px-3 py-2 text-left font-medium">Tool</th>
+                <th className="px-3 py-2 text-left font-medium">Description</th>
+                <th className="px-3 py-2 text-left font-medium">Inputs</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {tools.map((t) => (
+                <tr key={t.name}>
+                  <td className="px-3 py-2 font-mono text-[12px] text-foreground">{t.name}</td>
+                  <td className="px-3 py-2 text-[12px] text-muted-foreground">{t.description}</td>
+                  <td className="px-3 py-2 font-mono text-[11.5px] text-muted-foreground">{t.inputs}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CurlBox({ onParse }: { onParse: (text: string) => void }) {
+  const [text, setText] = useState("");
+  return (
+    <div className="space-y-1.5 rounded-lg border border-dashed border-border bg-card/40 p-3">
+      <div className="flex items-center justify-between">
+        <Label className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Paste cURL</Label>
+        <Button variant="outline" size="sm" className="h-7 gap-1.5 text-[11px]" disabled={!text.trim()} onClick={() => onParse(text)}>
+          <Wand2 className="h-3 w-3" /> Parse
+        </Button>
+      </div>
+      <Textarea value={text} onChange={(e) => setText(e.target.value)} placeholder={"curl -X POST https://api.example.com/v1/orders \\\n  -H 'Authorization: Bearer …' \\\n  -d '{\"customer_id\":\"123\"}'"} className="min-h-[64px] font-mono text-[11px]" />
+      <p className="text-[11px] text-muted-foreground">Fills method, URL, headers and body from a curl command.</p>
+    </div>
+  );
+}
+
+function JwtFields({ jwt, onChange }: { jwt: JwtConfig; onChange: (patch: Partial<JwtConfig>) => void }) {
+  const editList = (list: "claims" | "headerFields") => ({
+    add: () => onChange({ [list]: [...jwt[list], newClaim()] } as Partial<JwtConfig>),
+    update: (id: string, patch: Partial<JwtClaim>) => onChange({ [list]: jwt[list].map((c) => c.id === id ? { ...c, ...patch } : c) } as Partial<JwtConfig>),
+    remove: (id: string) => onChange({ [list]: jwt[list].filter((c) => c.id !== id) } as Partial<JwtConfig>),
+  });
+  const claims = editList("claims");
+  const headerFields = editList("headerFields");
+  return (
+    <div className="space-y-4 rounded-lg border border-border bg-secondary/20 p-3">
+      <div className="grid grid-cols-3 gap-3">
+        <FormField label="Algorithm">
+          <Select value={jwt.alg} onValueChange={(v) => onChange({ alg: v as JwtAlg })}>
+            <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select" /></SelectTrigger>
+            <SelectContent>{JWT_ALGS.map((a) => <SelectItem key={a} value={a} className="text-sm">{a}</SelectItem>)}</SelectContent>
+          </Select>
+        </FormField>
+        <FormField label="Add to">
+          <Select value={jwt.addTo} onValueChange={(v) => onChange({ addTo: v as "header" | "query" })}>
+            <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="header" className="text-sm">Header</SelectItem>
+              <SelectItem value="query" className="text-sm">Query Param</SelectItem>
+            </SelectContent>
+          </Select>
+        </FormField>
+        <FormField label="Key name"><Input value={jwt.keyName} onChange={(e) => onChange({ keyName: e.target.value })} placeholder="Authorization" className="h-9 font-mono text-xs" /></FormField>
+      </div>
+      <FormField label="Secret">
+        <Input type="password" value={jwt.secret} onChange={(e) => onChange({ secret: e.target.value })} placeholder="Enter secret key…" className="h-9 font-mono text-xs" />
+        <p className="text-[11px] text-muted-foreground">Stored encrypted in your workspace vault — never exposed to the model.</p>
+      </FormField>
+      <JwtClaimTable label="Claims / payload (JSON)" rows={jwt.claims} {...claims} />
+      <JwtClaimTable label="JWT header (JSON)" rows={jwt.headerFields} {...headerFields} />
+    </div>
+  );
+}
+
+function JwtClaimTable({
+  label, rows, add, update, remove,
 }: {
   label: string;
-  value: string;
-  placeholder?: string;
-  mono?: boolean;
-  onChange: (v: string) => void;
+  rows: JwtClaim[];
+  add: () => void;
+  update: (id: string, patch: Partial<JwtClaim>) => void;
+  remove: (id: string) => void;
 }) {
   return (
-    <tr>
-      <td className="px-3 py-1.5 align-middle font-mono text-[12px] text-muted-foreground">{label}</td>
-      <td className="px-3 py-1.5">
-        <Input
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={placeholder}
-          className={cn("h-8 text-xs", mono && "font-mono")}
-        />
-      </td>
-    </tr>
+    <div className="space-y-2">
+      <Label className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{label}</Label>
+      {rows.length > 0 && (
+        <div className="overflow-x-auto rounded-lg border border-border">
+          <table className="w-full min-w-[600px] text-sm">
+            <thead>
+              <tr className="border-b border-border bg-secondary/30 text-[10.5px] uppercase tracking-wider text-muted-foreground">
+                <th className="px-2 py-2 text-left font-medium">Keys</th>
+                <th className="px-2 py-2 text-left font-medium">Data type</th>
+                <th className="px-2 py-2 text-left font-medium">Type</th>
+                <th className="px-2 py-2 text-left font-medium">Value</th>
+                <th className="px-2 py-2 text-left font-medium">Description</th>
+                <th className="w-9 px-2 py-2" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {rows.map((c) => (
+                <tr key={c.id} className="align-middle">
+                  <td className="px-2 py-1.5"><Input value={c.key} onChange={(e) => update(c.id, { key: e.target.value })} placeholder="Key name" className="h-8 min-w-[110px] font-mono text-xs" /></td>
+                  <td className="px-2 py-1.5">
+                    <Select value={c.dataType} onValueChange={(v) => update(c.id, { dataType: v as ToolDataType })}>
+                      <SelectTrigger className="h-8 w-[96px] text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>{DATA_TYPES.map((t) => <SelectItem key={t} value={t} className="text-xs">{t}</SelectItem>)}</SelectContent>
+                    </Select>
+                  </td>
+                  <td className="px-2 py-1.5">
+                    <Select value={c.type} onValueChange={(v) => update(c.id, { type: v as JwtFieldType })}>
+                      <SelectTrigger className="h-8 w-[150px] text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>{JWT_FIELD_TYPES.map((t) => <SelectItem key={t} value={t} className="text-xs">{t}</SelectItem>)}</SelectContent>
+                    </Select>
+                  </td>
+                  <td className="px-2 py-1.5"><Input value={c.value} onChange={(e) => update(c.id, { value: e.target.value })} placeholder="Enter value" className="h-8 min-w-[120px] font-mono text-xs" /></td>
+                  <td className="px-2 py-1.5"><Input value={c.description} onChange={(e) => update(c.id, { description: e.target.value })} placeholder="Add" className="h-8 min-w-[120px] text-xs" /></td>
+                  <td className="px-2 py-1.5 text-center">
+                    <button onClick={() => remove(c.id)} className="rounded-md p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" title="Remove"><Trash2 className="h-3.5 w-3.5" /></button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={add}><Plus className="h-3.5 w-3.5" /> Add field</Button>
+    </div>
   );
 }
