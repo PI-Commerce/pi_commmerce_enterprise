@@ -25,7 +25,6 @@ import type { WorkflowNodeData, NodeKind, PresetConfig, PresetBranch, NodeOutput
 import { NODE_LABELS, SAMPLE_WORKFLOW_VARIABLES } from "@/lib/campaign-types";
 import { SEED_TEMPLATES } from "@/lib/waba-templates";
 import { whatsappOutputs, resolveWaTemplate, completedOutput } from "@/lib/wa-outputs";
-import { AGENT_TOOLS, getTool, TOOLS } from "@/lib/tool-registry";
 
 /** Per-node outcome variables (e.g. `<nodeId>.session_expired`) contributed by the
  *  action nodes present in the flow — merged into the Conditional variable picker. */
@@ -660,12 +659,6 @@ function VoiceCallCore({ config, readOnly, mark }: { config?: PresetConfig; read
     { v: "{{name}}", def: "contact.first_name" },
     { v: "{{phone}}", def: "contact.phone" },
   ];
-  const toolMap = config?.toolInputMap ?? [];
-  const [selectedTools, setSelectedTools] = useState<string[]>(() => (config?.agent ? AGENT_TOOLS[config.agent] ?? [] : []));
-  const pickAgent = (v: string) => { setAgent(v); setSelectedTools(AGENT_TOOLS[v] ?? []); mark(true); };
-  const addTool = (h: string) => setSelectedTools((ts) => (ts.includes(h) ? ts : [...ts, h]));
-  const removeTool = (h: string) => setSelectedTools((ts) => ts.filter((t) => t !== h));
-  const available = TOOLS.filter((t) => !selectedTools.includes(t.handle));
   return (
     <>
       <Section title="Agent">
@@ -682,7 +675,7 @@ function VoiceCallCore({ config, readOnly, mark }: { config?: PresetConfig; read
               disabled={readOnly}
               options={["Aria · Conversational", "Kai · Formal", "Maya · Friendly"]}
               defaultValue={config?.agent}
-              onPick={pickAgent}
+              onPick={(v) => { setAgent(v); mark(true); }}
               placeholder="Select agent…"
             />
           </div>
@@ -714,72 +707,6 @@ function VoiceCallCore({ config, readOnly, mark }: { config?: PresetConfig; read
         </div>
       </Section>
 
-      {/* Tool configuration — pick tools, then map each tool's inputs */}
-      {agentSelected && (
-        <Section title="Tool configuration">
-          <div className="rounded-xl border border-border bg-card/50 p-4 space-y-4">
-            <div className="space-y-2">
-              <Label className="text-[12px] font-medium text-foreground">Tools</Label>
-              <p className="text-[11px] text-muted-foreground">Add the tools this agent can call, then map each tool's inputs below.</p>
-              <div className="flex flex-wrap items-center gap-1.5">
-                {selectedTools.map((h) => (
-                  <span key={h} className="inline-flex items-center gap-1 rounded-md border border-ai/30 bg-ai/10 px-1.5 py-0.5 font-mono text-[11px] text-ai">
-                    @{h}
-                    {!readOnly && (
-                      <button onClick={() => removeTool(h)} className="text-ai/70 hover:text-ai" aria-label={`Remove ${h}`}><X className="h-3 w-3" /></button>
-                    )}
-                  </span>
-                ))}
-                {selectedTools.length === 0 && <span className="text-[11.5px] text-muted-foreground">No tools added yet.</span>}
-              </div>
-              {!readOnly && available.length > 0 && (
-                <div className="w-56 pt-1">
-                  <SelectLike
-                    key={selectedTools.join(",")}
-                    disabled={readOnly}
-                    options={available.map((t) => t.handle)}
-                    placeholder="+ Add tool…"
-                    onPick={addTool}
-                  />
-                </div>
-              )}
-            </div>
-
-            {selectedTools.length > 0 && (
-              <div className="space-y-3 border-t border-border/60 pt-3">
-                {selectedTools.map((h) => {
-                  const tool = getTool(h);
-                  if (!tool) return null;
-                  const mappable = tool.inputs.filter((i) => i.source !== "constant");
-                  return (
-                    <div key={h} className="rounded-lg border border-border bg-background/60 p-3 space-y-2.5">
-                      <div className="flex items-baseline justify-between gap-2">
-                        <span className="font-mono text-[12px] font-medium text-foreground">@{h}</span>
-                        <span className="truncate text-[10.5px] text-muted-foreground">{tool.description}</span>
-                      </div>
-                      {mappable.length > 0 ? (
-                        mappable.map((inp) => {
-                          const v = `${h}.${inp.key}`;
-                          const fallback = inp.source === "campaign" ? `contact.${inp.value ?? inp.key}` : "__llm__";
-                          const def = toolMap.find((m) => m.v === v)?.def ?? fallback;
-                          return (
-                            <div key={v} className="grid grid-cols-[130px_1fr] items-center gap-2">
-                              <span className="truncate font-mono text-[11.5px] text-muted-foreground" title={inp.description}>{inp.key}</span>
-                              <ToolInputMapPicker defaultValue={def} disabled={readOnly} />
-                            </div>
-                          );
-                        })
-                      ) : (
-                        <p className="text-[11px] text-muted-foreground">All inputs are fixed at the tool — nothing to map.</p>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </Section>
-      )}
       <Section title="Call window">
         <div className="grid grid-cols-2 gap-2">
           <Field label="Start time"><Input disabled={readOnly} type="time" defaultValue={config?.callStart ?? "09:00"} className="h-9" /></Field>
@@ -799,30 +726,6 @@ function VoiceCallCore({ config, readOnly, mark }: { config?: PresetConfig; read
       </Section>
       <ActionAdvanceBanner kind="voiceCall" />
     </>
-  );
-}
-
-/** Maps a single tool input to either "Let LLM decide" or a CSV/upstream variable. */
-function ToolInputMapPicker({ defaultValue, disabled }: { defaultValue?: string; disabled?: boolean }) {
-  const [v, setV] = useState(defaultValue ?? "__llm__");
-  const extraVariables = useContext(ExtraVariablesContext);
-  const allVariables = [...extraVariables, ...SAMPLE_WORKFLOW_VARIABLES];
-  const isCustom = v !== "__llm__" && !!v && !allVariables.some((s) => s.key === v);
-  return (
-    <Select value={v || "__llm__"} disabled={disabled} onValueChange={setV}>
-      <SelectTrigger className="h-8 font-mono text-[12px]"><SelectValue /></SelectTrigger>
-      <SelectContent>
-        <SelectItem value="__llm__" className="text-[12px]">
-          <span className="inline-flex items-center gap-1.5"><Sparkles className="h-3 w-3 text-ai" /> Let LLM decide</span>
-        </SelectItem>
-        {isCustom && (
-          <SelectItem value={v} className="font-mono text-[12px]">{v} <span className="text-muted-foreground">· upstream</span></SelectItem>
-        )}
-        {allVariables.map((s) => (
-          <SelectItem key={s.key} value={s.key} className="font-mono text-[12px]">{s.key} <span className="text-muted-foreground">· {s.source}</span></SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
   );
 }
 
@@ -1195,10 +1098,10 @@ function VariablePicker({
   // the sample list — surface the current value as its own option so it still renders.
   const isCustom = !!v && !allVariables.some((s) => s.key === v);
   return (
-    <div className="relative">
+    <div className="relative min-w-0">
       <Variable className="pointer-events-none absolute left-2.5 top-1/2 z-10 h-3 w-3 -translate-y-1/2 text-ai" />
       <Select value={v || undefined} disabled={disabled} onValueChange={(val) => { setV(val); onChange(val); }}>
-        <SelectTrigger className="h-9 pl-7 font-mono text-[12px]">
+        <SelectTrigger className="h-9 min-w-0 pl-7 font-mono text-[12px] [&>span]:truncate">
           <SelectValue placeholder="Select variable…" />
         </SelectTrigger>
         <SelectContent>

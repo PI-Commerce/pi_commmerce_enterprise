@@ -163,7 +163,7 @@ export function WorkflowNode({ data, selected }: NodeProps<WorkflowNodeData>) {
             {running && <Loader2 className="h-3 w-3 animate-spin text-ai" />}
           </div>
           {data.subtitle && (
-            <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{data.subtitle}</p>
+            <p title={data.subtitle} className="mt-0.5 truncate text-[11px] text-muted-foreground group-hover:whitespace-normal">{data.subtitle}</p>
           )}
           {invalid && (
             <p className="mt-1 flex items-center gap-1 text-[10.5px] font-medium text-destructive">

@@ -13,6 +13,9 @@ import {
 import {
   Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
 } from "@/components/ui/tooltip";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger,
+} from "@/components/ui/dialog";
 import { Plus, Phone, MessageCircle, Wrench, Search, MoreHorizontal, Workflow, Archive, Copy, Check, KeyRound, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -42,11 +45,7 @@ function Agents() {
       <PageHeader
         title="Agents"
         description="Reusable voice and chat agents you can wire into any campaign."
-        actions={
-          <Button size="sm" className="h-8 gap-1.5 text-xs" asChild>
-            <Link to="/agents/new"><Plus className="h-3.5 w-3.5" /> New agent</Link>
-          </Button>
-        }
+        actions={<NewAgentButton />}
       />
 
       <PageTabs<Tab>
@@ -61,6 +60,47 @@ function Agents() {
       {tab === "builder" && <Builder />}
       {tab === "tools" && <Tools />}
     </AppShell>
+  );
+}
+
+/** New-agent CTA → modal to pick voice vs chat → full-page builder. */
+function NewAgentButton() {
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  const choose = (type: "voice" | "chat") => {
+    setOpen(false);
+    navigate({ to: "/agents/new", search: { type } });
+  };
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button size="sm" className="h-8 gap-1.5 text-xs"><Plus className="h-3.5 w-3.5" /> New agent</Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Create an agent</DialogTitle>
+          <DialogDescription>What kind of agent do you want to build?</DialogDescription>
+        </DialogHeader>
+        <div className="grid grid-cols-2 gap-3 pt-1">
+          {([
+            ["voice", "Voice agent", "Makes & takes phone calls", Phone, "text-ai"],
+            ["chat", "Chat agent", "Replies on WhatsApp & chat", MessageCircle, "text-success"],
+          ] as const).map(([type, title, desc, Icon, tone]) => (
+            <button
+              key={type}
+              onClick={() => choose(type)}
+              className="flex flex-col items-start gap-2 rounded-xl border border-border bg-card p-4 text-left transition-colors hover:border-foreground/30 hover:bg-accent"
+            >
+              <span className={cn("flex h-9 w-9 items-center justify-center rounded-lg bg-accent", tone)}>
+                <Icon className="h-4 w-4" />
+              </span>
+              <span className="text-sm font-semibold">{title}</span>
+              <span className="text-[12px] text-muted-foreground">{desc}</span>
+            </button>
+          ))}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
