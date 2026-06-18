@@ -115,7 +115,7 @@ const EX1_NODES: Node<WorkflowNodeData>[] = [
     data: {
       kind: "voiceCall", title: "Voice AI call", subtitle: "Conversational reactivation", valid: true, preset: true,
       config: {
-        agent: "Aria · Conversational",
+        agent: "reactivation_voice",
         voiceVarMap: [
           { v: "{{name}}", def: "contact.first_name" },
           { v: "{{phone}}", def: "contact.phone" },
@@ -203,7 +203,7 @@ const EX2_NODES: Node<WorkflowNodeData>[] = [
     data: {
       kind: "voiceCall", title: "Voice AI win-back call", subtitle: "Call window 10:00–19:00 IST", valid: true, preset: true,
       config: {
-        agent: "Maya · Friendly",
+        agent: "winback_voice",
         voiceVarMap: [
           { v: "{{name}}", def: "contact.first_name" },
           { v: "{{phone}}", def: "contact.phone" },
@@ -296,7 +296,7 @@ const EX2_NODES: Node<WorkflowNodeData>[] = [
     data: {
       kind: "voiceCall", title: "Voice AI callback", subtitle: "Retry 1× · scheduled callback", valid: true, preset: true,
       config: {
-        agent: "Maya · Friendly",
+        agent: "reactivation_voice",
         voiceVarMap: [
           { v: "{{name}}", def: "contact.first_name" },
           { v: "{{phone}}", def: "contact.phone" },
@@ -434,7 +434,7 @@ const sAbSplit = (
 const sVoice = (id: string, title: string, subtitle?: string, cfg?: Partial<PresetConfig>): Spec => ({
   id, kind: "voiceCall", title, subtitle,
   config: {
-    agent: "Aria · Conversational",
+    agent: "reactivation_voice",
     voiceVarMap: [{ v: "{{name}}", def: "contact.first_name" }, { v: "{{phone}}", def: "contact.phone" }],
     callStart: "10:00", callEnd: "19:00", timezone: "Asia/Kolkata (IST)", maxAttempts: 2, retryInterval: "1 hour",
     ...cfg,

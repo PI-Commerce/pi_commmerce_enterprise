@@ -108,7 +108,7 @@ function TemplateList({ templates, onCreate, onEdit, onDelete }: {
   const rangeEnd = Math.min(pageSafe * PAGE_SIZE, filtered.length);
 
   return (
-    <div className="flex h-full flex-col px-8 py-6">
+    <div className="flex h-full flex-col px-8 pb-6">
       <div className="mx-auto flex h-full w-full max-w-6xl flex-col">
       {/* Frozen toolbar */}
       <div className="flex shrink-0 flex-wrap items-end gap-3">

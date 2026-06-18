@@ -11,14 +11,16 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as IntegrationsRouteImport } from './routes/integrations'
+import { Route as ChannelsRouteImport } from './routes/channels'
 import { Route as CampaignsRouteImport } from './routes/campaigns'
 import { Route as AnalyticsRouteImport } from './routes/analytics'
 import { Route as AgentsRouteImport } from './routes/agents'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as IntegrationsIndexRouteImport } from './routes/integrations.index'
+import { Route as ChannelsIndexRouteImport } from './routes/channels.index'
 import { Route as CampaignsIndexRouteImport } from './routes/campaigns.index'
 import { Route as AgentsIndexRouteImport } from './routes/agents.index'
-import { Route as IntegrationsWhatsappRouteImport } from './routes/integrations.whatsapp'
+import { Route as ChannelsWhatsappRouteImport } from './routes/channels.whatsapp'
 import { Route as CampaignsIdRouteImport } from './routes/campaigns.$id'
 import { Route as AgentsNewRouteImport } from './routes/agents.new'
 import { Route as AgentsIdRouteImport } from './routes/agents.$id'
@@ -33,6 +35,11 @@ const SettingsRoute = SettingsRouteImport.update({
 const IntegrationsRoute = IntegrationsRouteImport.update({
   id: '/integrations',
   path: '/integrations',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ChannelsRoute = ChannelsRouteImport.update({
+  id: '/channels',
+  path: '/channels',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CampaignsRoute = CampaignsRouteImport.update({
@@ -60,6 +67,11 @@ const IntegrationsIndexRoute = IntegrationsIndexRouteImport.update({
   path: '/',
   getParentRoute: () => IntegrationsRoute,
 } as any)
+const ChannelsIndexRoute = ChannelsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => ChannelsRoute,
+} as any)
 const CampaignsIndexRoute = CampaignsIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -70,10 +82,10 @@ const AgentsIndexRoute = AgentsIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AgentsRoute,
 } as any)
-const IntegrationsWhatsappRoute = IntegrationsWhatsappRouteImport.update({
+const ChannelsWhatsappRoute = ChannelsWhatsappRouteImport.update({
   id: '/whatsapp',
   path: '/whatsapp',
-  getParentRoute: () => IntegrationsRoute,
+  getParentRoute: () => ChannelsRoute,
 } as any)
 const CampaignsIdRoute = CampaignsIdRouteImport.update({
   id: '/$id',
@@ -106,14 +118,16 @@ export interface FileRoutesByFullPath {
   '/agents': typeof AgentsRouteWithChildren
   '/analytics': typeof AnalyticsRoute
   '/campaigns': typeof CampaignsRouteWithChildren
+  '/channels': typeof ChannelsRouteWithChildren
   '/integrations': typeof IntegrationsRouteWithChildren
   '/settings': typeof SettingsRoute
   '/agents/$id': typeof AgentsIdRoute
   '/agents/new': typeof AgentsNewRoute
   '/campaigns/$id': typeof CampaignsIdRoute
-  '/integrations/whatsapp': typeof IntegrationsWhatsappRoute
+  '/channels/whatsapp': typeof ChannelsWhatsappRoute
   '/agents/': typeof AgentsIndexRoute
   '/campaigns/': typeof CampaignsIndexRoute
+  '/channels/': typeof ChannelsIndexRoute
   '/integrations/': typeof IntegrationsIndexRoute
   '/agents/tools/new': typeof AgentsToolsNewRoute
   '/campaigns/versions/$id': typeof CampaignsVersionsIdRoute
@@ -125,9 +139,10 @@ export interface FileRoutesByTo {
   '/agents/$id': typeof AgentsIdRoute
   '/agents/new': typeof AgentsNewRoute
   '/campaigns/$id': typeof CampaignsIdRoute
-  '/integrations/whatsapp': typeof IntegrationsWhatsappRoute
+  '/channels/whatsapp': typeof ChannelsWhatsappRoute
   '/agents': typeof AgentsIndexRoute
   '/campaigns': typeof CampaignsIndexRoute
+  '/channels': typeof ChannelsIndexRoute
   '/integrations': typeof IntegrationsIndexRoute
   '/agents/tools/new': typeof AgentsToolsNewRoute
   '/campaigns/versions/$id': typeof CampaignsVersionsIdRoute
@@ -138,14 +153,16 @@ export interface FileRoutesById {
   '/agents': typeof AgentsRouteWithChildren
   '/analytics': typeof AnalyticsRoute
   '/campaigns': typeof CampaignsRouteWithChildren
+  '/channels': typeof ChannelsRouteWithChildren
   '/integrations': typeof IntegrationsRouteWithChildren
   '/settings': typeof SettingsRoute
   '/agents/$id': typeof AgentsIdRoute
   '/agents/new': typeof AgentsNewRoute
   '/campaigns/$id': typeof CampaignsIdRoute
-  '/integrations/whatsapp': typeof IntegrationsWhatsappRoute
+  '/channels/whatsapp': typeof ChannelsWhatsappRoute
   '/agents/': typeof AgentsIndexRoute
   '/campaigns/': typeof CampaignsIndexRoute
+  '/channels/': typeof ChannelsIndexRoute
   '/integrations/': typeof IntegrationsIndexRoute
   '/agents/tools/new': typeof AgentsToolsNewRoute
   '/campaigns/versions/$id': typeof CampaignsVersionsIdRoute
@@ -157,14 +174,16 @@ export interface FileRouteTypes {
     | '/agents'
     | '/analytics'
     | '/campaigns'
+    | '/channels'
     | '/integrations'
     | '/settings'
     | '/agents/$id'
     | '/agents/new'
     | '/campaigns/$id'
-    | '/integrations/whatsapp'
+    | '/channels/whatsapp'
     | '/agents/'
     | '/campaigns/'
+    | '/channels/'
     | '/integrations/'
     | '/agents/tools/new'
     | '/campaigns/versions/$id'
@@ -176,9 +195,10 @@ export interface FileRouteTypes {
     | '/agents/$id'
     | '/agents/new'
     | '/campaigns/$id'
-    | '/integrations/whatsapp'
+    | '/channels/whatsapp'
     | '/agents'
     | '/campaigns'
+    | '/channels'
     | '/integrations'
     | '/agents/tools/new'
     | '/campaigns/versions/$id'
@@ -188,14 +208,16 @@ export interface FileRouteTypes {
     | '/agents'
     | '/analytics'
     | '/campaigns'
+    | '/channels'
     | '/integrations'
     | '/settings'
     | '/agents/$id'
     | '/agents/new'
     | '/campaigns/$id'
-    | '/integrations/whatsapp'
+    | '/channels/whatsapp'
     | '/agents/'
     | '/campaigns/'
+    | '/channels/'
     | '/integrations/'
     | '/agents/tools/new'
     | '/campaigns/versions/$id'
@@ -206,6 +228,7 @@ export interface RootRouteChildren {
   AgentsRoute: typeof AgentsRouteWithChildren
   AnalyticsRoute: typeof AnalyticsRoute
   CampaignsRoute: typeof CampaignsRouteWithChildren
+  ChannelsRoute: typeof ChannelsRouteWithChildren
   IntegrationsRoute: typeof IntegrationsRouteWithChildren
   SettingsRoute: typeof SettingsRoute
 }
@@ -224,6 +247,13 @@ declare module '@tanstack/react-router' {
       path: '/integrations'
       fullPath: '/integrations'
       preLoaderRoute: typeof IntegrationsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/channels': {
+      id: '/channels'
+      path: '/channels'
+      fullPath: '/channels'
+      preLoaderRoute: typeof ChannelsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/campaigns': {
@@ -261,6 +291,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IntegrationsIndexRouteImport
       parentRoute: typeof IntegrationsRoute
     }
+    '/channels/': {
+      id: '/channels/'
+      path: '/'
+      fullPath: '/channels/'
+      preLoaderRoute: typeof ChannelsIndexRouteImport
+      parentRoute: typeof ChannelsRoute
+    }
     '/campaigns/': {
       id: '/campaigns/'
       path: '/'
@@ -275,12 +312,12 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AgentsIndexRouteImport
       parentRoute: typeof AgentsRoute
     }
-    '/integrations/whatsapp': {
-      id: '/integrations/whatsapp'
+    '/channels/whatsapp': {
+      id: '/channels/whatsapp'
       path: '/whatsapp'
-      fullPath: '/integrations/whatsapp'
-      preLoaderRoute: typeof IntegrationsWhatsappRouteImport
-      parentRoute: typeof IntegrationsRoute
+      fullPath: '/channels/whatsapp'
+      preLoaderRoute: typeof ChannelsWhatsappRouteImport
+      parentRoute: typeof ChannelsRoute
     }
     '/campaigns/$id': {
       id: '/campaigns/$id'
@@ -353,13 +390,25 @@ const CampaignsRouteWithChildren = CampaignsRoute._addFileChildren(
   CampaignsRouteChildren,
 )
 
+interface ChannelsRouteChildren {
+  ChannelsWhatsappRoute: typeof ChannelsWhatsappRoute
+  ChannelsIndexRoute: typeof ChannelsIndexRoute
+}
+
+const ChannelsRouteChildren: ChannelsRouteChildren = {
+  ChannelsWhatsappRoute: ChannelsWhatsappRoute,
+  ChannelsIndexRoute: ChannelsIndexRoute,
+}
+
+const ChannelsRouteWithChildren = ChannelsRoute._addFileChildren(
+  ChannelsRouteChildren,
+)
+
 interface IntegrationsRouteChildren {
-  IntegrationsWhatsappRoute: typeof IntegrationsWhatsappRoute
   IntegrationsIndexRoute: typeof IntegrationsIndexRoute
 }
 
 const IntegrationsRouteChildren: IntegrationsRouteChildren = {
-  IntegrationsWhatsappRoute: IntegrationsWhatsappRoute,
   IntegrationsIndexRoute: IntegrationsIndexRoute,
 }
 
@@ -372,6 +421,7 @@ const rootRouteChildren: RootRouteChildren = {
   AgentsRoute: AgentsRouteWithChildren,
   AnalyticsRoute: AnalyticsRoute,
   CampaignsRoute: CampaignsRouteWithChildren,
+  ChannelsRoute: ChannelsRouteWithChildren,
   IntegrationsRoute: IntegrationsRouteWithChildren,
   SettingsRoute: SettingsRoute,
 }
