@@ -36,7 +36,7 @@ export function WhatsAppOverview({ data }: { data: ConnectedWaba }) {
 
   return (
     <div className="h-full overflow-y-auto px-8 pb-6">
-      <div className="mx-auto max-w-6xl space-y-8 pb-10">
+      <div className="space-y-8 pb-10">
       {/* Connected assets */}
       <Section title="Connected assets" desc="The Meta business assets linked through Embedded Signup.">
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
