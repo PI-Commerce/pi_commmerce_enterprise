@@ -77,6 +77,8 @@ export type PresetConfig = {
   // ---- Voice Call core ----
   agent?: string;
   voiceVarMap?: PresetVarMap[];
+  /** Maps each tool campaign-input slot (`v` = "tool.param") to a CSV/audience column (`def`). */
+  toolInputMap?: PresetVarMap[];
   callStart?: string;
   callEnd?: string;
   timezone?: string;
@@ -177,6 +179,7 @@ export const STATUS_TONE: Record<CampaignStatus, string> = {
 
 /** Variables produced by upstream nodes — exposed in mapping dropdowns. */
 export const SAMPLE_WORKFLOW_VARIABLES: { key: string; source: string }[] = [
+  { key: "contact.customer_id", source: "Audience" },
   { key: "contact.phone", source: "Audience" },
   { key: "contact.first_name", source: "Audience" },
   { key: "contact.last_name", source: "Audience" },

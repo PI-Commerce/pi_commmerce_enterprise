@@ -9,6 +9,7 @@
  */
 import type { NodeKind, NodeOutput, WorkflowNodeData } from "./campaign-types";
 import { SEED_TEMPLATES, type TemplateButtonType, type WaTemplate } from "./waba-templates";
+import { toolOutputVarsForAgent } from "./tool-registry";
 
 /**
  * Button types that produce a usable inbound signal we can branch on.
@@ -97,7 +98,15 @@ export function deriveNodeOutcomeVariables(
       if (hasBranchable) vars.push({ key: `${n.id}.button`, source });
     } else if (kind === "voiceCall" || kind === "sms") {
       vars.push({ key: `${n.id}.completed`, source });
+      // A configured voice agent's tools expose their outputs downstream
+      // (e.g. `order_lookup.delivered_status`), namespaced by tool handle.
+      if (kind === "voiceCall" && config?.agent) {
+        for (const tv of toolOutputVarsForAgent(config.agent)) vars.push(tv);
+      }
     }
   }
-  return vars;
+  // Tool output vars are namespaced by tool (not node) so two voice nodes on the
+  // same agent would repeat them — dedupe by key.
+  const seen = new Set<string>();
+  return vars.filter((v) => (seen.has(v.key) ? false : (seen.add(v.key), true)));
 }
