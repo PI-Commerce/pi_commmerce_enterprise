@@ -3,60 +3,34 @@ import { createFileRoute } from "@tanstack/react-router";
 import { AppShell, PageHeader } from "@/components/app/AppShell";
 import { PageTabs } from "@/components/app/Tabs";
 import { Button } from "@/components/ui/button";
-import { WhatsAppCard } from "@/components/integrations/WhatsAppCard";
-import { Megaphone, MessageSquare, MessageSquareText, Database, Webhook, Key, Code2 } from "lucide-react";
+import { Database, Webhook, Key, Code2 } from "lucide-react";
 
 export const Route = createFileRoute("/integrations/")({
   component: Integrations,
   head: () => ({ meta: [{ title: "Integrations · Pi Commerce Enterprise" }] }),
 });
 
-type Tab = "channels" | "crm" | "developer";
+type Tab = "crm" | "developer";
 
 function Integrations() {
-  const [tab, setTab] = useState<Tab>("channels");
+  const [tab, setTab] = useState<Tab>("crm");
   return (
     <AppShell>
       <PageHeader
         title="Integrations"
-        description="Connect channels, data sources, and developer tooling."
+        description="Connect data sources and developer tooling. Messaging channels live under Channels."
       />
       <PageTabs<Tab>
         value={tab}
         onChange={setTab}
         tabs={[
-          { id: "channels", label: "Channels" },
-          { id: "crm", label: "CRMs", disabled: true },
-          { id: "developer", label: "Developer", disabled: true },
+          { id: "crm", label: "CRMs" },
+          { id: "developer", label: "Developer" },
         ]}
       />
-      {tab === "channels" && <Channels />}
       {tab === "crm" && <CRMs />}
       {tab === "developer" && <Developer />}
     </AppShell>
-  );
-}
-
-/**
- * v1 channels. WhatsApp Business (WABA) is the only live channel — it routes
- * through the full Embedded Signup + Template Manager. Meta Ads, SMS and RCS are
- * deliberate placeholders for the roadmap and render in a non-interactive
- * "Coming soon" state.
- */
-const CHANNELS = [
-  { name: "Meta Ads", icon: Megaphone, meta: "Sync custom audiences for retargeting" },
-  { name: "SMS", icon: MessageSquare, meta: "Transactional & promotional SMS" },
-  { name: "RCS", icon: MessageSquareText, meta: "Rich cards, carousels & branded sender" },
-];
-
-function Channels() {
-  return (
-    <div className="grid grid-cols-2 gap-3">
-      <WhatsAppCard />
-      {CHANNELS.map((c) => (
-        <ChannelPlaceholder key={c.name} icon={c.icon} title={c.name} meta={c.meta} />
-      ))}
-    </div>
   );
 }
 
@@ -162,27 +136,3 @@ function Card({ icon: Icon, title, meta, connected }: { icon: React.ComponentTyp
   );
 }
 
-/**
- * Roadmap channel card. Visually consistent with the live channels but inert —
- * a muted "Coming soon" pill and a disabled action communicate that only
- * WhatsApp is wired up in v1.
- */
-function ChannelPlaceholder({ icon: Icon, title, meta }: { icon: React.ComponentType<{ className?: string }>; title: string; meta: string }) {
-  return (
-    <div className="rounded-xl border border-border bg-card p-4">
-      <div className="flex items-start justify-between">
-        <div className="flex h-9 w-9 items-center justify-center rounded-md bg-accent text-muted-foreground"><Icon className="h-4 w-4" /></div>
-        <span className="inline-flex items-center gap-1 rounded-full border border-border bg-secondary px-2 py-0.5 text-[10.5px] text-muted-foreground">
-          Coming soon
-        </span>
-      </div>
-      <h3 className="mt-3 text-[14px] font-semibold">{title}</h3>
-      <p className="mt-0.5 text-[11.5px] text-muted-foreground">{meta}</p>
-      <div className="mt-3 flex justify-end">
-        <Button size="sm" variant="outline" className="h-7 text-[11.5px]" disabled>
-          Connect
-        </Button>
-      </div>
-    </div>
-  );
-}

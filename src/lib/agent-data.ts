@@ -2,6 +2,7 @@
  * Agent records — seed data for the agent builder (create starts blank, edit
  * hydrates from here). Tools are referenced by handle from the tool registry.
  */
+import { getTool } from "./tool-registry";
 
 export type AgentType = "voice" | "chat";
 export type PostCallVar = { id: string; name: string; prompt: string };
@@ -106,4 +107,26 @@ export const AGENT_RECORDS: Record<string, AgentRecord> = {
 
 export function getAgentRecord(id: string): AgentRecord | undefined {
   return AGENT_RECORDS[id];
+}
+
+/** Resolve an agent by its id OR its name (the voice node stores the name). */
+export function resolveAgent(nameOrId?: string): AgentRecord | undefined {
+  if (!nameOrId) return undefined;
+  return AGENT_RECORDS[nameOrId] ?? Object.values(AGENT_RECORDS).find((a) => a.name === nameOrId);
+}
+
+export function voiceAgents(): AgentRecord[] {
+  return Object.values(AGENT_RECORDS).filter((a) => a.type === "voice");
+}
+
+/** Output variables an agent's tools expose downstream (e.g. `order_lookup.delivered_status`). */
+export function agentToolOutputVars(nameOrId?: string): { key: string; source: string }[] {
+  const rec = resolveAgent(nameOrId);
+  if (!rec) return [];
+  const out: { key: string; source: string }[] = [];
+  for (const h of rec.tools) {
+    const t = getTool(h);
+    if (t) for (const o of t.outputs) out.push({ key: `${h}.${o.varName}`, source: `@${h}` });
+  }
+  return out;
 }

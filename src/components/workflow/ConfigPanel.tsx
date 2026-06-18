@@ -25,6 +25,10 @@ import type { WorkflowNodeData, NodeKind, PresetConfig, PresetBranch, NodeOutput
 import { NODE_LABELS, SAMPLE_WORKFLOW_VARIABLES } from "@/lib/campaign-types";
 import { SEED_TEMPLATES } from "@/lib/waba-templates";
 import { whatsappOutputs, resolveWaTemplate, completedOutput } from "@/lib/wa-outputs";
+import { getTool } from "@/lib/tool-registry";
+import { resolveAgent, voiceAgents } from "@/lib/agent-data";
+
+const VOICE_AGENTS = voiceAgents();
 
 /** Per-node outcome variables (e.g. `<nodeId>.session_expired`) contributed by the
  *  action nodes present in the flow — merged into the Conditional variable picker. */
@@ -766,6 +770,11 @@ function VoiceCallCore({ config, readOnly, mark }: { config?: PresetConfig; read
     { v: "{{name}}", def: "contact.first_name" },
     { v: "{{phone}}", def: "contact.phone" },
   ];
+  // Tools come from the selected agent (configured in the agent builder). At the
+  // node we only map each tool's inputs to a variable for this campaign.
+  const agentRecord = resolveAgent(agent);
+  const agentTools = (agentRecord?.tools ?? []).map(getTool).filter((t): t is NonNullable<typeof t> => !!t);
+  const toolMap = config?.toolInputMap ?? [];
   return (
     <>
       <Section title="Agent">
@@ -780,7 +789,7 @@ function VoiceCallCore({ config, readOnly, mark }: { config?: PresetConfig; read
             </div>
             <SelectLike
               disabled={readOnly}
-              options={["Aria · Conversational", "Kai · Formal", "Maya · Friendly"]}
+              options={VOICE_AGENTS.map((a) => a.name)}
               defaultValue={config?.agent}
               onPick={(v) => { setAgent(v); mark(true); }}
               placeholder="Select agent…"
@@ -814,6 +823,41 @@ function VoiceCallCore({ config, readOnly, mark }: { config?: PresetConfig; read
         </div>
       </Section>
 
+      {/* Tool configuration — the selected agent's tools; map each input to a variable */}
+      {agentSelected && agentTools.length > 0 && (
+        <Section title="Tool configuration">
+          <div className="rounded-xl border border-border bg-card/50 p-4 space-y-3">
+            <p className="text-[11px] text-muted-foreground">
+              <span className="font-mono text-foreground">{agent}</span> brings {agentTools.length} tool{agentTools.length === 1 ? "" : "s"}. Map each input to a CSV or upstream variable, or let the agent decide.
+            </p>
+            {agentTools.map((tool) => {
+              const mappable = tool.inputs.filter((i) => i.source !== "constant");
+              return (
+                <div key={tool.handle} className="rounded-lg border border-border bg-background/60 p-3 space-y-2.5">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="font-mono text-[12px] font-medium text-ai">@{tool.handle}</span>
+                    <span className="truncate text-[10.5px] text-muted-foreground">{tool.description}</span>
+                  </div>
+                  {mappable.length > 0 ? mappable.map((inp) => {
+                    const v = `${tool.handle}.${inp.key}`;
+                    const fallback = inp.source === "campaign" ? `contact.${inp.value ?? inp.key}` : "__llm__";
+                    const def = toolMap.find((m) => m.v === v)?.def ?? fallback;
+                    return (
+                      <div key={v} className="grid grid-cols-[130px_1fr] items-center gap-2">
+                        <span className="truncate font-mono text-[11.5px] text-muted-foreground" title={inp.description}>{inp.key}</span>
+                        <ToolInputMapPicker defaultValue={def} disabled={readOnly} />
+                      </div>
+                    );
+                  }) : (
+                    <p className="text-[11px] text-muted-foreground">All inputs are fixed at the tool.</p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </Section>
+      )}
+
       <Section title="Call window">
         <div className="grid grid-cols-2 gap-2">
           <Field label="Start time"><Input disabled={readOnly} type="time" defaultValue={config?.callStart ?? "09:00"} className="h-9" /></Field>
@@ -833,6 +877,30 @@ function VoiceCallCore({ config, readOnly, mark }: { config?: PresetConfig; read
       </Section>
       <ActionAdvanceBanner kind="voiceCall" />
     </>
+  );
+}
+
+/** Maps a single tool input to "Let LLM decide" or a CSV/upstream variable. */
+function ToolInputMapPicker({ defaultValue, disabled }: { defaultValue?: string; disabled?: boolean }) {
+  const [v, setV] = useState(defaultValue ?? "__llm__");
+  const extraVariables = useContext(ExtraVariablesContext);
+  const allVariables = [...extraVariables, ...SAMPLE_WORKFLOW_VARIABLES];
+  const isCustom = v !== "__llm__" && !!v && !allVariables.some((s) => s.key === v);
+  return (
+    <Select value={v || "__llm__"} disabled={disabled} onValueChange={setV}>
+      <SelectTrigger className="h-8 min-w-0 font-mono text-[12px] [&>span]:truncate"><SelectValue /></SelectTrigger>
+      <SelectContent>
+        <SelectItem value="__llm__" className="text-[12px]">
+          <span className="inline-flex items-center gap-1.5"><Sparkles className="h-3 w-3 text-ai" /> Let LLM decide</span>
+        </SelectItem>
+        {isCustom && (
+          <SelectItem value={v} className="font-mono text-[12px]">{v} <span className="text-muted-foreground">· upstream</span></SelectItem>
+        )}
+        {allVariables.map((s) => (
+          <SelectItem key={s.key} value={s.key} className="font-mono text-[12px]">{s.key} <span className="text-muted-foreground">· {s.source}</span></SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }
 

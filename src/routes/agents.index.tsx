@@ -183,7 +183,6 @@ function Builder() {
                 <th className="px-4 py-2.5 text-left font-medium">Type</th>
                 <th className="px-4 py-2.5 text-left font-medium">Status</th>
                 <th className="px-4 py-2.5 text-right font-medium">Campaigns</th>
-                <th className="px-4 py-2.5 text-right font-medium">Conversations</th>
                 <th className="w-10 px-2 py-2.5" />
               </tr>
             </thead>
@@ -236,7 +235,6 @@ function Builder() {
                         <span className="font-mono text-[12px] text-muted-foreground">—</span>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-right font-mono text-[12px]">{a.convs}</td>
                     <td className="px-2 py-3 text-right">
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>

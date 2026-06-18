@@ -9,7 +9,7 @@
  */
 import type { NodeKind, NodeOutput, WorkflowNodeData } from "./campaign-types";
 import { SEED_TEMPLATES, type TemplateButtonType, type WaTemplate } from "./waba-templates";
-import { toolOutputVarsForAgent } from "./tool-registry";
+import { agentToolOutputVars } from "./agent-data";
 
 /**
  * Button types that produce a usable inbound signal we can branch on.
@@ -101,7 +101,7 @@ export function deriveNodeOutcomeVariables(
       // A configured voice agent's tools expose their outputs downstream
       // (e.g. `order_lookup.delivered_status`), namespaced by tool handle.
       if (kind === "voiceCall" && config?.agent) {
-        for (const tv of toolOutputVarsForAgent(config.agent)) vars.push(tv);
+        for (const tv of agentToolOutputVars(config.agent)) vars.push(tv);
       }
     }
   }
