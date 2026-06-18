@@ -109,7 +109,7 @@ function TemplateList({ templates, onCreate, onEdit, onDelete }: {
 
   return (
     <div className="flex h-full flex-col px-8 pb-6">
-      <div className="mx-auto flex h-full w-full max-w-6xl flex-col">
+      <div className="flex h-full w-full flex-col">
       {/* Frozen toolbar */}
       <div className="flex shrink-0 flex-wrap items-end gap-3">
         <div className="relative min-w-56 flex-1">

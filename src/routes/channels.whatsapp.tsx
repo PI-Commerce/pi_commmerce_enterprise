@@ -34,7 +34,7 @@ function WhatsAppManage() {
       <div className="flex h-full flex-col">
         {/* Page header — standard title block, aligned with the page content below */}
         <div className="shrink-0 px-8 pt-6">
-          <div className="mx-auto max-w-6xl">
+          <div>
             <div className="flex items-start justify-between gap-4">
               <div className="min-w-0">
                 <h1 className="text-[22px] font-semibold tracking-tight">WhatsApp Business</h1>
@@ -78,7 +78,7 @@ function WhatsAppManage() {
             tab === "overview" ? <WhatsAppOverview data={connection} /> : <WhatsAppTemplates waba={connection} />
           ) : (
             <div className="h-full overflow-y-auto">
-              <div className="mx-auto max-w-6xl px-8 pb-8 pt-6">
+              <div className="px-8 pb-8 pt-6">
                 <NotConnected onConnect={() => setSignupOpen(true)} />
               </div>
             </div>
