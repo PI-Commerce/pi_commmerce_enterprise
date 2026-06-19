@@ -26,6 +26,10 @@ jobs:
 
       - name: Build
         run: bun run build
+        # Thesys/Crayon GenUI SDK is large; raise Node heap so the Cloudflare bundle step
+        # doesn't OOM (default ~4GB cap hit "JavaScript heap out of memory").
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192
 
       # On `vision`, retarget the generated (redirected) config to the vision Worker.
       # Redirected configs can't contain `env`, so we rename the build output instead.
