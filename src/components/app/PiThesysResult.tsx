@@ -15,10 +15,15 @@ export function PiThesysResult({ c1Response }: { c1Response: string }) {
     </div>
   );
 
+  // The generated card (insight + chart) can be tall — taller than the viewport on a
+  // laptop. The dock is bottom-anchored and grows upward, so an unbounded card runs off
+  // the top of the screen. Cap the height and let it scroll instead.
   if (!mounted) return placeholder;
   return (
-    <Suspense fallback={placeholder}>
-      <PiThesysInner c1Response={c1Response} />
-    </Suspense>
+    <div className="max-h-[calc(100vh-14rem)] overflow-y-auto">
+      <Suspense fallback={placeholder}>
+        <PiThesysInner c1Response={c1Response} />
+      </Suspense>
+    </div>
   );
 }
