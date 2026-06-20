@@ -1,12 +1,13 @@
 name: Deploy to Cloudflare Workers
 
-# `main`   -> Worker `picom-enterprise-demo`   (stable demo)
-# `vision` -> Worker `picom-enterprise-vision` (forward-looking "Pi Magic" build)
-# The vision target is selected by renaming the generated config after build (see below) —
+# `main`            -> Worker `picom-enterprise-demo`    (stable demo)
+# `vision`          -> Worker `picom-enterprise-vision`  (forward-looking "Pi Magic" build)
+# `thesys-analytics`-> Worker `picom-enterprise-thesys`  (analytics-only, Thesys-driven Ask Pi)
+# The non-main targets are selected by renaming the generated config after build (see below) —
 # wrangler forbids `env` blocks in the redirected/generated config this project deploys.
 on:
   push:
-    branches: [main, vision]
+    branches: [main, vision, thesys-analytics]
   workflow_dispatch:
 
 jobs:
@@ -36,6 +37,10 @@ jobs:
       - name: Point build at the vision Worker
         if: github.ref_name == 'vision'
         run: node -e "const f='dist/server/wrangler.json',fs=require('fs');const c=JSON.parse(fs.readFileSync(f));c.name='picom-enterprise-vision';fs.writeFileSync(f,JSON.stringify(c,null,2));console.log('Deploying Worker:',c.name)"
+
+      - name: Point build at the Thesys Worker
+        if: github.ref_name == 'thesys-analytics'
+        run: node -e "const f='dist/server/wrangler.json',fs=require('fs');const c=JSON.parse(fs.readFileSync(f));c.name='picom-enterprise-thesys';fs.writeFileSync(f,JSON.stringify(c,null,2));console.log('Deploying Worker:',c.name)"
 
       - name: Deploy to Cloudflare Workers
         run: bunx wrangler deploy

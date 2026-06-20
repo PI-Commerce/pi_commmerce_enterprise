@@ -6,6 +6,18 @@
 
 export type ThesysFixtureKey = "channel" | "trend" | "wa_vs_voice" | "reactivation_drop";
 
+// Resolve a natural-language Ask Pi question to one of the captured fixtures. Mirrors the
+// keyword routing of generateChart() in pi-charts.ts so the Thesys-driven Ask Pi answers the
+// same intents; the channel breakdown is the catch-all so Pi is never empty on Analytics.
+export function pickThesysFixtureKey(query: string): ThesysFixtureKey {
+  const q = query.toLowerCase();
+  const has = (re: RegExp) => re.test(q);
+  if (has(/(drop|dip|declin|fell|fall|slip|sank|why)/) && has(/(react|conver|campaign|8%)/)) return "reactivation_drop";
+  if (has(/(whatsapp|wa\b)/) && has(/(voice|call)/)) return "wa_vs_voice";
+  if (has(/(trend|over time|vs last|run vs|last run|this run|compare run|growth|daily|timeline)/)) return "trend";
+  return "channel";
+}
+
 export const THESYS_FIXTURES: Record<ThesysFixtureKey, string> = {
   "channel": "<content thesys=\"true\" version=\"2\">\n```openui-lang\nroot = Card([header, insight, chart])\nheader = Header(&quot;Conversions by Channel&quot;, &quot;Win-back campaign · Latest run&quot;)\ninsight = TextContent(&quot;Voice AI leads win-back at 25.1% — about 11 points ahead of WhatsApp; SMS and Ads trail.&quot;)\nchart = BarChart([&quot;Voice AI&quot;, &quot;WhatsApp&quot;, &quot;SMS&quot;, &quot;Ads&quot;], [series], &quot;default&quot;, &quot;grouped&quot;, &quot;Conversion Rate by Channel&quot;, &quot;% conversion · win-back, latest run&quot;, &quot;Channel&quot;, &quot;Conversion (%)&quot;)\nseries = { category: &quot;Conversion %&quot;, values: [25.1, 14.2, 9.8, 6.4] }\n```\n</content>",
   "trend": "<content thesys=\"true\" version=\"2\">\n```openui-lang\nroot = Card([insight, chart])\ninsight = TextContent(&quot;This run is pulling ahead — ending +2.6 points higher on day 7, with the gap opening after day 3.&quot;)\nchart = LineChart([&quot;Jun 5&quot;, &quot;Jun 6&quot;, &quot;Jun 7&quot;, &quot;Jun 8&quot;, &quot;Jun 9&quot;, &quot;Jun 10&quot;, &quot;Jun 11&quot;], [thisRun, lastRun], &quot;default&quot;, &quot;natural&quot;, &quot;This Run vs Last Run&quot;, &quot;Conversion rate over 7 days&quot;, &quot;Date&quot;, &quot;Conversion (%)&quot;)\nthisRun = { category: &quot;This run&quot;, values: [3.2, 4.1, 5, 5.4, 6.1, 6.8, 7.2] }\nlastRun = { category: &quot;Last run&quot;, values: [3, 3.4, 3.8, 4, 4.3, 4.5, 4.6] }\n```\n</content>",

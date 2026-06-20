@@ -9,7 +9,6 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as ThesysRouteImport } from './routes/thesys'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as IntegrationsRouteImport } from './routes/integrations'
 import { Route as ChannelsRouteImport } from './routes/channels'
@@ -28,11 +27,6 @@ import { Route as AgentsIdRouteImport } from './routes/agents.$id'
 import { Route as CampaignsVersionsIdRouteImport } from './routes/campaigns.versions.$id'
 import { Route as AgentsToolsNewRouteImport } from './routes/agents.tools.new'
 
-const ThesysRoute = ThesysRouteImport.update({
-  id: '/thesys',
-  path: '/thesys',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
@@ -127,7 +121,6 @@ export interface FileRoutesByFullPath {
   '/channels': typeof ChannelsRouteWithChildren
   '/integrations': typeof IntegrationsRouteWithChildren
   '/settings': typeof SettingsRoute
-  '/thesys': typeof ThesysRoute
   '/agents/$id': typeof AgentsIdRoute
   '/agents/new': typeof AgentsNewRoute
   '/campaigns/$id': typeof CampaignsIdRoute
@@ -143,7 +136,6 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/analytics': typeof AnalyticsRoute
   '/settings': typeof SettingsRoute
-  '/thesys': typeof ThesysRoute
   '/agents/$id': typeof AgentsIdRoute
   '/agents/new': typeof AgentsNewRoute
   '/campaigns/$id': typeof CampaignsIdRoute
@@ -164,7 +156,6 @@ export interface FileRoutesById {
   '/channels': typeof ChannelsRouteWithChildren
   '/integrations': typeof IntegrationsRouteWithChildren
   '/settings': typeof SettingsRoute
-  '/thesys': typeof ThesysRoute
   '/agents/$id': typeof AgentsIdRoute
   '/agents/new': typeof AgentsNewRoute
   '/campaigns/$id': typeof CampaignsIdRoute
@@ -186,7 +177,6 @@ export interface FileRouteTypes {
     | '/channels'
     | '/integrations'
     | '/settings'
-    | '/thesys'
     | '/agents/$id'
     | '/agents/new'
     | '/campaigns/$id'
@@ -202,7 +192,6 @@ export interface FileRouteTypes {
     | '/'
     | '/analytics'
     | '/settings'
-    | '/thesys'
     | '/agents/$id'
     | '/agents/new'
     | '/campaigns/$id'
@@ -222,7 +211,6 @@ export interface FileRouteTypes {
     | '/channels'
     | '/integrations'
     | '/settings'
-    | '/thesys'
     | '/agents/$id'
     | '/agents/new'
     | '/campaigns/$id'
@@ -243,18 +231,10 @@ export interface RootRouteChildren {
   ChannelsRoute: typeof ChannelsRouteWithChildren
   IntegrationsRoute: typeof IntegrationsRouteWithChildren
   SettingsRoute: typeof SettingsRoute
-  ThesysRoute: typeof ThesysRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/thesys': {
-      id: '/thesys'
-      path: '/thesys'
-      fullPath: '/thesys'
-      preLoaderRoute: typeof ThesysRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/settings': {
       id: '/settings'
       path: '/settings'
@@ -444,7 +424,6 @@ const rootRouteChildren: RootRouteChildren = {
   ChannelsRoute: ChannelsRouteWithChildren,
   IntegrationsRoute: IntegrationsRouteWithChildren,
   SettingsRoute: SettingsRoute,
-  ThesysRoute: ThesysRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
