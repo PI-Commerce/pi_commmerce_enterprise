@@ -11,7 +11,7 @@ export function PiThesysResult({ c1Response }: { c1Response: string }) {
 
   const placeholder = (
     <div className="flex h-[260px] w-full items-center justify-center text-[12px] text-muted-foreground">
-      Loading Thesys renderer…
+      Paytm Intelligence at work…
     </div>
   );
 

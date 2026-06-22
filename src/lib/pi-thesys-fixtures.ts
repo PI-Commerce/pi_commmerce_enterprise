@@ -1,23 +1,16 @@
-// Thesys C1 generative-UI responses (openui-lang DSL, version 2) for the analytics "Pi Magic"
-// demo. The numbers are derived from a real Volt Money voice-AI call dump (459 sessions:
-// call_intent, customer_sentiment, hang-up reasons, lead status). UI only — no secrets, no
-// network. PiThesysResult renders these fully offline. The three keys mirror the three Ask Pi
-// example chips on Analytics so each clickable question returns a coherent, on-topic answer.
+// Pi-generated analytics cards (openui-lang DSL, version 2) for the Analytics "Ask Pi"
+// surface. The numbers are derived from a real Volt Money voice-AI call dump (459 sessions).
+// UI only, no secrets, no network: PiThesysResult renders these fully offline. We keep one
+// curated example for now (the 20-second cliff); more second-order insights land later.
 
-export type ThesysFixtureKey = "call_outcomes" | "conversion_funnel" | "sentiment";
+export type ThesysFixtureKey = "duration_cliff";
 
-// Resolve a natural-language Ask Pi question to one of the captured fixtures. `call_outcomes`
-// is the catch-all so Pi is never empty on the voice-analytics surface.
-export function pickThesysFixtureKey(query: string): ThesysFixtureKey {
-  const q = query.toLowerCase();
-  const has = (re: RegExp) => re.test(q);
-  if (has(/(sentiment|positive|negative|happy|unhappy|mood|tone|frustrat|angry)/)) return "sentiment";
-  if (has(/(funnel|losing|lose|lost|convert|conversion|interested|leak|stage|where|drop)/)) return "conversion_funnel";
-  return "call_outcomes";
+// Resolve a natural-language Ask Pi question to a captured card. One example for now, so the
+// catch-all always returns it; the live path can still answer any question from the data.
+export function pickThesysFixtureKey(_query: string): ThesysFixtureKey {
+  return "duration_cliff";
 }
 
 export const THESYS_FIXTURES: Record<ThesysFixtureKey, string> = {
-  "call_outcomes": "<content thesys=\"true\" version=\"2\">\n```openui-lang\nroot = Card([header, insight, chart])\nheader = Header(&quot;Call Outcomes by Intent&quot;, &quot;Volt Money voice agent · last 459 calls&quot;)\ninsight = TextContent(&quot;Most calls never get going — 64% end with no meaningful engagement, usually a quick hang-up or language mismatch before the loan offer lands. Only ~7% reach real buying intent.&quot;)\nchart = BarChart([&quot;No Meaningful Engagement&quot;, &quot;Information Seeking&quot;, &quot;Not Interested&quot;, &quot;Interested&quot;], [series], &quot;default&quot;, &quot;grouped&quot;, &quot;Call Outcomes by Intent&quot;, &quot;% of classified calls&quot;, &quot;Call Intent&quot;, &quot;Share of Calls (%)&quot;)\nseries = { category: &quot;Share of calls&quot;, values: [64, 16, 13, 7] }\n```\n</content>",
-  "conversion_funnel": "<content thesys=\"true\" version=\"2\">\n```openui-lang\nroot = Card([insight, chart])\ninsight = TextContent(&quot;The funnel collapses at first contact: 92% of calls connect, but only 36% engage past the intro and just 7% turn interested. The biggest leak is the engage step — win the first 20 seconds and conversion roughly doubles.&quot;)\nchart = BarChart([&quot;Connected&quot;, &quot;Engaged&quot;, &quot;Interested&quot;, &quot;Callback / Visit&quot;], [series], &quot;default&quot;, &quot;grouped&quot;, &quot;Voice Agent Conversion Funnel&quot;, &quot;% of calls reaching each stage&quot;, &quot;Funnel Stage&quot;, &quot;Reach (%)&quot;)\nseries = { category: &quot;Reach&quot;, values: [92, 36, 7, 4] }\n```\n</content>",
-  "sentiment": "<content thesys=\"true\" version=\"2\">\n```openui-lang\nroot = Card([insight, chart])\ninsight = TextContent(&quot;Sentiment skews neutral — 81% of callers stay non-committal, while positives (12%) outnumber negatives (7%) nearly 2 to 1. Negative calls cluster on interest-rate and processing-fee objections.&quot;)\nchart = BarChart([&quot;Neutral&quot;, &quot;Positive&quot;, &quot;Negative&quot;], [series], &quot;default&quot;, &quot;grouped&quot;, &quot;Customer Sentiment Split&quot;, &quot;% of classified calls&quot;, &quot;Sentiment&quot;, &quot;Share of Calls (%)&quot;)\nseries = { category: &quot;Share of calls&quot;, values: [81, 12, 7] }\n```\n</content>",
+  "duration_cliff": "<content thesys=\"true\" version=\"2\">\n```openui-lang\nroot = Card([header, insight1, insight2, recommendation, chart])\nheader = Header(&quot;The 20-second cliff&quot;, &quot;Volt Money voice agent · 459 calls&quot;)\ninsight1 = TextContent(&quot;42% of calls end in under 20 seconds, and almost none of them ever show interest. That entire bucket converts at roughly zero.&quot;)\ninsight2 = TextContent(&quot;When a call gets past 60 seconds, about 40% of callers turn interested or have a genuinely meaningful conversation.&quot;)\nrecommendation = CalloutV2(&quot;success&quot;, &quot;Pi Recommends&quot;, &quot;Rewrite the opening hook (agent prompt §9, Call Opening Beat 1): lead with a 10-second curiosity hook before the formal eligibility line, so more callers survive past the 20-second cliff.&quot;)\nchart = BarChart([&quot;Under 20s&quot;, &quot;20-60s&quot;, &quot;Over 60s&quot;], [calls, reached], &quot;default&quot;, &quot;grouped&quot;, &quot;Most calls land where conversion is lowest&quot;, &quot;Volt Money voice agent · 459 calls&quot;, &quot;Call length&quot;, &quot;Percent (%)&quot;)\ncalls = { category: &quot;Share of all calls&quot;, values: [43, 29, 28] }\nreached = { category: &quot;Reached interest&quot;, values: [2, 19, 41] }\n```\n</content>",
 };

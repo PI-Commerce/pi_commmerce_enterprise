@@ -186,7 +186,7 @@ export function PiThinking({ steps }: { steps: string[] }) {
     <div className="space-y-1.5">
       <div className="flex items-center gap-2 text-[12.5px] font-medium text-foreground">
         <Loader2 className="h-3.5 w-3.5 animate-spin text-ai" />
-        Pi is working…
+        Paytm Intelligence at work…
       </div>
       <ul className="space-y-1 pl-5">
         {steps.map((s, i) => (
