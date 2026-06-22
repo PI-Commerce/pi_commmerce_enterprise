@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createFileRoute, useNavigate, useBlocker } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { WorkflowCanvas } from "@/components/workflow/WorkflowCanvas";
@@ -6,6 +6,16 @@ import { BuilderTopBar } from "@/components/workflow/BuilderTopBar";
 import type { CampaignStatus } from "@/lib/campaign-types";
 import { EXAMPLE_CAMPAIGNS } from "@/lib/campaign-examples";
 import { VERSION_HISTORY, makeVersion, type CampaignVersion } from "@/lib/campaign-versions";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 export const Route = createFileRoute("/campaigns/$id")({
   component: CampaignBuilder,
@@ -45,6 +55,12 @@ function CampaignBuilder() {
   const [versions, setVersions] = useState<CampaignVersion[]>(() =>
     isNew ? [] : VERSION_HISTORY[id] ? [...VERSION_HISTORY[id]] : [],
   );
+  // Confirm-before-version dialog — every Save once v1 exists creates a new version.
+  const [confirmSaveOpen, setConfirmSaveOpen] = useState(false);
+  // Whether the current pause already produced a version (via Save), so a following
+  // Resume doesn't double-mint. One version per pause cycle. Reset on each Resume.
+  const savedDuringPauseRef = useRef(false);
+  const currentVersion = versions.length ? Math.max(...versions.map((v) => v.version)) : 0;
 
   // Move to "ready" automatically when everything validates — but keep example
   // campaigns at their authored status (the two retained originals stay in draft).
@@ -84,16 +100,19 @@ function CampaignBuilder() {
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, [dirty]);
 
-  const handleSave = useCallback(() => {
+  // The actual save. Before v1 exists (first run not done) a save is a plain draft
+  // save — no version. Once a history exists, every save mints a new version, so a
+  // run never spans configs and analytics stay pinned to one version.
+  const performSave = useCallback(() => {
     setDirty(false);
-    // v1 is only minted on the first run; a plain save before that doesn't
-    // create a version. Once a history exists, every saved edit is a new version.
+    setConfirmSaveOpen(false);
     if (versions.length === 0) {
       toast.success("Changes saved", { description: name });
       return;
     }
     const nextNum = Math.max(...versions.map((v) => v.version)) + 1;
     const resumedEdit = status === "paused";
+    if (resumedEdit) savedDuringPauseRef.current = true;
     setVersions((prev) => [
       ...prev,
       makeVersion({
@@ -106,6 +125,36 @@ function CampaignBuilder() {
     ]);
     toast.success(`Saved as version ${nextNum}`, { description: name });
   }, [name, status, versions]);
+
+  // Save entry point: once v1 exists, warn that this creates a new version
+  // (even an empty save after a pause). A pre-v1 draft save goes straight through.
+  const handleSave = useCallback(() => {
+    if (versions.length === 0) { performSave(); return; }
+    setConfirmSaveOpen(true);
+  }, [versions.length, performSave]);
+
+  // Resume always starts a fresh version + new run. If a Save during the pause
+  // already minted one, don't double-mint; otherwise roll an (empty) version so
+  // the pause is a hard analytics cut.
+  const handleResume = useCallback(() => {
+    setStatus("running");
+    if (!savedDuringPauseRef.current && versions.length > 0) {
+      const nextNum = Math.max(...versions.map((v) => v.version)) + 1;
+      setVersions((prev) => [
+        ...prev,
+        makeVersion({
+          version: nextNum,
+          trigger: "resumed-edit",
+          summary: "Resumed the run — new version so analytics never blend across the pause.",
+        }),
+      ]);
+      toast.success(`Resumed as version ${nextNum}`, { description: name });
+    } else {
+      toast.success("Campaign resumed", { description: name });
+    }
+    savedDuringPauseRef.current = false;
+  }, [name, versions]);
+
   // First Save + Run mints v1.
   const handleRunStarted = useCallback(() => {
     setVersions((prev) =>
@@ -135,6 +184,7 @@ function CampaignBuilder() {
         description={isNew ? seedDescription : undefined}
         versions={versions}
         onRunStarted={handleRunStarted}
+        onResume={handleResume}
       />
       <div className="relative flex-1">
         <WorkflowCanvas
@@ -147,6 +197,23 @@ function CampaignBuilder() {
           onAiBuiltName={(n) => { setName(n); setDirty(true); }}
         />
       </div>
+
+      <AlertDialog open={confirmSaveOpen} onOpenChange={setConfirmSaveOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Save as a new version?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Saving creates <span className="font-medium text-foreground">version {currentVersion + 1}</span> of{" "}
+              <span className="font-medium text-foreground">{name}</span>. Each run is pinned to one version, so this keeps
+              your analytics clean across changes. There's no rollback in v1, so the current version stays in the history as-is.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={performSave}>Create version {currentVersion + 1}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

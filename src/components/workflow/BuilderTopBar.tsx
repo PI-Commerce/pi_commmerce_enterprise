@@ -26,7 +26,7 @@ export function BuilderTopBar({
   dirty, validNodes, totalNodes,
   onSave, onExit,
   objective, description,
-  versions = [], onRunStarted,
+  versions = [], onRunStarted, onResume,
 }: {
   campaignId: string;
   name: string;
@@ -42,6 +42,7 @@ export function BuilderTopBar({
   description?: string;
   versions?: CampaignVersion[];
   onRunStarted?: () => void;
+  onResume?: () => void;
 }) {
   const [editingName, setEditingName] = useState(false);
   const [draft, setDraft] = useState(name);
@@ -155,7 +156,8 @@ export function BuilderTopBar({
           variant="outline"
           size="sm"
           onClick={onSave}
-          disabled={!dirty || editLocked}
+          disabled={editLocked || (!dirty && status !== "paused")}
+          title={status === "paused" ? "Save — creates a new version" : "Save changes"}
           className="h-8 gap-1.5 text-xs"
         >
           <Save className="h-3.5 w-3.5" /> Save
@@ -166,7 +168,7 @@ export function BuilderTopBar({
             <Pause className="h-3 w-3" /> Pause
           </Button>
         ) : status === "paused" ? (
-          <Button size="sm" onClick={() => { onStatusChange("running"); toast.success("Campaign resumed", { description: name }); }} className="h-8 gap-1.5 text-xs">
+          <Button size="sm" onClick={() => { if (onResume) { onResume(); } else { onStatusChange("running"); toast.success("Campaign resumed", { description: name }); } }} className="h-8 gap-1.5 text-xs">
             <Play className="h-3 w-3 fill-current" /> Resume
           </Button>
         ) : (
