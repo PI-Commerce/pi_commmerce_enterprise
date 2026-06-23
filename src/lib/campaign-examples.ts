@@ -1094,6 +1094,105 @@ const C_BACKINSTOCK = buildCampaign("E-commerce · Back In Stock", [
   ed("purNon", "end", "yes"), ed("purNon", "vfuNon", "no"), ed("vfuNon", "end"),
 ]);
 
+/* ---- 17. Retail · Shoppers Stop FCC Loyalty ---------------------------- */
+// A four-tier loyalty journey for Shoppers Stop's First Citizen Club (FCC):
+// Silver → Gold → Platinum → Black, segmented from a CSV the retailer has already
+// tiered (`fcc_tier`, derived from 6-month ACV/AOV/LTV). Each tier A/B-tests a
+// WhatsApp invite, then checks enrollment via the derived `enrollment_tier` variable
+// (read-only here, same trick EX2/C_LEADQUAL use with `call_disposition`). Silver
+// alone upsells free→paid Gold; Gold/Platinum/Black just confirm enrollment with a
+// voice follow-up loop for non-enrollers. All paths terminate at one shared End.
+
+// One "confirm enrollment" tier block — Gold, Platinum and Black share this shape:
+// A/B split → 2 WhatsApp invites converge → Enrolled? → (enrolled) welcome / (not)
+// voice follow-up → 24h delay → Enrolled now? → same shared welcome / End.
+const fccTierBlock = (p: string, tier: string, label: string): { specs: Spec[]; edges: SpecEdge[] } => ({
+  specs: [
+    sAbSplit(`${p}Ab`, "A/B split", `${label} invite · Perks vs Savings`, [
+      { id: "vA", label: "Perks" },
+      { id: "vB", label: "Savings" },
+    ]),
+    sWa(`${p}WaA`, "WhatsApp invite · Perks", `${label} · join FCC`, `fcc_${tier}_perks`),
+    sWa(`${p}WaB`, "WhatsApp invite · Savings", `${label} · join FCC`, `fcc_${tier}_savings`),
+    sCond(`${p}Enr`, "Enrolled?", "enrollment_tier", [
+      { id: tier, label: "Enrolled" },
+      { id: "none", label: "Not enrolled" },
+    ]),
+    sWa(`${p}Wel`, `Welcome to ${label}`, `WhatsApp · ${label} welcome`, `fcc_welcome_${tier}`),
+    sVoice(`${p}Fu`, "Voice AI follow-up", `Re-invite to ${label} FCC`, { maxAttempts: 1 }),
+    sDelay(`${p}Dly`, 24, "Hours"),
+    sCond(`${p}Enr2`, "Enrolled now?", "enrollment_tier", [
+      { id: tier, label: "Enrolled" },
+      { id: "none", label: "Not enrolled" },
+    ]),
+  ],
+  edges: [
+    ed(`${p}Ab`, `${p}WaA`, "vA"), ed(`${p}Ab`, `${p}WaB`, "vB"),
+    ed(`${p}WaA`, `${p}Enr`), ed(`${p}WaB`, `${p}Enr`),
+    ed(`${p}Enr`, `${p}Wel`, tier), ed(`${p}Wel`, "end"),
+    ed(`${p}Enr`, `${p}Fu`, "none"),
+    ed(`${p}Fu`, `${p}Dly`), ed(`${p}Dly`, `${p}Enr2`),
+    ed(`${p}Enr2`, `${p}Wel`, tier), // post-follow-up enrolled → shared welcome
+    ed(`${p}Enr2`, "end", "none"),
+  ],
+});
+
+const FCC_GOLD = fccTierBlock("g", "gold", "Gold");
+const FCC_PLATINUM = fccTierBlock("p", "platinum", "Platinum");
+const FCC_BLACK = fccTierBlock("b", "black", "Black");
+
+const C_SHOPPERSTOP = buildCampaign("Retail · Shoppers Stop FCC Loyalty", [
+  sStart(),
+  sAud("CSV · First Citizen Club members · key customer_id", [
+    "fcc_tier", "acv_6m", "aov_6m", "orders_6m", "lifetime_value", "last_purchase_days", "preferred_lang",
+  ]),
+  sCond("tierSplit", "FCC tier", "fcc_tier", [
+    { id: "silver", label: "Silver" },
+    { id: "gold", label: "Gold" },
+    { id: "platinum", label: "Platinum" },
+    { id: "black", label: "Black" },
+  ]),
+  // ---- Silver: free entry → enrolled members upsold to paid Gold ----
+  sAbSplit("sAb", "A/B split", "Silver invite · Perks vs Savings", [
+    { id: "vA", label: "Perks" },
+    { id: "vB", label: "Savings" },
+  ]),
+  sWa("sWaA", "WhatsApp invite · Perks", "Silver · join FCC", "fcc_silver_perks"),
+  sWa("sWaB", "WhatsApp invite · Savings", "Silver · join FCC", "fcc_silver_savings"),
+  sCond("sEnr", "Enrolled?", "enrollment_tier", [
+    { id: "silver", label: "Enrolled" },
+    { id: "none", label: "Not enrolled" },
+  ]),
+  sVoice("sUp", "Voice AI · upgrade to Gold", "Limited-time paid Gold upgrade offer"),
+  sDelay("sDly", 24, "Hours"),
+  sCond("sUpg", "Upgraded to Gold?", "enrollment_tier", [
+    { id: "gold", label: "Upgraded to Gold" },
+    { id: "silver", label: "Still Silver" },
+  ]),
+  sWa("sWelGold", "Welcome to Gold", "WhatsApp · Gold welcome", "fcc_welcome_gold"),
+  sWa("sWelSilver", "Welcome to Silver", "WhatsApp · Silver welcome", "fcc_welcome_silver"),
+  // ---- Gold / Platinum / Black: confirm enrollment (+ voice follow-up loop) ----
+  ...FCC_GOLD.specs, ...FCC_PLATINUM.specs, ...FCC_BLACK.specs,
+  sEnd(),
+], [
+  ed("start", "aud"), ed("aud", "tierSplit"),
+  // 4-way tier fan-out
+  ed("tierSplit", "sAb", "silver"),
+  ed("tierSplit", "gAb", "gold"),
+  ed("tierSplit", "pAb", "platinum"),
+  ed("tierSplit", "bAb", "black"),
+  // Silver: A/B variants converge into one enrolled-check
+  ed("sAb", "sWaA", "vA"), ed("sAb", "sWaB", "vB"),
+  ed("sWaA", "sEnr"), ed("sWaB", "sEnr"),
+  ed("sEnr", "end", "none"), // not enrolled → discard
+  ed("sEnr", "sUp", "silver"), // enrolled (free) → upsell to paid Gold
+  ed("sUp", "sDly"), ed("sDly", "sUpg"),
+  ed("sUpg", "sWelGold", "gold"), ed("sWelGold", "end"),
+  ed("sUpg", "sWelSilver", "silver"), ed("sWelSilver", "end"),
+  // Gold / Platinum / Black tiers
+  ...FCC_GOLD.edges, ...FCC_PLATINUM.edges, ...FCC_BLACK.edges,
+]);
+
 const EX1_LAID = assemble(EX1_NODES, EX1_EDGES);
 const EX2_LAID = assemble(EX2_NODES, EX2_EDGES);
 
@@ -1116,6 +1215,7 @@ export const EXAMPLE_CAMPAIGNS: Record<string, ExampleCampaign> = {
   c_ex14: C_CART,
   c_ex15: C_PRICEDROP,
   c_ex16: C_BACKINSTOCK,
+  c_ex17: C_SHOPPERSTOP,
 };
 
 /** Names + status for the campaigns list (kept in sync with the registry above). */
