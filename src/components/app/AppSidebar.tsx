@@ -58,7 +58,7 @@ export function AppSidebar() {
         {!collapsed && (
           <div className="min-w-0">
             <p className="truncate text-[13px] font-semibold leading-tight">Pi Commerce</p>
-            <p className="truncate text-[10.5px] text-muted-foreground">ABC Enterprises · {regionLabel} ({regionCode})</p>
+            <p className="truncate text-[10.5px] text-muted-foreground">Al Tayer · {regionLabel} ({regionCode})</p>
           </div>
         )}
       </div>
