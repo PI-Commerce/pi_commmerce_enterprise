@@ -2,9 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { useRouterState } from "@tanstack/react-router";
 import { getPiContext } from "@/lib/ask-pi-context";
 import { Sparkle, X } from "lucide-react";
-import { pickThesysFixtureKey, THESYS_FIXTURES, type ThesysFixtureKey } from "@/lib/pi-thesys-fixtures";
-import { askPiThesys } from "@/lib/ask-pi-thesys";
-import { PiThesysResult } from "./PiThesysResult";
+import { pickGenUiFixtureKey, GENUI_FIXTURES, type GenUiFixtureKey } from "@/lib/pi-genui-fixtures";
+import { askPiGenUi } from "@/lib/ask-pi-genui";
+import { PiGenUiResult } from "./PiGenUiResult";
 import {
   PiPill,
   PiNudge,
@@ -44,10 +44,10 @@ function loadDismissedNudges(): string[] {
 export function AskPiDock() {
   const [state, setState] = useState<State>("collapsed");
   const [value, setValue] = useState("");
-  // I7 — on the Analytics surface, a question yields a Thesys C1 generative-UI answer.
+  // I7 — on the Analytics surface, a question yields a GenUI (C1) generative-UI answer.
   // Live path: the C1 API generates a fresh card per question (liveDsl). If the call fails
-  // (no key / offline), we fall back to one of the captured static fixtures (thesysKey).
-  const [thesysKey, setThesysKey] = useState<ThesysFixtureKey | null>(null);
+  // (no key / offline), we fall back to one of the captured static fixtures (genUiKey).
+  const [genUiKey, setGenUiKey] = useState<GenUiFixtureKey | null>(null);
   const [liveDsl, setLiveDsl] = useState<string | null>(null);
   // I4 — retired nudge ids (✕-dismissed are also persisted; used-nudges are session-only).
   const [hiddenNudges, setHiddenNudges] = useState<string[]>(() => loadDismissedNudges());
@@ -106,24 +106,24 @@ export function AskPiDock() {
     if (ctx.scope === "Analytics") {
       // Generative: ask C1 to build a card from the live question. Fall back to a captured
       // fixture if the API is unreachable or unconfigured so the demo never dead-ends.
-      setThesysKey(null);
+      setGenUiKey(null);
       setLiveDsl(null);
       try {
-        const r = await askPiThesys({ data: query });
+        const r = await askPiGenUi({ data: query });
         if (r.ok) setLiveDsl(r.content);
-        else setThesysKey(pickThesysFixtureKey(query));
+        else setGenUiKey(pickGenUiFixtureKey(query));
       } catch {
-        setThesysKey(pickThesysFixtureKey(query));
+        setGenUiKey(pickGenUiFixtureKey(query));
       }
       setState("result");
     } else {
       // Elsewhere, keep the route's canned text proposal.
-      setThesysKey(null);
+      setGenUiKey(null);
       setTimeout(() => setState("result"), 1800);
     }
   };
 
-  const reset = () => { setThesysKey(null); setLiveDsl(null); setValue(""); setState("idle"); };
+  const reset = () => { setGenUiKey(null); setLiveDsl(null); setValue(""); setState("idle"); };
 
   // I4 — proactive nudge plumbing. The route supplies it; it floats above the pill
   // until retired. `persist` writes the ✕-dismissal to localStorage; using a nudge
@@ -168,7 +168,7 @@ export function AskPiDock() {
               <div className="border-b border-border px-5 py-4 animate-fade-in">
                 {state === "thinking" ? (
                   <PiThinking steps={ctx.thinking} />
-                ) : liveDsl || thesysKey ? (
+                ) : liveDsl || genUiKey ? (
                   <div className="space-y-2.5">
                     <div className="flex items-center justify-between">
                       <span className="flex items-center gap-1 rounded-full border border-ai/30 bg-ai/5 px-2 py-0.5 text-[9.5px] font-medium text-ai">
@@ -183,7 +183,7 @@ export function AskPiDock() {
                       </button>
                     </div>
                     <div className="rounded-xl border border-ai/30 bg-card p-2">
-                      <PiThesysResult c1Response={liveDsl ?? THESYS_FIXTURES[thesysKey!]} />
+                      <PiGenUiResult c1Response={liveDsl ?? GENUI_FIXTURES[genUiKey!]} />
                     </div>
                   </div>
                 ) : (

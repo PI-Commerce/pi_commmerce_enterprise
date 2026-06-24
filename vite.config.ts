@@ -6,16 +6,16 @@
 // You can pass additional config via defineConfig({ vite: { ... } }) if needed.
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 
-// Thesys C1 (genui-sdk) pulls in mermaid + elkjs + @mermaid-js/parser (~6.5MB). The Thesys
-// renderer mounts client-only (see PiThesysResult), so the server never executes it — yet
-// rollup still bundles those deps into the Cloudflare Worker, blowing the 3 MiB worker-size
-// limit. Stub them to empty modules in the SSR build ONLY; the client build keeps the real
-// ones as static-asset chunks (not subject to the worker limit).
+// The GenUI C1 SDK (@thesysai/genui-sdk) pulls in mermaid + elkjs + @mermaid-js/parser
+// (~6.5MB). The GenUI renderer mounts client-only (see PiGenUiResult), so the server never
+// executes it — yet rollup still bundles those deps into the Cloudflare Worker, blowing the
+// 3 MiB worker-size limit. Stub them to empty modules in the SSR build ONLY; the client build
+// keeps the real ones as static-asset chunks (not subject to the worker limit).
 const STUB_SSR = /^(mermaid|elkjs|@mermaid-js\/parser)(\/|$)/;
 const EMPTY_STUB = "\0virtual:empty-ssr-stub";
 function stubHeavyDepsInSsr() {
   return {
-    name: "stub-thesys-heavy-ssr",
+    name: "stub-genui-heavy-ssr",
     enforce: "pre" as const,
     resolveId(id: string, _importer: string | undefined, opts?: { ssr?: boolean }) {
       if (opts?.ssr && STUB_SSR.test(id)) return EMPTY_STUB;

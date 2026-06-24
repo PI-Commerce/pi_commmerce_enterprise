@@ -1,11 +1,11 @@
-// Thesys C1 render wrapper for the Ask Pi comparison spike. TanStack Start SSRs every
-// route, but the Thesys SDK is browser-only — so we lazy-load the real render path and
-// only mount it after hydration. Renders a captured DSL fixture entirely offline.
+// GenUI (C1) render wrapper for Ask Pi. TanStack Start SSRs every route, but the
+// genui SDK is browser-only — so we lazy-load the real render path and only mount it
+// after hydration. Renders a captured DSL fixture entirely offline.
 import { Suspense, lazy, useEffect, useState } from "react";
 
-const PiThesysInner = lazy(() => import("./PiThesysInner"));
+const PiGenUiInner = lazy(() => import("./PiGenUiInner"));
 
-export function PiThesysResult({ c1Response }: { c1Response: string }) {
+export function PiGenUiResult({ c1Response }: { c1Response: string }) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
@@ -22,7 +22,7 @@ export function PiThesysResult({ c1Response }: { c1Response: string }) {
   return (
     <div className="max-h-[calc(100vh-14rem)] overflow-y-auto">
       <Suspense fallback={placeholder}>
-        <PiThesysInner c1Response={c1Response} />
+        <PiGenUiInner c1Response={c1Response} />
       </Suspense>
     </div>
   );

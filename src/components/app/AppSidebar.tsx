@@ -7,11 +7,11 @@ import {
 import { cn } from "@/lib/utils";
 import { useRegion } from "@/lib/region";
 
-// This build is the Thesys "Pi Magic" analytics demo: every surface except Analytics is
-// disabled so the focus stays on the Thesys-driven Ask Pi.
+// This build is the Ask Pi demo: Campaigns and Analytics are the live surfaces
+// (Ask Pi runs on both); every other surface stays disabled to keep the focus there.
 const primary = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, exact: true, disabled: true },
-  { to: "/campaigns", label: "Campaigns", icon: Megaphone, disabled: true },
+  { to: "/campaigns", label: "Campaigns", icon: Megaphone },
   { to: "/agents", label: "Agents", icon: Bot, disabled: true },
   { to: "/analytics", label: "Analytics", icon: BarChart3 },
 ] as const;
@@ -94,7 +94,7 @@ export function AppSidebar() {
   );
 }
 
-/** Channels: disabled in the Thesys analytics demo build (Analytics is the only live surface). */
+/** Channels: disabled in the Ask Pi demo build (Campaigns + Analytics are the live surfaces). */
 function ChannelsNav({ collapsed }: { collapsed: boolean }) {
   return (
     <ul className="mt-0.5 space-y-0.5">

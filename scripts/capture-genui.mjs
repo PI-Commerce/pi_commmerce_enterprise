@@ -1,25 +1,25 @@
-// One-off dev tool: capture real Thesys C1 DSL responses for the Ask Pi × Thesys
-// comparison spike. Feeds OUR mock analytics numbers (mirrored from src/lib/pi-charts.ts)
-// through the C1 API so the Thesys panel answers identically to the ECharts panel.
+// One-off dev tool: capture real GenUI (C1) DSL responses for the Ask Pi analytics
+// surface. Feeds OUR mock analytics numbers (mirrored from src/lib/pi-charts.ts)
+// through the C1 API so the GenUI panel answers identically to the ECharts panel.
 //
 // Run once (key via env, never committed):
-//   THESYS_API_KEY=sk-... node scripts/capture-thesys.mjs
+//   ASKPI_API_KEY=sk-... node scripts/capture-genui.mjs
 //
-// Writes src/lib/pi-thesys-fixtures.json — that file (UI only, no secret) is what the
+// Writes src/lib/pi-genui-fixtures.ts — that file (UI only, no secret) is what the
 // app renders offline. Re-run only if the prompts/data change.
 
 import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-const KEY = process.env.THESYS_API_KEY;
+const KEY = process.env.ASKPI_API_KEY;
 if (!KEY) {
-  console.error("Missing THESYS_API_KEY env var.");
+  console.error("Missing ASKPI_API_KEY env var.");
   process.exit(1);
 }
 
 const BASE = "https://api.thesys.dev/v1/embed/chat/completions";
-const MODEL = process.env.THESYS_MODEL || "c1/anthropic/claude-sonnet-4.6/v-20260331";
+const MODEL = process.env.ASKPI_MODEL || "c1/anthropic/claude-sonnet-4.6/v-20260331";
 
 const SYSTEM = `You are Pi, the analytics copilot inside PiCom, a marketing-automation platform.
 When given an analytics question plus a data block, respond with a single compact generative-UI card:
@@ -115,16 +115,16 @@ for (const task of TASKS) {
 
 const keys = Object.keys(out);
 const header =
-  "// Real Thesys C1 generative-UI responses (openui-lang DSL, version 2), captured ONCE from\n" +
-  "// the C1 API via scripts/capture-thesys.mjs using OUR mock analytics numbers (mirrored from\n" +
-  "// src/lib/pi-charts.ts). UI only — contains no secrets. PiThesysResult renders these fully\n" +
+  "// Real GenUI (C1) generative-UI responses (openui-lang DSL, version 2), captured ONCE from\n" +
+  "// the C1 API via scripts/capture-genui.mjs using OUR mock analytics numbers (mirrored from\n" +
+  "// src/lib/pi-charts.ts). UI only — contains no secrets. PiGenUiResult renders these fully\n" +
   "// offline; the keys mirror the four generateChart() intents so both compare panels answer\n" +
   "// identically. Re-run the capture script only if the prompts or mock data change.\n\n";
 const body =
-  `export type ThesysFixtureKey = ${keys.map((k) => JSON.stringify(k)).join(" | ")};\n\n` +
-  "export const THESYS_FIXTURES: Record<ThesysFixtureKey, string> = {\n" +
+  `export type GenUiFixtureKey = ${keys.map((k) => JSON.stringify(k)).join(" | ")};\n\n` +
+  "export const GENUI_FIXTURES: Record<GenUiFixtureKey, string> = {\n" +
   keys.map((k) => `  ${JSON.stringify(k)}: ${JSON.stringify(out[k])},`).join("\n") +
   "\n};\n";
-const dest = join(dirname(fileURLToPath(import.meta.url)), "..", "src", "lib", "pi-thesys-fixtures.ts");
+const dest = join(dirname(fileURLToPath(import.meta.url)), "..", "src", "lib", "pi-genui-fixtures.ts");
 writeFileSync(dest, header + body);
-console.log(`\nWrote ${keys.length} fixtures → src/lib/pi-thesys-fixtures.ts`);
+console.log(`\nWrote ${keys.length} fixtures → src/lib/pi-genui-fixtures.ts`);

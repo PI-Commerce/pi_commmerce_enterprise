@@ -1,4 +1,4 @@
-// Grounding data for the live Thesys Ask Pi on Analytics. Aggregated from a real Volt Money
+// Grounding data for the live GenUI Ask Pi on Analytics. Aggregated from a real Volt Money
 // voice-AI call dump (459 sessions). These are the ONLY numbers the C1 model is allowed to
 // chart — the server prompt instructs it to render exactly what's here and never invent values.
 // Counts are exact; percentages are of the classified subset (365 calls with a scored intent).

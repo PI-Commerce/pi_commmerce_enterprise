@@ -1,13 +1,13 @@
 name: Deploy to Cloudflare Workers
 
-# `main`            -> Worker `picom-enterprise-demo`    (stable demo)
-# `vision`          -> Worker `picom-enterprise-vision`  (forward-looking "Pi Magic" build)
-# `thesys-analytics`-> Worker `picom-enterprise-thesys`  (analytics-only, Thesys-driven Ask Pi)
+# `main`    -> Worker `picom-enterprise-demo`    (stable demo)
+# `vision`  -> Worker `picom-enterprise-vision`  (forward-looking "Pi Magic" build)
+# `ask-pi`  -> Worker `picom-enterprise-ask-pi`  (Ask Pi demo: GenUI Ask Pi on Analytics + Campaigns)
 # The non-main targets are selected by renaming the generated config after build (see below) —
 # wrangler forbids `env` blocks in the redirected/generated config this project deploys.
 on:
   push:
-    branches: [main, vision, thesys-analytics]
+    branches: [main, vision, ask-pi]
   workflow_dispatch:
 
 jobs:
@@ -27,7 +27,7 @@ jobs:
 
       - name: Build
         run: bun run build
-        # Thesys/Crayon GenUI SDK is large; raise Node heap so the Cloudflare bundle step
+        # The GenUI/Crayon C1 SDK is large; raise Node heap so the Cloudflare bundle step
         # doesn't OOM (default ~4GB cap hit "JavaScript heap out of memory").
         env:
           NODE_OPTIONS: --max-old-space-size=8192
@@ -38,9 +38,9 @@ jobs:
         if: github.ref_name == 'vision'
         run: node -e "const f='dist/server/wrangler.json',fs=require('fs');const c=JSON.parse(fs.readFileSync(f));c.name='picom-enterprise-vision';fs.writeFileSync(f,JSON.stringify(c,null,2));console.log('Deploying Worker:',c.name)"
 
-      - name: Point build at the Thesys Worker
-        if: github.ref_name == 'thesys-analytics'
-        run: node -e "const f='dist/server/wrangler.json',fs=require('fs');const c=JSON.parse(fs.readFileSync(f));c.name='picom-enterprise-thesys';fs.writeFileSync(f,JSON.stringify(c,null,2));console.log('Deploying Worker:',c.name)"
+      - name: Point build at the Ask Pi Worker
+        if: github.ref_name == 'ask-pi'
+        run: node -e "const f='dist/server/wrangler.json',fs=require('fs');const c=JSON.parse(fs.readFileSync(f));c.name='picom-enterprise-ask-pi';fs.writeFileSync(f,JSON.stringify(c,null,2));console.log('Deploying Worker:',c.name)"
 
       - name: Deploy to Cloudflare Workers
         run: bunx wrangler deploy

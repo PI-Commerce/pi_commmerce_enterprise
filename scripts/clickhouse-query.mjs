@@ -2,7 +2,7 @@
 // Python stdio proxy (init + tools/call on the SAME keep-alive connection, retried — the
 // prod cluster has multiple pods with no sticky sessions, so both requests must land on
 // the same pod via a reused TCP socket). Token from env CLICKHOUSE_PROD_TOKEN (full value,
-// incl. "Bearer "). Never commit the token. Used to pull real numbers for the Thesys capture.
+// incl. "Bearer "). Never commit the token. Used to pull real numbers for the GenUI capture.
 //
 //   CLICKHOUSE_PROD_TOKEN="Bearer ..." node scripts/clickhouse-query.mjs list_databases
 //   CLICKHOUSE_PROD_TOKEN="Bearer ..." node scripts/clickhouse-query.mjs list_tables observability

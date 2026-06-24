@@ -1,9 +1,9 @@
 import { createServerFn } from "@tanstack/react-start";
 import { voiceDataBlock } from "./voice-analytics-data";
 
-// Live Thesys C1 path for Analytics Ask Pi. Runs server-side only (createServerFn) so the
+// Live GenUI (C1) path for Analytics Ask Pi. Runs server-side only (createServerFn) so the
 // API key never reaches the browser. Given a free-text question it asks C1 to generate a
-// chart from the voice-call grounding data and returns the DSL string, which PiThesysResult
+// chart from the voice-call grounding data and returns the DSL string, which PiGenUiResult
 // renders with the same offline C1Component used for the static fixtures.
 
 const ENDPOINT = "https://api.thesys.dev/v1/embed/chat/completions";
@@ -18,16 +18,16 @@ Rules: never invent, round, or alter numbers — use the exact values in the dat
 most relevant breakdown for the question. If the data can't answer it, say so briefly in the
 insight and chart the closest available breakdown. One card, one chart, no filler.`;
 
-export type AskPiThesysResult =
+export type AskPiGenUiResult =
   | { ok: true; content: string }
   | { ok: false; error: string };
 
-export const askPiThesys = createServerFn({ method: "POST" })
+export const askPiGenUi = createServerFn({ method: "POST" })
   .inputValidator((question: string) => question)
-  .handler(async ({ data: question }): Promise<AskPiThesysResult> => {
-    const key = process.env.THESYS_API_KEY;
+  .handler(async ({ data: question }): Promise<AskPiGenUiResult> => {
+    const key = process.env.ASKPI_API_KEY;
     if (!key) return { ok: false, error: "missing_key" };
-    const model = process.env.THESYS_MODEL || "c1/anthropic/claude-sonnet-4.6/v-20260331";
+    const model = process.env.ASKPI_MODEL || "c1/anthropic/claude-sonnet-4.6/v-20260331";
 
     const userContent =
       `Question: ${question}\n\n` +

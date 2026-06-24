@@ -1,6 +1,6 @@
-// The actual Thesys C1 render path, isolated in its own module so it can be lazy-loaded
-// (browser-only) — see PiThesysResult. C1Component is a pure renderer: given a captured
-// c1Response DSL string it draws Thesys/Crayon UI with no API key and no network call.
+// The actual GenUI (C1) render path, isolated in its own module so it can be lazy-loaded
+// (browser-only) — see PiGenUiResult. C1Component is a pure renderer: given a captured
+// c1Response DSL string it draws the generative UI with no API key and no network call.
 import { C1Component, ThemeProvider } from "@thesysai/genui-sdk";
 import "@crayonai/react-ui/styles/index.css";
 
@@ -10,7 +10,7 @@ import "@crayonai/react-ui/styles/index.css";
 // so slate sits at 1 and blue at 3 (the off slots are filler).
 const CHART_PALETTE = ["#94A3B8", "#94A3B8", "#2563EB", "#2563EB"];
 
-export default function PiThesysInner({ c1Response }: { c1Response: string }) {
+export default function PiGenUiInner({ c1Response }: { c1Response: string }) {
   return (
     <ThemeProvider theme={{ barChartPalette: CHART_PALETTE }}>
       <C1Component c1Response={c1Response} isStreaming={false} />
