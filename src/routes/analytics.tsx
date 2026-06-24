@@ -295,20 +295,46 @@ function LeadsTable({ run, restrictToNodeIds, title = "Lead Analytics", hideStag
     [allLeads, restrictToNodeIds],
   );
 
-  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [stageSel, setStageSel] = useState<string[]>([]);
+  const [statusSel, setStatusSel] = useState<string[]>([]);
   const [q, setQ] = useState("");
   const [pageSize, setPageSize] = useState<number>(25);
   const [page, setPage] = useState<number>(1);
 
-  useEffect(() => { setPage(1); }, [statusFilter, q, pageSize, run.id, restrictToNodeIds]);
+  useEffect(() => { setPage(1); }, [stageSel, statusSel, q, pageSize, run.id, restrictToNodeIds]);
 
-  const statusOptions = useMemo(
-    () => Array.from(new Set(scoped.map((l) => l.status).filter(Boolean) as string[])),
-    [scoped],
+  // Two filter groups that narrow each other (bidirectional), mirroring the
+  // Channel-analytics pattern: Group A = Node Stage, Group B = Status. Since a
+  // node's possible statuses depend on its kind, picking node stages limits the
+  // status list and vice-versa — so e.g. selecting only WhatsApp stages drops
+  // voice-only statuses out of the Status menu.
+  const passStage = (l: Lead) => stageSel.length === 0 || stageSel.includes(l.stageNodeId);
+  const passStatus = (l: Lead) => statusSel.length === 0 || (!!l.status && statusSel.includes(l.status));
+
+  // Serial = node position in the run's authored flow order (Start = 1), matching
+  // the Leads "Stage" column and the Campaign Flow node sub-headings.
+  const serialByNode = useMemo(
+    () => new Map(run.sankey.nodes.map((n, i) => [n.id, i + 1] as const)),
+    [run],
   );
 
+  const stageOptions = useMemo(() => {
+    const ids = new Set(scoped.filter(passStatus).map((l) => l.stageNodeId));
+    return run.sankey.nodes
+      .filter((n) => ids.has(n.id))
+      .map((n) => ({ value: n.id, label: `${serialByNode.get(n.id)} · ${n.name.split(" · ")[0]}` }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scoped, statusSel, run, serialByNode]);
+
+  const statusOptions = useMemo(() => {
+    const set = new Set(scoped.filter(passStage).map((l) => l.status).filter(Boolean) as string[]);
+    return Array.from(set).map((s) => ({ value: s, label: s.charAt(0).toUpperCase() + s.slice(1) }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scoped, stageSel]);
+
   const filtered = useMemo(() => scoped.filter((l) => {
-    if (statusFilter !== "all" && l.status !== statusFilter) return false;
+    if (!passStage(l)) return false;
+    if (!passStatus(l)) return false;
     if (q) {
       const s = q.toLowerCase();
       const hay = [l.id, l.name, l.phone, l.email, l.stageLabel, l.status ?? "", l.channel ?? "", l.updatedDate]
@@ -316,7 +342,8 @@ function LeadsTable({ run, restrictToNodeIds, title = "Lead Analytics", hideStag
       if (!hay.includes(s)) return false;
     }
     return true;
-  }), [scoped, statusFilter, q]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [scoped, stageSel, statusSel, q]);
 
   const isVoice = restrictToNodeIds && run.sankey.nodes.find((n) => restrictToNodeIds.includes(n.id))?.kind === "voice";
 
@@ -330,13 +357,26 @@ function LeadsTable({ run, restrictToNodeIds, title = "Lead Analytics", hideStag
             <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search all columns…" className="h-8 w-[200px] pl-7 text-xs" />
           </div>
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="h-8 w-[150px] text-xs"><SelectValue placeholder="Status" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All statuses</SelectItem>
-              {statusOptions.map((s) => (<SelectItem key={s} value={s} className="capitalize">{s}</SelectItem>))}
-            </SelectContent>
-          </Select>
+          {!hideStage && (
+            <div className="w-[190px]">
+              <MultiSelect
+                options={stageOptions}
+                value={stageSel}
+                onChange={setStageSel}
+                allLabel="All nodes"
+                triggerClassName="h-8"
+              />
+            </div>
+          )}
+          <div className="w-[160px]">
+            <MultiSelect
+              options={statusOptions}
+              value={statusSel}
+              onChange={setStatusSel}
+              allLabel="All statuses"
+              triggerClassName="h-8 capitalize"
+            />
+          </div>
           <Button
             variant="outline" size="sm" className="h-8 gap-1.5 text-xs"
             onClick={() => downloadCsv(`${run.id || "run"}_leads.csv`, leadsToCsv(filtered))}
@@ -352,7 +392,7 @@ function LeadsTable({ run, restrictToNodeIds, title = "Lead Analytics", hideStag
               <th className="px-4 py-2 text-left font-medium">Lead ID</th>
               <th className="px-4 py-2 text-left font-medium">Name</th>
               <th className="px-4 py-2 text-left font-medium">Phone</th>
-              {!hideStage && <th className="px-4 py-2 text-left font-medium">Stage</th>}
+              {!hideStage && <th className="px-4 py-2 text-left font-medium">Node Stage</th>}
               <th className="px-4 py-2 text-left font-medium">Status</th>
               {isVoice && <th className="px-4 py-2 text-right font-medium">Duration</th>}
               <th className="px-4 py-2 text-right font-medium">Last Updated</th>
@@ -753,20 +793,70 @@ function ChannelAnalytics({
   }, [assets]);
 
   const assetSel = selection.assetIds ?? [];
+  const campaignSel = selection.campaignIds ?? [];
+  const runSel = selection.runIds ?? [];
+  const nodeSel = selection.nodeIds ?? [];
 
-  // v1: a single filter group — the channel asset (WhatsApp Number / Voice Agent).
-  // Date range scopes it. The journey-path (Campaign→Run→Node) cross-filtering was
-  // removed for the first cut.
+  // Bidirectional cross-filtering. Two filter groups — Group A (Campaign→Run→Node,
+  // the journey path) and Group B (Asset: WhatsApp Number / Voice Agent) — narrow
+  // each other: every dimension's options are computed by applying all the OTHER
+  // active filters, so options with zero overlap simply drop out.
   const refKey = (r: Ref) => `${r.campaignId}|${r.runId}|${r.nodeId}`;
+  const nodeKey = (r: Ref) => `${r.runId}::${r.nodeId}`;
   const passAsset = (r: Ref) =>
     assetSel.length === 0 || assetSel.some((aid) => refsByAsset.get(aid)?.has(refKey(r)));
+  const passCampaign = (r: Ref) => campaignSel.length === 0 || campaignSel.includes(r.campaignId);
+  const passRun = (r: Ref) => runSel.length === 0 || runSel.includes(r.runId);
+  const passNode = (r: Ref) => nodeSel.length === 0 || nodeSel.includes(nodeKey(r));
 
-  const assetOptions = assets;
+  const campaignOptions = useMemo(() => {
+    const ids = new Set(allRefs.filter((r) => passAsset(r) && passRun(r) && passNode(r)).map((r) => r.campaignId));
+    return CAMPAIGNS.filter((c) => ids.has(c.id));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allRefs, assetSel, runSel, nodeSel, refsByAsset]);
+
+  const runOptions = useMemo(() => {
+    const ids = new Set(allRefs.filter((r) => passAsset(r) && passCampaign(r) && passNode(r)).map((r) => r.runId));
+    const rows: { run: RunRow; campaignName: string }[] = [];
+    for (const c of CAMPAIGNS) for (const r of c.runs) if (ids.has(r.id)) rows.push({ run: r, campaignName: c.name });
+    return rows;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allRefs, assetSel, campaignSel, nodeSel, refsByAsset]);
+
+  const nodeOptions = useMemo(() => {
+    const seen = new Set<string>();
+    const opts: { value: string; label: string }[] = [];
+    for (const ref of allRefs.filter((r) => passAsset(r) && passCampaign(r) && passRun(r))) {
+      const campaign = CAMPAIGNS.find((c) => c.id === ref.campaignId);
+      const run = campaign?.runs.find((r) => r.id === ref.runId);
+      const node = run?.sankey.nodes.find((n) => n.id === ref.nodeId);
+      if (!node) continue;
+      const key = nodeKey(ref);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const nodeLabel = node.name.split(" · ").slice(1).join(" · ") || node.name;
+      opts.push({ value: key, label: `${nodeLabel} · ${run!.startedAt}` });
+    }
+    return opts;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allRefs, assetSel, campaignSel, runSel, refsByAsset]);
+
+  // Group B options narrow to assets touched by the current Group A selection.
+  const assetOptions = useMemo(() => {
+    const allowed = new Set(allRefs.filter((r) => passCampaign(r) && passRun(r) && passNode(r)).map((r) => refKey(r)));
+    return assets.filter((a) => {
+      const s = refsByAsset.get(a.id);
+      if (!s) return false;
+      for (const k of s) if (allowed.has(k)) return true;
+      return false;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allRefs, assets, campaignSel, runSel, nodeSel, refsByAsset]);
 
   const selectedRefs = useMemo(
-    () => allRefs.filter((r) => passAsset(r)),
+    () => allRefs.filter((r) => passAsset(r) && passCampaign(r) && passRun(r) && passNode(r)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [allRefs, assetSel, refsByAsset],
+    [allRefs, assetSel, campaignSel, runSel, nodeSel, refsByAsset],
   );
 
   const tabMeta = CHANNEL_TABS.find((c) => c.kind === kind)!;
@@ -794,10 +884,42 @@ function ChannelAnalytics({
         })}
       </div>
 
-      {/* v1: a single filter group — the channel asset (WhatsApp Number / Voice
-          Agent), scoped by date range. */}
-      <div className="mb-4">
-        <FilterGroup title={`${tabMeta.label} channel`}>
+      {/* Two distinct filter groups that narrow each other (bidirectional):
+          Group A = the journey path (Campaign → Run → Node); Group B = the channel
+          asset (WhatsApp Number / Voice Agent). Date range scopes both. */}
+      <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-stretch">
+        <FilterGroup title="Journey path" className="lg:flex-[3]">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <FilterField label="Campaign">
+              <MultiSelect
+                options={campaignOptions.map((c) => ({ value: c.id, label: c.name }))}
+                value={campaignSel}
+                onChange={(v) => onSelectionChange({ ...selection, campaignIds: v, runIds: [], nodeIds: [] })}
+                allLabel="All Campaigns"
+              />
+            </FilterField>
+            <FilterField label="Run">
+              <MultiSelect
+                options={runOptions.map(({ run, campaignName }) => ({
+                  value: run.id,
+                  label: `${run.startedAt} · ${campaignName}`,
+                }))}
+                value={runSel}
+                onChange={(v) => onSelectionChange({ ...selection, runIds: v, nodeIds: [] })}
+                allLabel="All Runs"
+              />
+            </FilterField>
+            <FilterField label="Node">
+              <MultiSelect
+                options={nodeOptions}
+                value={nodeSel}
+                onChange={(v) => onSelectionChange({ ...selection, nodeIds: v })}
+                allLabel="All Nodes"
+              />
+            </FilterField>
+          </div>
+        </FilterGroup>
+        <FilterGroup title={`${tabMeta.label} channel`} className="lg:flex-[2]">
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <FilterField label={tabMeta.assetLabel}>
               <MultiSelect

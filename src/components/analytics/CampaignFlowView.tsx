@@ -36,6 +36,9 @@ export function CampaignFlowView({
   // lay it out with the async ELK layout at render-time.
   const { rawNodes, rawEdges } = useMemo(() => {
     const idToNode = new Map(run.sankey.nodes.map((n) => [n.id, n] as const));
+    // Serial = the node's position in the run's authored flow order (Start = 1).
+    // Shown in the node sub-heading so it matches the Leads table's "<serial> · name".
+    const serialById = new Map(run.sankey.nodes.map((n, i) => [n.id, i + 1] as const));
 
     // Group each node's outgoing edges by source handle (value + label), so a
     // WhatsApp node's outcome split can be shown ON the node (not just the drawer).
@@ -55,11 +58,14 @@ export function CampaignFlowView({
       const isConverted = n.kind === "end" && /convert|complete|resubmit/i.test(n.name);
       const isDropped   = n.kind === "end" && !isConverted;
       const title = isConverted ? "Converted" : isDropped ? "End" : n.name.split(" · ")[0];
-      const subtitle = n.kind === "end"
+      const serial = serialById.get(n.id);
+      const baseSubtitle = n.kind === "end"
         ? `${n.entered.toLocaleString()} users`
         : n.name.includes(" · ")
           ? n.name.split(" · ").slice(1).join(" · ")
           : undefined;
+      // Prefix the serial so the node is unambiguously the one referenced in the Leads table.
+      const subtitle = baseSubtitle ? `${serial} · ${baseSubtitle}` : `#${serial}`;
       const dropoffPct = n.entered > 0 ? ((n.entered - n.exited) / n.entered) * 100 : 0;
       const showMetrics = n.kind !== "start" && n.kind !== "end";
 
