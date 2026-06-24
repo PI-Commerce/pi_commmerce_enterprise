@@ -36,10 +36,15 @@ export type CampaignAnalytics = {
   runs: RunRow[];
 };
 
+export type RunType = "time-scoped" | "always-on";
+
 export type RunRow = {
   id: string;
+  name: string;
+  code: string;
   startedAt: string;
   status: "completed" | "running" | "failed" | "paused";
+  runType: RunType;
   audience: number;
   totalLeads: number;
   leadsProcessed: number;
@@ -103,7 +108,7 @@ function waHandleBaseWeight(handle: string): number {
 }
 
 /** Propagate `base` leads through an example graph into a consistent run. */
-function deriveRun(ex: ExampleCampaign, base: number, runId: string, startedAt: string): RunRow {
+function deriveRun(ex: ExampleCampaign, base: number, runId: string, startedAt: string, runType: RunType, name: string, code: string): RunRow {
   const { nodes, edges } = ex;
   const kindOf = new Map<string, SankeyNodeKind>(nodes.map((n) => [n.id, KIND_TO_SANKEY[n.data.kind]]));
   const titleOf = new Map<string, string>(nodes.map((n) => [n.id, n.data.title]));
@@ -186,7 +191,7 @@ function deriveRun(ex: ExampleCampaign, base: number, runId: string, startedAt: 
   const successRate = base > 0 ? Math.round((completed / base) * 100) : 0;
 
   return {
-    id: runId, startedAt, status: "completed", audience: base,
+    id: runId, name, code, startedAt, status: "completed", runType, audience: base,
     totalLeads: base, leadsProcessed: completed, successRate,
     kpi: { totalLeads: base, validLeads, leadsProcessed: completed, successRate },
     sankey: { nodes: sankeyNodes, edges: sankeyEdges },
@@ -196,7 +201,8 @@ function deriveRun(ex: ExampleCampaign, base: number, runId: string, startedAt: 
 export const CAMPAIGNS: CampaignAnalytics[] = Object.entries(EXAMPLE_CAMPAIGNS).map(([id, ex], i) => ({
   id,
   name: ex.name,
-  runs: [deriveRun(ex, 9000 + i * 600, `r_${id}`, "Today · 09:00")],
+  // Alternate run types so both the badge and the Always-on-only date filter are demonstrable.
+  runs: [deriveRun(ex, 9000 + i * 600, `r_${id}`, "Today · 09:00", i % 2 === 0 ? "time-scoped" : "always-on", "Run 1", `RUN-${4200 + i}`)],
 }));
 export const NODE_METRICS: Partial<Record<
   SankeyNodeKind,
