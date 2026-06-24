@@ -16,12 +16,14 @@ export type TemplateButtonType = "URL" | "Phone Number" | "Quick Reply" | "Link 
 export type TemplateButton = {
   type: TemplateButtonType;
   text: string;
-  /** URL buttons: destination + optional dynamic suffix + click tracking. */
+  /** URL buttons: destination + URL type + optional dynamic suffix + click tracking. */
   url?: string;
+  urlType?: "Static" | "Dynamic";
   urlSuffix?: string;
   clickTracking?: boolean;
-  /** Phone Number buttons: national number (dial code is rendered separately). */
+  /** Phone Number buttons: national number + selected country dial code. */
   phone?: string;
+  dialCode?: string;
 };
 
 export type WaTemplate = {
@@ -40,7 +42,22 @@ export type WaTemplate = {
 
 export const TEMPLATE_CATEGORIES: TemplateCategory[] = ["Marketing", "Utility", "Authentication"];
 
-export const TEMPLATE_BUTTON_TYPES: TemplateButtonType[] = ["URL", "Phone Number", "Quick Reply", "Link Flow"];
+/**
+ * Button types offered in the create form. We expose the three Meta calls a
+ * Marketing template needs — Custom (quick reply), Visit website (URL) and Call
+ * phone number — and keep the order Meta uses in its "Add button" menu. The
+ * "Link Flow" type stays in the union for existing data/journey code, but is no
+ * longer addable from the form.
+ */
+export const TEMPLATE_BUTTON_TYPES: TemplateButtonType[] = ["Quick Reply", "URL", "Phone Number"];
+
+/** Friendly labels (the WhatsApp button names Meta shows) for each type. */
+export const BUTTON_TYPE_LABELS: Record<TemplateButtonType, string> = {
+  "Quick Reply": "Custom",
+  "URL": "Visit website",
+  "Phone Number": "Call phone number",
+  "Link Flow": "Flow",
+};
 
 /**
  * Meta's button rules for message templates (the ones we enforce):
@@ -404,7 +421,11 @@ export const TEMPLATE_LIMITS = {
   headerMax: 60,
   bodyMax: 1024,
   footerMax: 60,
-  buttonTextMax: 25,
+  buttonTextMax: 40,
+  /** Website (URL) button destination length. */
+  buttonUrlMax: 2000,
+  /** Phone Number button national-number length. */
+  buttonPhoneMax: 20,
   /** Header text supports at most one variable. */
   headerVarsMax: 1,
   /** Footer text supports no variables. */
@@ -413,14 +434,56 @@ export const TEMPLATE_LIMITS = {
   bodyVarsMax: 10,
 } as const;
 
-/** Required-field errors for the current buttons (missing text / URL / phone). */
+/** Meta rejects templates whose body starts or ends with a variable. */
+export function bodyEdgeVariable(text: string): boolean {
+  return /^\s*\{\{\s*\d+\s*\}\}/.test(text) || /\{\{\s*\d+\s*\}\}\s*$/.test(text);
+}
+
+/**
+ * Meta rejects a body that has "too many variables for its length" — there must
+ * be enough surrounding copy. We approximate it: the count of non-variable words
+ * must be at least the number of distinct variables.
+ */
+export function bodyTooManyVariables(text: string): boolean {
+  const vars = variableCount(text);
+  if (vars === 0) return false;
+  const fixedWords = text.replace(/\{\{\s*\d+\s*\}\}/g, " ").trim().split(/\s+/).filter(Boolean).length;
+  return vars > fixedWords;
+}
+
+/** Required-field errors for the current buttons (missing text / URL / phone,
+ *  plus Meta's "no two buttons may share the same text" rule). */
 export function buttonFieldErrors(buttons: TemplateButton[]): string[] {
   const errors: string[] = [];
   buttons.forEach((b, i) => {
     const n = i + 1;
     if (!b.text.trim()) errors.push(`Button ${n}: add button text.`);
-    if (b.type === "URL" && !b.url?.trim()) errors.push(`Button ${n}: add a URL.`);
+    if (b.type === "URL" && !b.url?.trim()) errors.push(`Button ${n}: add a website URL.`);
     if (b.type === "Phone Number" && !b.phone?.trim()) errors.push(`Button ${n}: add a phone number.`);
   });
+  // Duplicate button text (case-insensitive) — Meta blocks identical labels.
+  const counts = new Map<string, number>();
+  buttons.forEach((b) => {
+    const t = b.text.trim().toLowerCase();
+    if (t) counts.set(t, (counts.get(t) ?? 0) + 1);
+  });
+  if ([...counts.values()].some((c) => c > 1)) {
+    errors.push("Each button needs unique text — two buttons share the same label.");
+  }
   return errors;
+}
+
+/** Per-button text indexes that duplicate another button's label (for inline flags). */
+export function duplicateButtonIndexes(buttons: TemplateButton[]): Set<number> {
+  const byText = new Map<string, number[]>();
+  buttons.forEach((b, i) => {
+    const t = b.text.trim().toLowerCase();
+    if (!t) return;
+    const arr = byText.get(t) ?? [];
+    arr.push(i);
+    byText.set(t, arr);
+  });
+  const dup = new Set<number>();
+  for (const arr of byText.values()) if (arr.length > 1) arr.forEach((i) => dup.add(i));
+  return dup;
 }
