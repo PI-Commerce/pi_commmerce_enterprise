@@ -66,6 +66,9 @@ const KIND_TO_SANKEY: Record<NodeKind, SankeyNodeKind> = {
   start: "start", end: "end", audience: "audience", conditional: "conditional",
   abSplit: "abSplit", delay: "delay", voiceCall: "voice", whatsapp: "whatsapp",
   sms: "sms", adsCampaign: "ads",
+  // API Tool Call has no channel analytics of its own — treat it as a structural
+  // pass-through (everyone flows through) until it gets dedicated analytics.
+  apiToolCall: "delay",
 };
 
 const PASS_RATE: Record<SankeyNodeKind, number> = {

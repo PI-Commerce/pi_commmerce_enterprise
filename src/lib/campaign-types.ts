@@ -11,6 +11,7 @@ export type NodeKind =
   | "end"
   // data
   | "audience"
+  | "apiToolCall"
   // logic
   | "conditional"
   | "abSplit"
@@ -102,6 +103,11 @@ export type PresetConfig = {
   // ---- Delay ----
   delayValue?: number;
   delayUnit?: "Minutes" | "Hours" | "Days";
+  // ---- API Tool Call ----
+  /** Handle of the registry tool this node calls (see {@link file://./tool-registry.ts}). */
+  apiTool?: string;
+  /** Maps each non-constant tool input (`v` = input key) to an upstream variable (`def`). */
+  apiInputMap?: PresetVarMap[];
 };
 
 export type WorkflowNodeData = {
@@ -141,6 +147,7 @@ export const NODE_GROUPS: Record<NodeKind, NodeGroup> = {
   start: "system",
   end: "system",
   audience: "data",
+  apiToolCall: "data",
   conditional: "logic",
   abSplit: "logic",
   delay: "logic",
@@ -154,6 +161,7 @@ export const NODE_LABELS: Record<NodeKind, string> = {
   start: "Start",
   end: "End",
   audience: "Audience",
+  apiToolCall: "API Tool Call",
   conditional: "Conditional Branch",
   abSplit: "A/B Split",
   delay: "Delay",

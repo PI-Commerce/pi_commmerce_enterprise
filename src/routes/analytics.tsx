@@ -83,6 +83,7 @@ const NODE_TYPE_LABEL: Record<SankeyNodeKind, string> = {
   conditional: "Conditional Branch", delay: "Delay", end: "End",
 };
 const STATUS_TONE: Record<string, string> = {
+  sent: "text-sky-600 bg-sky-500/10",
   delivered: "text-emerald-600 bg-emerald-500/10",
   read: "text-sky-600 bg-sky-500/10",
   clicked: "text-violet-600 bg-violet-500/10",
@@ -294,42 +295,28 @@ function LeadsTable({ run, restrictToNodeIds, title = "Lead Analytics", hideStag
     [allLeads, restrictToNodeIds],
   );
 
-  const [stageFilter, setStageFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [q, setQ] = useState("");
   const [pageSize, setPageSize] = useState<number>(25);
   const [page, setPage] = useState<number>(1);
-  const [leadDateRange, setLeadDateRange] = useState<DateRange | undefined>(undefined);
 
-  useEffect(() => { setPage(1); }, [stageFilter, statusFilter, q, pageSize, run.id, restrictToNodeIds, leadDateRange]);
-
-  const stageOptions = useMemo(() => {
-    const ids = restrictToNodeIds ?? run.sankey.nodes.map((n) => n.id);
-    return run.sankey.nodes.filter((n) => ids.includes(n.id));
-  }, [run, restrictToNodeIds]);
+  useEffect(() => { setPage(1); }, [statusFilter, q, pageSize, run.id, restrictToNodeIds]);
 
   const statusOptions = useMemo(
-    () => Array.from(new Set(scoped.map((l) => l.status))),
+    () => Array.from(new Set(scoped.map((l) => l.status).filter(Boolean) as string[])),
     [scoped],
   );
 
   const filtered = useMemo(() => scoped.filter((l) => {
-    if (stageFilter !== "all" && l.stageNodeId !== stageFilter) return false;
     if (statusFilter !== "all" && l.status !== statusFilter) return false;
-    if (leadDateRange?.from) {
-      const from = new Date(leadDateRange.from); from.setHours(0,0,0,0);
-      const to = new Date(leadDateRange.to ?? leadDateRange.from); to.setHours(23,59,59,999);
-      const d = new Date(l.updatedDate + "T00:00:00");
-      if (d < from || d > to) return false;
-    }
     if (q) {
       const s = q.toLowerCase();
-      const hay = [l.id, l.name, l.phone, l.email, l.stageLabel, l.status, l.channel ?? "", l.updatedDate]
+      const hay = [l.id, l.name, l.phone, l.email, l.stageLabel, l.status ?? "", l.channel ?? "", l.updatedDate]
         .join(" ").toLowerCase();
       if (!hay.includes(s)) return false;
     }
     return true;
-  }), [scoped, stageFilter, statusFilter, q, leadDateRange]);
+  }), [scoped, statusFilter, q]);
 
   const isVoice = restrictToNodeIds && run.sankey.nodes.find((n) => restrictToNodeIds.includes(n.id))?.kind === "voice";
 
@@ -343,25 +330,13 @@ function LeadsTable({ run, restrictToNodeIds, title = "Lead Analytics", hideStag
             <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search all columns…" className="h-8 w-[200px] pl-7 text-xs" />
           </div>
-          {!hideStage && (
-            <Select value={stageFilter} onValueChange={setStageFilter}>
-              <SelectTrigger className="h-8 w-[180px] text-xs"><SelectValue placeholder="Current Node" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All nodes</SelectItem>
-                {stageOptions.map((n) => (
-                  <SelectItem key={n.id} value={n.id}>{n.name.split(" · ")[0]}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
           <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="h-8 w-[150px] text-xs"><SelectValue placeholder="Run Status" /></SelectTrigger>
+            <SelectTrigger className="h-8 w-[150px] text-xs"><SelectValue placeholder="Status" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All statuses</SelectItem>
               {statusOptions.map((s) => (<SelectItem key={s} value={s} className="capitalize">{s}</SelectItem>))}
             </SelectContent>
           </Select>
-          <DateRangePicker value={leadDateRange} onChange={setLeadDateRange} />
           <Button
             variant="outline" size="sm" className="h-8 gap-1.5 text-xs"
             onClick={() => downloadCsv(`${run.id || "run"}_leads.csv`, leadsToCsv(filtered))}
@@ -377,7 +352,7 @@ function LeadsTable({ run, restrictToNodeIds, title = "Lead Analytics", hideStag
               <th className="px-4 py-2 text-left font-medium">Lead ID</th>
               <th className="px-4 py-2 text-left font-medium">Name</th>
               <th className="px-4 py-2 text-left font-medium">Phone</th>
-              {!hideStage && <th className="px-4 py-2 text-left font-medium">Node Stage</th>}
+              {!hideStage && <th className="px-4 py-2 text-left font-medium">Stage</th>}
               <th className="px-4 py-2 text-left font-medium">Status</th>
               {isVoice && <th className="px-4 py-2 text-right font-medium">Duration</th>}
               <th className="px-4 py-2 text-right font-medium">Last Updated</th>
@@ -430,7 +405,11 @@ function LeadRow({ l, showDuration, hideStage }: { l: Lead; showDuration: boolea
       <td className="px-4 py-2.5 font-mono text-[12px] text-muted-foreground">{l.phone}</td>
       {!hideStage && <td className="px-4 py-2.5 text-[12px]">{l.stageLabel}</td>}
       <td className="px-4 py-2.5">
-        <span className={cn("rounded-md px-2 py-0.5 text-[10.5px] font-medium capitalize", STATUS_TONE[l.status] ?? STATUS_TONE.pending)}>{l.status}</span>
+        {l.status ? (
+          <span className={cn("rounded-md px-2 py-0.5 text-[10.5px] font-medium capitalize", STATUS_TONE[l.status] ?? STATUS_TONE.pending)}>{l.status}</span>
+        ) : (
+          <span className="text-muted-foreground">—</span>
+        )}
       </td>
       {showDuration && (
         <td className="px-4 py-2.5 text-right font-mono text-[12px]">{l.duration ? `${Math.floor(l.duration/60)}:${String(l.duration%60).padStart(2,"0")}` : "—"}</td>
@@ -774,70 +753,20 @@ function ChannelAnalytics({
   }, [assets]);
 
   const assetSel = selection.assetIds ?? [];
-  const campaignSel = selection.campaignIds ?? [];
-  const runSel = selection.runIds ?? [];
-  const nodeSel = selection.nodeIds ?? [];
 
-  // Bidirectional cross-filtering. Two filter groups — Group A (Campaign→Run→Node,
-  // the journey path) and Group B (Asset: WhatsApp Number / Voice Agent) — narrow
-  // each other: every dimension's options are computed by applying all the OTHER
-  // active filters, so options with zero overlap simply drop out.
+  // v1: a single filter group — the channel asset (WhatsApp Number / Voice Agent).
+  // Date range scopes it. The journey-path (Campaign→Run→Node) cross-filtering was
+  // removed for the first cut.
   const refKey = (r: Ref) => `${r.campaignId}|${r.runId}|${r.nodeId}`;
-  const nodeKey = (r: Ref) => `${r.runId}::${r.nodeId}`;
   const passAsset = (r: Ref) =>
     assetSel.length === 0 || assetSel.some((aid) => refsByAsset.get(aid)?.has(refKey(r)));
-  const passCampaign = (r: Ref) => campaignSel.length === 0 || campaignSel.includes(r.campaignId);
-  const passRun = (r: Ref) => runSel.length === 0 || runSel.includes(r.runId);
-  const passNode = (r: Ref) => nodeSel.length === 0 || nodeSel.includes(nodeKey(r));
 
-  const campaignOptions = useMemo(() => {
-    const ids = new Set(allRefs.filter((r) => passAsset(r) && passRun(r) && passNode(r)).map((r) => r.campaignId));
-    return CAMPAIGNS.filter((c) => ids.has(c.id));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allRefs, assetSel, runSel, nodeSel, refsByAsset]);
-
-  const runOptions = useMemo(() => {
-    const ids = new Set(allRefs.filter((r) => passAsset(r) && passCampaign(r) && passNode(r)).map((r) => r.runId));
-    const rows: { run: RunRow; campaignName: string }[] = [];
-    for (const c of CAMPAIGNS) for (const r of c.runs) if (ids.has(r.id)) rows.push({ run: r, campaignName: c.name });
-    return rows;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allRefs, assetSel, campaignSel, nodeSel, refsByAsset]);
-
-  const nodeOptions = useMemo(() => {
-    const seen = new Set<string>();
-    const opts: { value: string; label: string }[] = [];
-    for (const ref of allRefs.filter((r) => passAsset(r) && passCampaign(r) && passRun(r))) {
-      const campaign = CAMPAIGNS.find((c) => c.id === ref.campaignId);
-      const run = campaign?.runs.find((r) => r.id === ref.runId);
-      const node = run?.sankey.nodes.find((n) => n.id === ref.nodeId);
-      if (!node) continue;
-      const key = nodeKey(ref);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      const nodeLabel = node.name.split(" · ").slice(1).join(" · ") || node.name;
-      opts.push({ value: key, label: `${nodeLabel} · ${run!.startedAt}` });
-    }
-    return opts;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allRefs, assetSel, campaignSel, runSel, refsByAsset]);
-
-  // Group B options narrow to assets touched by the current Group A selection.
-  const assetOptions = useMemo(() => {
-    const allowed = new Set(allRefs.filter((r) => passCampaign(r) && passRun(r) && passNode(r)).map((r) => refKey(r)));
-    return assets.filter((a) => {
-      const s = refsByAsset.get(a.id);
-      if (!s) return false;
-      for (const k of s) if (allowed.has(k)) return true;
-      return false;
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allRefs, assets, campaignSel, runSel, nodeSel, refsByAsset]);
+  const assetOptions = assets;
 
   const selectedRefs = useMemo(
-    () => allRefs.filter((r) => passAsset(r) && passCampaign(r) && passRun(r) && passNode(r)),
+    () => allRefs.filter((r) => passAsset(r)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [allRefs, assetSel, campaignSel, runSel, nodeSel, refsByAsset],
+    [allRefs, assetSel, refsByAsset],
   );
 
   const tabMeta = CHANNEL_TABS.find((c) => c.kind === kind)!;
@@ -865,42 +794,10 @@ function ChannelAnalytics({
         })}
       </div>
 
-      {/* Two distinct filter groups that narrow each other (bidirectional):
-          Group A = the journey path (Campaign → Run → Node); Group B = the channel
-          asset (WhatsApp Number / Voice Agent). Date range scopes both. */}
-      <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-stretch">
-        <FilterGroup title="Journey path" className="lg:flex-[3]">
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-            <FilterField label="Campaign">
-              <MultiSelect
-                options={campaignOptions.map((c) => ({ value: c.id, label: c.name }))}
-                value={campaignSel}
-                onChange={(v) => onSelectionChange({ ...selection, campaignIds: v, runIds: [], nodeIds: [] })}
-                allLabel="All Campaigns"
-              />
-            </FilterField>
-            <FilterField label="Run">
-              <MultiSelect
-                options={runOptions.map(({ run, campaignName }) => ({
-                  value: run.id,
-                  label: `${run.startedAt} · ${campaignName}`,
-                }))}
-                value={runSel}
-                onChange={(v) => onSelectionChange({ ...selection, runIds: v, nodeIds: [] })}
-                allLabel="All Runs"
-              />
-            </FilterField>
-            <FilterField label="Node">
-              <MultiSelect
-                options={nodeOptions}
-                value={nodeSel}
-                onChange={(v) => onSelectionChange({ ...selection, nodeIds: v })}
-                allLabel="All Nodes"
-              />
-            </FilterField>
-          </div>
-        </FilterGroup>
-        <FilterGroup title={`${tabMeta.label} channel`} className="lg:flex-[2]">
+      {/* v1: a single filter group — the channel asset (WhatsApp Number / Voice
+          Agent), scoped by date range. */}
+      <div className="mb-4">
+        <FilterGroup title={`${tabMeta.label} channel`}>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <FilterField label={tabMeta.assetLabel}>
               <MultiSelect

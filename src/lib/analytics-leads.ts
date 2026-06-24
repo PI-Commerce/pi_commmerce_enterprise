@@ -4,7 +4,7 @@
 import type { ChannelKind, RunRow, SankeyNode, SankeyNodeKind } from "@/lib/analytics-data";
 
 export type LeadStatus =
-  | "delivered" | "read" | "clicked" | "replied" | "converted"
+  | "sent" | "delivered" | "read" | "clicked" | "replied" | "converted"
   | "connected" | "answered" | "interested" | "voicemail"
   | "failed" | "dropped" | "pending";
 
@@ -14,9 +14,9 @@ export type Lead = {
   phone: string;
   email: string;
   stageNodeId: string;     // current node id in the DAG
-  stageLabel: string;      // human label of that node
+  stageLabel: string;      // human label of that node, prefixed with run serial
   channel?: ChannelKind;
-  status: LeadStatus;
+  status?: LeadStatus;     // only action/channel nodes carry a status; blank otherwise
   cost: number;
   duration?: number;       // voice call seconds
   updatedAt: string;
@@ -32,17 +32,21 @@ function rng(seed: string) {
   return () => { h = Math.imul(h ^ (h >>> 15), 2246822507); h = Math.imul(h ^ (h >>> 13), 3266489909); return ((h ^= h >>> 16) >>> 0) / 4294967295; };
 }
 
+// Only action/channel nodes carry a status. A lead sitting on a structural node
+// "just moves forward", so it renders blank (empty array → undefined status).
 const STATUS_BY_KIND: Record<SankeyNodeKind, LeadStatus[]> = {
-  start:       ["pending"],
-  audience:    ["pending"],
-  abSplit:     ["pending"],
-  conditional: ["pending"],
-  delay:       ["pending"],
-  whatsapp:    ["delivered","read","clicked","replied","failed"],
+  start:       [],
+  audience:    [],
+  abSplit:     [],
+  conditional: [],
+  delay:       [],
+  // Aligned to the Meta delivery callback set (clicked/replied are interaction
+  // events, not delivery statuses, so they're excluded here).
+  whatsapp:    ["sent","delivered","read","failed"],
   voice:       ["connected","answered","interested","voicemail","failed"],
   sms:         ["delivered","failed"],
   ads:         ["clicked","delivered"],
-  end:         ["converted","dropped"],
+  end:         [],
 };
 
 const CHANNEL_BY_KIND: Partial<Record<SankeyNodeKind, ChannelKind>> = {
@@ -53,6 +57,9 @@ const CHANNEL_BY_KIND: Partial<Record<SankeyNodeKind, ChannelKind>> = {
 export function generateLeads(run: RunRow, total = 3990): Lead[] {
   const rand = rng(run.id || "default_run");
   const nodes = run.sankey.nodes;
+  // Serial = the node's position in the run's authored flow order (Start = 1),
+  // so "<serial> · <name>" unambiguously identifies the exact node.
+  const serialById = new Map(nodes.map((n, i) => [n.id, i + 1]));
   // weight = entered, but downweight pipe/system nodes
   const weighted: { node: SankeyNode; w: number }[] = nodes.map((n) => ({
     node: n,
@@ -66,7 +73,7 @@ export function generateLeads(run: RunRow, total = 3990): Lead[] {
     let r = rand() * sumW, pick = weighted[0].node;
     for (const w of weighted) { r -= w.w; if (r <= 0) { pick = w.node; break; } }
     const statuses = STATUS_BY_KIND[pick.kind];
-    const status = statuses[Math.floor(rand() * statuses.length)];
+    const status = statuses.length ? statuses[Math.floor(rand() * statuses.length)] : undefined;
     const first = FIRST[Math.floor(rand() * FIRST.length)];
     const last  = LAST[Math.floor(rand() * LAST.length)];
     const phone = `+91 9${Math.floor(100000000 + rand() * 899999999)}`;
@@ -76,7 +83,7 @@ export function generateLeads(run: RunRow, total = 3990): Lead[] {
       phone,
       email: `${first}.${last}@example.com`.toLowerCase(),
       stageNodeId: pick.id,
-      stageLabel: pick.name.split(" · ")[0],
+      stageLabel: `${serialById.get(pick.id) ?? "?"} · ${pick.name.split(" · ")[0]}`,
       channel: CHANNEL_BY_KIND[pick.kind],
       status,
       cost: +((rand() * 0.18) + 0.02).toFixed(3),
@@ -107,7 +114,7 @@ export function generateLeads(run: RunRow, total = 3990): Lead[] {
 export function leadsToCsv(leads: Lead[]): string {
   const head = ["lead_id","name","phone","email","stage","channel","status","duration_sec","cost_usd","updated_date","updated_at"];
   const rows = leads.map((l) => [
-    l.id, l.name, l.phone, l.email, l.stageLabel, l.channel ?? "", l.status,
+    l.id, l.name, l.phone, l.email, l.stageLabel, l.channel ?? "", l.status ?? "",
     l.duration ?? "", l.cost, l.updatedDate, l.updatedAt,
   ]);
   return [head, ...rows].map((r) => r.map((v) => {

@@ -286,11 +286,9 @@ function StatusTag({ status }: { status: AgentStatus }) {
 
 function Tools() {
   const [query, setQuery] = useState("");
-  const [fHealth, setFHealth] = useState<"all" | "ok" | "warn">("all");
   const [fType, setFType] = useState<"all" | ToolType>("all");
 
   const filtered = TOOLS.filter((t) => {
-    if (fHealth !== "all" && t.health !== fHealth) return false;
     if (fType !== "all" && t.type !== fType) return false;
     if (query && !t.handle.toLowerCase().includes(query.toLowerCase()) && !t.description.toLowerCase().includes(query.toLowerCase())) return false;
     return true;
@@ -318,16 +316,6 @@ function Tools() {
             { value: "mcp", label: "MCP" },
           ]}
         />
-        <FilterSelect
-          label="Health"
-          value={fHealth}
-          onChange={(v) => setFHealth(v as typeof fHealth)}
-          options={[
-            { value: "all", label: "All" },
-            { value: "ok", label: "Healthy" },
-            { value: "warn", label: "Degraded" },
-          ]}
-        />
         <Button size="sm" className="ml-auto h-8 gap-1.5 text-xs" asChild>
           <Link to="/agents/tools/new" search={{ tool: undefined }}><Plus className="h-3.5 w-3.5" /> Add tool</Link>
         </Button>
@@ -345,7 +333,6 @@ function Tools() {
                 <th className="px-4 py-2.5 text-left font-medium">Tool</th>
                 <th className="px-4 py-2.5 text-left font-medium">Type</th>
                 <th className="px-4 py-2.5 text-left font-medium">Auth</th>
-                <th className="px-4 py-2.5 text-left font-medium">Health</th>
                 <th className="px-4 py-2.5 text-left font-medium">Status</th>
                 <th className="px-4 py-2.5 text-left font-medium">Created</th>
                 <th className="px-4 py-2.5 text-left font-medium">Updated</th>
@@ -378,15 +365,6 @@ function Tools() {
                     <span className="inline-flex items-center gap-1.5 text-[12px] text-muted-foreground">
                       <KeyRound className="h-3 w-3" />
                       {AUTH_LABEL[t.auth]}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span
-                      title="Based on recent calls"
-                      className={cn("inline-flex items-center gap-1.5 text-[12px]", t.health === "ok" ? "text-success" : "text-warning")}
-                    >
-                      <span className={cn("h-1.5 w-1.5 rounded-full", t.health === "ok" ? "bg-success" : "bg-warning")} />
-                      {t.health === "ok" ? "Healthy" : "Degraded"}
                     </span>
                   </td>
                   <td className="px-4 py-3">

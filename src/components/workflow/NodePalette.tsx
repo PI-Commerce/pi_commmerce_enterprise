@@ -1,7 +1,7 @@
 import { useState } from "react";
 import {
   Users, GitBranch, Split, Phone, MessageCircle,
-  MessageSquare, Clock, Megaphone, Plus, X,
+  MessageSquare, Clock, Megaphone, Plus, X, Webhook,
   type LucideIcon,
 } from "lucide-react";
 import type { NodeKind } from "@/lib/campaign-types";
@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 
 const ICONS: Partial<Record<NodeKind, LucideIcon>> = {
   audience: Users,
+  apiToolCall: Webhook,
   conditional: GitBranch,
   abSplit: Split,
   delay: Clock,
@@ -20,7 +21,7 @@ const ICONS: Partial<Record<NodeKind, LucideIcon>> = {
 };
 
 const SECTIONS: Array<{ label: string; nodes: NodeKind[] }> = [
-  { label: "Data Nodes", nodes: ["audience"] },
+  { label: "Data Nodes", nodes: ["audience", "apiToolCall"] },
   { label: "Logic Nodes", nodes: ["conditional", "abSplit", "delay"] },
   { label: "Action Nodes", nodes: ["voiceCall", "whatsapp", "sms"] },
   { label: "Ads Nodes", nodes: ["adsCampaign"] },

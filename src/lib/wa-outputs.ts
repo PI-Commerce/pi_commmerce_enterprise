@@ -10,6 +10,7 @@
 import type { NodeKind, NodeOutput, WorkflowNodeData } from "./campaign-types";
 import { SEED_TEMPLATES, type TemplateButtonType, type WaTemplate } from "./waba-templates";
 import { agentToolOutputVars } from "./agent-data";
+import { getTool } from "./tool-registry";
 
 /**
  * Button types that produce a usable inbound signal we can branch on.
@@ -74,7 +75,7 @@ export function actionNodeOutputs(kind: NodeKind, config?: WorkflowNodeData["con
     if (config?.waMode === "freeform") return whatsappOutputs(undefined, split);
     return whatsappOutputs(resolveWaTemplate(config?.waTemplate), split);
   }
-  if (kind === "voiceCall" || kind === "sms") return completedOutput();
+  if (kind === "voiceCall" || kind === "sms" || kind === "apiToolCall") return completedOutput();
   return undefined;
 }
 
@@ -103,6 +104,11 @@ export function deriveNodeOutcomeVariables(
       if (kind === "voiceCall" && config?.agent) {
         for (const tv of agentToolOutputVars(config.agent)) vars.push(tv);
       }
+    } else if (kind === "apiToolCall") {
+      // A direct API Tool Call exposes the selected tool's response fields
+      // downstream, namespaced by node id (e.g. `<id>.college_name`).
+      const tool = config?.apiTool ? getTool(config.apiTool) : undefined;
+      if (tool) for (const o of tool.outputs) vars.push({ key: `${n.id}.${o.varName}`, source });
     }
   }
   // Tool output vars are namespaced by tool (not node) so two voice nodes on the

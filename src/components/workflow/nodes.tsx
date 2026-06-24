@@ -2,7 +2,7 @@ import { Handle, Position, type NodeProps } from "reactflow";
 import {
   Play, Square, Users, GitBranch, Split,
   Phone, MessageCircle, MessageSquare,
-  Clock, Megaphone, AlertCircle, CheckCircle2, Loader2, Sparkles, FlaskConical,
+  Clock, Megaphone, AlertCircle, CheckCircle2, Loader2, Sparkles, FlaskConical, Webhook,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -15,6 +15,7 @@ const ICONS: Record<NodeKind, LucideIcon> = {
   start: Play,
   end: Square,
   audience: Users,
+  apiToolCall: Webhook,
   conditional: GitBranch,
   abSplit: Split,
   delay: Clock,

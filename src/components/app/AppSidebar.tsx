@@ -23,7 +23,7 @@ const channelChildren: ChannelChild[] = [
 ];
 
 const secondary = [
-  { to: "/integrations", label: "Integrations", icon: Plug },
+  { to: "/integrations", label: "Integrations", icon: Plug, disabled: true },
   { to: "/settings", label: "Settings", icon: Settings, disabled: true },
 ] as const;
 
