@@ -175,75 +175,61 @@ function CampaignAnalytics({
 }) {
   const [campaignId, setCampaignId] = useState(CAMPAIGNS[0].id);
   const campaign = CAMPAIGNS.find((c) => c.id === campaignId)!;
-  // Version scopes the visible runs (Campaign → Version → Run cascade). "all" = every version.
-  const [version, setVersion] = useState<string>("all");
-  const versions = useMemo(() => campaign.runs.map((_, i) => runVersionLabel(campaign, i)), [campaign]);
-  const visibleRuns = useMemo(
-    () => (version === "all" ? campaign.runs : campaign.runs.filter((_, i) => runVersionLabel(campaign, i) === version)),
-    [campaign, version],
-  );
   const [runId, setRunId] = useState(campaign.runs[0].id);
-  const run = visibleRuns.find((r) => r.id === runId) ?? visibleRuns[0] ?? campaign.runs[0];
+  const run = campaign.runs.find((r) => r.id === runId) ?? campaign.runs[0];
   const [openNode, setOpenNode] = useState<SankeyNode | null>(null);
 
   return (
     <>
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <Select
-          value={campaignId}
-          onValueChange={(v) => {
-            setCampaignId(v);
-            const next = CAMPAIGNS.find((c) => c.id === v)!;
-            setVersion("all");
-            setRunId(next.runs[0].id);
-          }}
-        >
-          <SelectTrigger className="h-9 w-[280px] text-xs"><SelectValue placeholder="Campaign" /></SelectTrigger>
-          <SelectContent>
-            {CAMPAIGNS.map((c) => (<SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>))}
-          </SelectContent>
-        </Select>
-        <Select
-          value={version}
-          onValueChange={(v) => {
-            setVersion(v);
-            const next = v === "all" ? campaign.runs : campaign.runs.filter((_, i) => runVersionLabel(campaign, i) === v);
-            setRunId((next[0] ?? campaign.runs[0]).id);
-          }}
-        >
-          <SelectTrigger className="h-9 w-[150px] text-xs"><SelectValue placeholder="Version" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All versions</SelectItem>
-            {versions.map((v, i) => (
-              <SelectItem key={v} value={v}>{v}{i === 0 && " (current)"}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={run.id} onValueChange={setRunId}>
-          <SelectTrigger className="h-9 w-[280px] text-xs"><SelectValue placeholder="Run" /></SelectTrigger>
-          <SelectContent>
-            {visibleRuns.map((r) => {
-              const idx = campaign.runs.indexOf(r);
-              return (
-                <SelectItem key={r.id} value={r.id}>
-                  {r.startedAt} · {runVersionLabel(campaign, idx)}{idx === 0 && " (latest)"}
-                </SelectItem>
-              );
-            })}
-          </SelectContent>
-        </Select>
-        <div className="ml-auto flex items-center gap-2">
-          <DateRangePicker value={dateRange} onChange={onDateRangeChange} />
-          <Badge variant="outline" className="text-[11px] capitalize">
-            {run.status}
-          </Badge>
-        </div>
+      <div className="mb-4 flex flex-wrap items-end gap-2">
+        <FilterField label="Campaign">
+          <Select
+            value={campaignId}
+            onValueChange={(v) => {
+              setCampaignId(v);
+              const next = CAMPAIGNS.find((c) => c.id === v)!;
+              setRunId(next.runs[0].id);
+            }}
+          >
+            <SelectTrigger className="h-9 w-[280px] text-xs"><SelectValue placeholder="Campaign" /></SelectTrigger>
+            <SelectContent>
+              {CAMPAIGNS.map((c) => (<SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>))}
+            </SelectContent>
+          </Select>
+        </FilterField>
+        <FilterField label="Run">
+          <Select value={run.id} onValueChange={setRunId}>
+            <SelectTrigger className="h-9 w-[420px] text-xs"><SelectValue placeholder="Run" /></SelectTrigger>
+            <SelectContent>
+              {campaign.runs.map((r) => {
+                const idx = campaign.runs.indexOf(r);
+                return (
+                  <SelectItem key={r.id} value={r.id}>
+                    <span className="flex items-center gap-2">
+                      <span className="font-medium">{r.name}</span>
+                      <span className="text-muted-foreground">{r.code} · {runVersionLabel(campaign, idx)}</span>
+                      <Badge variant="outline" className="text-[10px]">
+                        {r.runType === "always-on" ? "Always-on" : "Time-Scoped"}
+                      </Badge>
+                    </span>
+                  </SelectItem>
+                );
+              })}
+            </SelectContent>
+          </Select>
+        </FilterField>
+        {/* Date range is meaningful only for Always-on runs; a Time-Scoped run is a fixed batch. */}
+        {run.runType === "always-on" && (
+          <FilterField label="Date range">
+            <DateRangePicker value={dateRange} onChange={onDateRangeChange} />
+          </FilterField>
+        )}
       </div>
 
       <div className="grid grid-cols-3 gap-3">
-        <KPI label="Total Leads"      value={run.kpi.totalLeads.toLocaleString()}     info="Total Leads available for the Run, at a point in time." />
-        <KPI label="Valid Leads"      value={run.kpi.validLeads.toLocaleString()}     info="Total Leads that were addressable, to enter the campaign workflow." />
-        <KPI label="Completed Leads"  value={run.kpi.leadsProcessed.toLocaleString()} info="Total Leads that reached the End Node of the selected Run." />
+        <KPI label="Total Leads"      value={run.kpi.totalLeads.toLocaleString()}     info="Total input leads available to the Run, at a point in time." />
+        <KPI label="Eligible Leads"   value={run.kpi.validLeads.toLocaleString()}     info="Leads that were valid and addressable, and entered the campaign workflow." />
+        <KPI label="Completed Leads"  value={run.kpi.leadsProcessed.toLocaleString()} info="Leads that completed the full campaign (reached the End Node of the selected Run)." />
       </div>
 
       <div className="mt-4 rounded-xl border border-border bg-card">
@@ -792,65 +778,67 @@ function ChannelAnalytics({
   const runSel = selection.runIds ?? [];
   const nodeSel = selection.nodeIds ?? [];
 
-  // Cascade filters: asset → campaign → run → node
-  const refsAfterAsset = useMemo(() => {
-    if (assetSel.length === 0) return allRefs;
-    const allowed = new Set<string>();
-    for (const aid of assetSel) {
-      const s = refsByAsset.get(aid);
-      if (s) s.forEach((k) => allowed.add(k));
-    }
-    return allRefs.filter((r) => allowed.has(`${r.campaignId}|${r.runId}|${r.nodeId}`));
-  }, [allRefs, assetSel, refsByAsset]);
+  // Bidirectional cross-filtering. Two filter groups — Group A (Campaign→Run→Node,
+  // the journey path) and Group B (Asset: WhatsApp Number / Voice Agent) — narrow
+  // each other: every dimension's options are computed by applying all the OTHER
+  // active filters, so options with zero overlap simply drop out.
+  const refKey = (r: Ref) => `${r.campaignId}|${r.runId}|${r.nodeId}`;
+  const nodeKey = (r: Ref) => `${r.runId}::${r.nodeId}`;
+  const passAsset = (r: Ref) =>
+    assetSel.length === 0 || assetSel.some((aid) => refsByAsset.get(aid)?.has(refKey(r)));
+  const passCampaign = (r: Ref) => campaignSel.length === 0 || campaignSel.includes(r.campaignId);
+  const passRun = (r: Ref) => runSel.length === 0 || runSel.includes(r.runId);
+  const passNode = (r: Ref) => nodeSel.length === 0 || nodeSel.includes(nodeKey(r));
 
   const campaignOptions = useMemo(() => {
-    const ids = new Set(refsAfterAsset.map((r) => r.campaignId));
+    const ids = new Set(allRefs.filter((r) => passAsset(r) && passRun(r) && passNode(r)).map((r) => r.campaignId));
     return CAMPAIGNS.filter((c) => ids.has(c.id));
-  }, [refsAfterAsset]);
-
-  const refsAfterCampaign = useMemo(
-    () => (campaignSel.length === 0 ? refsAfterAsset : refsAfterAsset.filter((r) => campaignSel.includes(r.campaignId))),
-    [refsAfterAsset, campaignSel],
-  );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allRefs, assetSel, runSel, nodeSel, refsByAsset]);
 
   const runOptions = useMemo(() => {
-    const ids = new Set(refsAfterCampaign.map((r) => r.runId));
+    const ids = new Set(allRefs.filter((r) => passAsset(r) && passCampaign(r) && passNode(r)).map((r) => r.runId));
     const rows: { run: RunRow; campaignName: string }[] = [];
-    for (const c of CAMPAIGNS) {
-      for (const r of c.runs) {
-        if (ids.has(r.id)) rows.push({ run: r, campaignName: c.name });
-      }
-    }
+    for (const c of CAMPAIGNS) for (const r of c.runs) if (ids.has(r.id)) rows.push({ run: r, campaignName: c.name });
     return rows;
-  }, [refsAfterCampaign]);
-
-  const refsAfterRun = useMemo(
-    () => (runSel.length === 0 ? refsAfterCampaign : refsAfterCampaign.filter((r) => runSel.includes(r.runId))),
-    [refsAfterCampaign, runSel],
-  );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allRefs, assetSel, campaignSel, nodeSel, refsByAsset]);
 
   const nodeOptions = useMemo(() => {
     const seen = new Set<string>();
     const opts: { value: string; label: string }[] = [];
-    for (const ref of refsAfterRun) {
+    for (const ref of allRefs.filter((r) => passAsset(r) && passCampaign(r) && passRun(r))) {
       const campaign = CAMPAIGNS.find((c) => c.id === ref.campaignId);
       const run = campaign?.runs.find((r) => r.id === ref.runId);
       const node = run?.sankey.nodes.find((n) => n.id === ref.nodeId);
       if (!node) continue;
-      const key = `${ref.runId}::${ref.nodeId}`;
+      const key = nodeKey(ref);
       if (seen.has(key)) continue;
       seen.add(key);
       const nodeLabel = node.name.split(" · ").slice(1).join(" · ") || node.name;
       opts.push({ value: key, label: `${nodeLabel} · ${run!.startedAt}` });
     }
     return opts;
-  }, [refsAfterRun]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allRefs, assetSel, campaignSel, runSel, refsByAsset]);
 
-  const selectedRefs = useMemo(() => {
-    if (nodeSel.length === 0) return refsAfterRun;
-    const keep = new Set(nodeSel);
-    return refsAfterRun.filter((r) => keep.has(`${r.runId}::${r.nodeId}`));
-  }, [refsAfterRun, nodeSel]);
+  // Group B options narrow to assets touched by the current Group A selection.
+  const assetOptions = useMemo(() => {
+    const allowed = new Set(allRefs.filter((r) => passCampaign(r) && passRun(r) && passNode(r)).map((r) => refKey(r)));
+    return assets.filter((a) => {
+      const s = refsByAsset.get(a.id);
+      if (!s) return false;
+      for (const k of s) if (allowed.has(k)) return true;
+      return false;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allRefs, assets, campaignSel, runSel, nodeSel, refsByAsset]);
+
+  const selectedRefs = useMemo(
+    () => allRefs.filter((r) => passAsset(r) && passCampaign(r) && passRun(r) && passNode(r)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [allRefs, assetSel, campaignSel, runSel, nodeSel, refsByAsset],
+  );
 
   const tabMeta = CHANNEL_TABS.find((c) => c.kind === kind)!;
 
@@ -877,47 +865,56 @@ function ChannelAnalytics({
         })}
       </div>
 
-      {/* Standardized filter row: Asset · Campaign · Run · Node · Date range — the
-          date filter lives inside the filter row (not at page level). */}
-      <div className="mb-4 grid grid-cols-1 gap-2 md:grid-cols-3 lg:grid-cols-5">
-        <FilterField label={tabMeta.assetLabel}>
-          <MultiSelect
-            options={assets.map((a) => ({ value: a.id, label: a.label }))}
-            value={assetSel}
-            onChange={(v) => onSelectionChange({ ...selection, assetIds: v, campaignIds: [], runIds: [], nodeIds: [] })}
-            allLabel={`All ${tabMeta.assetLabel}s`}
-          />
-        </FilterField>
-        <FilterField label="Campaign">
-          <MultiSelect
-            options={campaignOptions.map((c) => ({ value: c.id, label: c.name }))}
-            value={campaignSel}
-            onChange={(v) => onSelectionChange({ ...selection, campaignIds: v, runIds: [], nodeIds: [] })}
-            allLabel="All Campaigns"
-          />
-        </FilterField>
-        <FilterField label="Run">
-          <MultiSelect
-            options={runOptions.map(({ run, campaignName }) => ({
-              value: run.id,
-              label: `${run.startedAt} · ${campaignName}`,
-            }))}
-            value={runSel}
-            onChange={(v) => onSelectionChange({ ...selection, runIds: v, nodeIds: [] })}
-            allLabel="All Runs"
-          />
-        </FilterField>
-        <FilterField label="Node">
-          <MultiSelect
-            options={nodeOptions}
-            value={nodeSel}
-            onChange={(v) => onSelectionChange({ ...selection, nodeIds: v })}
-            allLabel="All Nodes"
-          />
-        </FilterField>
-        <FilterField label="Date range">
-          <DateRangePicker value={dateRange} onChange={onDateRangeChange} align="start" className="w-full" />
-        </FilterField>
+      {/* Two distinct filter groups that narrow each other (bidirectional):
+          Group A = the journey path (Campaign → Run → Node); Group B = the channel
+          asset (WhatsApp Number / Voice Agent). Date range scopes both. */}
+      <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-stretch">
+        <FilterGroup title="Journey path" className="lg:flex-[3]">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <FilterField label="Campaign">
+              <MultiSelect
+                options={campaignOptions.map((c) => ({ value: c.id, label: c.name }))}
+                value={campaignSel}
+                onChange={(v) => onSelectionChange({ ...selection, campaignIds: v, runIds: [], nodeIds: [] })}
+                allLabel="All Campaigns"
+              />
+            </FilterField>
+            <FilterField label="Run">
+              <MultiSelect
+                options={runOptions.map(({ run, campaignName }) => ({
+                  value: run.id,
+                  label: `${run.startedAt} · ${campaignName}`,
+                }))}
+                value={runSel}
+                onChange={(v) => onSelectionChange({ ...selection, runIds: v, nodeIds: [] })}
+                allLabel="All Runs"
+              />
+            </FilterField>
+            <FilterField label="Node">
+              <MultiSelect
+                options={nodeOptions}
+                value={nodeSel}
+                onChange={(v) => onSelectionChange({ ...selection, nodeIds: v })}
+                allLabel="All Nodes"
+              />
+            </FilterField>
+          </div>
+        </FilterGroup>
+        <FilterGroup title={`${tabMeta.label} channel`} className="lg:flex-[2]">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <FilterField label={tabMeta.assetLabel}>
+              <MultiSelect
+                options={assetOptions.map((a) => ({ value: a.id, label: a.label }))}
+                value={assetSel}
+                onChange={(v) => onSelectionChange({ ...selection, assetIds: v })}
+                allLabel={`All ${tabMeta.assetLabel}s`}
+              />
+            </FilterField>
+            <FilterField label="Date range">
+              <DateRangePicker value={dateRange} onChange={onDateRangeChange} align="start" className="w-full" />
+            </FilterField>
+          </div>
+        </FilterGroup>
       </div>
 
       {selectedRefs.length === 0 ? (
@@ -942,6 +939,15 @@ function FilterField({ label, children }: { label: string; children: React.React
   return (
     <div>
       <p className="mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">{label}</p>
+      {children}
+    </div>
+  );
+}
+
+function FilterGroup({ title, className, children }: { title: string; className?: string; children: React.ReactNode }) {
+  return (
+    <div className={`rounded-lg border border-border bg-muted/30 p-2.5 ${className ?? ""}`}>
+      <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{title}</p>
       {children}
     </div>
   );
