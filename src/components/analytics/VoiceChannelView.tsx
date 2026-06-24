@@ -42,7 +42,7 @@ function buildCalls(run: RunRow, node: SankeyNode): Call[] {
   const leads = generateLeads(run).filter((l) => l.stageNodeId === node.id);
   const r = seed(node.id + run.id);
   return leads.slice(0, 80).map((l, i) => {
-    const answered = l.status === "answered" || l.status === "interested" || (l.status !== "failed" && r() > 0.25);
+    const answered = l.status === "complete" || l.status === "running" || (l.status !== "failed" && r() > 0.25);
     const hh = 7 + Math.floor(r() * 13);
     const mm = String(Math.floor(r() * 59)).padStart(2, "0");
     return {

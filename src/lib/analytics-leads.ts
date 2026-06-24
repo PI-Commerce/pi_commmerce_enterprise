@@ -5,7 +5,7 @@ import type { ChannelKind, RunRow, SankeyNode, SankeyNodeKind } from "@/lib/anal
 
 export type LeadStatus =
   | "sent" | "delivered" | "read" | "clicked" | "replied" | "converted"
-  | "connected" | "answered" | "interested" | "voicemail"
+  | "running" | "complete"
   | "failed" | "dropped" | "pending";
 
 export type Lead = {
@@ -43,7 +43,8 @@ const STATUS_BY_KIND: Record<SankeyNodeKind, LeadStatus[]> = {
   // Aligned to the Meta delivery callback set (clicked/replied are interaction
   // events, not delivery statuses, so they're excluded here).
   whatsapp:    ["sent","delivered","read","failed"],
-  voice:       ["connected","answered","interested","voicemail","failed"],
+  // Dev team's current voice-call lifecycle statuses.
+  voice:       ["pending","running","complete","failed"],
   sms:         ["delivered","failed"],
   ads:         ["clicked","delivered"],
   end:         [],
