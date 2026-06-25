@@ -206,3 +206,54 @@
   border-radius: 3px;
 }
 .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+
+/* Ask Pi (CopilotKit chat) — align the agent chat with the app's design tokens
+   so text messages match the deterministic cards. */
+.askpi-chat .copilotKitChat,
+.askpi-chat .copilotKitMessages,
+.askpi-chat .copilotKitInputContainer {
+  background: transparent;
+  font-family: var(--font-sans);
+}
+/* Hide the per-message action toolbar (regenerate / copy / thumbs up-down). */
+.askpi-chat .copilotKitMessageControls { display: none !important; }
+/* Message bubbles — compact, tokenized, matching the card typography.
+   Scoped through .copilotKitMessages to out-specify CopilotKit's own
+   stylesheet, which is imported after this one. */
+.askpi-chat .copilotKitMessages .copilotKitMessage {
+  font-size: 13px;
+  line-height: 1.5;
+}
+.askpi-chat .copilotKitMessages .copilotKitUserMessage {
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+  border-radius: 14px;
+  padding: 7px 11px;
+}
+.askpi-chat .copilotKitMessages .copilotKitAssistantMessage {
+  background: transparent;
+  color: var(--foreground);
+  padding: 7px 11px 7px 0;
+}
+.askpi-chat .copilotKitMessages .copilotKitMarkdown,
+.askpi-chat .copilotKitMessages .copilotKitParagraph { font-size: 13px; }
+/* Hide the default tool-call status pills ("instantiateCampaignTemplate · Done")
+   for the silent data/side-effect actions. CopilotKit 1.61's AG-UI tool renderer
+   ignores a per-action `render` override for handler actions, so suppress the
+   pill here by tool-name. The HITL cards (listCampaignTemplates / resolveCampaign
+   / validateCampaign / confirmCampaign) carry different tool-names and stay visible. */
+.askpi-chat [data-testid="copilot-tool-render"][data-tool-name="instantiateCampaignTemplate"],
+.askpi-chat [data-testid="copilot-tool-render"][data-tool-name="listSegments"],
+.askpi-chat [data-testid="copilot-tool-render"][data-tool-name="listWhatsAppTemplates"],
+.askpi-chat [data-testid="copilot-tool-render"][data-tool-name="listVoiceAgents"] {
+  display: none !important;
+}
+/* Composer input — match the app's input token, smaller text. */
+.askpi-chat .copilotKitInput {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  font-size: 13px;
+  color: var(--foreground);
+}
+.askpi-chat .copilotKitInput::placeholder { color: var(--muted-foreground); }

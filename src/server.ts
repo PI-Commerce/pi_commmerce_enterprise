@@ -1,5 +1,6 @@
 import "./lib/error-capture";
 
+import { COPILOT_ENDPOINT } from "./lib/copilot/endpoint";
 import { consumeLastCapturedError } from "./lib/error-capture";
 import { renderErrorPage } from "./lib/error-page";
 
@@ -69,6 +70,12 @@ async function normalizeCatastrophicSsrResponse(response: Response): Promise<Res
 export default {
   async fetch(request: Request, env: unknown, ctx: unknown) {
     try {
+      // Front-end CopilotKit provider posts here; intercept before SSR and
+      // lazily import the heavy runtime so it stays off the page-render path.
+      if (new URL(request.url).pathname.startsWith(COPILOT_ENDPOINT)) {
+        const { handleCopilotRequest } = await import("./lib/copilot/runtime.server");
+        return await handleCopilotRequest(request, env as Record<string, unknown> | undefined);
+      }
       const handler = await getServerEntry();
       const response = await handler.fetch(request, env, ctx);
       return await normalizeCatastrophicSsrResponse(response);

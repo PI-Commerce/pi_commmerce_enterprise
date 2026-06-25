@@ -12,7 +12,11 @@
     "format": "prettier --write ."
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.57.0",
     "@cloudflare/vite-plugin": "^1.25.5",
+    "@copilotkit/react-core": "^1.61.0",
+    "@copilotkit/react-ui": "^1.61.0",
+    "@copilotkit/runtime": "^1.61.0",
     "@crayonai/react-core": "^0.7.7",
     "@crayonai/react-ui": "^0.9.16",
     "@crayonai/stream": "^0.6.4",

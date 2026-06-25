@@ -140,23 +140,3 @@ const ROUTES: { match: (p: string) => boolean; ctx: PiContext }[] = [
 export function getPiContext(pathname: string): PiContext {
   return ROUTES.find((r) => r.match(pathname))?.ctx ?? DEFAULT;
 }
-
-/**
- * Canvas (campaign builder) context — used by the in-canvas AiComposer, which
- * lives outside the AppShell. Node-level suggestions; benchmark copy lands in I3.
- */
-export const CANVAS_CONTEXT: PiContext = {
-  scope: "Campaign canvas",
-  placeholder: "Ask Pi anything…",
-  chips: ["Add dormant trader reactivation", "Insert Voice AI after WhatsApp fail"],
-  thinking: [
-    "Reading current graph (10 nodes, 10 edges)…",
-    "Identifying failure branch on WhatsApp send…",
-    "Proposing Voice AI Agent insertion…",
-  ],
-  result: {
-    text: "I'll add a Voice AI Agent after the WhatsApp failure branch, then route accepted users back into the nurture loop.",
-    diff: ["+ insert  Voice AI Agent · after node wa_send_1", "+ connect edge wa_send_1.failed → voice_agent"],
-    cta: "Apply changes",
-  },
-};

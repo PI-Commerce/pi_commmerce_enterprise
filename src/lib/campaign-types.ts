@@ -135,9 +135,10 @@ export type WorkflowNodeData = {
    */
   preset?: boolean;
   /**
-   * I3 — opt-in node-level Pi optimization hint. Holds the id of a suggestion in
-   * {@link file://./pi-node-suggestions.ts}. Only nodes that explicitly set this
-   * surface a hover "Pi tip"; the hint retires once its change is applied.
+   * Legacy node-level Pi optimization hint id. The hover "Pi tip" UI that
+   * consumed it was removed when the campaign builder switched to the dedicated
+   * Ask Pi creation composer; some authored nodes still carry the field but it is
+   * no longer rendered. Retained so existing node data stays valid.
    */
   piHint?: string;
 };

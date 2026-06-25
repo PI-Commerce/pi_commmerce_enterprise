@@ -9,7 +9,6 @@ import {
 import { cn } from "@/lib/utils";
 import type { NodeKind, WorkflowNodeData } from "@/lib/campaign-types";
 import { NODE_GROUPS } from "@/lib/campaign-types";
-import { getSuggestion } from "@/lib/pi-node-suggestions";
 
 export type { WorkflowNodeData } from "@/lib/campaign-types";
 
@@ -25,15 +24,6 @@ export const CanvasModeContext = createContext<{ showPiTips: boolean; focusNodeI
   showPiTips: false,
   focusNodeId: null,
 });
-
-/**
- * Fires a decoupled request to open the canvas Ask Pi composer and propose a
- * specific node suggestion. The composer pre-fills, "thinks", then shows the
- * proposed change — and only mutates the graph when the user confirms.
- */
-function askPiSuggest(nodeId: string, suggestionId: string) {
-  window.dispatchEvent(new CustomEvent("askpi:suggest", { detail: { nodeId, suggestionId } }));
-}
 
 const ICONS: Record<NodeKind, LucideIcon> = {
   start: Play,
@@ -73,11 +63,7 @@ export function WorkflowNode({ id, data, selected }: NodeProps<WorkflowNodeData>
   // downward with more ports instead of ballooning sideways.
   const nodeWidth = multiOut ? 240 : 224;
 
-  // I3 — node-level Pi optimization hint. Opt-in per node via `data.piHint`, so
-  // only the curated few nodes surface a tip — never the whole graph. Suppressed
-  // on analytics (data.metrics) and read-only snapshots (showPiTips).
-  const { showPiTips, focusNodeId } = useContext(CanvasModeContext);
-  const piTip = showPiTips && !data.metrics && !data.building ? getSuggestion(data.piHint) : undefined;
+  const { focusNodeId } = useContext(CanvasModeContext);
 
   // I6 — edit focus mode. When another node is selected, this one dims so the
   // configured node stands out. The selected node itself never dims.
@@ -182,35 +168,6 @@ export function WorkflowNode({ id, data, selected }: NodeProps<WorkflowNodeData>
         <div className="absolute -right-2 -top-2.5 z-10 flex items-center gap-1 rounded-full border border-chart-1/40 bg-chart-1/10 px-1.5 py-0.5 text-[9px] font-semibold text-chart-1 shadow-sm backdrop-blur-sm">
           <FlaskConical className="h-2.5 w-2.5" />
           A/B {abTest.variants.map((v) => v.pct).join("/")}
-        </div>
-      )}
-
-      {piTip && (
-        <div className="group/pitip absolute -top-3 left-2 z-20">
-          {/* Hint chip — fades in on node hover; click opens Ask Pi pre-filled. */}
-          <button
-            type="button"
-            onClick={(e) => { e.stopPropagation(); askPiSuggest(id, piTip.id); }}
-            className="pointer-events-auto flex h-5 items-center gap-1 rounded-full border border-ai/40 bg-card px-1.5 text-[9px] font-semibold text-ai opacity-0 shadow-sm transition-opacity duration-150 group-hover:opacity-100"
-            aria-label="Pi optimization tip"
-          >
-            <Sparkles className="h-2.5 w-2.5" /> Pi tip
-          </button>
-          {/* Benchmark popover — opens upward on hint hover, over canvas whitespace. */}
-          <div className="invisible absolute bottom-full left-0 mb-1 w-56 rounded-xl border border-ai/30 bg-card p-2.5 text-left opacity-0 shadow-[0_14px_34px_-10px_rgba(0,0,0,0.28)] transition-all duration-150 group-hover/pitip:visible group-hover/pitip:opacity-100">
-            <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-ai">
-              <Sparkles className="h-2.5 w-2.5" /> Benchmark
-            </div>
-            <p className="mt-1 text-[11px] leading-snug text-muted-foreground">{piTip.benchmark}</p>
-            <p className="mt-1.5 text-[11.5px] font-medium leading-snug text-foreground">{piTip.tip}</p>
-            <button
-              type="button"
-              onClick={(e) => { e.stopPropagation(); askPiSuggest(id, piTip.id); }}
-              className="mt-2 inline-flex items-center gap-1 rounded-md bg-foreground px-2 py-1 text-[10.5px] font-medium text-background transition-transform hover:scale-[1.03]"
-            >
-              <Sparkles className="h-2.5 w-2.5" /> Ask Pi to apply
-            </button>
-          </div>
         </div>
       )}
 

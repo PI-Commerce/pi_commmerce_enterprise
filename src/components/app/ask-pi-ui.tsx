@@ -1,11 +1,10 @@
 // Shared Ask Pi UI — one visual language for the assistant everywhere it appears.
 //
-// Both the omnipresent global dock (AskPiDock, on shell pages) and the in-canvas
-// composer (AiComposer, on the campaign builder) render these exact primitives, so
-// the pill, the expanded panel chrome, the "thinking" trace, the result card, the
-// suggestion chips, the send button and the drag behaviour stay identical and can't
-// drift apart. Each surface keeps its own orchestration (routing, wizard, nudges);
-// only the look-and-feel lives here.
+// The omnipresent global dock (AskPiDock, on shell pages) renders these exact
+// primitives — the pill, the expanded panel chrome, the "thinking" trace, the
+// result card, the suggestion chips, the send button and the drag behaviour — so
+// the look-and-feel stays consistent and can't drift apart. Each surface keeps its
+// own orchestration (routing, nudges); only the look-and-feel lives here.
 
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import { ArrowUp, Square, Check, Loader2, Sparkle, X } from "lucide-react";

@@ -12,11 +12,11 @@ import type { WorkflowNodeData, NodeKind, CampaignStatus } from "@/lib/campaign-
 import { NODE_LABELS } from "@/lib/campaign-types";
 import { whatsappOutputs, completedOutput, deriveNodeOutcomeVariables } from "@/lib/wa-outputs";
 import { EXAMPLE_CAMPAIGNS } from "@/lib/campaign-examples";
-import { getSuggestion } from "@/lib/pi-node-suggestions";
 import { elkLayout, type Point } from "@/lib/flow-layout";
 import { useRegion, localizeTzAbbrev, localizeCurrency } from "@/lib/region";
+import { toast } from "sonner";
 import { ConfigPanel } from "./ConfigPanel";
-import { AiComposer } from "./AiComposer";
+import { AgentComposer } from "./AgentComposer";
 import { NodePalette } from "./NodePalette";
 
 
@@ -79,6 +79,10 @@ export function WorkflowCanvas({
   onDirty,
   autoStartAskPi = false,
   isNew = false,
+  agentChat = false,
+  seedName,
+  seedDescription,
+  seedObjective,
   onAiBuiltName,
   previewOnly = false,
 }: {
@@ -88,6 +92,12 @@ export function WorkflowCanvas({
   onDirty?: () => void;
   autoStartAskPi?: boolean;
   isNew?: boolean;
+  /** `?agent=1` opens the new-campaign Ask Pi straight into the live agent chat. */
+  agentChat?: boolean;
+  /** Seed name/description/objective from the create-campaign modal — feed the Ask Pi brief. */
+  seedName?: string;
+  seedDescription?: string;
+  seedObjective?: string;
   onAiBuiltName?: (name: string) => void;
   /** Read-only snapshot mode (e.g. Version History): no palette, no Ask Pi, no editing,
    *  no run pulse — but nodes are still clickable and show their config read-only. */
@@ -305,23 +315,6 @@ export function WorkflowCanvas({
     [setNodes, onDirty],
   );
 
-  // I3 — confirmed a node-level Pi suggestion: run its real graph transform.
-  // The suggestion mutates nodes/edges (fix an invalid node, rewrite a message,
-  // insert a step) and clears its own hint, so the change lands live on canvas.
-  const applySuggestion = useCallback(
-    ({ nodeId, suggestionId }: { nodeId: string; suggestionId: string }) => {
-      const sug = getSuggestion(suggestionId);
-      if (!sug) return;
-      const next = sug.apply(nodes, edges, nodeId);
-      setNodes(next.nodes);
-      setEdges(next.edges);
-      setSelected(null);
-      onDirty?.();
-      refit();
-    },
-    [nodes, edges, setNodes, setEdges, onDirty, refit],
-  );
-
   const deleteNode = useCallback(
     (id: string) => {
       const target = nodes.find((n) => n.id === id);
@@ -469,13 +462,18 @@ export function WorkflowCanvas({
         extraVariables={outcomeVariables.filter((v) => !selected || !v.key.startsWith(`${selected.id}.`))}
       />
 
-      {!previewOnly && (
-        <AiComposer
-          mode="wizard"
+      {/* Ask Pi is scoped to campaign creation only — new campaigns mount the
+          CopilotKit/offline-wizard creation composer (inside the CopilotKit
+          provider from campaigns.$id). Existing campaigns get no composer. */}
+      {!previewOnly && isNew && (
+        <AgentComposer
+          mode={agentChat ? "chat" : "wizard"}
           nudge={{ label: "Ask Pi to build your campaign", active: autoStartAskPi }}
           autoOpenWizard={askPiOpen}
+          seedName={seedName}
+          seedDescription={seedDescription}
+          seedObjective={seedObjective}
           onBuildingChange={setAiBuilding}
-          onApplySuggestion={applySuggestion}
           onWizardSkeleton={(skel) => {
             setSelected(null);
             setNodes(skel.nodes);
@@ -489,6 +487,12 @@ export function WorkflowCanvas({
             onAiBuiltName?.(plan.name);
             onDirty?.();
             refit();
+          }}
+          onSavedDraft={(v) => {
+            onDirty?.();
+            toast.success(`Saved as draft ${v}`, {
+              description: "Review on the canvas — launch is a separate step.",
+            });
           }}
         />
       )}

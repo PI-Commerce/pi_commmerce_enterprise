@@ -4,7 +4,18 @@
 //     componentTagger (dev-only), VITE_* env injection, @ path alias, React/TanStack dedupe,
 //     error logger plugins, and sandbox detection (port/host/strictPort).
 // You can pass additional config via defineConfig({ vite: { ... } }) if needed.
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
+
+// @copilotkit/runtime pulls in pkce-challenge@5 (OAuth PKCE helper). Its package.json
+// `exports` map only declares `browser`/`node` condition branches with no bare default,
+// so rollup's resolver (which doesn't match either during the Cloudflare Worker/SSR build)
+// errors with "No known conditions for '.' specifier". We never exercise PKCE — the live
+// agent path uses the AnthropicAdapter directly, not CopilotCloud's OAuth flow — but we
+// still alias the specifier straight to its concrete node ESM file so the bundle resolves.
+const PKCE_NODE_ENTRY = fileURLToPath(
+  new URL("./node_modules/pkce-challenge/dist/index.node.js", import.meta.url),
+);
 
 // The GenUI C1 SDK (@thesysai/genui-sdk) pulls in mermaid + elkjs + @mermaid-js/parser
 // (~6.5MB). The GenUI renderer mounts client-only (see PiGenUiResult), so the server never
@@ -45,5 +56,8 @@ export default defineConfig({
   },
   vite: {
     plugins: [stubHeavyDepsInSsr()],
+    resolve: {
+      alias: [{ find: /^pkce-challenge$/, replacement: PKCE_NODE_ENTRY }],
+    },
   },
 });
