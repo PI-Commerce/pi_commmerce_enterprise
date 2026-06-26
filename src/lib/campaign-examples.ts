@@ -17,6 +17,7 @@ import type {
   CampaignStatus, WorkflowNodeData, NodeKind, NodeOutput, NodeOutputKind,
   PresetConfig, PresetVarMap,
 } from "./campaign-types";
+import { SERIAL_PREFIX } from "./campaign-types";
 import { whatsappOutputs, resolveWaTemplate } from "./wa-outputs";
 
 export type ExampleCampaign = {
@@ -90,7 +91,7 @@ const EX1_NODES: Node<WorkflowNodeData>[] = [
         { id: "btn_0", label: "Complete purchase", kind: "outcome" },
         { id: "btn_1", label: "Not interested", kind: "outcome" },
         { id: "reply_received", label: "Replied (no button)", kind: "outcome" },
-        { id: "session_expired", label: "Session expired (24h)", kind: "outcome" },
+        { id: "no_response", label: "No response / continue", kind: "default" },
       ],
       config: {
         waNumber: "+91 98100 12345 · PiCommerce",
@@ -157,7 +158,7 @@ const EX1_EDGES: Edge[] = [
   { id: "ex1-e3", source: "tier", sourceHandle: "high_ltv", target: "chat", type: EDGE },
   { id: "ex1-e4", source: "tier", sourceHandle: "mid_ltv", target: "chatMid", type: EDGE },
   { id: "ex1-e5", source: "chat", sourceHandle: "btn_0", target: "end", type: EDGE },
-  { id: "ex1-e6", source: "chat", sourceHandle: "session_expired", target: "voice", type: EDGE },
+  { id: "ex1-e6", source: "chat", sourceHandle: "no_response", target: "voice", type: EDGE },
   { id: "ex1-e7", source: "chat", sourceHandle: "reply_received", target: "delay5", type: EDGE },
   { id: "ex1-e5b", source: "chat", sourceHandle: "btn_1", target: "delay5", type: EDGE },
   { id: "ex1-e8", source: "delay5", target: "voice", type: EDGE },
@@ -247,7 +248,7 @@ const EX2_NODES: Node<WorkflowNodeData>[] = [
         { id: "btn_0", label: "Pay now", kind: "outcome" },
         { id: "btn_1", label: "Remind me later", kind: "outcome" },
         { id: "reply_received", label: "Replied (no button)", kind: "outcome" },
-        { id: "session_expired", label: "Session expired (24h)", kind: "outcome" },
+        { id: "no_response", label: "No response / continue", kind: "default" },
       ],
       config: {
         waNumber: "+91 98100 12345 · PiCommerce",
@@ -356,7 +357,7 @@ const EX2_EDGES: Edge[] = [
   { id: "ex2-e7", source: "outcome", sourceHandle: "no_connect", target: "chatNC", type: EDGE },
   { id: "ex2-e8", source: "outcome", sourceHandle: "wrong_number", target: "end", type: EDGE },
   { id: "ex2-e9", source: "chat", sourceHandle: "btn_0", target: "end", type: EDGE },
-  { id: "ex2-e10", source: "chat", sourceHandle: "session_expired", target: "delay2", type: EDGE },
+  { id: "ex2-e10", source: "chat", sourceHandle: "no_response", target: "delay2", type: EDGE },
   { id: "ex2-e11", source: "chat", sourceHandle: "reply_received", target: "end", type: EDGE },
   { id: "ex2-e9b", source: "chat", sourceHandle: "btn_1", target: "delay2", type: EDGE },
   { id: "ex2-e12", source: "delay2", target: "chatReminder", type: EDGE },
@@ -449,10 +450,10 @@ const sWa = (
   opts?: { vars?: PresetVarMap[]; number?: string },
 ): Spec => ({
   id, kind: "whatsapp", title, subtitle,
-  // Outputs derive from the template's buttons: button templates expand to
-  // per-button + reply + session handles; text-only templates stay collapsed
-  // (single advance handle) since the Type-1 split toggle defaults off.
-  outputs: whatsappOutputs(resolveWaTemplate(template), false),
+  // A WhatsApp node always exposes reply_received + no_response, plus one handle
+  // per trackable button. buildCampaign fans a port-less onward edge to every
+  // handle, so a "linear" library send still wires all of them to the next step.
+  outputs: whatsappOutputs(resolveWaTemplate(template)),
   config: {
     waNumber: opts?.number ?? "+91 98100 12345 · PiCommerce", waMode: "template", waTemplate: template, waVarMap: opts?.vars ?? NAME_VAR,
   },
@@ -1193,7 +1194,7 @@ const C_ALTAYER = buildCampaign("Retail · Al Tayer FCC Loyalty", [
 const EX1_LAID = assemble(EX1_NODES, EX1_EDGES);
 const EX2_LAID = assemble(EX2_NODES, EX2_EDGES);
 
-export const EXAMPLE_CAMPAIGNS: Record<string, ExampleCampaign> = {
+const RAW_EXAMPLE_CAMPAIGNS: Record<string, ExampleCampaign> = {
   // Order here drives the Campaigns-list order (the list staggers `lastEdited` by
   // index). The Al Tayer FCC loyalty campaign leads, followed by the rest of the
   // retail examples so the whole retail set sits on the front page. The two retained
@@ -1216,6 +1217,94 @@ export const EXAMPLE_CAMPAIGNS: Record<string, ExampleCampaign> = {
   c_ex15: C_PRICEDROP,
   c_ex16: C_BACKINSTOCK,
 };
+
+/* ---- normalization ------------------------------------------------------
+ * Mirror the live builder's node-identity + branching rules onto every example:
+ *  - assign a per-kind serial (`whatsapp_2`, `cond_1`, …) by node order,
+ *  - derive a short (≤12 char) description from the title (drives the sub-heading),
+ *  - ensure every Conditional carries an always-on `default` / else output handle.
+ * Start/End stay structural (no serial — the sub-heading simply omits the line). */
+const DESCRIPTION_MAX = 12;
+function shortDesc(title: string): string {
+  // Prefer the distinguishing suffix after a "·" (e.g. "Chat AI · loyalty" → "loyalty",
+  // "Delay · 5 days" → "5 days"); otherwise use the whole title. Trim to ≤12 chars on a
+  // word boundary where possible.
+  const parts = title.split("·").map((s) => s.trim()).filter(Boolean);
+  const base = (parts.length > 1 ? parts[parts.length - 1] : parts[0]) || title;
+  if (base.length <= DESCRIPTION_MAX) return base;
+  const cut = base.slice(0, DESCRIPTION_MAX);
+  const sp = cut.lastIndexOf(" ");
+  return (sp >= 5 ? cut.slice(0, sp) : cut).trim();
+}
+
+function normalizeCampaign(c: ExampleCampaign): ExampleCampaign {
+  const counters: Partial<Record<NodeKind, number>> = {};
+  // WhatsApp nodes authored without explicit outputs get the standard handle set
+  // here (reply_received + no_response + any trackable button); their port-less
+  // onward edge must then fan to every handle so each one is wired.
+  const waFanned = new Map<string, NodeOutput[]>();
+  // Conditional nodes that have an always-on `default` handle — used below to
+  // guarantee that handle is wired (no lead ever stuck on a dangling default).
+  const conditionalIds = new Set<string>();
+  const nodes = c.nodes.map((n) => {
+    const { kind } = n.data;
+    if (kind === "start" || kind === "end") return n;
+    const idx = (counters[kind] = (counters[kind] ?? 0) + 1);
+    const serial = n.data.serial ?? `${SERIAL_PREFIX[kind]}_${idx}`;
+    const description = n.data.description ?? shortDesc(n.data.title);
+    let outputs = n.data.outputs;
+    if (kind === "conditional") {
+      const outs = outputs ?? [];
+      if (!outs.some((o) => o.id === "default")) {
+        outputs = [...outs, { id: "default", label: "Default / else", kind: "default" as NodeOutputKind }];
+      }
+      conditionalIds.add(n.id);
+    } else if (kind === "whatsapp" && (!outputs || outputs.length === 0)) {
+      const tmpl = n.data.config?.waMode === "freeform" ? undefined : resolveWaTemplate(n.data.config?.waTemplate);
+      outputs = whatsappOutputs(tmpl);
+      waFanned.set(n.id, outputs);
+    }
+    return { ...n, data: { ...n.data, serial, description, outputs } };
+  });
+  let edges = c.edges;
+  if (waFanned.size) {
+    const fanned: Edge[] = [];
+    let fi = 0;
+    c.edges.forEach((e) => {
+      const handles = waFanned.get(e.source);
+      if (handles && !e.sourceHandle) {
+        handles.forEach((h) => fanned.push({ ...e, id: `${e.id}_${h.id}_${fi++}`, sourceHandle: h.id }));
+      } else {
+        fanned.push(e);
+      }
+    });
+    edges = fanned;
+  }
+  // Wire every conditional's always-on `default` handle to the End node when no
+  // edge already sources from it — otherwise the default branch dangles.
+  const endNode = nodes.find((n) => n.data.kind === "end");
+  if (endNode && conditionalIds.size) {
+    const defaultEdges: Edge[] = [];
+    conditionalIds.forEach((condId) => {
+      const wired = edges.some((e) => e.source === condId && e.sourceHandle === "default");
+      if (!wired) {
+        defaultEdges.push({
+          id: `${condId}_default_end`,
+          source: condId,
+          sourceHandle: "default",
+          target: endNode.id,
+          type: EDGE,
+        });
+      }
+    });
+    if (defaultEdges.length) edges = [...edges, ...defaultEdges];
+  }
+  return { ...c, nodes, edges };
+}
+
+export const EXAMPLE_CAMPAIGNS: Record<string, ExampleCampaign> = Object.fromEntries(
+  Object.entries(RAW_EXAMPLE_CAMPAIGNS).map(([id, c]) => [id, normalizeCampaign(c)]),
+);
 
 /** Names + status for the campaigns list (kept in sync with the registry above). */
 export const EXAMPLE_CAMPAIGN_NAMES: { id: string; name: string; status: CampaignStatus }[] =

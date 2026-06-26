@@ -163,9 +163,13 @@ export function WorkflowNode({ data, selected }: NodeProps<WorkflowNodeData>) {
             {failed && <AlertCircle className="h-3 w-3 text-destructive" />}
             {running && <Loader2 className="h-3 w-3 animate-spin text-ai" />}
           </div>
-          {data.subtitle && (
+          {data.serial ? (
+            <p className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground/80">
+              {data.description ? `${data.serial} • ${data.description}` : data.serial}
+            </p>
+          ) : data.subtitle ? (
             <p title={data.subtitle} className="mt-0.5 truncate text-[11px] text-muted-foreground group-hover:whitespace-normal">{data.subtitle}</p>
-          )}
+          ) : null}
           {invalid && (
             <p className="mt-1 flex items-center gap-1 text-[10.5px] font-medium text-destructive">
               <AlertCircle className="h-2.5 w-2.5" /> {data.error ?? "Incomplete configuration"}

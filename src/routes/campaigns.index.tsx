@@ -14,13 +14,14 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
   Plus, Search, MoreHorizontal, Copy, Workflow,
   CircleDashed, CircleCheck, CircleX, CirclePause, CircleDot,
   Pause, Play, Square, ArrowUp, ArrowDown, ChevronsUpDown, Check,
   Upload, Download, FileSpreadsheet, Database, ChevronLeft, ChevronRight,
+  Webhook,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -56,6 +57,9 @@ type CampaignRow = {
   lastRunAt?: string;
   lastRunTs?: number;
   lastRunId?: string;
+  /** Count of live/associated runs — surfaced so the user sees editing risk
+   *  (publishing edits mints a new version that only new leads follow). */
+  activeRuns: number;
 };
 
 const NOW = Date.now();
@@ -65,6 +69,10 @@ const M = 60_000, H = 60 * M, D = 24 * H;
 // table. Names + ids come straight from the authored graphs so they stay in sync
 // and are searchable by their chosen names. Sub-second stagger keeps them ordered
 // (and above the demo campaigns) under the default "last edited" sort.
+// Deterministic mock of associated-run counts. Only `ready` campaigns can have
+// runs (a `draft` is by definition not run-ready), so drafts always show 0.
+const RUN_SEED = [3, 1, 0, 2, 1, 0, 4, 1];
+
 const EXAMPLE_ROWS: CampaignRow[] = EXAMPLE_CAMPAIGN_NAMES.map((e, i) => ({
   id: e.id,
   name: e.name,
@@ -75,13 +83,14 @@ const EXAMPLE_ROWS: CampaignRow[] = EXAMPLE_CAMPAIGN_NAMES.map((e, i) => ({
   lastEditedTs: NOW - (i + 1) * 1000,
   runType: "one-time" as RunType,
   lastRun: "—" as LastRunStatus,
+  activeRuns: e.status === "ready" ? RUN_SEED[i % RUN_SEED.length] : 0,
 }));
 
 // Only the sales-team example library is shown — older demo campaigns were
 // retired so the platform stays contextual to these examples end-to-end.
 const INITIAL: CampaignRow[] = [...EXAMPLE_ROWS];
 
-const STATES: CampaignStatus[] = ["draft", "ready", "running", "paused"];
+const STATES: CampaignStatus[] = ["draft", "ready"];
 
 const LAST_RUN_META: Record<LastRunStatus, { icon: typeof CircleDashed; tone: string; label: string }> = {
   completed: { icon: CircleCheck,  tone: "text-success",          label: "Completed" },
@@ -93,18 +102,20 @@ const LAST_RUN_META: Record<LastRunStatus, { icon: typeof CircleDashed; tone: st
 
 // ============= Runs =============
 
-type RunStatus = "running" | "completed" | "paused" | "queued" | "failed" | "terminated";
+// Run lifecycle (PRD): pending (queued) → running → completed (time-scoped only).
+// paused (mainly API/always-on), terminated (manual stop), failed (tech failure).
+type RunStatus = "pending" | "running" | "paused" | "completed" | "failed" | "terminated";
 
 const RUN_TONE: Record<RunStatus, string> = {
+  pending:    "border-border bg-secondary text-muted-foreground",
   running:    "border-success/30 bg-success/10 text-success",
-  completed:  "border-border bg-secondary text-muted-foreground",
   paused:     "border-warning/30 bg-warning/10 text-warning",
-  queued:     "border-border bg-muted text-muted-foreground",
+  completed:  "border-border bg-secondary text-muted-foreground",
   failed:     "border-destructive/30 bg-destructive/10 text-destructive",
   terminated: "border-destructive/30 bg-destructive/10 text-destructive",
 };
 
-const RUN_STATUSES: RunStatus[] = ["running", "completed", "paused", "queued", "failed", "terminated"];
+const RUN_STATUSES: RunStatus[] = ["pending", "running", "paused", "completed", "failed", "terminated"];
 
 type TriggerMode = "manual" | "api";
 
@@ -123,7 +134,7 @@ type RunRow = {
 const RUNS: RunRow[] = [
   { id: "\u200B", campaign: "BFSI · Lead Qualification", status: "running",    runType: "one-time",  triggerMode: "manual", startedAt: "Today, 12:04 PM",   completedAt: "ongoing",         leadsProcessed: 630,  leadsTotal: 1500 },
   { id: "r_8420", campaign: "Retail · Activation",       status: "running",    runType: "recurring", triggerMode: "api",    startedAt: "Today, 11:50 AM",   completedAt: "ongoing",         leadsProcessed: 1200 },
-  { id: "r_8419", campaign: "BFSI · Collections",       status: "queued",     runType: "one-time",  triggerMode: "manual", startedAt: "Today, 11:48 AM",   completedAt: "ongoing",         leadsProcessed: 0,    leadsTotal: 820 },
+  { id: "r_8419", campaign: "BFSI · Collections",       status: "pending",    runType: "one-time",  triggerMode: "manual", startedAt: "Today, 11:48 AM",   completedAt: "ongoing",         leadsProcessed: 0,    leadsTotal: 820 },
   { id: "r_8418", campaign: "Retail · Winback",         status: "paused",     runType: "one-time",  triggerMode: "manual", startedAt: "Today, 11:32 AM",   completedAt: "ongoing",         leadsProcessed: 412,  leadsTotal: 750 },
   { id: "r_8417", campaign: "D2C · Cart Abandonment", status: "completed",  runType: "one-time",  triggerMode: "manual", startedAt: "Today, 10:00 AM",   completedAt: "Today, 11:14 AM", leadsProcessed: 1500, leadsTotal: 1500 },
   { id: "r_8416", campaign: "Retail · Seasonal Sale",       status: "completed",  runType: "one-time",  triggerMode: "manual", startedAt: "Yesterday, 08:00 AM",completedAt: "Yesterday, 09:42 AM", leadsProcessed: 3200, leadsTotal: 3200 },
@@ -163,7 +174,6 @@ function CampaignList() {
   };
   const [query, setQuery] = useState("");
   const [fState, setFState] = useState<"all" | CampaignStatus>("all");
-  const [fRunType, setFRunType] = useState<"all" | RunType>("all");
   const [createOpen, setCreateOpen] = useState(false);
   const [createRunOpen, setCreateRunOpen] = useState(false);
   const [runFor, setRunFor] = useState<CampaignRow | null>(null);
@@ -191,7 +201,6 @@ function CampaignList() {
 
   const filtered = rows.filter((r) => {
     if (fState !== "all" && r.state !== fState) return false;
-    if (fRunType !== "all" && r.runType !== fRunType) return false;
     if (query && !r.name.toLowerCase().includes(query.toLowerCase())) return false;
     return true;
   });
@@ -215,7 +224,7 @@ function CampaignList() {
   // Pagination for the campaigns table.
   const C_PAGE_SIZE = 8;
   const [cPage, setCPage] = useState(1);
-  useEffect(() => { setCPage(1); }, [query, fState, fRunType, sortKey, sortDir]);
+  useEffect(() => { setCPage(1); }, [query, fState, sortKey, sortDir]);
   const cTotalPages = Math.max(1, Math.ceil(sorted.length / C_PAGE_SIZE));
   const cPageSafe = Math.min(cPage, cTotalPages);
   const pageRows = sorted.slice((cPageSafe - 1) * C_PAGE_SIZE, cPageSafe * C_PAGE_SIZE);
@@ -241,10 +250,18 @@ function CampaignList() {
     navigate({ to: "/campaigns/$id", params: { id: "new" }, search: { name, description, objective } as never });
   };
 
+  // After an API-sourced run is created, surface its unique trigger endpoint in a
+  // follow-up dialog so it can be copied immediately (it's also on the run row).
+  const [endpointInfo, setEndpointInfo] = useState<{ runName: string; endpoint: string } | null>(null);
+
   const handleRunStarted = (payload: CreateRunPayload) => {
     setCreateRunOpen(false);
     setRunFor(null);
     toast.success("Run started", { description: `${payload.runName} · ${payload.triggerMode === "api" ? "API trigger activated" : "running now"}` });
+    if (payload.audienceSource === "api") {
+      const runId = `run_${Date.now().toString(36)}`;
+      setEndpointInfo({ runName: payload.runName, endpoint: `https://api.picommerce.io/v1/runs/trigger/${runId}` });
+    }
   };
 
   const hasAny = rows.length > 0;
@@ -313,16 +330,6 @@ function CampaignList() {
               onChange={(v) => setFState(v as typeof fState)}
               options={[{ value: "all", label: "All states" }, ...STATES.map((s) => ({ value: s, label: cap(s) }))]}
             />
-            <FilterSelect
-              label="Run type"
-              value={fRunType}
-              onChange={(v) => setFRunType(v as typeof fRunType)}
-              options={[
-                { value: "all", label: "All run types" },
-                { value: "one-time", label: "Time-Scoped" },
-                { value: "recurring", label: "Always-on" },
-              ]}
-            />
           </div>
 
           {!hasAny ? (
@@ -338,6 +345,7 @@ function CampaignList() {
                   <tr className="border-b border-border bg-secondary/30 text-[11px] uppercase tracking-wider text-muted-foreground">
                     <SortHeader label="Campaign name" k="name" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                     <SortHeader label="Status" k="state" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                    <th className="px-4 py-2.5 text-left font-medium">Associated runs</th>
                     <SortHeader label="Last edited" k="lastEdited" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                     <SortHeader label="Last run" k="lastRun" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                     <SortHeader label="Created at" k="createdAt" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
@@ -369,6 +377,19 @@ function CampaignList() {
                         </td>
                         <td className="px-4 py-3">
                           <StateTag state={c.state} />
+                        </td>
+                        <td className="px-4 py-3">
+                          {c.activeRuns > 0 ? (
+                            <span
+                              title={`${c.activeRuns} associated run${c.activeRuns > 1 ? "s" : ""} — editing and publishing mints a new version that only new leads follow`}
+                              className="inline-flex items-center gap-1.5 rounded-full border border-warning/30 bg-warning/10 px-2 py-0.5 text-[11px] font-medium text-warning"
+                            >
+                              <CircleDot className="h-3 w-3" />
+                              {c.activeRuns} run{c.activeRuns > 1 ? "s" : ""}
+                            </span>
+                          ) : (
+                            <span className="text-[12px] text-muted-foreground">No runs</span>
+                          )}
                         </td>
                         <td className="px-4 py-3 text-[12px] text-muted-foreground">{c.lastEdited}</td>
                         <td className="px-4 py-3">
@@ -550,7 +571,7 @@ function CampaignList() {
                       </div>
                     </td>
                     <td className="px-2 py-3 text-right">
-                      <RunRowMenu status={r.status} runId={r.id} />
+                      <RunRowMenu status={r.status} runId={r.id} triggerMode={r.triggerMode} />
                     </td>
                   </tr>
                   );
@@ -584,6 +605,57 @@ function CampaignList() {
         campaign={runFor ? ({ id: runFor.id, name: runFor.name, audienceSource: "csv" } satisfies CampaignOption) : undefined}
         onStart={handleRunStarted}
       />
+
+      {/* Post-create: reveal the new run's unique trigger endpoint (API runs only). */}
+      <Dialog open={endpointInfo !== null} onOpenChange={(v) => { if (!v) setEndpointInfo(null); }}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-success/10 text-success">
+                <Check className="h-4 w-4" />
+              </span>
+              Run created
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              <span className="font-medium text-foreground">{endpointInfo?.runName}</span> is live. POST your
+              audience payload to the unique trigger endpoint below to start streaming leads.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-1.5 rounded-md border border-input bg-muted/40 p-3">
+            <Label className="flex items-center gap-1.5 text-xs">
+              <Webhook className="h-3 w-3" /> Trigger API endpoint
+            </Label>
+            <div className="flex items-center gap-2">
+              <code className="min-w-0 flex-1 truncate rounded border border-border bg-background px-2 py-1.5 font-mono text-[12px]">
+                {endpointInfo?.endpoint}
+              </code>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-8 shrink-0 gap-1.5 text-xs"
+                onClick={() => endpointInfo && copyId(endpointInfo.endpoint)}
+              >
+                {endpointInfo && copiedId === endpointInfo.endpoint ? (
+                  <><Check className="h-3.5 w-3.5 text-success" /> Copied</>
+                ) : (
+                  <><Copy className="h-3.5 w-3.5" /> Copy</>
+                )}
+              </Button>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              You can copy this again any time from the run's row in the Runs tab.
+            </p>
+          </div>
+
+          <DialogFooter>
+            <Button size="sm" className="h-8 text-xs" onClick={() => setEndpointInfo(null)}>
+              Done
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </AppShell>
   );
 }
@@ -662,16 +734,26 @@ function cap(s: string) { return s[0].toUpperCase() + s.slice(1); }
 function StateTag({ state }: { state: CampaignStatus }) {
   return (
     <span className={cn("inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium capitalize", STATUS_TONE[state])}>
-      <span className={cn("h-1.5 w-1.5 rounded-full", state === "running" ? "bg-success animate-pulse" : "bg-current opacity-60")} />
+      <span className="h-1.5 w-1.5 rounded-full bg-current opacity-60" />
       {state}
     </span>
   );
 }
 
-function RunRowMenu({ status, runId }: { status: RunStatus; runId: string }) {
+function RunRowMenu({ status, runId, triggerMode }: { status: RunStatus; runId: string; triggerMode: TriggerMode }) {
   const canPause = status === "running";
   const canResume = status === "paused";
-  const canTerminate = status === "running" || status === "paused" || status === "queued";
+  // Pending (queued) and live (running/paused) runs can be terminated/cancelled.
+  const canTerminate = status === "running" || status === "paused" || status === "pending";
+  // API-triggered runs expose their unique endpoint for re-copy (also on the row).
+  const isApi = triggerMode === "api";
+  const endpoint = `https://api.picommerce.io/v1/runs/trigger/${runId}`;
+  const copyEndpoint = () => {
+    navigator.clipboard?.writeText(endpoint);
+    toast.success("Trigger endpoint copied", { description: endpoint });
+  };
+
+  const hasLifecycle = canPause || canResume || canTerminate;
 
   return (
     <DropdownMenu>
@@ -680,7 +762,13 @@ function RunRowMenu({ status, runId }: { status: RunStatus; runId: string }) {
           <MoreHorizontal className="h-4 w-4" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-44">
+      <DropdownMenuContent align="end" className="w-52">
+        {isApi && (
+          <DropdownMenuItem className="gap-2 text-xs" onClick={copyEndpoint}>
+            <Webhook className="h-3.5 w-3.5" /> Copy trigger endpoint
+          </DropdownMenuItem>
+        )}
+        {isApi && hasLifecycle && <DropdownMenuSeparator />}
         {canPause && (
           <DropdownMenuItem className="gap-2 text-xs" onClick={() => toast.success("Run paused", { description: runId })}><Pause className="h-3.5 w-3.5" /> Pause</DropdownMenuItem>
         )}
@@ -692,7 +780,7 @@ function RunRowMenu({ status, runId }: { status: RunStatus; runId: string }) {
             <Square className="h-3.5 w-3.5" /> Terminate
           </DropdownMenuItem>
         )}
-        {!canPause && !canResume && !canTerminate && (
+        {!isApi && !hasLifecycle && (
           <DropdownMenuItem disabled className="gap-2 text-xs">No actions available</DropdownMenuItem>
         )}
       </DropdownMenuContent>

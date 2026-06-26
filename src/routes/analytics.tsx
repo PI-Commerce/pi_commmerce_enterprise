@@ -30,7 +30,7 @@ import {
   type ChannelKind, type SankeyNode, type SankeyNodeKind, type RunRow,
   type ChannelAsset, type CampaignAnalytics as CampaignAnalyticsData,
 } from "@/lib/analytics-data";
-import { generateLeads, leadsToCsv, downloadCsv, type Lead } from "@/lib/analytics-leads";
+import { generateLeads, leadsToCsv, downloadCsv, stageLabelFor, type Lead } from "@/lib/analytics-leads";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/analytics")({
@@ -175,7 +175,21 @@ function CampaignAnalytics({
   const [campaignId, setCampaignId] = useState(CAMPAIGNS[0].id);
   const campaign = CAMPAIGNS.find((c) => c.id === campaignId)!;
   const [runId, setRunId] = useState(campaign.runs[0].id);
-  const run = campaign.runs.find((r) => r.id === runId) ?? campaign.runs[0];
+  // Campaign → Version → Run drill-down. A run is pinned to a specific published
+  // version (editing on the fly mints a new version; the run id never changes),
+  // so Analytics can scope by version then by an individual run within it.
+  const [version, setVersion] = useState<string>("all");
+  const versionLabels = useMemo(
+    () => Array.from(new Set(campaign.runs.map((_, i) => runVersionLabel(campaign, i)))),
+    [campaign],
+  );
+  const visibleRuns = useMemo(
+    () => (version === "all"
+      ? campaign.runs
+      : campaign.runs.filter((_, i) => runVersionLabel(campaign, i) === version)),
+    [campaign, version],
+  );
+  const run = visibleRuns.find((r) => r.id === runId) ?? visibleRuns[0] ?? campaign.runs[0];
   const [openNode, setOpenNode] = useState<SankeyNode | null>(null);
 
   return (
@@ -187,6 +201,7 @@ function CampaignAnalytics({
             onValueChange={(v) => {
               setCampaignId(v);
               const next = CAMPAIGNS.find((c) => c.id === v)!;
+              setVersion("all");
               setRunId(next.runs[0].id);
             }}
           >
@@ -196,11 +211,29 @@ function CampaignAnalytics({
             </SelectContent>
           </Select>
         </FilterField>
+        <FilterField label="Version">
+          <Select
+            value={version}
+            onValueChange={(v) => {
+              setVersion(v);
+              const next = v === "all"
+                ? campaign.runs
+                : campaign.runs.filter((_, i) => runVersionLabel(campaign, i) === v);
+              if (next[0]) setRunId(next[0].id);
+            }}
+          >
+            <SelectTrigger className="h-9 w-[140px] text-xs"><SelectValue placeholder="Version" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All versions</SelectItem>
+              {versionLabels.map((v) => (<SelectItem key={v} value={v}>{v}</SelectItem>))}
+            </SelectContent>
+          </Select>
+        </FilterField>
         <FilterField label="Run">
           <Select value={run.id} onValueChange={setRunId}>
             <SelectTrigger className="h-9 w-[420px] text-xs"><SelectValue placeholder="Run" /></SelectTrigger>
             <SelectContent>
-              {campaign.runs.map((r) => {
+              {visibleRuns.map((r) => {
                 const idx = campaign.runs.indexOf(r);
                 return (
                   <SelectItem key={r.id} value={r.id}>
@@ -309,8 +342,9 @@ function LeadsTable({ run, restrictToNodeIds, title = "Lead Analytics", hideStag
   const passStage = (l: Lead) => stageSel.length === 0 || stageSel.includes(l.stageNodeId);
   const passStatus = (l: Lead) => statusSel.length === 0 || (!!l.status && statusSel.includes(l.status));
 
-  // Serial = node position in the run's authored flow order (Start = 1), matching
-  // the Leads "Stage" column and the Campaign Flow node sub-headings.
+  // Node identity prefers the per-kind serial + description (the live builder's
+  // scheme, e.g. `whatsapp_2 • Renewal`), falling back to the legacy positional
+  // serial — matching the Leads "Stage" column and the Campaign Flow sub-headings.
   const serialByNode = useMemo(
     () => new Map(run.sankey.nodes.map((n, i) => [n.id, i + 1] as const)),
     [run],
@@ -320,7 +354,7 @@ function LeadsTable({ run, restrictToNodeIds, title = "Lead Analytics", hideStag
     const ids = new Set(scoped.filter(passStatus).map((l) => l.stageNodeId));
     return run.sankey.nodes
       .filter((n) => ids.has(n.id))
-      .map((n) => ({ value: n.id, label: `${serialByNode.get(n.id)} · ${n.name.split(" · ")[0]}` }));
+      .map((n) => ({ value: n.id, label: stageLabelFor(n, serialByNode) }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scoped, statusSel, run, serialByNode]);
 
@@ -545,7 +579,8 @@ function NodeDrawer({
       const tgt = run.sankey.nodes.find((n) => n.id === e.target);
       const prev = byHandle.get(h);
       const label = e.handleLabel
-        ?? (h === "session_expired" ? "Session expired" : h === "reply_received" ? "Replied" : h === "__advance__" ? "Advance" : h);
+        ?? (h === "no_response" ? "No response" : h === "session_expired" ? "Session expired"
+          : h === "reply_received" ? "Replied" : h === "advance" || h === "__advance__" ? "Continue" : h);
       if (prev) prev.value += e.value;
       else byHandle.set(h, { label, target: tgt?.name.split(" · ")[0] ?? e.target, value: e.value });
     });
@@ -832,7 +867,11 @@ function ChannelAnalytics({
       const key = nodeKey(ref);
       if (seen.has(key)) continue;
       seen.add(key);
-      const nodeLabel = node.name.split(" · ").slice(1).join(" · ") || node.name;
+      // Prefer the node's serial + description (live builder identity); otherwise
+      // fall back to the asset portion of its title.
+      const nodeLabel = node.serial
+        ? (node.description ? `${node.serial} • ${node.description}` : node.serial)
+        : (node.name.split(" · ").slice(1).join(" · ") || node.name);
       opts.push({ value: key, label: `${nodeLabel} · ${run!.startedAt}` });
     }
     return opts;

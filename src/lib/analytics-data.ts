@@ -23,6 +23,10 @@ export type SankeyNodeKind =
 export type SankeyNode = {
   id: string;
   name: string;
+  /** Per-kind serial (`whatsapp_2`) carried over from the campaign node. */
+  serial?: string;
+  /** Short user label (≤12 chars) carried over from the campaign node. */
+  description?: string;
   kind: SankeyNodeKind;
   entered: number;
   exited: number;
@@ -104,7 +108,9 @@ function nodePassRate(kind: SankeyNodeKind, id: string, title: string, salt: str
  *  engagement) is the largest slice, button taps moderate, freeform replies the
  *  smallest. Per-(run, node, handle) noise keeps the split varied and realistic. */
 function waHandleBaseWeight(handle: string): number {
-  if (handle === "session_expired") return 1.7;
+  // "no_response" (split) / "advance" (collapsed) are the no-engagement catch-all
+  // — the largest slice; button taps moderate, freeform replies the smallest.
+  if (handle === "no_response" || handle === "advance" || handle === "session_expired") return 1.7;
   if (handle === "reply_received") return 0.8;
   if (handle.startsWith("btn_")) return 1.1;
   return 1;
@@ -176,7 +182,8 @@ function deriveRun(ex: ExampleCampaign, base: number, runId: string, startedAt: 
   }
 
   const sankeyNodes: SankeyNode[] = nodes.map((n) => ({
-    id: n.id, name: n.data.title, kind: kindOf.get(n.id)!,
+    id: n.id, name: n.data.title, serial: n.data.serial, description: n.data.description,
+    kind: kindOf.get(n.id)!,
     entered: entered.get(n.id) ?? 0, exited: exited.get(n.id) ?? 0,
   }));
   // Map (nodeId, handleId) → the node's output label, so the drawer can show a

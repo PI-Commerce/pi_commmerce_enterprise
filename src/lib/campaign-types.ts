@@ -25,12 +25,15 @@ export type NodeKind =
 
 export type NodeRunState = "idle" | "running" | "success" | "failed";
 
+/**
+ * A campaign's own status is config-only — `draft` (configuration incomplete) or
+ * `ready` (run-ready). Liveness lives on Runs, not the campaign: a campaign can have
+ * any number of associated runs in flight, but its status never becomes "running".
+ * The campaign table surfaces the associated-run count so editing risk is visible.
+ */
 export type CampaignStatus =
   | "draft"
-  | "ready"
-  | "running"
-  | "paused"
-  | "locked";
+  | "ready";
 
 export type RetryPolicy = { maxRetries: number; backoffSeconds: number };
 
@@ -48,10 +51,44 @@ export type NodeOutput = { id: string; label: string; kind: NodeOutputKind };
  * example node "looks fully configured" without a bespoke summary card.
  */
 export type PresetSchemaField = { id: string; name: string; type: "String" | "Number" | "Boolean" };
-export type PresetBranch = { id: string; label: string; variable: string; op: string; value: string; value2?: string };
+/** A single comparison inside a Conditional branch. */
+export type PresetCondition = { variable: string; op: string; value: string; value2?: string };
+/**
+ * A Conditional branch. New shape carries a list of {@link PresetCondition}s joined by
+ * `logic` (AND/OR). Legacy authored data used the flat single-condition fields
+ * (`variable`/`op`/`value`); both are accepted and normalized via {@link branchConditions}.
+ */
+export type PresetBranch = {
+  id: string;
+  label: string;
+  logic?: "AND" | "OR";
+  conditions?: PresetCondition[];
+  // ---- legacy single-condition shape (pre-AND/OR) ----
+  variable?: string;
+  op?: string;
+  value?: string;
+  value2?: string;
+};
+/** Normalize a branch (new or legacy) to its list of conditions. */
+export function branchConditions(b: PresetBranch): PresetCondition[] {
+  if (b.conditions && b.conditions.length) return b.conditions;
+  if (b.variable != null || b.op != null || b.value != null) {
+    return [{ variable: b.variable ?? "", op: b.op ?? "", value: b.value ?? "", value2: b.value2 }];
+  }
+  return [];
+}
 export type PresetSplitVariant = { id: string; label: string; pct: number };
 export type PresetTransform = { id: string; type: string; input: string; output: string };
-export type PresetVarMap = { v: string; def: string };
+/** A value-remap row: rewrite an incoming label (`from`) to an outgoing code (`to`)
+ *  at the consuming node — e.g. a WhatsApp button label `Delhi` → API code `ind_delhi`. */
+export type PresetValueRemap = { from: string; to: string };
+/**
+ * A mapping row. `def` holds either an upstream variable key (`mode: "variable"`, default)
+ * or a hardcoded literal (`mode: "constant"`). Absent `mode` = `"variable"` (back-compat).
+ * `remap` (optional) is a label→code lookup applied to the resolved variable value before
+ * it is sent — human labels flow untouched through conditionals; the transform lives here.
+ */
+export type PresetVarMap = { v: string; def: string; mode?: "variable" | "constant"; remap?: PresetValueRemap[] };
 
 export type PresetConfig = {
   // ---- Audience ----
@@ -90,9 +127,9 @@ export type PresetConfig = {
   waMode?: "template" | "freeform";
   /** A {@link WaTemplate} id or name from the template registry. Unresolved values fall back to a no-button (Type 1) node. */
   waTemplate?: string;
-  /** Type-1 (no-button) only: when true, splits into reply_received + session_expired handles; when false (default) the node has a single "advance" output. */
-  waSplitOutcomes?: boolean;
   waVarMap?: PresetVarMap[];
+  /** Header variables, separate from body `waVarMap`. May share variable names with the body. */
+  waHeaderVarMap?: PresetVarMap[];
   waBody?: string;
   // ---- SMS core ----
   smsType?: string;
@@ -114,6 +151,10 @@ export type WorkflowNodeData = {
   kind: NodeKind;
   title: string;
   subtitle?: string;
+  /** Stable per-kind, add-order id (e.g. `whatsapp_2`, `voice_1`, `api_1`). Assigned on add. */
+  serial?: string;
+  /** Short user label (≤12 chars). Drives the node sub-heading `serial • description`. */
+  description?: string;
   /** Per-node configuration. For preset/example nodes this is a {@link PresetConfig}; otherwise loosely typed. */
   config?: PresetConfig & Record<string, unknown>;
   /** Whether all required config fields are satisfied */
@@ -174,12 +215,35 @@ export const NODE_LABELS: Record<NodeKind, string> = {
 export const STATUS_TONE: Record<CampaignStatus, string> = {
   draft: "border-border bg-secondary text-muted-foreground",
   ready: "border-ai/30 bg-ai/10 text-ai",
-  running: "border-success/30 bg-success/10 text-success",
-  paused: "border-warning/30 bg-warning/10 text-warning",
-  locked: "border-destructive/30 bg-destructive/10 text-destructive",
 };
 
-/** Variables produced by upstream nodes — exposed in mapping dropdowns. */
+/** Prefix used to build a node's per-kind serial (`<prefix>_<n>`), assigned by add-order. */
+export const SERIAL_PREFIX: Record<NodeKind, string> = {
+  start: "start",
+  end: "end",
+  audience: "audience",
+  apiToolCall: "api",
+  conditional: "cond",
+  abSplit: "split",
+  delay: "delay",
+  voiceCall: "voice",
+  whatsapp: "whatsapp",
+  sms: "sms",
+  adsCampaign: "ads",
+};
+
+/**
+ * Fallback `contact.*` variables shown in mapping dropdowns BEFORE the Audience
+ * node's schema has been edited. Once the Audience node has real schema rows,
+ * {@link file://./wa-outputs.ts} derives `contact.<key>` from them and these are
+ * dropped (see `mergeVariables`).
+ *
+ * There are intentionally NO generic `voice.*` / `wa.*` / `payload.*` entries:
+ * those signals never exist in the abstract — they are always produced by a
+ * specific upstream Voice / WhatsApp / API node and are therefore namespaced by
+ * that node's serial (e.g. `voice_4.call_status`, `whatsapp_2.delivery_state`)
+ * via `deriveNodeOutcomeVariables`.
+ */
 export const SAMPLE_WORKFLOW_VARIABLES: { key: string; source: string }[] = [
   { key: "contact.customer_id", source: "Audience" },
   { key: "contact.phone", source: "Audience" },
@@ -187,9 +251,4 @@ export const SAMPLE_WORKFLOW_VARIABLES: { key: string; source: string }[] = [
   { key: "contact.last_name", source: "Audience" },
   { key: "contact.email", source: "Audience" },
   { key: "contact.tier", source: "Audience" },
-  { key: "payload.order_id", source: "API payload" },
-  { key: "payload.amount", source: "API payload" },
-  { key: "voice.call_status", source: "Voice Call" },
-  { key: "voice.duration_sec", source: "Voice Call" },
-  { key: "wa.delivery_state", source: "WhatsApp" },
 ];

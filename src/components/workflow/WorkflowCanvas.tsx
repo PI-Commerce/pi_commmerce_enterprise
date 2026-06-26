@@ -9,8 +9,8 @@ import { Wand2 } from "lucide-react";
 import { nodeTypes } from "./nodes";
 import { edgeTypes } from "./edges";
 import type { WorkflowNodeData, NodeKind, CampaignStatus } from "@/lib/campaign-types";
-import { NODE_LABELS } from "@/lib/campaign-types";
-import { whatsappOutputs, completedOutput, deriveNodeOutcomeVariables } from "@/lib/wa-outputs";
+import { NODE_LABELS, SERIAL_PREFIX } from "@/lib/campaign-types";
+import { whatsappOutputs, completedOutput, apiOutcomeOutputs, deriveNodeOutcomeVariables } from "@/lib/wa-outputs";
 import { EXAMPLE_CAMPAIGNS } from "@/lib/campaign-examples";
 import { elkLayout, type Point } from "@/lib/flow-layout";
 import { useRegion, localizeTzAbbrev, localizeCurrency } from "@/lib/region";
@@ -54,7 +54,7 @@ const DEFAULT_NODE_DATA: Record<NodeKind, Partial<WorkflowNodeData>> = {
   start: { valid: true, locked: true },
   end: { valid: true, locked: true },
   audience: { subtitle: "CSV or runtime API", valid: false, error: "Select source" },
-  apiToolCall: { subtitle: "Call an API", valid: false, error: "Select API tool", outputs: completedOutput() },
+  apiToolCall: { subtitle: "Call an API", valid: false, error: "Select API tool", outputs: apiOutcomeOutputs() },
   conditional: { subtitle: "Route on variable", valid: false, error: "Add a branch" },
   abSplit: { subtitle: "Split traffic", valid: false, error: "Set split %" },
   delay: { subtitle: "Wait", valid: false, error: "Set duration" },
@@ -67,9 +67,20 @@ const DEFAULT_NODE_DATA: Record<NodeKind, Partial<WorkflowNodeData>> = {
 
 let nodeCounter = 100;
 
+// A fresh canvas always has the three structural nodes — Start, Audience, End —
+// and all three are non-deletable (locked). Audience is the single entry point for
+// contacts, so it can be neither duplicated nor added a second time (see NodePalette).
 const BLANK_NODES: Node<WorkflowNodeData>[] = [
   { id: "start", type: "workflow", position: { x: 0, y: 0 },
     data: { kind: "start", title: "Start", locked: true, valid: true } },
+  { id: "audience", type: "workflow", position: { x: 0, y: 120 },
+    data: { kind: "audience", title: "Audience", subtitle: "Drop a CSV", locked: true, valid: false, error: "Select source" } },
+  { id: "end", type: "workflow", position: { x: 0, y: 260 },
+    data: { kind: "end", title: "End", locked: true, valid: true } },
+];
+
+const BLANK_EDGES: Edge[] = [
+  { id: "be1", source: "start", target: "audience" },
 ];
 
 export function WorkflowCanvas({
@@ -101,7 +112,7 @@ export function WorkflowCanvas({
     isNew ? BLANK_NODES : example?.nodes ?? SEED_NODES,
   );
   const [edges, setEdges, onEdgesChange] = useEdgesState(
-    isNew ? [] : example?.edges ?? SEED_EDGES,
+    isNew ? BLANK_EDGES : example?.edges ?? SEED_EDGES,
   );
   const [selected, setSelected] = useState<{ id: string; data: WorkflowNodeData } | null>(null);
   const [askPiOpen, setAskPiOpen] = useState(false);
@@ -186,7 +197,9 @@ export function WorkflowCanvas({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoStartAskPi]);
 
-  const editable = !previewOnly && (status === "draft" || status === "ready" || status === "paused") && !aiBuilding;
+  // Editing is allowed in every campaign status — even while a run is live
+  // (publishing then mints a new version that only new leads follow).
+  const editable = !previewOnly && !aiBuilding;
 
   // Report validity upwards
   useEffect(() => {
@@ -238,30 +251,12 @@ export function WorkflowCanvas({
 
   const outcomeVariables = useMemo(() => deriveNodeOutcomeVariables(nodes), [nodes]);
 
-  // Simulated execution pulse for running state
+  // Campaign status is config-only (draft | ready) — liveness lives on Runs, not
+  // the campaign — so the builder canvas always renders nodes idle (no run pulse).
   useEffect(() => {
     if (previewOnly) return;
-    if (status !== "running") {
-      setNodes((nds) => nds.map((n) => ({ ...n, data: { ...n.data, runState: "idle" as const } })));
-      return;
-    }
-    const order = ["start", "audience", "split", "wa", "voice", "delay", "end"];
-    let i = 0;
-    const tick = setInterval(() => {
-      setNodes((nds) =>
-        nds.map((n) => {
-          const idx = order.indexOf(n.id);
-          if (idx === -1) return n;
-          let runState: WorkflowNodeData["runState"] = "idle";
-          if (idx < i) runState = "success";
-          else if (idx === i) runState = "running";
-          return { ...n, data: { ...n.data, runState } };
-        }),
-      );
-      i = (i + 1) % (order.length + 2);
-    }, 1100);
-    return () => clearInterval(tick);
-  }, [status, setNodes, previewOnly]);
+    setNodes((nds) => nds.map((n) => ({ ...n, data: { ...n.data, runState: "idle" as const } })));
+  }, [setNodes, previewOnly]);
 
   const onConnect = useCallback(
     (c: Connection) => {
@@ -341,15 +336,21 @@ export function WorkflowCanvas({
     (kind: NodeKind) => {
       const newId = `n_${++nodeCounter}`;
       const defaults = DEFAULT_NODE_DATA[kind];
-      setNodes((nds) => [
-        ...nds,
-        {
-          id: newId,
-          type: "workflow",
-          position: { x: 320, y: 200 + nds.length * 20 },
-          data: { kind, title: NODE_LABELS[kind], ...defaults },
-        },
-      ]);
+      setNodes((nds) => {
+        // Per-kind, add-order serial (e.g. whatsapp_2, voice_1) — stable identity
+        // consumed by the node sub-heading and the Conditional variable picker.
+        const nextIndex = nds.filter((n) => n.data.kind === kind).length + 1;
+        const serial = `${SERIAL_PREFIX[kind]}_${nextIndex}`;
+        return [
+          ...nds,
+          {
+            id: newId,
+            type: "workflow",
+            position: { x: 320, y: 200 + nds.length * 20 },
+            data: { kind, title: NODE_LABELS[kind], serial, ...defaults },
+          },
+        ];
+      });
       onDirty?.();
     },
     [setNodes, onDirty],
@@ -392,7 +393,13 @@ export function WorkflowCanvas({
         zoomOnPinch={!aiBuilding}
         zoomOnDoubleClick={!aiBuilding}
         onInit={(inst) => { rfRef.current = inst; }}
-        onNodesChange={(c) => { if (editable) onNodesChange(c); }}
+        onNodesChange={(c) => {
+          if (!editable) return;
+          // Locked structural nodes (Start, Audience, End) are non-deletable —
+          // drop any removal change that targets one.
+          const lockedIds = new Set(nodes.filter((n) => n.data.locked).map((n) => n.id));
+          onNodesChange(c.filter((ch) => !(ch.type === "remove" && lockedIds.has(ch.id))));
+        }}
         onEdgesChange={(c) => { if (editable) onEdgesChange(c); }}
         onConnect={onConnect}
         isValidConnection={isValidConnection}
@@ -436,7 +443,12 @@ export function WorkflowCanvas({
         onChange={(patch) => selected && updateNodeData(selected.id, patch)}
         onDelete={() => selected && deleteNode(selected.id)}
         onDuplicate={() => selected && duplicateNode(selected.id)}
-        extraVariables={outcomeVariables.filter((v) => !selected || !v.key.startsWith(`${selected.id}.`))}
+        extraVariables={outcomeVariables.filter((v) => {
+          // Vars are namespaced by serial (e.g. `whatsapp_1.*`) — exclude the
+          // selected node's own outputs so it can't reference itself.
+          const ns = selected?.data?.serial ?? selected?.id;
+          return !selected || !v.key.startsWith(`${ns}.`);
+        })}
       />
 
       {!previewOnly && (

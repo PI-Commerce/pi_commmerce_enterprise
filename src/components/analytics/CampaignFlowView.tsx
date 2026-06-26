@@ -64,7 +64,8 @@ export function CampaignFlowView({
         : n.name.includes(" · ")
           ? n.name.split(" · ").slice(1).join(" · ")
           : undefined;
-      // Prefix the serial so the node is unambiguously the one referenced in the Leads table.
+      // Prefix the positional serial so a node without a builder serial (Start/End)
+      // is still unambiguously the one referenced in the Leads table.
       const subtitle = baseSubtitle ? `${serial} · ${baseSubtitle}` : `#${serial}`;
       const dropoffPct = n.entered > 0 ? ((n.entered - n.exited) / n.entered) * 100 : 0;
       const showMetrics = n.kind !== "start" && n.kind !== "end";
@@ -94,6 +95,11 @@ export function CampaignFlowView({
         data: {
           kind: KIND_MAP[n.kind],
           title,
+          // Carry the builder identity so the flow node sub-heading reads
+          // `serial • description` (matching the live builder + Leads table). Falls
+          // back to the positional `subtitle` for nodes without a serial (Start/End).
+          serial: n.serial,
+          description: n.description,
           subtitle,
           valid: true,
           locked: true,

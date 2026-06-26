@@ -20,8 +20,10 @@ const ICONS: Partial<Record<NodeKind, LucideIcon>> = {
   adsCampaign: Megaphone,
 };
 
+// Audience is omitted: every canvas already ships with exactly one (non-deletable)
+// Audience node as the single contact entry point, so it's never addable here.
 const SECTIONS: Array<{ label: string; nodes: NodeKind[] }> = [
-  { label: "Data Nodes", nodes: ["audience", "apiToolCall"] },
+  { label: "Data Nodes", nodes: ["apiToolCall"] },
   { label: "Logic Nodes", nodes: ["conditional", "abSplit", "delay"] },
   { label: "Action Nodes", nodes: ["voiceCall", "whatsapp", "sms"] },
   { label: "Ads Nodes", nodes: ["adsCampaign"] },

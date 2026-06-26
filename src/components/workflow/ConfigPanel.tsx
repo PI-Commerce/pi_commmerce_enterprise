@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef, createContext, useContext } from "react";
 import {
   X, Copy, Trash2, AlertCircle, CheckCircle2, Plus, GripVertical, ChevronDown, Variable,
-  Sparkles, GitBranch, FlaskConical, ArrowUp, ArrowDown,
-  FileSpreadsheet, Loader2, Clock,
+  Sparkles, GitBranch, FlaskConical, ArrowUp, ArrowDown, ArrowRight, ArrowLeftRight,
+  FileSpreadsheet, Loader2, Clock, Hash,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useRegion, localizeCurrency } from "@/lib/region";
@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import {
-  Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
+  Select, SelectTrigger, SelectValue, SelectContent, SelectItem, SelectGroup, SelectLabel,
 } from "@/components/ui/select";
 
 import { Label } from "@/components/ui/label";
@@ -21,18 +21,75 @@ import {
   AlertDialogFooter, AlertDialogTitle, AlertDialogDescription, AlertDialogAction, AlertDialogCancel,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
-import type { WorkflowNodeData, NodeKind, PresetConfig, PresetBranch, NodeOutput } from "@/lib/campaign-types";
-import { NODE_LABELS, SAMPLE_WORKFLOW_VARIABLES } from "@/lib/campaign-types";
+import type { WorkflowNodeData, NodeKind, PresetConfig, PresetBranch, PresetCondition, PresetVarMap, PresetValueRemap, NodeOutput } from "@/lib/campaign-types";
+import { NODE_LABELS, SAMPLE_WORKFLOW_VARIABLES, branchConditions } from "@/lib/campaign-types";
 import { SEED_TEMPLATES } from "@/lib/waba-templates";
-import { whatsappOutputs, resolveWaTemplate, completedOutput } from "@/lib/wa-outputs";
+import { whatsappOutputs, resolveWaTemplate, completedOutput, isBranchableButton } from "@/lib/wa-outputs";
 import { getTool, TOOLS } from "@/lib/tool-registry";
 import { resolveAgent, voiceAgents } from "@/lib/agent-data";
 
 const VOICE_AGENTS = voiceAgents();
 
-/** Per-node outcome variables (e.g. `<nodeId>.session_expired`) contributed by the
+/** Per-node outcome variables (e.g. `whatsapp_1.session_expired`) contributed by the
  *  action nodes present in the flow — merged into the Conditional variable picker. */
 const ExtraVariablesContext = createContext<{ key: string; source: string }[]>([]);
+
+/** Merge flow-derived variables (from the live nodes) with the static sample set.
+ *  Dedupes by key (derived wins). When the Audience node has contributed real
+ *  `contact.*` fields from its edited schema, the static `contact.*` samples are
+ *  dropped so the picker reflects the actual schema, not the demo defaults. */
+function mergeVariables(extra: { key: string; source: string }[]) {
+  const hasDerivedContact = extra.some((v) => v.key.startsWith("contact."));
+  const sample = hasDerivedContact
+    ? SAMPLE_WORKFLOW_VARIABLES.filter((v) => !v.key.startsWith("contact."))
+    : SAMPLE_WORKFLOW_VARIABLES;
+  const seen = new Set<string>();
+  const out: { key: string; source: string }[] = [];
+  for (const v of [...extra, ...sample]) {
+    if (seen.has(v.key)) continue;
+    seen.add(v.key);
+    out.push(v);
+  }
+  return out;
+}
+
+/** Two-level grouping for the variable pickers: level 1 = the producing node
+ *  (its serial) / data source, level 2 = that node's variables. First-seen order. */
+function groupVariablesBySource(vars: { key: string; source: string }[]) {
+  const order: string[] = [];
+  const bySource = new Map<string, { key: string; source: string }[]>();
+  for (const s of vars) {
+    if (!bySource.has(s.source)) { bySource.set(s.source, []); order.push(s.source); }
+    bySource.get(s.source)!.push(s);
+  }
+  return order.map((source) => ({ source, items: bySource.get(source)! }));
+}
+
+/** Labeled `[Variable | Value]` segmented control — replaces the old icon toggle.
+ *  `Variable` maps to an upstream key; `Value` hardcodes a constant literal. */
+function VarValueToggle({
+  mode, disabled, onPick, size = "h-9",
+}: { mode: "variable" | "constant"; disabled?: boolean; onPick: (m: "variable" | "constant") => void; size?: string }) {
+  return (
+    <div className={cn("inline-flex shrink-0 overflow-hidden rounded-md border border-border", size)}>
+      {([["variable", "Variable"], ["constant", "Value"]] as const).map(([key, label]) => (
+        <button
+          key={key}
+          type="button"
+          disabled={disabled}
+          onClick={() => { if (mode !== key) onPick(key); }}
+          className={cn(
+            "px-2 text-[11px] font-medium transition-colors",
+            mode === key ? "bg-foreground text-background" : "bg-background text-muted-foreground hover:bg-accent",
+            disabled && "cursor-not-allowed opacity-50",
+          )}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 // Collision-free local id generator — Date.now() alone collides on rapid clicks,
 // producing duplicate React keys and duplicate canvas handle ids.
@@ -160,6 +217,7 @@ export function ConfigPanel({ node, readOnly, onClose, onChange, onDelete, onDup
 
         <div className="scrollbar-thin flex-1 overflow-y-auto px-5 py-5 space-y-5">
           <NameField data={data} readOnly={ro} onChange={safeChange} />
+          {!isSystem && <DescriptionField data={data} readOnly={ro} onChange={safeChange} />}
           {isSystem ? (
             <div className="flex items-start gap-2.5 rounded-lg bg-muted px-3.5 py-3 text-[13px] text-muted-foreground">
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -249,6 +307,34 @@ function NameField({
   );
 }
 
+/* --------------------------- Description (serial label) --------------------------- */
+
+const DESCRIPTION_MAX = 12;
+
+function DescriptionField({
+  data, readOnly, onChange,
+}: { data: WorkflowNodeData; readOnly?: boolean; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
+  return (
+    <div className="space-y-1.5">
+      <Label className="flex items-center justify-between text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+        <span>Description</span>
+        {data.serial && <span className="font-mono normal-case tracking-normal text-muted-foreground/80">{data.serial}</span>}
+      </Label>
+      <Input
+        value={data.description ?? ""}
+        disabled={readOnly}
+        maxLength={DESCRIPTION_MAX}
+        placeholder="Short label (≤12 chars)"
+        onChange={(e) => onChange({ description: e.target.value.slice(0, DESCRIPTION_MAX) })}
+        className="h-9 text-sm"
+      />
+      <p className="text-[11px] text-muted-foreground">
+        Appears under the node as <span className="font-mono">{data.serial ? `${data.serial} • ${data.description || "…"}` : "serial • description"}</span>.
+      </p>
+    </div>
+  );
+}
+
 /* --------------------------- Per-kind fields --------------------------- */
 
 function NodeFields({
@@ -314,124 +400,104 @@ function KindFields({
 // duplicate validation, row-level phone validation, filtering, or runtime endpoint —
 // runtime data delivery now lives in the Run modal + Data tab.
 function AudienceFields({ config, readOnly, mark }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void }) {
-  // Schema source: derive from a sample CSV, or define fields by hand.
-  const initialMode: "csv" | "manual" = config?.csvKeys ? "csv" : config?.fields ? "manual" : "csv";
-  const [mode, setMode] = useState<"csv" | "manual">(initialMode);
+  // Schema is *always* hand-editable as key → data-type rows. A CSV drop is purely a
+  // convenience: it merges its column headers into those same rows (new names appended,
+  // existing names left untouched), and the user can keep editing afterward.
+  const seededFields: SchemaField[] = config?.fields
+    ?? (config?.csvKeys ?? CSV_KEYS).map((k, i) => ({ id: `f${i + 1}`, name: k, type: "String" as const }));
 
-  // CSV-derived schema — metadata only (column headers); rows are never read.
-  const [status, setStatus] = useState<DetectStatus>(config?.csvKeys ? "detected" : "idle");
+  const [fields, setFields] = useState<SchemaField[]>(seededFields.length ? seededFields : [{ id: "f1", name: "", type: "String" }]);
   const [fileName, setFileName] = useState(config?.fileName ?? "");
-  const csvKeys = config?.csvKeys ?? CSV_KEYS;
-  const csvDetected = status === "detected";
-
-  // Manually defined schema.
-  const [fields, setFields] = useState<SchemaField[]>(config?.fields ?? [
-    { id: "f1", name: "phone", type: "String" },
-    { id: "f2", name: "first_name", type: "String" },
-  ]);
+  const [importing, setImporting] = useState(false);
   const namedFields = fields.filter((f) => f.name.trim());
 
   // Phone field selection (accepts legacy phoneCol/phoneField from preset configs).
   const [phoneField, setPhoneField] = useState(config?.phoneField ?? config?.phoneCol ?? "");
 
-  const keys = mode === "csv" ? (csvDetected ? csvKeys : []) : namedFields.map((f) => f.name);
-  const schemaOk = mode === "csv" ? csvDetected : namedFields.length > 0;
-  // CSV columns are untyped, so the String requirement is only enforced in manual mode.
-  const phoneTypeOk = mode === "csv" ? true : namedFields.some((f) => f.name === phoneField && f.type === "String");
+  const keys = namedFields.map((f) => f.name);
+  const schemaOk = namedFields.length > 0;
+  const phoneTypeOk = namedFields.some((f) => f.name === phoneField && f.type === "String");
   const phoneOk = !!phoneField && keys.includes(phoneField) && phoneTypeOk;
 
   useEffect(() => {
     const ok = schemaOk && phoneOk;
     const err = !schemaOk
-      ? (mode === "csv" ? "Upload a sample CSV to read its columns" : "Define at least one schema field")
+      ? "Add at least one schema field"
       : !phoneField ? "Select the phone number field"
       : !keys.includes(phoneField) ? "Phone field is not in the current schema"
       : !phoneTypeOk ? "Phone field must be a String type"
       : undefined;
     mark(ok, err);
-  }, [mode, schemaOk, phoneOk, phoneField]);
+  }, [schemaOk, phoneOk, phoneField]);
 
-  // Sample-CSV upload — simulates reading the header row only.
+  // CSV drop — simulates reading the header row only, then *merges* any new columns into
+  // the existing editable rows (never clobbers what's already there).
   const onFile = (name?: string) => {
     if (!name) return;
     setFileName(name);
-    setStatus("uploading");
-    setTimeout(() => setStatus("detecting"), 450);
+    setImporting(true);
     setTimeout(() => {
-      setStatus("detected");
-      toast.success("Columns read", { description: `${csvKeys.length} columns detected · row data not stored` });
-    }, 1150);
+      setFields((prev) => {
+        const existing = new Set(prev.filter((f) => f.name.trim()).map((f) => f.name));
+        const additions = CSV_KEYS
+          .filter((k) => !existing.has(k))
+          .map((k) => ({ id: uid("f"), name: k, type: "String" as const }));
+        // Drop any leading blank placeholder row if we're adding real columns.
+        const base = prev.filter((f) => f.name.trim());
+        const merged = [...base, ...additions];
+        return merged.length ? merged : prev;
+      });
+      setImporting(false);
+      toast.success("Columns merged", { description: `${CSV_KEYS.length} columns read · row data not stored` });
+    }, 900);
   };
-  const replace = () => { setStatus("idle"); setFileName(""); };
 
   return (
     <>
-      {/* Section: Schema */}
+      {/* Section: Schema — optional CSV merge on top (the input), then the
+          always-editable key → type rows it populates (the result). */}
       <Section title="Schema">
-        <Field label="Define schema by" required>
-          <div className="grid grid-cols-2 gap-2">
-            <SegmentBtn active={mode === "csv"} onClick={() => setMode("csv")} disabled={readOnly}>Sample CSV</SegmentBtn>
-            <SegmentBtn active={mode === "manual"} onClick={() => setMode("manual")} disabled={readOnly}>Manual</SegmentBtn>
-          </div>
-        </Field>
+        <div className="space-y-3">
+          <p className="text-[11px] text-muted-foreground">Define the runtime variables downstream nodes can use. Drop a CSV to populate them, or edit them by hand below.</p>
 
-        {mode === "csv" ? (
-          <div className="space-y-3">
-            {status === "idle" ? (
-              <label className="flex h-20 cursor-pointer items-center justify-center rounded-lg border border-dashed border-border bg-muted/30 px-3 text-center text-xs text-muted-foreground hover:bg-muted/60">
-                <input type="file" accept=".csv" className="hidden" disabled={readOnly} onChange={(e) => onFile(e.target.files?.[0]?.name ?? "sample.csv")} />
-                Upload a sample CSV to read its column headers
-              </label>
-            ) : (
-              <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-card px-3 py-2.5 text-[12px]">
-                <div className="flex min-w-0 items-center gap-2">
-                  <FileSpreadsheet className="h-4 w-4 shrink-0 text-chart-2" />
-                  <span className="truncate font-medium">{fileName || "sample.csv"}</span>
-                  <span className="shrink-0 rounded-full border border-border bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                    {status === "uploading" ? "Reading…" : "Headers read"}
-                  </span>
-                </div>
-                {!readOnly && status !== "uploading" && (
-                  <button onClick={replace} className="shrink-0 text-[11px] text-muted-foreground hover:text-foreground">Replace</button>
-                )}
+          {/* Optional CSV merge — sits above the rows it feeds into */}
+          {fileName ? (
+            <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-card px-3 py-2.5 text-[12px]">
+              <div className="flex min-w-0 items-center gap-2">
+                <FileSpreadsheet className="h-4 w-4 shrink-0 text-chart-2" />
+                <span className="truncate font-medium">{fileName}</span>
+                <span className="shrink-0 rounded-full border border-border bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                  {importing ? "Reading…" : "Merged"}
+                </span>
               </div>
-            )}
-            <DetectStatusRow status={status} />
-            {csvDetected && (
-              <>
-                <DetectStat label="Columns" value={String(csvKeys.length)} />
-                <div className="flex flex-wrap gap-1.5">
-                  {csvKeys.map((k) => (
-                    <span key={k} className="inline-flex items-center gap-1 rounded-md border border-border bg-card px-1.5 py-0.5 font-mono text-[11px]"><Variable className="h-3 w-3 text-ai" />{k}</span>
-                  ))}
-                </div>
-              </>
-            )}
-            <p className="text-[11px] text-muted-foreground">Only column headers and their count are read — row data is never parsed or stored.</p>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            <SchemaFieldsEditor fields={fields} setFields={setFields} readOnly={readOnly} />
-            {namedFields.length > 0 && (
-              <div className="flex flex-wrap gap-1.5">
-                {namedFields.map((f) => (
-                  <span key={f.id} className="inline-flex items-center gap-1 rounded-md border border-border bg-card px-1.5 py-0.5 font-mono text-[11px]">
-                    <Variable className="h-3 w-3 text-ai" />{f.name} <span className="text-muted-foreground">({f.type})</span>
-                  </span>
-                ))}
-              </div>
-            )}
-            <p className="text-[11px] text-muted-foreground">Fields become runtime variables available to downstream nodes.</p>
-          </div>
-        )}
+              {!readOnly && !importing && (
+                <label className="shrink-0 cursor-pointer text-[11px] text-muted-foreground hover:text-foreground">
+                  Replace
+                  <input type="file" accept=".csv" className="hidden" disabled={readOnly} onChange={(e) => onFile(e.target.files?.[0]?.name ?? "sample.csv")} />
+                </label>
+              )}
+            </div>
+          ) : (
+            <label className="flex h-20 cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border bg-muted/30 px-3 text-center text-xs text-muted-foreground hover:bg-muted/60">
+              <input type="file" accept=".csv" className="hidden" disabled={readOnly} onChange={(e) => onFile(e.target.files?.[0]?.name ?? "sample.csv")} />
+              <FileSpreadsheet className="h-5 w-5 text-chart-2" />
+              <span>Drop a CSV to populate columns (optional)</span>
+            </label>
+          )}
+
+          <div className="border-t border-border/60" />
+
+          <SchemaFieldsEditor fields={fields} setFields={setFields} readOnly={readOnly} />
+          <p className="text-[11px] text-muted-foreground">Only column headers are read — row data is never parsed or stored.</p>
+        </div>
       </Section>
 
       {/* Section: Phone Number Selection */}
       <Section title="Phone Number Selection">
         <Field label="Phone number field" required>
-          <SelectLike disabled={readOnly} options={keys} placeholder={keys.length ? "Select phone field…" : "Define the schema first"} defaultValue={phoneField} onPick={setPhoneField} />
+          <SelectLike disabled={readOnly} options={keys} placeholder={keys.length ? "Select phone field…" : "Add a schema field first"} defaultValue={phoneField} onPick={setPhoneField} />
         </Field>
-        {mode === "manual" && phoneField && !phoneTypeOk && (
+        {phoneField && !phoneTypeOk && (
           <StatusBanner ok={false} title="Phone field must be a String type" detail="Change the mapped field’s data type to String." />
         )}
         <p className="text-[11px] text-muted-foreground">Required when the workflow contains Voice or WhatsApp nodes. Must be a String field.</p>
@@ -442,42 +508,6 @@ function AudienceFields({ config, readOnly, mark }: { config?: PresetConfig; rea
 
 /* Fallback column keys for the sample-CSV demo (only the header row is read). */
 const CSV_KEYS = ["customer_id", "phone", "first_name", "last_name", "city", "tier", "loan_amount"];
-
-type DetectStatus = "idle" | "uploading" | "uploaded" | "detecting" | "detected" | "failed";
-
-const DETECT_LABEL: Record<DetectStatus, string> = {
-  idle: "Pending detection",
-  uploading: "Uploading…",
-  uploaded: "Pending detection",
-  detecting: "Detecting schema…",
-  detected: "Schema detected",
-  failed: "Detection failed",
-};
-
-function DetectStatusRow({ status }: { status: DetectStatus }) {
-  const tone =
-    status === "detected" ? "text-success" :
-    status === "failed" ? "text-destructive" :
-    status === "detecting" ? "text-ai" : "text-muted-foreground";
-  return (
-    <div className={cn("flex items-center gap-2 text-[11.5px]", tone)}>
-      {status === "detecting" ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-        : status === "detected" ? <CheckCircle2 className="h-3.5 w-3.5" />
-        : status === "failed" ? <AlertCircle className="h-3.5 w-3.5" />
-        : <Clock className="h-3.5 w-3.5" />}
-      {DETECT_LABEL[status]}
-    </div>
-  );
-}
-
-function DetectStat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-md border border-border bg-card px-2 py-1.5">
-      <p className="text-[9px] uppercase tracking-wider text-muted-foreground">{label}</p>
-      <p className="font-mono text-[13px] font-semibold tabular-nums">{value}</p>
-    </div>
-  );
-}
 
 function StatusBanner({ ok, title, detail }: { ok: boolean; title: string; detail?: string }) {
   return (
@@ -535,20 +565,37 @@ const RANGE_OPERATORS = new Set(["between", "not between"]);
 
 function ConditionalFields({ config, readOnly, mark, onChange }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
   const { symbol } = useRegion();
+  // Normalize every branch (new or legacy flat shape) to `{ conditions[], logic }`.
   const [branches, setBranches] = useState<PresetBranch[]>(() =>
     (config?.branches ?? [
-      { id: "bA", label: "High value", variable: "contact.tier", op: "equals", value: "gold" },
-      { id: "bB", label: "Engaged", variable: "wa.delivery_state", op: "equals", value: "read" },
-    ]).map((b) => ({ ...b, label: localizeCurrency(b.label, symbol) })),
+      { id: "bA", label: "High value", conditions: [{ variable: "contact.tier", op: "equals", value: "gold" }] },
+      { id: "bB", label: "Engaged", conditions: [{ variable: "wa.delivery_state", op: "equals", value: "read" }] },
+    ]).map((b) => ({
+      id: b.id,
+      label: localizeCurrency(b.label, symbol),
+      logic: b.logic ?? "AND",
+      conditions: branchConditions(b),
+    })),
   );
-  const update = (i: number, patch: Partial<typeof branches[number]>) => {
+  const update = (i: number, patch: Partial<PresetBranch>) => {
     setBranches((b) => b.map((x, idx) => idx === i ? { ...x, ...patch } : x));
     mark(true);
   };
+  // Update a single condition within branch `i`.
+  const updateCond = (i: number, ci: number, patch: Partial<PresetCondition>) => {
+    setBranches((b) => b.map((x, idx) => idx === i
+      ? { ...x, conditions: (x.conditions ?? []).map((c, cidx) => cidx === ci ? { ...c, ...patch } : c) }
+      : x));
+    mark(true);
+  };
+  const addCond = (i: number) => update(i, { conditions: [...(branches[i].conditions ?? []), { variable: "", op: "equals", value: "" }] });
+  const removeCond = (i: number, ci: number) => update(i, { conditions: (branches[i].conditions ?? []).filter((_, cidx) => cidx !== ci) });
 
-  // Publish each branch (+ an implicit default/else) as a labeled output handle on the canvas node.
+  // Publish each branch (+ an always-on default/else) as a labeled output handle, and
+  // persist the branch config so edits survive reopen.
   useEffect(() => {
     onChange({
+      config: { ...config, branches },
       outputs: [
         ...branches.map((b, i) => ({ id: b.id, label: b.label || `Branch ${i + 1}`, kind: "branch" as const })),
         { id: "default", label: "Default / else", kind: "default" as const },
@@ -559,7 +606,9 @@ function ConditionalFields({ config, readOnly, mark, onChange }: { config?: Pres
   return (
     <Section title="Branches (evaluated top → bottom)">
       <div className="space-y-2">
-        {branches.map((b, i) => (
+        {branches.map((b, i) => {
+          const conds = b.conditions ?? [];
+          return (
           <div key={b.id} className="rounded-lg border border-border bg-card p-2.5 space-y-2">
             <div className="flex items-center gap-1.5">
               <GripVertical className="h-3.5 w-3.5 text-muted-foreground" />
@@ -570,30 +619,69 @@ function ConditionalFields({ config, readOnly, mark, onChange }: { config?: Pres
               </button>
             </div>
             <div className="space-y-1.5">
-              <VariablePicker value={b.variable} disabled={readOnly} onChange={(v) => update(i, { variable: v })} />
-              <div className="grid grid-cols-2 gap-1.5">
-                <SelectLike disabled={readOnly} options={COMPARISON_OPERATORS} defaultValue={b.op} onPick={(v) => update(i, { op: v })} />
-                {RANGE_OPERATORS.has(b.op) ? (
-                  // Range operators take two bounds — show "[min] and [max]"
-                  // inline. Both values are inclusive (matches the "50–80" reading).
-                  <div className="flex items-center gap-1">
-                    <Input value={b.value} disabled={readOnly} onChange={(e) => update(i, { value: e.target.value })} className="h-9 text-sm" placeholder="Min" />
-                    <span className="px-0.5 text-[11px] text-muted-foreground">and</span>
-                    <Input value={b.value2 ?? ""} disabled={readOnly} onChange={(e) => update(i, { value2: e.target.value })} className="h-9 text-sm" placeholder="Max" />
+              {conds.map((c, ci) => (
+                <div key={ci} className="space-y-1.5">
+                  {ci > 0 && (
+                    // AND/OR joiner — a single logic applies to the whole branch.
+                    <div className="flex items-center gap-1.5 py-0.5">
+                      <div className="h-px flex-1 bg-border" />
+                      <div className="inline-flex overflow-hidden rounded-md border border-border">
+                        {(["AND", "OR"] as const).map((op) => (
+                          <button
+                            key={op}
+                            type="button"
+                            disabled={readOnly}
+                            onClick={() => update(i, { logic: op })}
+                            className={cn(
+                              "px-2 py-0.5 text-[10.5px] font-semibold transition-colors",
+                              (b.logic ?? "AND") === op ? "bg-primary text-primary-foreground" : "bg-card text-muted-foreground hover:bg-accent",
+                            )}
+                          >
+                            {op}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="h-px flex-1 bg-border" />
+                    </div>
+                  )}
+                  <div className="flex items-start gap-1.5">
+                    <div className="flex-1 space-y-1.5">
+                      <VariablePicker value={c.variable} disabled={readOnly} onChange={(v) => updateCond(i, ci, { variable: v })} />
+                      <div className="grid grid-cols-2 gap-1.5">
+                        <SelectLike disabled={readOnly} options={COMPARISON_OPERATORS} defaultValue={c.op} onPick={(v) => updateCond(i, ci, { op: v })} />
+                        {RANGE_OPERATORS.has(c.op) ? (
+                          // Range operators take two inclusive bounds — "[min] and [max]".
+                          <div className="flex items-center gap-1">
+                            <Input value={c.value} disabled={readOnly} onChange={(e) => updateCond(i, ci, { value: e.target.value })} className="h-9 text-sm" placeholder="Min" />
+                            <span className="px-0.5 text-[11px] text-muted-foreground">and</span>
+                            <Input value={c.value2 ?? ""} disabled={readOnly} onChange={(e) => updateCond(i, ci, { value2: e.target.value })} className="h-9 text-sm" placeholder="Max" />
+                          </div>
+                        ) : (
+                          <Input value={c.value} disabled={readOnly || VALUELESS_OPERATORS.has(c.op)} onChange={(e) => updateCond(i, ci, { value: e.target.value })} className="h-9 text-sm" placeholder={VALUELESS_OPERATORS.has(c.op) ? "—" : "Value"} />
+                        )}
+                      </div>
+                    </div>
+                    {conds.length > 1 && (
+                      <button disabled={readOnly} onClick={() => removeCond(i, ci)} title="Remove condition" className="mt-1.5 text-muted-foreground hover:text-destructive">
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    )}
                   </div>
-                ) : (
-                  <Input value={b.value} disabled={readOnly || VALUELESS_OPERATORS.has(b.op)} onChange={(e) => update(i, { value: e.target.value })} className="h-9 text-sm" placeholder={VALUELESS_OPERATORS.has(b.op) ? "—" : "Value"} />
-                )}
-              </div>
+                </div>
+              ))}
+              <button disabled={readOnly} onClick={() => addCond(i)} className="inline-flex items-center gap-1 text-[11px] font-medium text-primary hover:underline disabled:opacity-50">
+                <Plus className="h-3 w-3" /> Add condition
+              </button>
             </div>
           </div>
-        ))}
-        <Button size="sm" variant="outline" disabled={readOnly} onClick={() => setBranches((b) => [...b, { id: uid("b"), label: `Branch ${b.length + 1}`, variable: "", op: "equals", value: "" }])} className="h-8 w-full text-xs">
+          );
+        })}
+        <Button size="sm" variant="outline" disabled={readOnly} onClick={() => setBranches((b) => [...b, { id: uid("b"), label: `Branch ${b.length + 1}`, logic: "AND", conditions: [{ variable: "", op: "equals", value: "" }] }])} className="h-8 w-full text-xs">
           <Plus className="mr-1 h-3 w-3" /> Add branch
         </Button>
         <div className="flex items-start gap-2 rounded-md border border-dashed border-border bg-muted/30 px-2.5 py-2 text-[11px] text-muted-foreground">
           <GitBranch className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          <span>Each branch is a separate output on the canvas. Leads matching no branch leave through the <span className="font-medium text-foreground">Default / else</span> output.</span>
+          <span>Each branch is a separate output on the canvas. Combine conditions with <span className="font-medium text-foreground">AND/OR</span>. Leads matching no branch leave through the always-present <span className="font-medium text-foreground">Default / else</span> output.</span>
         </div>
       </div>
     </Section>
@@ -675,9 +763,17 @@ function ApiToolCallFields({
     // but for this UI-first demo selecting the tool is enough to flip the node valid.
     mark(!!t, t ? undefined : "Select an API tool");
   };
-  const setMapping = (key: string, def: string) => {
+  const setMapping = (key: string, def: string, mode?: "variable" | "constant") => {
+    const existing = inputMap.find((m) => m.v === key);
     const next = inputMap.filter((m) => m.v !== key);
-    if (def) next.push({ v: key, def });
+    // Preserve any value-remap when the source variable changes; constants don't remap.
+    if (def) next.push({ v: key, def, mode, remap: mode === "constant" ? undefined : existing?.remap });
+    onChange({ config: { ...config, apiTool: handle, apiInputMap: next } });
+  };
+  const setRemap = (key: string, remap: PresetValueRemap[]) => {
+    const existing = inputMap.find((m) => m.v === key);
+    const next = inputMap.filter((m) => m.v !== key);
+    next.push({ v: key, def: existing?.def ?? "", mode: existing?.mode, remap: remap.length ? remap : undefined });
     onChange({ config: { ...config, apiTool: handle, apiInputMap: next } });
   };
   return (
@@ -722,14 +818,35 @@ function ApiToolCallFields({
               mappable.length > 0 ? (
                 <div className="space-y-2 pt-1">
                   {mappable.map((inp) => {
-                    const def = inputMap.find((m) => m.v === inp.key)?.def
+                    const row = inputMap.find((m) => m.v === inp.key);
+                    const def = row?.def
                       ?? (inp.source === "campaign" ? `contact.${inp.value ?? inp.key}` : "");
+                    // A value-remap only makes sense for a variable source (you remap the
+                    // resolved value); a hardcoded constant is already the final value.
+                    const isVarMapped = (row?.mode ?? "variable") === "variable" && !!def;
                     return (
-                      <div key={inp.key} className="grid grid-cols-[130px_1fr] items-center gap-2">
-                        <span className="truncate font-mono text-[11.5px] text-muted-foreground" title={inp.description}>
-                          {inp.key}
-                        </span>
-                        <VariablePicker defaultValue={def} disabled={readOnly} onChange={(v) => setMapping(inp.key, v)} />
+                      <div key={inp.key} className="space-y-1.5">
+                        <div className="grid grid-cols-[130px_1fr] items-center gap-2">
+                          <span className="truncate font-mono text-[11.5px] text-muted-foreground" title={inp.description}>
+                            {inp.key}
+                          </span>
+                          <VariablePicker
+                            defaultValue={def}
+                            disabled={readOnly}
+                            allowConstant
+                            mode={row?.mode}
+                            onChange={(v, mode) => setMapping(inp.key, v, mode)}
+                          />
+                        </div>
+                        {isVarMapped && (
+                          <div className="pl-[138px]">
+                            <ValueRemapEditor
+                              value={row?.remap ?? []}
+                              disabled={readOnly}
+                              onChange={(rm) => setRemap(inp.key, rm)}
+                            />
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -781,16 +898,71 @@ function ApiToolCallFields({
   );
 }
 
+/**
+ * Optional per-input value-remap (Model B): rewrites the resolved variable value
+ * before the request is sent — e.g. a WhatsApp button label `Delhi` → API code
+ * `ind_delhi`. Human labels still flow untouched through conditionals; the
+ * transform is confined to the consuming API node. Unlisted values pass through.
+ */
+function ValueRemapEditor({
+  value, disabled, onChange,
+}: { value: PresetValueRemap[]; disabled?: boolean; onChange: (v: PresetValueRemap[]) => void }) {
+  const [open, setOpen] = useState(value.length > 0);
+  const rows = value;
+  const update = (i: number, patch: Partial<PresetValueRemap>) =>
+    onChange(rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+  const add = () => { onChange([...rows, { from: "", to: "" }]); setOpen(true); };
+  const remove = (i: number) => onChange(rows.filter((_, idx) => idx !== i));
+
+  if (!open && rows.length === 0) {
+    return (
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={add}
+        className="inline-flex items-center gap-1 text-[10.5px] font-medium text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+      >
+        <ArrowLeftRight className="h-3 w-3" /> Remap values
+      </button>
+    );
+  }
+  return (
+    <div className="space-y-1.5 rounded-md border border-dashed border-border bg-muted/20 p-2">
+      <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        <ArrowLeftRight className="h-3 w-3" /> Remap values
+      </div>
+      {rows.map((r, i) => (
+        <div key={i} className="flex items-center gap-1.5">
+          <Input value={r.from} disabled={disabled} onChange={(e) => update(i, { from: e.target.value })} placeholder="Incoming label" className="h-7 text-[11px]" />
+          <ArrowRight className="h-3 w-3 shrink-0 text-muted-foreground" />
+          <Input value={r.to} disabled={disabled} onChange={(e) => update(i, { to: e.target.value })} placeholder="Sent value" className="h-7 font-mono text-[11px]" />
+          {!disabled && (
+            <button type="button" onClick={() => remove(i)} title="Remove" className="shrink-0 text-muted-foreground hover:text-destructive">
+              <X className="h-3 w-3" />
+            </button>
+          )}
+        </div>
+      ))}
+      {!disabled && (
+        <button type="button" onClick={add} className="inline-flex items-center gap-1 text-[10.5px] font-medium text-primary hover:underline">
+          <Plus className="h-3 w-3" /> Add row
+        </button>
+      )}
+      <p className="text-[10px] text-muted-foreground">Values not listed pass through unchanged.</p>
+    </div>
+  );
+}
+
 /* --------------------------- Voice Call --------------------------- */
 
 function VoiceCallFields({ config, readOnly, mark, onChange }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
   return (
     <ActionNodeShell kind="voiceCall" config={config} readOnly={readOnly} mark={mark} onChange={onChange}
-      renderCore={(coreMark) => <VoiceCallCore config={config} readOnly={readOnly} mark={coreMark} />} />
+      renderCore={(coreMark) => <VoiceCallCore config={config} readOnly={readOnly} mark={coreMark} onChange={onChange} />} />
   );
 }
 
-function VoiceCallCore({ config, readOnly, mark }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void }) {
+function VoiceCallCore({ config, readOnly, mark, onChange }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
   const { tzLabel } = useRegion();
   const [agent, setAgent] = useState<string>(config?.agent ?? "");
   const agentSelected = !!agent;
@@ -803,6 +975,20 @@ function VoiceCallCore({ config, readOnly, mark }: { config?: PresetConfig; read
   const agentRecord = resolveAgent(agent);
   const agentTools = (agentRecord?.tools ?? []).map(getTool).filter((t): t is NonNullable<typeof t> => !!t);
   const toolMap = config?.toolInputMap ?? [];
+
+  // Persist the agent var-map / tool input-map so mappings (and their constant/variable
+  // mode) survive reopen and downstream nodes resolve them. Both write into node config.
+  const setVoiceMapping = (key: string, def: string, mode?: "variable" | "constant") => {
+    const base = config?.voiceVarMap ?? varMap;
+    const next = base.filter((m) => m.v !== key);
+    next.push({ v: key, def, mode });
+    onChange({ config: { ...config, voiceVarMap: next } });
+  };
+  const setToolMapping = (key: string, def: string, mode?: "variable" | "constant") => {
+    const next = toolMap.filter((m) => m.v !== key);
+    next.push({ v: key, def, mode });
+    onChange({ config: { ...config, toolInputMap: next } });
+  };
   return (
     <>
       <Section title="Agent">
@@ -835,12 +1021,21 @@ function VoiceCallCore({ config, readOnly, mark }: { config?: PresetConfig; read
             <p className="text-[11px] text-muted-foreground">Map agent variables to upstream workflow variables.</p>
             {agentSelected ? (
               <div className="space-y-2 pt-1">
-                {varMap.map((row) => (
-                  <div key={row.v} className="grid grid-cols-[110px_1fr] items-center gap-2">
-                    <span className="font-mono text-[11.5px] text-muted-foreground">{row.v}</span>
-                    <VariablePicker defaultValue={row.def} disabled={readOnly} onChange={() => undefined} />
-                  </div>
-                ))}
+                {varMap.map((row) => {
+                  const saved = config?.voiceVarMap?.find((m) => m.v === row.v) ?? row;
+                  return (
+                    <div key={row.v} className="grid grid-cols-[110px_1fr] items-center gap-2">
+                      <span className="font-mono text-[11.5px] text-muted-foreground">{row.v}</span>
+                      <VariablePicker
+                        defaultValue={saved.def}
+                        disabled={readOnly}
+                        allowConstant
+                        mode={saved.mode}
+                        onChange={(v, mode) => setVoiceMapping(row.v, v, mode)}
+                      />
+                    </div>
+                  );
+                })}
               </div>
             ) : (
               <div className="rounded-md border border-dashed border-border bg-muted/30 px-3 py-3 text-[11.5px] text-muted-foreground">
@@ -868,12 +1063,18 @@ function VoiceCallCore({ config, readOnly, mark }: { config?: PresetConfig; read
                   </div>
                   {mappable.length > 0 ? mappable.map((inp) => {
                     const v = `${tool.handle}.${inp.key}`;
+                    const saved = toolMap.find((m) => m.v === v);
                     const fallback = inp.source === "campaign" ? `contact.${inp.value ?? inp.key}` : "__llm__";
-                    const def = toolMap.find((m) => m.v === v)?.def ?? fallback;
+                    const def = saved?.def ?? fallback;
                     return (
                       <div key={v} className="grid grid-cols-[130px_1fr] items-center gap-2">
                         <span className="truncate font-mono text-[11.5px] text-muted-foreground" title={inp.description}>{inp.key}</span>
-                        <ToolInputMapPicker defaultValue={def} disabled={readOnly} />
+                        <ToolInputMapPicker
+                          defaultValue={def}
+                          disabled={readOnly}
+                          mode={saved?.mode}
+                          onChange={(val, mode) => setToolMapping(v, val, mode)}
+                        />
                       </div>
                     );
                   }) : (
@@ -908,27 +1109,72 @@ function VoiceCallCore({ config, readOnly, mark }: { config?: PresetConfig; read
   );
 }
 
-/** Maps a single tool input to "Let LLM decide" or a CSV/upstream variable. */
-function ToolInputMapPicker({ defaultValue, disabled }: { defaultValue?: string; disabled?: boolean }) {
+/** Maps a single tool input to "Let LLM decide", a CSV/upstream variable, or a constant. */
+function ToolInputMapPicker({
+  defaultValue, disabled, mode = "variable", onChange,
+}: {
+  defaultValue?: string; disabled?: boolean;
+  mode?: "variable" | "constant";
+  onChange?: (v: string, mode?: "variable" | "constant") => void;
+}) {
   const [v, setV] = useState(defaultValue ?? "__llm__");
+  const [m, setM] = useState<"variable" | "constant">(mode);
+  useEffect(() => { setM(mode); }, [mode]);
   const extraVariables = useContext(ExtraVariablesContext);
-  const allVariables = [...extraVariables, ...SAMPLE_WORKFLOW_VARIABLES];
+  const allVariables = mergeVariables(extraVariables);
   const isCustom = v !== "__llm__" && !!v && !allVariables.some((s) => s.key === v);
+  const grouped = groupVariablesBySource(allVariables);
+
+  const pickMode = (next: "variable" | "constant") => {
+    setM(next);
+    const reset = next === "variable" ? "__llm__" : "";
+    setV(reset);
+    onChange?.(reset, next);
+  };
+  const toggleBtn = (
+    <VarValueToggle mode={m} disabled={disabled} onPick={pickMode} size="h-8" />
+  );
+
+  if (m === "constant") {
+    return (
+      <div className="flex min-w-0 items-center gap-1">
+        <div className="relative min-w-0 flex-1">
+          <Hash className="pointer-events-none absolute left-2.5 top-1/2 z-10 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={v}
+            disabled={disabled}
+            onChange={(e) => { setV(e.target.value); onChange?.(e.target.value, "constant"); }}
+            placeholder="Constant value…"
+            className="h-8 min-w-0 pl-7 font-mono text-[12px]"
+          />
+        </div>
+        {toggleBtn}
+      </div>
+    );
+  }
   return (
-    <Select value={v || "__llm__"} disabled={disabled} onValueChange={setV}>
-      <SelectTrigger className="h-8 min-w-0 font-mono text-[12px] [&>span]:truncate"><SelectValue /></SelectTrigger>
-      <SelectContent>
-        <SelectItem value="__llm__" className="text-[12px]">
-          <span className="inline-flex items-center gap-1.5"><Sparkles className="h-3 w-3 text-ai" /> Let LLM decide</span>
-        </SelectItem>
-        {isCustom && (
-          <SelectItem value={v} className="font-mono text-[12px]">{v} <span className="text-muted-foreground">· upstream</span></SelectItem>
-        )}
-        {allVariables.map((s) => (
-          <SelectItem key={s.key} value={s.key} className="font-mono text-[12px]">{s.key} <span className="text-muted-foreground">· {s.source}</span></SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+    <div className="flex min-w-0 items-center gap-1">
+      <Select value={v || "__llm__"} disabled={disabled} onValueChange={(val) => { setV(val); onChange?.(val, "variable"); }}>
+        <SelectTrigger className="h-8 min-w-0 font-mono text-[12px] [&>span]:truncate"><SelectValue /></SelectTrigger>
+        <SelectContent>
+          <SelectItem value="__llm__" className="text-[12px]">
+            <span className="inline-flex items-center gap-1.5"><Sparkles className="h-3 w-3 text-ai" /> Let LLM decide</span>
+          </SelectItem>
+          {isCustom && (
+            <SelectItem value={v} className="font-mono text-[12px]">{v} <span className="text-muted-foreground">· upstream</span></SelectItem>
+          )}
+          {grouped.map((g) => (
+            <SelectGroup key={g.source}>
+              <SelectLabel className="text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground">{g.source}</SelectLabel>
+              {g.items.map((s) => (
+                <SelectItem key={s.key} value={s.key} className="pl-7 font-mono text-[12px]">{s.key}</SelectItem>
+              ))}
+            </SelectGroup>
+          ))}
+        </SelectContent>
+      </Select>
+      {toggleBtn}
+    </div>
   );
 }
 
@@ -967,18 +1213,36 @@ function WhatsAppCore({
   const [templateId, setTemplateId] = useState(config?.waTemplate ?? "");
   const [numberSelected, setNumberSelected] = useState(!!config?.waNumber);
   const [contentReady, setContentReady] = useState(!!config?.waTemplate || !!config?.waBody);
-  const [splitOutcomes, setSplitOutcomes] = useState(config?.waSplitOutcomes ?? false);
   const template = resolveWaTemplate(templateId);
   const templateSelected = !!template;
+  // "Branchable" buttons produce a trackable handle (Quick Reply / tracked URL).
+  // Phone numbers and untracked URLs are NOT branchable — those taps route through
+  // the always-on "No response / continue" path.
   const hasButtons = mode !== "freeform" && !!template
-    && (template.buttons ?? []).some((b) => b.type === "URL" || b.type === "Quick Reply" || b.type === "Link Flow");
-  // Type 1 = no branchable buttons; its outcomes only split when the toggle is on.
+    && (template.buttons ?? []).some(isBranchableButton);
   const isType1 = !hasButtons;
 
-  const waVarMap = config?.waVarMap ?? [
-    { v: "{{1}}", def: "contact.first_name" },
-    { v: "{{2}}", def: "ai.intent" },
-  ];
+  // Mirror the WA template-creation page: Header and Body each carry their OWN variable
+  // numbering — a template can reference {{1}} in the header AND {{1}} in the body, and
+  // they're independent placeholders mapped separately. Derive each set from the selected
+  // template's text, then hydrate from any saved mapping so edits persist.
+  const placeholders = (text?: string) =>
+    Array.from(new Set((text?.match(/\{\{\s*\d+\s*\}\}/g) ?? []).map((s) => s.replace(/\s+/g, ""))));
+  const bodyVars = placeholders(template?.body);
+  const headerVars = placeholders(template?.header);
+  const hydrate = (vars: string[], saved?: PresetVarMap[]): PresetVarMap[] =>
+    vars.map((v) => saved?.find((m) => m.v === v) ?? { v, def: "" });
+  const waVarMap: PresetVarMap[] = hydrate(bodyVars, config?.waVarMap);
+  const waHeaderVarMap: PresetVarMap[] = hydrate(headerVars, config?.waHeaderVarMap);
+
+  // Persist body / header variable maps (with constant-vs-variable mode) into config.
+  const setWaMapping = (scope: "body" | "header", key: string, def: string, mode?: "variable" | "constant") => {
+    const field = scope === "header" ? "waHeaderVarMap" : "waVarMap";
+    const base = scope === "header" ? waHeaderVarMap : waVarMap;
+    const next = base.filter((m) => m.v !== key);
+    next.push({ v: key, def, mode });
+    onChange({ config: { ...config, [field]: next } });
+  };
 
   useEffect(() => {
     mark(numberSelected && contentReady, numberSelected ? undefined : "Select a connected WhatsApp number");
@@ -987,13 +1251,13 @@ function WhatsAppCore({
   // Publish the canvas handles (derived from template buttons + the Type-1 split
   // toggle) AND persist the config so the node restores correctly when reopened.
   useEffect(() => {
-    const outs = mode === "freeform" ? whatsappOutputs(undefined, splitOutcomes) : whatsappOutputs(template, splitOutcomes);
+    const outs = mode === "freeform" ? whatsappOutputs(undefined) : whatsappOutputs(template);
     onChange({
       outputs: outs,
-      config: { ...config, waMode: mode, waTemplate: templateId, waSplitOutcomes: splitOutcomes },
+      config: { ...config, waMode: mode, waTemplate: templateId },
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, templateId, splitOutcomes]);
+  }, [mode, templateId]);
 
   return (
     <>
@@ -1049,6 +1313,7 @@ function WhatsAppCore({
               {template && (
                 <div className="rounded-lg border border-border bg-muted/30 p-3 text-[12px]">
                   <p className="mb-1 text-[10.5px] uppercase tracking-wider text-muted-foreground">Preview</p>
+                  {template.header && <p className="mb-1 font-semibold text-foreground">{template.header}</p>}
                   <p className="text-foreground">{template.body}</p>
                   {template.buttons && template.buttons.length > 0 && (
                     <div className="mt-2 flex flex-wrap gap-1.5">
@@ -1070,14 +1335,54 @@ function WhatsAppCore({
                 <Label className="text-[12px] font-medium text-foreground">Variable mapping</Label>
               </div>
               {templateSelected ? (
-                <div className="space-y-2 pt-1">
-                  {waVarMap.map((row) => (
-                    <div key={row.v} className="grid grid-cols-[60px_1fr] items-center gap-2">
-                      <span className="font-mono text-[11.5px] text-muted-foreground">{row.v}</span>
-                      <VariablePicker defaultValue={row.def} disabled={readOnly} onChange={() => undefined} />
-                    </div>
-                  ))}
-                </div>
+                (waHeaderVarMap.length > 0 || waVarMap.length > 0) ? (
+                  <div className="space-y-4 pt-1">
+                    <p className="text-[11px] text-muted-foreground">
+                      Header and Body number their variables independently — map what goes into each
+                      <span className="font-mono"> {"{{1}}"}</span> separately.
+                    </p>
+                    {/* Header variable samples */}
+                    {waHeaderVarMap.length > 0 && (
+                      <div className="space-y-2">
+                        <p className="text-[10.5px] font-medium uppercase tracking-wider text-muted-foreground">Header sample{waHeaderVarMap.length > 1 ? "s" : ""}</p>
+                        {waHeaderVarMap.map((row) => (
+                          <div key={row.v} className="space-y-1">
+                            <span className="font-mono text-[11px] text-muted-foreground">Header {row.v}</span>
+                            <VariablePicker
+                              defaultValue={row.def}
+                              disabled={readOnly}
+                              allowConstant
+                              mode={row.mode}
+                              onChange={(v, mode) => setWaMapping("header", row.v, v, mode)}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {/* Body variable samples */}
+                    {waVarMap.length > 0 && (
+                      <div className="space-y-2">
+                        <p className="text-[10.5px] font-medium uppercase tracking-wider text-muted-foreground">Body sample{waVarMap.length > 1 ? "s" : ""}</p>
+                        {waVarMap.map((row) => (
+                          <div key={row.v} className="space-y-1">
+                            <span className="font-mono text-[11px] text-muted-foreground">Body {row.v}</span>
+                            <VariablePicker
+                              defaultValue={row.def}
+                              disabled={readOnly}
+                              allowConstant
+                              mode={row.mode}
+                              onChange={(v, mode) => setWaMapping("body", row.v, v, mode)}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="rounded-md border border-dashed border-border bg-muted/30 px-3 py-3 text-[11.5px] text-muted-foreground">
+                    This template has no variables to map.
+                  </div>
+                )
               ) : (
                 <div className="rounded-md border border-dashed border-border bg-muted/30 px-3 py-3 text-[11.5px] text-muted-foreground">
                   Choose a template above to map its variables.
@@ -1097,23 +1402,11 @@ function WhatsAppCore({
         </Section>
       )}
 
-      {/* Type-1 only: opt in to splitting reply vs. session into separate paths.
-          Type-2 (button) nodes always expose their outcomes, so the toggle is hidden. */}
-      {isType1 && (
-        <Section title="Outcome paths">
-          <div className="flex items-start justify-between gap-3 rounded-lg border border-border bg-card/40 px-3 py-2.5">
-            <div className="min-w-0">
-              <p className="text-[12px] font-medium">Split reply &amp; session into separate paths</p>
-              <p className="mt-0.5 text-[11px] text-muted-foreground">
-                Off: one output advances every lead onward. On: route “replied” and “session expired” separately.
-              </p>
-            </div>
-            <Switch checked={splitOutcomes} disabled={readOnly} onCheckedChange={setSplitOutcomes} />
-          </div>
-        </Section>
-      )}
-
-      <ActionAdvanceBanner kind="whatsapp" type1={isType1} split={splitOutcomes} />
+      {/* A WhatsApp node always exposes "Replied (no button)" + "No response /
+          continue" (and one handle per trackable button). Untrackable taps —
+          phone numbers, untracked URLs — route through "No response / continue",
+          so call it out when the template carries any. */}
+      <ActionAdvanceBanner kind="whatsapp" type1={isType1} />
     </>
   );
 }
@@ -1290,36 +1583,87 @@ function SelectLike({
 }
 
 function VariablePicker({
-  value, defaultValue, disabled, onChange,
-}: { value?: string; defaultValue?: string; disabled?: boolean; onChange: (v: string) => void }) {
+  value, defaultValue, disabled, onChange, allowConstant, mode = "variable",
+}: {
+  value?: string; defaultValue?: string; disabled?: boolean;
+  /** Emits the value and (when `allowConstant`) whether it's a variable key or a literal. */
+  onChange: (v: string, mode?: "variable" | "constant") => void;
+  /** When true, a toggle lets the user enter a hardcoded constant instead of a variable. */
+  allowConstant?: boolean;
+  mode?: "variable" | "constant";
+}) {
   const [v, setV] = useState(value ?? defaultValue ?? "");
+  const [m, setM] = useState<"variable" | "constant">(mode);
   useEffect(() => { if (value !== undefined) setV(value); }, [value]);
-  // Outcome variables from other action nodes in the flow (e.g. `<id>.session_expired`).
+  useEffect(() => { setM(mode); }, [mode]);
+  // Outcome variables from other action nodes in the flow (e.g. `whatsapp_1.button`).
   const extraVariables = useContext(ExtraVariablesContext);
-  const allVariables = [...extraVariables, ...SAMPLE_WORKFLOW_VARIABLES];
+  const allVariables = mergeVariables(extraVariables);
   // Preset/upstream variables (e.g. lifetime_order_value, call_disposition) aren't in
   // the sample list — surface the current value as its own option so it still renders.
   const isCustom = !!v && !allVariables.some((s) => s.key === v);
+  const grouped = groupVariablesBySource(allVariables);
+
+  // Switch between mapping to a variable and hardcoding a constant. Clearing the value
+  // on switch avoids a variable key lingering as a "constant" (and vice versa).
+  const pickMode = (next: "variable" | "constant") => {
+    setM(next);
+    setV("");
+    onChange("", next);
+  };
+  const toggleBtn = allowConstant ? (
+    <VarValueToggle mode={m} disabled={disabled} onPick={pickMode} size="h-9" />
+  ) : null;
+
+  if (allowConstant && m === "constant") {
+    return (
+      <div className="flex min-w-0 items-center gap-1">
+        <div className="relative min-w-0 flex-1">
+          <Hash className="pointer-events-none absolute left-2.5 top-1/2 z-10 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={v}
+            disabled={disabled}
+            onChange={(e) => { setV(e.target.value); onChange(e.target.value, "constant"); }}
+            placeholder="Constant value…"
+            className="h-9 min-w-0 pl-7 font-mono text-[12px]"
+          />
+        </div>
+        {toggleBtn}
+      </div>
+    );
+  }
   return (
-    <div className="relative min-w-0">
-      <Variable className="pointer-events-none absolute left-2.5 top-1/2 z-10 h-3 w-3 -translate-y-1/2 text-ai" />
-      <Select value={v || undefined} disabled={disabled} onValueChange={(val) => { setV(val); onChange(val); }}>
-        <SelectTrigger className="h-9 min-w-0 pl-7 font-mono text-[12px] [&>span]:truncate">
-          <SelectValue placeholder="Select variable…" />
-        </SelectTrigger>
-        <SelectContent>
-          {isCustom && (
-            <SelectItem value={v} className="font-mono text-[12px]">
-              {v} <span className="text-muted-foreground">· upstream</span>
-            </SelectItem>
-          )}
-          {allVariables.map((s) => (
-            <SelectItem key={s.key} value={s.key} className="font-mono text-[12px]">
-              {s.key} <span className="text-muted-foreground">· {s.source}</span>
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+    <div className="flex min-w-0 items-center gap-1">
+      <div className="relative min-w-0 flex-1">
+        <Variable className="pointer-events-none absolute left-2.5 top-1/2 z-10 h-3 w-3 -translate-y-1/2 text-ai" />
+        <Select value={v || undefined} disabled={disabled} onValueChange={(val) => { setV(val); onChange(val, "variable"); }}>
+          <SelectTrigger className="h-9 min-w-0 pl-7 font-mono text-[12px] [&>span]:truncate">
+            <SelectValue placeholder="Select variable…" />
+          </SelectTrigger>
+          <SelectContent>
+            {isCustom && (
+              <SelectItem value={v} className="font-mono text-[12px]">
+                {v} <span className="text-muted-foreground">· upstream</span>
+              </SelectItem>
+            )}
+            {grouped.map((g) => (
+              <SelectGroup key={g.source}>
+                <SelectLabel className="text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  {g.source}
+                </SelectLabel>
+                {g.items.map((s) => (
+                  // Full key kept as the item text so the trigger echoes `whatsapp_1.button`
+                  // (v1 consistency); the serial header above provides the level-1 grouping.
+                  <SelectItem key={s.key} value={s.key} className="pl-7 font-mono text-[12px]">
+                    {s.key}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      {toggleBtn}
     </div>
   );
 }
@@ -1529,17 +1873,15 @@ function ActionNodeShell({
 /** Static, non-editable explainer of when a lead advances off an action node.
  *  Replaces the old (editable) Exit Conditions section — branching is now done
  *  with a downstream Conditional node. */
-function ActionAdvanceBanner({ kind, type1, split }: { kind: ActionKind; type1?: boolean; split?: boolean }) {
+function ActionAdvanceBanner({ kind, type1 }: { kind: ActionKind; type1?: boolean }) {
   const text =
     kind === "voiceCall"
       ? "Leads advance when the call concludes or retries are exhausted. Branch on the outcome with a Conditional node downstream."
       : kind === "sms"
         ? "Leads advance once the message is sent. Branch on the outcome with a Conditional node downstream."
         : type1
-          ? split
-            ? "Leads branch on whether a reply arrived or the 24-hour session window expired — wire each output."
-            : "Leads advance to the next step once a reply is received or the 24-hour session window expires."
-          : "Leads advance when a button is tapped, a reply is received, or the 24-hour session window expires. Each button is its own output on the canvas — connect an edge from every button.";
+          ? "Always two outputs: “Replied (no button)” and “No response / continue” (24h session expiry + any untrackable tap). Wire both."
+          : "Each trackable button is its own output, plus “Replied (no button)” and “No response / continue”. Phone numbers and untracked URLs aren’t trackable — those taps route through “No response / continue”. Wire every output.";
   return (
     <div className="mt-4 flex items-start gap-2 rounded-md border border-dashed border-border bg-muted/30 px-2.5 py-2 text-[11px] text-muted-foreground">
       <GitBranch className="mt-0.5 h-3.5 w-3.5 shrink-0" />

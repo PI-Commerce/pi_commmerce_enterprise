@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { AppShell, PageHeader } from "@/components/app/AppShell";
 import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
 import {
   Select,
   SelectContent,
@@ -66,32 +67,50 @@ function Dashboard() {
       <div className="mt-6 rounded-xl border border-border bg-card">
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <div>
-            <h2 className="text-sm font-semibold">Live campaigns</h2>
-            <p className="text-[11px] text-muted-foreground">Updated just now</p>
+            <h2 className="text-sm font-semibold">Live runs</h2>
+            <p className="text-[11px] text-muted-foreground">5 most recent running runs · updated just now</p>
           </div>
           <Link to="/campaigns" className="inline-flex items-center gap-1 text-[11.5px] text-muted-foreground hover:text-foreground">
-            View all <ArrowUpRight className="h-3 w-3" />
+            View all runs <ArrowUpRight className="h-3 w-3" />
           </Link>
         </div>
-        <ul className="divide-y divide-border">
-          {LIVE.map((c) => (
-            <li key={c.name} className="flex items-center gap-3 px-4 py-3 text-sm">
-              <span className={`h-1.5 w-1.5 rounded-full ${c.status === "running" ? "bg-success animate-pulse" : c.status === "paused" ? "bg-warning" : "bg-muted-foreground"}`} />
-              <div className="min-w-0 flex-1">
-                <p className="truncate font-medium">{c.name}</p>
-                <p className="text-[11px] text-muted-foreground">{c.channels.join(" · ")} · owned by {c.owner}</p>
-              </div>
-              <div className="hidden text-right md:block">
-                <p className="font-mono text-[12px]">{c.runs}</p>
-                <p className="text-[10.5px] text-muted-foreground">runs / 24h</p>
-              </div>
-              <div className="w-20 text-right">
-                <p className="font-mono text-[12px] capitalize">{c.status}</p>
-                <p className="text-[10.5px] text-muted-foreground">status</p>
-              </div>
-            </li>
-          ))}
-        </ul>
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-border bg-secondary/30 text-[11px] uppercase tracking-wider text-muted-foreground">
+              <th className="px-4 py-2.5 text-left font-medium">Run ID</th>
+              <th className="px-4 py-2.5 text-left font-medium">Campaign</th>
+              <th className="px-4 py-2.5 text-left font-medium">Started at</th>
+              <th className="px-4 py-2.5 text-left font-medium w-[220px]">Progress</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {LIVE_RUNS.map((r) => {
+              const pct = r.total ? Math.round((r.processed / r.total) * 100) : 100;
+              return (
+                <tr key={r.id} className="transition-colors hover:bg-accent/30">
+                  <td className="px-4 py-3 font-mono text-[12px]">{r.id}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <span className="h-1.5 w-1.5 rounded-full bg-success animate-pulse" />
+                      <span className="font-medium">{r.campaign}</span>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 text-[12px] text-muted-foreground">{r.startedAt}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex flex-col gap-1">
+                      <Progress value={pct} className="h-1.5 w-44" />
+                      <span className="font-mono text-[11px] text-muted-foreground tabular-nums">
+                        {r.total
+                          ? `${r.processed.toLocaleString()}/${r.total.toLocaleString()} leads processed`
+                          : `${r.processed.toLocaleString()} leads processed`}
+                      </span>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
 
       <div className="mt-4 grid grid-cols-3 gap-4">
@@ -126,10 +145,11 @@ function ShortcutCard({ icon: Icon, title, desc, to }: { icon: React.ComponentTy
   );
 }
 
-// In-scope campaigns only — WhatsApp (Chat AI) and Voice AI channels.
-const LIVE = [
-  { name: "Dormant Trader Reactivation", channels: ["Chat AI", "Voice AI"], owner: "Aman", runs: "3", status: "running" },
-  { name: "New Trader Onboarding", channels: ["Chat AI", "Voice AI"], owner: "Priya", runs: "1", status: "running" },
-  { name: "High-Value Win-Back", channels: ["Voice AI", "Chat AI"], owner: "Aman", runs: "1", status: "paused" },
-  { name: "KYC Drop-off Recovery", channels: ["Chat AI", "Voice AI"], owner: "Ria", runs: "1", status: "completed" },
+// The 5 most recent running runs across in-scope campaigns (WhatsApp / Voice AI).
+const LIVE_RUNS = [
+  { id: "r_8423", campaign: "Dormant Trader Reactivation", startedAt: "Today, 12:04 PM", processed: 630,  total: 1500 as number | undefined },
+  { id: "r_8422", campaign: "Retail · Activation",         startedAt: "Today, 11:50 AM", processed: 1200, total: undefined },
+  { id: "r_8421", campaign: "New Trader Onboarding",       startedAt: "Today, 11:32 AM", processed: 410,  total: 900 },
+  { id: "r_8420", campaign: "KYC Drop-off Recovery",       startedAt: "Today, 10:58 AM", processed: 220,  total: 540 },
+  { id: "r_8419", campaign: "High-Value Win-Back",         startedAt: "Today, 10:20 AM", processed: 75,   total: 300 },
 ] as const;

@@ -140,7 +140,7 @@ export const SEED_TEMPLATES: WaTemplate[] = [
     format: "TEXT",
     status: "Approved",
     createdAt: "11 Jun 2026",
-    header: "Order confirmed",
+    header: "Order {{1}} confirmed",
     body: "Hi {{1}}, your order {{2}} is confirmed and will be delivered by {{3}}. Track it anytime in the Paytm app.",
     footer: "Paytm Commerce",
     buttons: [{ type: "URL", text: "Track order" }],
@@ -156,7 +156,7 @@ export const SEED_TEMPLATES: WaTemplate[] = [
     body: "Hi {{1}}, a payment of ₹{{2}} for {{3}} is due on {{4}}. Pay now to avoid late fees.",
     footer: "Paytm",
     buttons: [
-      { type: "URL", text: "Pay now" },
+      { type: "URL", text: "Pay now", clickTracking: true },
       { type: "Quick Reply", text: "Remind me later" },
     ],
   },
@@ -172,7 +172,7 @@ export const SEED_TEMPLATES: WaTemplate[] = [
     body: "Still thinking it over, {{1}}? Your cart is waiting. Use code {{2}} for ₹{{3}} off — today only.",
     footer: "Reply STOP to opt out",
     buttons: [
-      { type: "URL", text: "Complete purchase" },
+      { type: "URL", text: "Complete purchase", clickTracking: true },
       { type: "Quick Reply", text: "Not interested" },
     ],
   },

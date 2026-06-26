@@ -54,6 +54,16 @@ const CHANNEL_BY_KIND: Partial<Record<SankeyNodeKind, ChannelKind>> = {
   whatsapp: "whatsapp", voice: "voice", sms: "sms", ads: "ads",
 };
 
+/**
+ * Stage label shown in the Leads table. Prefer the node's per-kind serial +
+ * description (`whatsapp_2 • Renewal`, the live builder's identity scheme); fall
+ * back to the legacy positional `<n> · <name>` for nodes lacking a serial.
+ */
+export function stageLabelFor(node: SankeyNode, serialById: Map<string, number>): string {
+  if (node.serial) return node.description ? `${node.serial} • ${node.description}` : node.serial;
+  return `${serialById.get(node.id) ?? "?"} · ${node.name.split(" · ")[0]}`;
+}
+
 /** Generate leads weighted by each node's `entered` count.  */
 export function generateLeads(run: RunRow, total = 3990): Lead[] {
   const rand = rng(run.id || "default_run");
@@ -84,7 +94,7 @@ export function generateLeads(run: RunRow, total = 3990): Lead[] {
       phone,
       email: `${first}.${last}@example.com`.toLowerCase(),
       stageNodeId: pick.id,
-      stageLabel: `${serialById.get(pick.id) ?? "?"} · ${pick.name.split(" · ")[0]}`,
+      stageLabel: stageLabelFor(pick, serialById),
       channel: CHANNEL_BY_KIND[pick.kind],
       status,
       cost: +((rand() * 0.18) + 0.02).toFixed(3),

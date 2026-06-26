@@ -25,6 +25,46 @@ export function AgentBuilder({ mode, type, record }: { mode: "create" | "edit"; 
   const [masterPrompt, setMasterPrompt] = useState(record?.masterPrompt ?? "");
   const [knowledgeBase, setKnowledgeBase] = useState(record?.knowledgeBase ?? "");
   const [postCall, setPostCall] = useState<PostCallVar[]>(record?.postCall ?? []);
+  // Post-call vars are authored in ONE of two modes (never both at once): row-by-row
+  // ("manual") or by pasting a `{ key: prompt }` JSON object ("json").
+  const [postCallMode, setPostCallMode] = useState<"manual" | "json">("manual");
+  const [jsonText, setJsonText] = useState("");
+
+  const importPostCallJson = () => {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(jsonText);
+    } catch {
+      toast.error("Invalid JSON", { description: "Paste an object of \"variable_name\": \"prompt\" pairs." });
+      return;
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      toast.error("Expected a JSON object", { description: "e.g. { \"intent\": \"What did the customer want?\" }" });
+      return;
+    }
+    const entries = Object.entries(parsed as Record<string, unknown>)
+      .map(([k, v]) => ({ name: slug(k), prompt: typeof v === "string" ? v : String(v) }))
+      .filter((e) => e.name);
+    if (entries.length === 0) {
+      toast.error("No variables found", { description: "The object had no usable key/prompt pairs." });
+      return;
+    }
+    // Merge: update prompts for existing names, append new ones.
+    setPostCall((xs) => {
+      const next = [...xs];
+      let added = 0;
+      for (const e of entries) {
+        const existing = next.find((x) => x.name === e.name);
+        if (existing) existing.prompt = e.prompt;
+        else { next.push({ id: uid(), name: e.name, prompt: e.prompt }); added++; }
+      }
+      toast.success(`Imported ${entries.length} variable${entries.length === 1 ? "" : "s"}`, {
+        description: added < entries.length ? `${entries.length - added} updated, ${added} added.` : undefined,
+      });
+      return next;
+    });
+    setJsonText("");
+  };
 
   const close = () => navigate({ to: "/agents" });
   const save = () => {
@@ -140,32 +180,70 @@ export function AgentBuilder({ mode, type, record }: { mode: "create" | "edit"; 
 
           {/* Post-call analysis variables */}
           <Card title="Post-call analysis variables" desc="Values extracted from the call/chat transcript after it ends.">
-            {postCall.length > 0 && (
-              <div className="space-y-2">
-                {postCall.map((v) => (
-                  <div key={v.id} className="rounded-lg border border-border bg-background/60 p-3 space-y-2">
-                    <div className="flex items-center gap-2">
-                      <Input
-                        value={v.name}
-                        onChange={(e) => setPostCall((xs) => xs.map((x) => x.id === v.id ? { ...x, name: slug(e.target.value) } : x))}
-                        placeholder="variable_name"
-                        className="h-8 flex-1 font-mono text-xs"
-                      />
-                      <button onClick={() => setPostCall((xs) => xs.filter((x) => x.id !== v.id))} className="rounded-md p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" title="Remove"><Trash2 className="h-3.5 w-3.5" /></button>
-                    </div>
-                    <Textarea
-                      value={v.prompt}
-                      onChange={(e) => setPostCall((xs) => xs.map((x) => x.id === v.id ? { ...x, prompt: e.target.value } : x))}
-                      placeholder="Prompt the LLM uses to capture this from the transcript…"
-                      className="min-h-[52px] text-xs"
-                    />
+            {/* Mode toggle — author EITHER manually OR by pasting JSON, never both at once. */}
+            <div className="inline-flex items-center gap-0.5 rounded-lg border border-border bg-secondary/40 p-0.5 text-[11.5px]">
+              <button
+                onClick={() => setPostCallMode("manual")}
+                className={cn("rounded-md px-2.5 py-1 font-medium transition-colors", postCallMode === "manual" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}
+              >
+                Manual
+              </button>
+              <button
+                onClick={() => setPostCallMode("json")}
+                className={cn("rounded-md px-2.5 py-1 font-medium transition-colors", postCallMode === "json" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}
+              >
+                Paste JSON
+              </button>
+            </div>
+
+            {postCallMode === "manual" ? (
+              <>
+                {postCall.length > 0 && (
+                  <div className="space-y-2">
+                    {postCall.map((v) => (
+                      <div key={v.id} className="rounded-lg border border-border bg-background/60 p-3 space-y-2">
+                        <div className="flex items-center gap-2">
+                          <Input
+                            value={v.name}
+                            onChange={(e) => setPostCall((xs) => xs.map((x) => x.id === v.id ? { ...x, name: slug(e.target.value) } : x))}
+                            placeholder="variable_name"
+                            className="h-8 flex-1 font-mono text-xs"
+                          />
+                          <button onClick={() => setPostCall((xs) => xs.filter((x) => x.id !== v.id))} className="rounded-md p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" title="Remove"><Trash2 className="h-3.5 w-3.5" /></button>
+                        </div>
+                        <Textarea
+                          value={v.prompt}
+                          onChange={(e) => setPostCall((xs) => xs.map((x) => x.id === v.id ? { ...x, prompt: e.target.value } : x))}
+                          placeholder="Prompt the LLM uses to capture this from the transcript…"
+                          className="min-h-[52px] text-xs"
+                        />
+                      </div>
+                    ))}
                   </div>
-                ))}
+                )}
+                <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => setPostCall((xs) => [...xs, { id: uid(), name: "", prompt: "" }])}>
+                  <Plus className="h-3.5 w-3.5" /> Add variable
+                </Button>
+              </>
+            ) : (
+              <div className="space-y-2 rounded-lg border border-border bg-background/60 p-3">
+                <p className="text-[11px] text-muted-foreground">
+                  Paste an object of <span className="font-mono">{"{ \"variable_name\": \"prompt\" }"}</span> pairs. Existing names are updated; new ones are added.
+                </p>
+                <Textarea
+                  value={jsonText}
+                  onChange={(e) => setJsonText(e.target.value)}
+                  placeholder={"{\n  \"intent\": \"What did the customer want?\",\n  \"sentiment\": \"Overall sentiment of the call\"\n}"}
+                  className="min-h-[120px] font-mono text-xs"
+                />
+                <div className="flex justify-end gap-2">
+                  <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => setJsonText("")}>Clear</Button>
+                  <Button size="sm" className="h-8 gap-1.5 text-xs" disabled={!jsonText.trim()} onClick={importPostCallJson}>
+                    <Plus className="h-3.5 w-3.5" /> Import variables
+                  </Button>
+                </div>
               </div>
             )}
-            <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => setPostCall((xs) => [...xs, { id: uid(), name: "", prompt: "" }])}>
-              <Plus className="h-3.5 w-3.5" /> Add variable
-            </Button>
           </Card>
         </div>
       </section>

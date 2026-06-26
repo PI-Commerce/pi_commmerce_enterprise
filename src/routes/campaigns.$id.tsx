@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { createFileRoute, useNavigate, useBlocker } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { WorkflowCanvas } from "@/components/workflow/WorkflowCanvas";
@@ -57,10 +57,14 @@ function CampaignBuilder() {
   );
   // Confirm-before-version dialog — every Save once v1 exists creates a new version.
   const [confirmSaveOpen, setConfirmSaveOpen] = useState(false);
-  // Whether the current pause already produced a version (via Save), so a following
-  // Resume doesn't double-mint. One version per pause cycle. Reset on each Resume.
-  const savedDuringPauseRef = useRef(false);
+  // Confirm-before-publish dialog — only shown when a run is already live, to warn
+  // that publishing mints a new version that only new leads follow.
+  const [confirmPublishOpen, setConfirmPublishOpen] = useState(false);
   const currentVersion = versions.length ? Math.max(...versions.map((v) => v.version)) : 0;
+  // Campaign status is config-only now (draft | ready). Liveness is a Run concept:
+  // a campaign with a seeded version history is treated as having live/associated
+  // runs, which is what gates the "publishing mints a new version" publish warning.
+  const hasLiveRun = !isNew && (VERSION_HISTORY[id]?.length ?? 0) > 0;
 
   // Move to "ready" automatically when everything validates — but keep example
   // campaigns at their authored status (the two retained originals stay in draft).
@@ -111,20 +115,16 @@ function CampaignBuilder() {
       return;
     }
     const nextNum = Math.max(...versions.map((v) => v.version)) + 1;
-    const resumedEdit = status === "paused";
-    if (resumedEdit) savedDuringPauseRef.current = true;
     setVersions((prev) => [
       ...prev,
       makeVersion({
         version: nextNum,
-        trigger: resumedEdit ? "resumed-edit" : "edit",
-        summary: resumedEdit
-          ? "Paused and edited — saved as a new version."
-          : "Edited the campaign — saved as a new version.",
+        trigger: "edit",
+        summary: "Edited the campaign — saved as a new version.",
       }),
     ]);
     toast.success(`Saved as version ${nextNum}`, { description: name });
-  }, [name, status, versions]);
+  }, [name, versions]);
 
   // Save entry point: once v1 exists, warn that this creates a new version
   // (even an empty save after a pause). A pre-v1 draft save goes straight through.
@@ -133,36 +133,40 @@ function CampaignBuilder() {
     setConfirmSaveOpen(true);
   }, [versions.length, performSave]);
 
-  // Resume always starts a fresh version + new run. If a Save during the pause
-  // already minted one, don't double-mint; otherwise roll an (empty) version so
-  // the pause is a hard analytics cut.
-  const handleResume = useCallback(() => {
-    setStatus("running");
-    if (!savedDuringPauseRef.current && versions.length > 0) {
-      const nextNum = Math.max(...versions.map((v) => v.version)) + 1;
-      setVersions((prev) => [
-        ...prev,
-        makeVersion({
-          version: nextNum,
-          trigger: "resumed-edit",
-          summary: "Resumed the run — new version so analytics never blend across the pause.",
-        }),
-      ]);
-      toast.success(`Resumed as version ${nextNum}`, { description: name });
+  // Publish the current config. Mints a version (v1 on first publish), clears the
+  // dirty flag, and marks a draft campaign Ready. When a run is already live it
+  // creates a new version that only new leads follow — existing leads stay on theirs.
+  const performPublish = useCallback(() => {
+    setConfirmPublishOpen(false);
+    setDirty(false);
+    const nextNum = (versions.length ? Math.max(...versions.map((v) => v.version)) : 0) + 1;
+    const first = versions.length === 0;
+    setVersions((prev) => [
+      ...prev,
+      makeVersion({
+        version: nextNum,
+        trigger: first ? "created" : "edit",
+        summary: first
+          ? "Initial version — published the campaign."
+          : "Published a new version of the campaign.",
+      }),
+    ]);
+    if (hasLiveRun) {
+      toast.success(`Published version ${nextNum}`, {
+        description: "New leads follow this version; existing leads stay on theirs.",
+      });
     } else {
-      toast.success("Campaign resumed", { description: name });
+      setStatus("ready");
+      toast.success(`Published version ${nextNum}`, { description: name });
     }
-    savedDuringPauseRef.current = false;
-  }, [name, versions]);
+  }, [name, hasLiveRun, versions]);
 
-  // First Save + Run mints v1.
-  const handleRunStarted = useCallback(() => {
-    setVersions((prev) =>
-      prev.length > 0
-        ? prev
-        : [makeVersion({ version: 1, trigger: "created", summary: "Initial version — saved and launched the first run." })],
-    );
-  }, []);
+  // Publish entry point: warn before publishing over a live run.
+  const handlePublish = useCallback(() => {
+    if (hasLiveRun) { setConfirmPublishOpen(true); return; }
+    performPublish();
+  }, [hasLiveRun, performPublish]);
+
   const handleExit = useCallback(() => { navigate({ to: "/campaigns" }); }, [navigate]);
   const handleValidity = useCallback((v: number, t: number) => { setValidCount(v); setTotal(t); }, []);
   const handleDirty = useCallback(() => setDirty(true), []);
@@ -174,17 +178,16 @@ function CampaignBuilder() {
         name={name}
         onNameChange={(n) => { setName(n); setDirty(true); }}
         status={status}
-        onStatusChange={setStatus}
         dirty={dirty}
         validNodes={validCount}
         totalNodes={total}
         onSave={handleSave}
         onExit={handleExit}
+        onPublish={handlePublish}
         objective={isNew ? seedObjective : undefined}
         description={isNew ? seedDescription : undefined}
         versions={versions}
-        onRunStarted={handleRunStarted}
-        onResume={handleResume}
+        hasLiveRun={hasLiveRun}
       />
       <div className="relative flex-1">
         <WorkflowCanvas
@@ -211,6 +214,23 @@ function CampaignBuilder() {
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={performSave}>Create version {currentVersion + 1}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={confirmPublishOpen} onOpenChange={setConfirmPublishOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Publish a new version?</AlertDialogTitle>
+            <AlertDialogDescription>
+              <span className="font-medium text-foreground">{name}</span> has a live run. Publishing creates{" "}
+              <span className="font-medium text-foreground">version {currentVersion + 1}</span> — only new leads follow it.
+              Leads already in flight stay on their current version, so analytics never blend across the change.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={performPublish}>Publish version {currentVersion + 1}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
