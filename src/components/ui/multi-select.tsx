@@ -36,11 +36,24 @@ export function MultiSelect({
   );
 
   const allSelected = value.length === 0 || value.length === options.length;
-  const display = allSelected
-    ? (allLabel ?? placeholder)
-    : value.length === 1
-      ? (options.find((o) => o.value === value[0])?.label ?? "1 selected")
-      : `${value.length} selected`;
+  // A single pinned value always shows its own label — even when it is the only
+  // option (1-of-1). Otherwise a scoped default (e.g. one run) would misleadingly
+  // read "All Runs". "All …" is reserved for the empty/unfiltered state and for
+  // an explicit all-of-many selection.
+  const single = value.length === 1;
+  // When the scope offers exactly one option, "All X" and "that one option" denote
+  // the same set — so show the concrete label rather than a misleading "All …".
+  // This keeps gated widgets honest: e.g. a Voice Agent filter that resolves to a
+  // single agent reads as that agent (which is why intent can populate), not
+  // "All Voice Agents". Applies even when nothing is explicitly selected.
+  const lone = options.length === 1;
+  const display = single
+    ? (options.find((o) => o.value === value[0])?.label ?? allLabel ?? placeholder)
+    : lone
+      ? options[0].label
+      : allSelected
+        ? (allLabel ?? placeholder)
+        : `${value.length} selected`;
 
   function toggle(v: string) {
     if (value.includes(v)) onChange(value.filter((x) => x !== v));
@@ -62,7 +75,7 @@ export function MultiSelect({
             triggerClassName,
           )}
         >
-          <span className={cn("truncate", allSelected && "text-muted-foreground")}>{display}</span>
+          <span className={cn("truncate", allSelected && !single && !lone && "text-muted-foreground")}>{display}</span>
           <ChevronDown className="ml-2 h-4 w-4 opacity-50" />
         </button>
       </PopoverTrigger>

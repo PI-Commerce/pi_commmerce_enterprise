@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import ReactFlow, {
-  Background, BackgroundVariant, Controls,
-  type Edge, type Node, type NodeMouseHandler,
+  Background,
+  BackgroundVariant,
+  Controls,
+  type Edge,
+  type Node,
+  type NodeMouseHandler,
 } from "reactflow";
 import "reactflow/dist/style.css";
 import { nodeTypes } from "@/components/workflow/nodes";
@@ -13,16 +17,17 @@ import { elkLayout } from "@/lib/flow-layout";
 /** Map analytics SankeyNodeKind → Campaign Builder NodeKind so we can reuse
  *  the same visual node component the user designs the campaign with. */
 const KIND_MAP: Record<SankeyNodeKind, NodeKind> = {
-  start:       "start",
-  audience:    "audience",
-  abSplit:     "abSplit",
-  whatsapp:    "whatsapp",
-  voice:       "voiceCall",
-  sms:         "sms",
-  ads:         "adsCampaign",
+  start: "start",
+  audience: "audience",
+  apiToolCall: "apiToolCall",
+  abSplit: "abSplit",
+  whatsapp: "whatsapp",
+  voice: "voiceCall",
+  sms: "sms",
+  ads: "adsCampaign",
   conditional: "conditional",
-  delay:       "delay",
-  end:         "end",
+  delay: "delay",
+  end: "end",
 };
 
 export function CampaignFlowView({
@@ -38,15 +43,23 @@ export function CampaignFlowView({
     const idToNode = new Map(run.sankey.nodes.map((n) => [n.id, n] as const));
     // Serial = the node's position in the run's authored flow order (Start = 1).
     // Shown in the node sub-heading so it matches the Leads table's "<serial> · name".
-    const serialById = new Map(run.sankey.nodes.map((n, i) => [n.id, i + 1] as const));
+    const serialById = new Map(
+      run.sankey.nodes.map((n, i) => [n.id, i + 1] as const),
+    );
 
     // Group each node's outgoing edges by source handle (value + label), so a
     // WhatsApp node's outcome split can be shown ON the node (not just the drawer).
-    const outByNode = new Map<string, Map<string, { value: number; label?: string }>>();
+    const outByNode = new Map<
+      string,
+      Map<string, { value: number; label?: string }>
+    >();
     run.sankey.edges.forEach((e) => {
       if (!e.sourceHandle) return;
       let m = outByNode.get(e.source);
-      if (!m) { m = new Map(); outByNode.set(e.source, m); }
+      if (!m) {
+        m = new Map();
+        outByNode.set(e.source, m);
+      }
       const prev = m.get(e.sourceHandle);
       if (prev) prev.value += e.value;
       else m.set(e.sourceHandle, { value: e.value, label: e.handleLabel });
@@ -55,24 +68,35 @@ export function CampaignFlowView({
     const handleNodeIds = new Set<string>();
 
     const rawNodes: Node<WorkflowNodeData>[] = run.sankey.nodes.map((n) => {
-      const isConverted = n.kind === "end" && /convert|complete|resubmit/i.test(n.name);
-      const isDropped   = n.kind === "end" && !isConverted;
-      const title = isConverted ? "Converted" : isDropped ? "End" : n.name.split(" · ")[0];
+      const isConverted =
+        n.kind === "end" && /convert|complete|resubmit/i.test(n.name);
+      const isDropped = n.kind === "end" && !isConverted;
+      const title = isConverted
+        ? "Converted"
+        : isDropped
+          ? "End"
+          : n.name.split(" · ")[0];
       const serial = serialById.get(n.id);
-      const baseSubtitle = n.kind === "end"
-        ? `${n.entered.toLocaleString()} users`
-        : n.name.includes(" · ")
-          ? n.name.split(" · ").slice(1).join(" · ")
-          : undefined;
+      const baseSubtitle =
+        n.kind === "end"
+          ? `${n.entered.toLocaleString()} users`
+          : n.name.includes(" · ")
+            ? n.name.split(" · ").slice(1).join(" · ")
+            : undefined;
       // Prefix the positional serial so a node without a builder serial (Start/End)
       // is still unambiguously the one referenced in the Leads table.
-      const subtitle = baseSubtitle ? `${serial} · ${baseSubtitle}` : `#${serial}`;
-      const dropoffPct = n.entered > 0 ? ((n.entered - n.exited) / n.entered) * 100 : 0;
+      const subtitle = baseSubtitle
+        ? `${serial} · ${baseSubtitle}`
+        : `#${serial}`;
+      const dropoffPct =
+        n.entered > 0 ? ((n.entered - n.exited) / n.entered) * 100 : 0;
       const showMetrics = n.kind !== "start" && n.kind !== "end";
 
-      // WhatsApp outcome distribution shown inline as labeled output handles.
+      // Branching nodes (WhatsApp outcomes, conditional, A/B split) render their
+      // per-handle splits ON the node so the journey is readable without opening
+      // the drawer. Mirrors the builder's labeled output handles.
       let outputs: WorkflowNodeData["outputs"];
-      if (n.kind === "whatsapp") {
+      if (n.kind === "whatsapp" || n.kind === "conditional" || n.kind === "abSplit") {
         const m = outByNode.get(n.id);
         if (m && m.size >= 2) {
           const total = [...m.values()].reduce((s, v) => s + v.value, 0) || 1;
@@ -113,14 +137,24 @@ export function CampaignFlowView({
 
     const rawEdges: Edge[] = run.sankey.edges.map((e, i) => {
       const tgt = idToNode.get(e.target);
-      const isDrop = tgt?.kind === "end" && !/convert|complete|resubmit/i.test(tgt?.name ?? "");
-      const isConv = tgt?.kind === "end" && /convert|complete|resubmit/i.test(tgt?.name ?? "");
-      const stroke = isConv ? "rgba(34,197,94,0.55)" : isDrop ? "rgba(239,68,68,0.45)" : "rgba(148,163,184,0.55)";
+      const isDrop =
+        tgt?.kind === "end" &&
+        !/convert|complete|resubmit/i.test(tgt?.name ?? "");
+      const isConv =
+        tgt?.kind === "end" &&
+        /convert|complete|resubmit/i.test(tgt?.name ?? "");
+      const stroke = isConv
+        ? "rgba(34,197,94,0.55)"
+        : isDrop
+          ? "rgba(239,68,68,0.45)"
+          : "rgba(148,163,184,0.55)";
       return {
         id: `e_${i}`,
         source: e.source,
         // Anchor to the matching outcome handle only when the node renders them.
-        sourceHandle: handleNodeIds.has(e.source) ? e.sourceHandle ?? undefined : undefined,
+        sourceHandle: handleNodeIds.has(e.source)
+          ? (e.sourceHandle ?? undefined)
+          : undefined,
         target: e.target,
         type: "routed",
         animated: false,
@@ -131,7 +165,10 @@ export function CampaignFlowView({
     return { rawNodes, rawEdges };
   }, [run]);
 
-  const [layout, setLayout] = useState<{ nodes: Node<WorkflowNodeData>[]; edges: Edge[] } | null>(null);
+  const [layout, setLayout] = useState<{
+    nodes: Node<WorkflowNodeData>[];
+    edges: Edge[];
+  } | null>(null);
   useEffect(() => {
     let cancelled = false;
     setLayout(null);
@@ -140,7 +177,9 @@ export function CampaignFlowView({
     elkLayout(rawNodes, rawEdges).then((laid) => {
       if (!cancelled) setLayout(laid);
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [rawNodes, rawEdges]);
 
   const handleNodeClick: NodeMouseHandler = (_evt, n) => {
