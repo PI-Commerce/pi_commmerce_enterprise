@@ -17,23 +17,125 @@ const PKCE_NODE_ENTRY = fileURLToPath(
   new URL("./node_modules/pkce-challenge/dist/index.node.js", import.meta.url),
 );
 
-// The GenUI C1 SDK (@thesysai/genui-sdk) pulls in mermaid + elkjs + @mermaid-js/parser
-// (~6.5MB). The GenUI renderer mounts client-only (see PiGenUiResult), so the server never
-// executes it — yet rollup still bundles those deps into the Cloudflare Worker, blowing the
-// 3 MiB worker-size limit. Stub them to empty modules in the SSR build ONLY; the client build
-// keeps the real ones as static-asset chunks (not subject to the worker limit).
-const STUB_SSR = /^(mermaid|elkjs|@mermaid-js\/parser)(\/|$)/;
+// Stub heavy *client-only* renderer deps in the SSR (Cloudflare Worker) build so they don't
+// blow the 3 MiB free-plan worker-size limit. Each module here is never executed server-side:
+//
+//   - mermaid / elkjs / @mermaid-js/parser — GenUI C1 SDK (@thesysai/genui-sdk) draws these
+//     client-only via PiGenUiResult; ~6.5 MiB raw of dead weight in the worker otherwise.
+//   - streamdown — @copilotkit/react-core's streaming markdown renderer for chat messages.
+//     It transitively pulls `shiki` + `@shikijs/langs` (~1.18 MiB gz of language packs) and
+//     `@shikijs/themes` (~158 KiB gz). CopilotChat is gated by `state==="collapsed"` in
+//     AgentComposer, so SSR's first render never enters that subtree — stubbing the
+//     Streamdown entry shears the whole shiki tree off the worker bundle.
+//   - react-syntax-highlighter (root + /dist/esm/styles/prism) — pulled by @copilotkit/react-ui
+//     and @crayonai/react-ui's `CodeBlock` for prism-themed code highlighting. Same logic:
+//     never reached by SSR; stubbing drops refractor / highlight.js / lowlight (~260 KiB gz).
+//
+// The client build (no stub) keeps the real modules — they ship as static-asset chunks under
+// dist/client, which Cloudflare serves directly via the ASSETS binding (not subject to the
+// 3 MiB worker limit). Three stub flavours, one per shape of named imports:
 const EMPTY_STUB = "\0virtual:empty-ssr-stub";
+const STREAMDOWN_STUB = "\0virtual:streamdown-ssr-stub";
+const RSH_ROOT_STUB = "\0virtual:rsh-root-ssr-stub";
+const RSH_STYLES_STUB = "\0virtual:rsh-styles-ssr-stub";
+const COPILOT_RUNTIME_STUB = "\0virtual:copilot-runtime-ssr-stub";
+const ANTHROPIC_STUB = "\0virtual:anthropic-ssr-stub";
+// `reflect-metadata` is intentionally NOT stubbed — it's a polyfill side-effect import.
+// `@ag-ui/{client,core}` and `@copilotkit/shared` are NOT stubbed either: they're pulled
+// in by @copilotkit/react-core (the SSR-rendered provider) with many named imports, and
+// trying to whack-a-mole them one name at a time breaks the build. Trim what's cleanly
+// shearable; the rest is the cost of keeping the provider SSR-renderable.
+const STUB_SSR_EMPTY = /^(mermaid|elkjs|@mermaid-js\/parser|@modelcontextprotocol\/sdk|google-auth-library|@copilotkit\/web-inspector)(\/|$)/;
+const STUB_SSR_RSH_STYLES = /^react-syntax-highlighter\/dist\/esm\/styles\//;
+const STUB_SSR_RSH_ROOT = /^react-syntax-highlighter(\/|$)/;
+const STUB_SSR_STREAMDOWN = /^streamdown(\/|$)/;
+const STUB_SSR_COPILOT_RUNTIME = /^@copilotkit\/runtime(\/|$)/;
+const STUB_SSR_ANTHROPIC = /^@anthropic-ai\/sdk(\/|$)/;
 function stubHeavyDepsInSsr() {
   return {
     name: "stub-genui-heavy-ssr",
     enforce: "pre" as const,
     resolveId(id: string, _importer: string | undefined, opts?: { ssr?: boolean }) {
-      if (opts?.ssr && STUB_SSR.test(id)) return EMPTY_STUB;
+      if (!opts?.ssr) return null;
+      if (STUB_SSR_EMPTY.test(id)) return EMPTY_STUB;
+      // Order matters: the more-specific /styles/ subpath must be checked BEFORE the
+      // root regex, otherwise the root catch grabs it and the wrong named exports are
+      // emitted (the styles files export theme objects, not components).
+      if (STUB_SSR_RSH_STYLES.test(id)) return RSH_STYLES_STUB;
+      if (STUB_SSR_RSH_ROOT.test(id)) return RSH_ROOT_STUB;
+      if (STUB_SSR_STREAMDOWN.test(id)) return STREAMDOWN_STUB;
+      if (STUB_SSR_COPILOT_RUNTIME.test(id)) return COPILOT_RUNTIME_STUB;
+      if (STUB_SSR_ANTHROPIC.test(id)) return ANTHROPIC_STUB;
       return null;
     },
     load(id: string) {
       if (id === EMPTY_STUB) return "export default {};";
+      if (id === STREAMDOWN_STUB) {
+        // streamdown's only public export is the Streamdown React component.
+        return [
+          "const noop = () => null;",
+          "export default noop;",
+          "export const Streamdown = noop;",
+        ].join("\n");
+      }
+      if (id === RSH_ROOT_STUB) {
+        // react-syntax-highlighter root entry — Light/Prism are React components used by
+        // @copilotkit/react-ui's MarkdownRenderer and @crayonai's CodeBlock; the rest are
+        // documented public exports we include defensively.
+        return [
+          "const noop = () => null;",
+          "export default noop;",
+          "export const Light = noop;",
+          "export const Prism = noop;",
+          "export const PrismLight = noop;",
+          "export const PrismAsync = noop;",
+          "export const PrismAsyncLight = noop;",
+          "export const createElement = noop;",
+        ].join("\n");
+      }
+      if (id === COPILOT_RUNTIME_STUB) {
+        // @copilotkit/runtime — server-only, reached only via the lazy `runtime.server.ts`
+        // module that handles /api/copilotkit. Stubbed in SSR per the "offline-only deploy"
+        // posture: in the deployed worker the chat path returns 503 (wizard mode still
+        // works — that's the default and is fully offline). Local dev uses real modules.
+        return [
+          "const noop = () => null;",
+          "class Noop { constructor(){} }",
+          "export default Noop;",
+          "export const AnthropicAdapter = Noop;",
+          "export const CopilotRuntime = Noop;",
+          "export const EmptyAdapter = Noop;",
+          "export const copilotRuntimeNextJSAppRouterEndpoint = () => ({ handleRequest: noop, POST: noop });",
+        ].join("\n");
+      }
+      if (id === ANTHROPIC_STUB) {
+        // @anthropic-ai/sdk — server-only HTTP client for Anthropic; never used in SSR
+        // render path. The default export is the Anthropic client class.
+        return [
+          "class Anthropic { constructor() {} }",
+          "export default Anthropic;",
+          "export { Anthropic };",
+        ].join("\n");
+      }
+      if (id === RSH_STYLES_STUB) {
+        // /dist/esm/styles/prism|hljs exports style objects (color rules). We only need
+        // vscDarkPlus today (crayonai/CodeBlock); listing the common Prism/hljs theme
+        // names here lets the stub keep working if other consumers grow imports.
+        const themes = [
+          "vscDarkPlus", "atomDark", "coldarkCold", "coldarkDark", "coy", "coyWithoutShadows",
+          "darcula", "dracula", "duotoneDark", "duotoneEarth", "duotoneForest", "duotoneLight",
+          "duotoneSea", "duotoneSpace", "ghcolors", "gruvboxDark", "gruvboxLight", "holiTheme",
+          "hopscotch", "lucario", "materialDark", "materialLight", "materialOceanic", "nightOwl",
+          "nord", "okaidia", "oneDark", "oneLight", "pojoaque", "prism", "shadesOfPurple",
+          "solarizedDarkAtom", "solarizedlight", "synthwave84", "tomorrow", "twilight", "vs",
+          "xonokai", "zTouch", "base16AteliersulphurpoolLight", "cb",
+        ];
+        return [
+          "const empty = {};",
+          "export default empty;",
+          ...themes.map((t) => `export const ${t} = empty;`),
+        ].join("\n");
+      }
       return null;
     },
   };

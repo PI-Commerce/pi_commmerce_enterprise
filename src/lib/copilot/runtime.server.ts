@@ -272,18 +272,46 @@ async function withSystemPrompt(request: Request): Promise<Request> {
 }
 
 /**
+ * Graceful 503 used when the live agent runtime isn't usable on this deploy.
+ *
+ * Why this can happen: to fit the Cloudflare 3 MiB free-plan worker-size limit, the
+ * SSR build stubs `@copilotkit/runtime` + `@anthropic-ai/sdk` + friends to empty Noop
+ * classes (see `stubHeavyDepsInSsr` in vite.config.ts). That keeps the wizard path
+ * (offline, default) shipping on a free worker, but the live chat path can't run there.
+ * Local dev and the production build do NOT apply the stub, so chat works normally
+ * there — only the deployed-on-free-tier worker degrades.
+ */
+function liveChatUnavailable(): Response {
+  return new Response(
+    JSON.stringify({
+      error:
+        "Live chat is not available on this deploy. Use wizard mode (the default), or run locally with ANTHROPIC_API_KEY set.",
+    }),
+    { status: 503, headers: { "Content-Type": "application/json" } },
+  );
+}
+
+/**
  * Handle a request to {@link COPILOT_ENDPOINT}. Constructs a fresh runtime per
  * request (cheap; keeps the Worker stateless) and delegates to CopilotKit's
- * Web-standard App Router handler.
+ * Web-standard App Router handler. Wrapped in a try/catch so the SSR-stubbed
+ * "offline-only deploy" returns a clean 503 instead of an opaque 500.
  */
 export async function handleCopilotRequest(request: Request, env?: RuntimeEnv): Promise<Response> {
-  const { runtime, serviceAdapter } = buildRuntime(env);
+  try {
+    const { runtime, serviceAdapter } = buildRuntime(env);
 
-  const { handleRequest } = copilotRuntimeNextJSAppRouterEndpoint({
-    runtime,
-    serviceAdapter,
-    endpoint: COPILOT_ENDPOINT,
-  });
+    const { handleRequest } = copilotRuntimeNextJSAppRouterEndpoint({
+      runtime,
+      serviceAdapter,
+      endpoint: COPILOT_ENDPOINT,
+    });
 
-  return handleRequest(await withSystemPrompt(request));
+    const response = await handleRequest(await withSystemPrompt(request));
+    // When the worker is built with the SSR runtime stubs, `handleRequest` is a no-op
+    // returning null. Treat anything that isn't a real Response as "live chat off".
+    return response instanceof Response ? response : liveChatUnavailable();
+  } catch {
+    return liveChatUnavailable();
+  }
 }
