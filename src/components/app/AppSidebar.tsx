@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useRouterState } from "@tanstack/react-router";
 import {
-  LayoutDashboard, Megaphone, Bot, BarChart3, Plug, Settings, Command, Sparkles,
+  Megaphone, Bot, BarChart3, Plug, Settings, Command,
   PanelLeftClose, PanelLeftOpen, Radio,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -9,8 +9,9 @@ import { useRegion } from "@/lib/region";
 
 // This build is the Ask Pi demo: Campaigns and Analytics are the live surfaces
 // (Ask Pi runs on both); every other surface stays disabled to keep the focus there.
+// The Dashboard route has been retired — `/` redirects to `/campaigns` and the
+// sidebar no longer surfaces it.
 const primary = [
-  { to: "/", label: "Dashboard", icon: LayoutDashboard, exact: true, disabled: true },
   { to: "/campaigns", label: "Campaigns", icon: Megaphone },
   { to: "/agents", label: "Agents", icon: Bot, disabled: true },
   { to: "/analytics", label: "Analytics", icon: BarChart3 },
@@ -63,17 +64,6 @@ export function AppSidebar() {
         <div className="my-3 h-px bg-border" />
         <NavSection items={secondary} isActive={isActive} collapsed={collapsed} />
       </nav>
-
-      {!collapsed && (
-        <div className="m-2 rounded-xl border border-border bg-secondary/40 p-3">
-          <div className="flex items-center gap-1.5 text-[11px] font-medium text-ai">
-            <Sparkles className="h-3 w-3" /> Ask Pi
-          </div>
-          <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
-            Press <kbd className="rounded border border-border bg-background px-1 font-mono text-[10px]">⌘ K</kbd> anywhere to summon Pi!
-          </p>
-        </div>
-      )}
 
       <div className={cn("border-t border-border p-2", collapsed && "flex justify-center")}>
         <button

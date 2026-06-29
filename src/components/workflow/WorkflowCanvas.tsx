@@ -17,6 +17,7 @@ import { useRegion, localizeTzAbbrev, localizeCurrency } from "@/lib/region";
 import { toast } from "sonner";
 import { ConfigPanel } from "./ConfigPanel";
 import { AgentComposer } from "./AgentComposer";
+import { DemoAskPiComposer } from "./DemoAskPiComposer";
 import { NodePalette } from "./NodePalette";
 
 
@@ -462,9 +463,17 @@ export function WorkflowCanvas({
         extraVariables={outcomeVariables.filter((v) => !selected || !v.key.startsWith(`${selected.id}.`))}
       />
 
-      {/* Ask Pi is scoped to campaign creation only — new campaigns mount the
-          CopilotKit/offline-wizard creation composer (inside the CopilotKit
-          provider from campaigns.$id). Existing campaigns get no composer. */}
+      {/* Ask Pi mounts in two flavours on the canvas, depending on whether the
+          campaign is being authored or just inspected:
+            - New campaigns (`isNew`) get the live CopilotKit/offline-wizard
+              creation composer — it actually mutates the graph.
+            - Saved/existing campaigns get the read-only {@link DemoAskPiComposer}
+              — a visually-identical floating pill that opens a text input but is
+              inert on submit, and listens for the node-hover "Pi tip" event so
+              the I3 demo flow has a visible destination.
+          Read-only snapshots (`previewOnly`, e.g. version-history viewer) get
+          neither — there is no editor context to mutate. */}
+      {!previewOnly && !isNew && <DemoAskPiComposer />}
       {!previewOnly && isNew && (
         <AgentComposer
           mode={agentChat ? "chat" : "wizard"}

@@ -59,6 +59,11 @@ export function AskPiDock() {
   // always match the surface Pi is summoned from.
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const ctx = getPiContext(pathname);
+  // The Campaigns list page is intentionally Pi-free — the dock only appears once
+  // the user is *inside* a campaign (which mounts its own canvas composer) or on
+  // a different surface (Analytics). The actual short-circuit lives at the JSX
+  // return below, after the hooks, so React's rules-of-hooks are preserved.
+  const hideOnCampaignsList = pathname === "/campaigns" || pathname === "/campaigns/";
 
   // Shared horizontal drag (same behaviour + remembered position as the canvas composer).
   const { dragX, pillHandlers, suppressClick } = usePiDrag(wrapRef);
@@ -145,6 +150,8 @@ export function AskPiDock() {
     setValue(nudge.prompt);
     setTimeout(() => submit(nudge.prompt), 60);
   };
+
+  if (hideOnCampaignsList) return null;
 
   return (
     <div ref={wrapRef} className="pointer-events-none absolute inset-x-0 bottom-5 z-30 flex justify-center px-4">
