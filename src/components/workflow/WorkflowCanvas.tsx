@@ -19,6 +19,7 @@ import { ConfigPanel } from "./ConfigPanel";
 import { AgentComposer } from "./AgentComposer";
 import { DemoAskPiComposer } from "./DemoAskPiComposer";
 import { NodePalette } from "./NodePalette";
+import { getSuggestion } from "@/lib/pi-node-suggestions";
 
 
 const SEED_NODES: Node<WorkflowNodeData>[] = [
@@ -316,6 +317,25 @@ export function WorkflowCanvas({
     [setNodes, onDirty],
   );
 
+  // I3 — apply a curated node-hover Pi suggestion. The suggestion's pure graph
+  // transform takes the current nodes/edges and returns the next ones (and also
+  // clears the source node's `piHint` so the tip retires after one apply). This is
+  // wired to {@link DemoAskPiComposer} below, which calls it from the Result card
+  // after the canned thinking → result demo loop.
+  const applySuggestion = useCallback(
+    ({ nodeId, suggestionId }: { nodeId: string; suggestionId: string }) => {
+      const sug = getSuggestion(suggestionId);
+      if (!sug) return;
+      const next = sug.apply(nodes, edges, nodeId);
+      setNodes(next.nodes);
+      setEdges(next.edges);
+      setSelected(null);
+      onDirty?.();
+      refit();
+    },
+    [nodes, edges, setNodes, setEdges, onDirty, refit],
+  );
+
   const deleteNode = useCallback(
     (id: string) => {
       const target = nodes.find((n) => n.id === id);
@@ -473,7 +493,7 @@ export function WorkflowCanvas({
               the I3 demo flow has a visible destination.
           Read-only snapshots (`previewOnly`, e.g. version-history viewer) get
           neither — there is no editor context to mutate. */}
-      {!previewOnly && !isNew && <DemoAskPiComposer />}
+      {!previewOnly && !isNew && <DemoAskPiComposer onApplySuggestion={applySuggestion} />}
       {!previewOnly && isNew && (
         <AgentComposer
           mode={agentChat ? "chat" : "wizard"}
