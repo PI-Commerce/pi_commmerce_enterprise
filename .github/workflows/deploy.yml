@@ -1,8 +1,11 @@
 name: Deploy to Cloudflare Workers
 
+# `uae` -> Worker `picom-enterprise-uae` (UAE market build; keeps region toggle
+#          and Al Tayer branding). Redirected configs can't contain `env`, so
+#          the build output is renamed just before `wrangler deploy`.
 on:
   push:
-    branches: [main]
+    branches: [uae]
   workflow_dispatch:
 
 jobs:
@@ -22,6 +25,9 @@ jobs:
 
       - name: Build
         run: bun run build
+
+      - name: Point build at the UAE Worker
+        run: node -e "const f='dist/server/wrangler.json',fs=require('fs');const c=JSON.parse(fs.readFileSync(f));c.name='picom-enterprise-uae';fs.writeFileSync(f,JSON.stringify(c,null,2));console.log('Deploying Worker:',c.name)"
 
       - name: Deploy to Cloudflare Workers
         run: bunx wrangler deploy
