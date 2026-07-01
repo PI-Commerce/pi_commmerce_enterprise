@@ -9,7 +9,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ArrowUpRight, Megaphone, Bot, Activity, Plus, Globe } from "lucide-react";
+import { ArrowUpRight, Megaphone, Bot, Activity, Plus, Globe, Info } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useRegion, COUNTRY_OPTIONS, type CountryCode } from "@/lib/region";
 
 export const Route = createFileRoute("/")({
@@ -58,12 +59,38 @@ function Dashboard() {
         }
       />
 
+      <TooltipProvider delayDuration={150}>
       <div className="grid grid-cols-4 gap-3">
-        <Kpi label="Active campaigns" value="8" sub="Currently running" />
-        <Kpi label="Leads processed · 7d" value="24,180" sub="Reached End node" />
-        <Kpi label="WhatsApp messages · 7d" value="61,420" sub="Sent across campaigns" />
-        <Kpi label="Voice AI minutes · 7d" value="4,830" sub="Across all agents" />
+        <Kpi
+          label="Active campaigns"
+          value="8"
+          unit="live"
+          timeframe="Currently running"
+          info="Campaigns with at least one run in progress right now."
+        />
+        <Kpi
+          label="Leads processed"
+          value="24,180"
+          unit="leads"
+          timeframe="Last 7 days"
+          info="New leads that traversed a campaign from Start to End node in the last 7 days."
+        />
+        <Kpi
+          label="WhatsApp messages sent"
+          value="61,420"
+          unit="messages"
+          timeframe="Last 7 days"
+          info="Total WhatsApp messages dispatched by any campaign in the last 7 days."
+        />
+        <Kpi
+          label="Voice AI conversation"
+          value="4,830"
+          unit="minutes"
+          timeframe="Last 7 days"
+          info="Total minutes spoken across all voice agents and campaigns in the last 7 days."
+        />
       </div>
+      </TooltipProvider>
 
       <div className="mt-6 rounded-xl border border-border bg-card">
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
@@ -123,12 +150,43 @@ function Dashboard() {
   );
 }
 
-function Kpi({ label, value, sub }: { label: string; value: string; sub: string }) {
+function Kpi({
+  label,
+  value,
+  unit,
+  timeframe,
+  info,
+}: {
+  label: string;
+  value: string;
+  unit: string;
+  timeframe: string;
+  info: string;
+}) {
   return (
     <div className="rounded-xl border border-border bg-card px-4 py-3.5">
-      <p className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</p>
-      <p className="mt-1.5 text-2xl font-semibold tracking-tight">{value}</p>
-      <p className="mt-0.5 text-[11px] text-muted-foreground">{sub}</p>
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</p>
+        <Tooltip delayDuration={100}>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              aria-label={`About ${label}`}
+              className="-mr-1 -mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <Info className="h-3 w-3" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="top" className="max-w-[220px] text-[11px] leading-snug">
+            {info}
+          </TooltipContent>
+        </Tooltip>
+      </div>
+      <div className="mt-1.5 flex items-baseline gap-1.5">
+        <p className="text-2xl font-semibold tracking-tight tabular-nums">{value}</p>
+        <p className="text-[12px] text-muted-foreground">{unit}</p>
+      </div>
+      <p className="mt-0.5 text-[11px] text-muted-foreground">{timeframe}</p>
     </div>
   );
 }

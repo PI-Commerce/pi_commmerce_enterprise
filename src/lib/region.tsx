@@ -82,7 +82,7 @@ const RegionContext = createContext<RegionContextValue | null>(null);
 const STORAGE_KEY = "picom.country";
 
 export function RegionProvider({ children }: { children: ReactNode }) {
-  const [country, setCountryState] = useState<CountryCode>("IN");
+  const [country, setCountryState] = useState<CountryCode>("AE");
 
   // Hydrate from localStorage after mount (client-only) to avoid SSR mismatch.
   useEffect(() => {
