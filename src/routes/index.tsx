@@ -30,6 +30,7 @@ export const Route = createFileRoute("/")({
  */
 function Dashboard() {
   const { country, setCountry } = useRegion();
+  const runs = [...LIVE_RUNS].sort((a, b) => b.startedAtTs - a.startedAtTs).slice(0, 5);
   return (
     <AppShell>
       <PageHeader
@@ -58,17 +59,17 @@ function Dashboard() {
       />
 
       <div className="grid grid-cols-4 gap-3">
-        <Kpi label="Active campaigns" value="8" sub="2 running now" />
-        <Kpi label="Live agents" value="5" sub="Voice & chat" />
-        <Kpi label="Runs · last 24h" value="3" sub="Across all campaigns" />
-        <Kpi label="Leads processed · 24h" value="3,460" sub="Reached End node" />
+        <Kpi label="Active campaigns" value="8" sub="Currently running" />
+        <Kpi label="Leads processed · 7d" value="24,180" sub="Reached End node" />
+        <Kpi label="WhatsApp messages · 7d" value="61,420" sub="Sent across campaigns" />
+        <Kpi label="Voice AI minutes · 7d" value="4,830" sub="Across all agents" />
       </div>
 
       <div className="mt-6 rounded-xl border border-border bg-card">
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <div>
             <h2 className="text-sm font-semibold">Live runs</h2>
-            <p className="text-[11px] text-muted-foreground">5 most recent running runs · updated just now</p>
+            <p className="text-[11px] text-muted-foreground">5 most recently started runs · updated just now</p>
           </div>
           <Link to="/campaigns" className="inline-flex items-center gap-1 text-[11.5px] text-muted-foreground hover:text-foreground">
             View all runs <ArrowUpRight className="h-3 w-3" />
@@ -84,7 +85,7 @@ function Dashboard() {
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
-            {LIVE_RUNS.map((r) => {
+            {runs.map((r) => {
               const pct = r.total ? Math.round((r.processed / r.total) * 100) : 100;
               return (
                 <tr key={r.id} className="transition-colors hover:bg-accent/30">
@@ -145,11 +146,11 @@ function ShortcutCard({ icon: Icon, title, desc, to }: { icon: React.ComponentTy
   );
 }
 
-// The 5 most recent running runs across in-scope campaigns (WhatsApp / Voice AI).
+// Live runs, sorted by startedAtTs descending at render time.
 const LIVE_RUNS = [
-  { id: "r_8423", campaign: "Dormant Trader Reactivation", startedAt: "Today, 12:04 PM", processed: 630,  total: 1500 as number | undefined },
-  { id: "r_8422", campaign: "Retail · Activation",         startedAt: "Today, 11:50 AM", processed: 1200, total: undefined },
-  { id: "r_8421", campaign: "New Trader Onboarding",       startedAt: "Today, 11:32 AM", processed: 410,  total: 900 },
-  { id: "r_8420", campaign: "KYC Drop-off Recovery",       startedAt: "Today, 10:58 AM", processed: 220,  total: 540 },
-  { id: "r_8419", campaign: "High-Value Win-Back",         startedAt: "Today, 10:20 AM", processed: 75,   total: 300 },
+  { id: "r_8423", campaign: "Dormant Trader Reactivation", startedAt: "Today, 12:04 PM", startedAtTs: 1719813840000, processed: 630,  total: 1500 as number | undefined },
+  { id: "r_8422", campaign: "Retail · Activation",         startedAt: "Today, 11:50 AM", startedAtTs: 1719813000000, processed: 1200, total: undefined },
+  { id: "r_8421", campaign: "New Trader Onboarding",       startedAt: "Today, 11:32 AM", startedAtTs: 1719811920000, processed: 410,  total: 900 },
+  { id: "r_8420", campaign: "KYC Drop-off Recovery",       startedAt: "Today, 10:58 AM", startedAtTs: 1719809880000, processed: 220,  total: 540 },
+  { id: "r_8419", campaign: "High-Value Win-Back",         startedAt: "Today, 10:20 AM", startedAtTs: 1719807600000, processed: 75,   total: 300 },
 ] as const;
