@@ -1095,17 +1095,16 @@ const C_BACKINSTOCK = buildCampaign("E-commerce · Back In Stock", [
   ed("purNon", "end", "yes"), ed("purNon", "vfuNon", "no"), ed("vfuNon", "end"),
 ]);
 
-/* ---- 17. Retail · Al Tayer FCC Loyalty (UAE) --------------------------- */
-// A four-tier loyalty journey for Al Tayer's First Citizen Club (FCC):
+/* ---- 17. Retail · ACME Corp FCC Loyalty -------------------------------- */
+// A four-tier loyalty journey for ACME Corp's First Citizen Club (FCC):
 // Silver → Gold → Platinum → Black, segmented from a CSV the retailer has already
 // tiered (`fcc_tier`, derived from 6-month ACV/AOV/LTV). Enrollment is checked on the
 // derived `enrollment_tier` variable (read-only here, same trick EX2/C_LEADQUAL use
 // with `call_disposition`). Silver alone A/B-tests its invite and upsells free→paid
 // Gold; Gold/Platinum/Black send a single invite, then run an enrollment check with a
-// voice follow-up loop for non-enrollers, sharing one welcome per tier. UAE settings
-// throughout: Asia/Dubai timezone, Al Tayer WhatsApp sender.
+// voice follow-up loop for non-enrollers, sharing one welcome per tier.
 
-const AE_WA = "+971 4 201 1111 · Al Tayer"; // UAE WhatsApp business sender
+const AE_WA = "+91 22 6156 1111 · ACME Corp"; // WhatsApp business sender
 
 // One "confirm enrollment" tier block for Gold/Platinum/Black (no A/B split):
 // single WhatsApp invite → Enrolled? → (enrolled) welcome / (not) voice follow-up →
@@ -1118,7 +1117,7 @@ const fccTierBlock = (p: string, tier: string, label: string): { specs: Spec[]; 
       { id: "none", label: "Not enrolled" },
     ]),
     sWa(`${p}Wel`, `Welcome to ${label}`, `WhatsApp · ${label} welcome`, `fcc_welcome_${tier}`, { number: AE_WA }),
-    sVoice(`${p}Fu`, "Voice AI follow-up", `Re-invite to ${label} FCC`, { maxAttempts: 1, timezone: "Asia/Dubai (GST)" }),
+    sVoice(`${p}Fu`, "Voice AI follow-up", `Re-invite to ${label} FCC`, { maxAttempts: 1, timezone: "Asia/Kolkata (IST)" }),
     sDelay(`${p}Dly`, 24, "Hours"),
     sCond(`${p}Enr2`, "Enrolled now?", "enrollment_tier", [
       { id: tier, label: "Enrolled" },
@@ -1139,7 +1138,7 @@ const FCC_GOLD = fccTierBlock("g", "gold", "Gold");
 const FCC_PLATINUM = fccTierBlock("p", "platinum", "Platinum");
 const FCC_BLACK = fccTierBlock("b", "black", "Black");
 
-const C_ALTAYER = buildCampaign("Retail · Al Tayer FCC Loyalty", [
+const C_ALTAYER = buildCampaign("Retail · ACME Corp FCC Loyalty", [
   sStart(),
   sAud("CSV · First Citizen Club members · key customer_id", [
     "fcc_tier", "acv_6m", "aov_6m", "orders_6m", "lifetime_value", "last_purchase_days", "preferred_lang",
@@ -1161,7 +1160,7 @@ const C_ALTAYER = buildCampaign("Retail · Al Tayer FCC Loyalty", [
     { id: "silver", label: "Enrolled" },
     { id: "none", label: "Not enrolled" },
   ]),
-  sVoice("sUp", "Voice AI · upgrade to Gold", "Limited-time paid Gold upgrade offer", { timezone: "Asia/Dubai (GST)" }),
+  sVoice("sUp", "Voice AI · upgrade to Gold", "Limited-time paid Gold upgrade offer", { timezone: "Asia/Kolkata (IST)" }),
   sDelay("sDly", 24, "Hours"),
   sCond("sUpg", "Upgraded to Gold?", "enrollment_tier", [
     { id: "gold", label: "Upgraded to Gold" },
@@ -1196,7 +1195,7 @@ const EX2_LAID = assemble(EX2_NODES, EX2_EDGES);
 
 const RAW_EXAMPLE_CAMPAIGNS: Record<string, ExampleCampaign> = {
   // Order here drives the Campaigns-list order (the list staggers `lastEdited` by
-  // index). The Al Tayer FCC loyalty campaign leads, followed by the rest of the
+  // index). The ACME Corp FCC loyalty campaign leads, followed by the rest of the
   // retail examples so the whole retail set sits on the front page. The two retained
   // originals (kept in draft) and the other verticals follow.
   c_ex17: C_ALTAYER,
