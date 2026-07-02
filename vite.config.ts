@@ -11,50 +11,44 @@ import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 // `exports` map only declares `browser`/`node` condition branches with no bare default,
 // so rollup's resolver (which doesn't match either during the Cloudflare Worker/SSR build)
 // errors with "No known conditions for '.' specifier". We never exercise PKCE — the live
-// agent path uses the AnthropicAdapter directly, not CopilotCloud's OAuth flow — but we
+// agent path uses the OpenAIAdapter directly, not CopilotCloud's OAuth flow — but we
 // still alias the specifier straight to its concrete node ESM file so the bundle resolves.
 const PKCE_NODE_ENTRY = fileURLToPath(
   new URL("./node_modules/pkce-challenge/dist/index.node.js", import.meta.url),
 );
 
-// Stub heavy *client-only* renderer deps in the SSR (Cloudflare Worker) build so they don't
-// blow the 3 MiB free-plan worker-size limit. Each module here is never executed server-side:
+// Stub heavy *client-only* renderer deps in the SSR (Cloudflare Worker) build. On the
+// Workers Paid plan we've cleared the 3 MiB size ceiling (the new limit is 10 MiB), so
+// these stubs are no longer strictly required — the deploy would fit either way. We keep
+// them because every module here is genuinely never executed server-side, so shipping
+// the real (much larger) implementations to the worker would just be dead weight:
 //
 //   - mermaid / elkjs / @mermaid-js/parser — GenUI C1 SDK (@thesysai/genui-sdk) draws these
 //     client-only via PiGenUiResult; ~6.5 MiB raw of dead weight in the worker otherwise.
 //   - streamdown — @copilotkit/react-core's streaming markdown renderer for chat messages.
 //     It transitively pulls `shiki` + `@shikijs/langs` (~1.18 MiB gz of language packs) and
 //     `@shikijs/themes` (~158 KiB gz). CopilotChat is gated by `state==="collapsed"` in
-//     AgentComposer, so SSR's first render never enters that subtree — stubbing the
-//     Streamdown entry shears the whole shiki tree off the worker bundle.
+//     AgentComposer, so SSR's first render never enters that subtree.
 //   - react-syntax-highlighter (root + /dist/esm/styles/prism) — pulled by @copilotkit/react-ui
-//     and @crayonai/react-ui's `CodeBlock` for prism-themed code highlighting. Same logic:
-//     never reached by SSR; stubbing drops refractor / highlight.js / lowlight (~260 KiB gz).
+//     and @crayonai/react-ui's `CodeBlock` for prism-themed code highlighting; never reached
+//     by SSR.
+//
+// The runtime-side stubs (@copilotkit/runtime, openai, @ai-sdk/openai, @anthropic-ai/sdk,
+// @copilotkit/web-inspector, @modelcontextprotocol/sdk, google-auth-library) that we shipped
+// during the offline-only free-plan posture have been REMOVED — those genuinely need to
+// execute server-side to handle /api/copilotkit, so on Paid we let them ship real.
 //
 // The client build (no stub) keeps the real modules — they ship as static-asset chunks under
-// dist/client, which Cloudflare serves directly via the ASSETS binding (not subject to the
-// 3 MiB worker limit). Three stub flavours, one per shape of named imports:
+// dist/client, which Cloudflare serves directly via the ASSETS binding (not counted against
+// the worker limit).
 const EMPTY_STUB = "\0virtual:empty-ssr-stub";
 const STREAMDOWN_STUB = "\0virtual:streamdown-ssr-stub";
 const RSH_ROOT_STUB = "\0virtual:rsh-root-ssr-stub";
 const RSH_STYLES_STUB = "\0virtual:rsh-styles-ssr-stub";
-const COPILOT_RUNTIME_STUB = "\0virtual:copilot-runtime-ssr-stub";
-const ANTHROPIC_STUB = "\0virtual:anthropic-ssr-stub";
-const OPENAI_STUB = "\0virtual:openai-ssr-stub";
-const AI_SDK_OPENAI_STUB = "\0virtual:ai-sdk-openai-ssr-stub";
-// `reflect-metadata` is intentionally NOT stubbed — it's a polyfill side-effect import.
-// `@ag-ui/{client,core}` and `@copilotkit/shared` are NOT stubbed either: they're pulled
-// in by @copilotkit/react-core (the SSR-rendered provider) with many named imports, and
-// trying to whack-a-mole them one name at a time breaks the build. Trim what's cleanly
-// shearable; the rest is the cost of keeping the provider SSR-renderable.
-const STUB_SSR_EMPTY = /^(mermaid|elkjs|@mermaid-js\/parser|@modelcontextprotocol\/sdk|google-auth-library|@copilotkit\/web-inspector)(\/|$)/;
+const STUB_SSR_EMPTY = /^(mermaid|elkjs|@mermaid-js\/parser)(\/|$)/;
 const STUB_SSR_RSH_STYLES = /^react-syntax-highlighter\/dist\/esm\/styles\//;
 const STUB_SSR_RSH_ROOT = /^react-syntax-highlighter(\/|$)/;
 const STUB_SSR_STREAMDOWN = /^streamdown(\/|$)/;
-const STUB_SSR_COPILOT_RUNTIME = /^@copilotkit\/runtime(\/|$)/;
-const STUB_SSR_ANTHROPIC = /^@anthropic-ai\/sdk(\/|$)/;
-const STUB_SSR_OPENAI = /^openai(\/|$)/;
-const STUB_SSR_AI_SDK_OPENAI = /^@ai-sdk\/openai(\/|$)/;
 function stubHeavyDepsInSsr() {
   return {
     name: "stub-genui-heavy-ssr",
@@ -68,10 +62,6 @@ function stubHeavyDepsInSsr() {
       if (STUB_SSR_RSH_STYLES.test(id)) return RSH_STYLES_STUB;
       if (STUB_SSR_RSH_ROOT.test(id)) return RSH_ROOT_STUB;
       if (STUB_SSR_STREAMDOWN.test(id)) return STREAMDOWN_STUB;
-      if (STUB_SSR_COPILOT_RUNTIME.test(id)) return COPILOT_RUNTIME_STUB;
-      if (STUB_SSR_ANTHROPIC.test(id)) return ANTHROPIC_STUB;
-      if (STUB_SSR_OPENAI.test(id)) return OPENAI_STUB;
-      if (STUB_SSR_AI_SDK_OPENAI.test(id)) return AI_SDK_OPENAI_STUB;
       return null;
     },
     load(id: string) {
@@ -97,60 +87,6 @@ function stubHeavyDepsInSsr() {
           "export const PrismAsync = noop;",
           "export const PrismAsyncLight = noop;",
           "export const createElement = noop;",
-        ].join("\n");
-      }
-      if (id === COPILOT_RUNTIME_STUB) {
-        // @copilotkit/runtime — server-only, reached only via the lazy `runtime.server.ts`
-        // module that handles /api/copilotkit. Stubbed in SSR per the "offline-only deploy"
-        // posture: in the deployed worker the chat path returns 503 (wizard mode still
-        // works — that's the default and is fully offline). Local dev uses real modules.
-        // Named exports match every adapter/class that runtime.server.ts and its transitive
-        // consumers import from this package.
-        return [
-          "const noop = () => null;",
-          "class Noop { constructor(){} }",
-          "export default Noop;",
-          "export const AnthropicAdapter = Noop;",
-          "export const OpenAIAdapter = Noop;",
-          "export const CopilotRuntime = Noop;",
-          "export const EmptyAdapter = Noop;",
-          "export const copilotRuntimeNextJSAppRouterEndpoint = () => ({ handleRequest: noop, POST: noop });",
-        ].join("\n");
-      }
-      if (id === ANTHROPIC_STUB) {
-        // @anthropic-ai/sdk — server-only HTTP client for Anthropic; never used in SSR
-        // render path. The default export is the Anthropic client class.
-        return [
-          "class Anthropic { constructor() {} }",
-          "export default Anthropic;",
-          "export { Anthropic };",
-        ].join("\n");
-      }
-      if (id === OPENAI_STUB) {
-        // openai SDK — server-only HTTP client the runtime uses (default export is
-        // the OpenAI client class). Reached only via the lazy `runtime.server.ts` module.
-        // The stubbed client exposes only what the runtime constructs at import time —
-        // the actual API surface is never called because the parent OpenAIAdapter stub
-        // makes the whole path a no-op that the graceful-503 catch handles.
-        return [
-          "class OpenAI { constructor() { this.baseURL = ''; this.apiKey = null; } }",
-          "export default OpenAI;",
-          "export { OpenAI };",
-        ].join("\n");
-      }
-      if (id === AI_SDK_OPENAI_STUB) {
-        // @ai-sdk/openai — the Vercel AI SDK's OpenAI provider. `createOpenAI` returns
-        // a callable that also exposes `.chat(model)`. Our TfyOpenAIAdapter uses the
-        // `.chat()` form to pin the LanguageModel to /chat/completions instead of the
-        // Responses API. In production the whole adapter is Noop-stubbed and the 503
-        // catch handles the resulting invocation, so this stub just needs to satisfy
-        // rollup's static analysis at build time.
-        return [
-          "const noop = () => null;",
-          "const provider = () => noop; provider.chat = noop; provider.completion = noop;",
-          "export const createOpenAI = () => provider;",
-          "export const openai = provider;",
-          "export default provider;",
         ].join("\n");
       }
       if (id === RSH_STYLES_STUB) {

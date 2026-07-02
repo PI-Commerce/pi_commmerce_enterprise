@@ -1,17 +1,17 @@
 /**
  * Server-only CopilotKit runtime — the bridge between the Ask Pi chat panel and
- * Claude.
+ * Claude, routed through TrueFoundry's OpenAI-compatible LLM gateway.
  *
  * This module is intentionally imported *lazily* (only when a request hits
- * {@link COPILOT_ENDPOINT}) so the heavy CopilotKit + Anthropic graph never loads
- * on the normal SSR page-render path.
+ * {@link COPILOT_ENDPOINT}) so the CopilotKit runtime + openai SDK graph never
+ * loads on the normal SSR page-render path.
  *
  * Backend selection (CopilotKit 1.61 is AG-UI–agent based, so the runtime must
  * expose a `default` agent for the React client's `useAgent({agentId:"default"})`):
- *  - If an Anthropic API key is present (Cloudflare `env.ANTHROPIC_API_KEY` in
- *    production, `process.env.ANTHROPIC_API_KEY` in node dev) we hand the runtime
- *    an {@link AnthropicAdapter}; the runtime auto-builds a `default` BuiltInAgent
- *    from the adapter's language model.
+ *  - If a live-agent key is present (Cloudflare `env.PI_AGENT_API_KEY` on the
+ *    deployed worker, `process.env.PI_AGENT_API_KEY` in node dev) we hand the
+ *    runtime a {@link TfyOpenAIAdapter}; the runtime auto-builds a `default`
+ *    BuiltInAgent from the adapter's language model.
  *  - Otherwise we register a deterministic {@link OfflinePiAgent} as the `default`
  *    agent (paired with {@link EmptyAdapter}) so the chat round-trip is fully
  *    exercisable without any secret.
@@ -358,46 +358,18 @@ async function withSystemPrompt(request: Request): Promise<Request> {
 }
 
 /**
- * Graceful 503 used when the live agent runtime isn't usable on this deploy.
- *
- * Why this can happen: to fit the Cloudflare 3 MiB free-plan worker-size limit, the
- * SSR build stubs `@copilotkit/runtime` + `@anthropic-ai/sdk` + friends to empty Noop
- * classes (see `stubHeavyDepsInSsr` in vite.config.ts). That keeps the wizard path
- * (offline, default) shipping on a free worker, but the live chat path can't run there.
- * Local dev and the production build do NOT apply the stub, so chat works normally
- * there — only the deployed-on-free-tier worker degrades.
- */
-function liveChatUnavailable(): Response {
-  return new Response(
-    JSON.stringify({
-      error:
-        "Live chat is not available on this deploy. Use wizard mode (the default), or run locally with ANTHROPIC_API_KEY set.",
-    }),
-    { status: 503, headers: { "Content-Type": "application/json" } },
-  );
-}
-
-/**
  * Handle a request to {@link COPILOT_ENDPOINT}. Constructs a fresh runtime per
  * request (cheap; keeps the Worker stateless) and delegates to CopilotKit's
- * Web-standard App Router handler. Wrapped in a try/catch so the SSR-stubbed
- * "offline-only deploy" returns a clean 503 instead of an opaque 500.
+ * Web-standard App Router handler.
  */
 export async function handleCopilotRequest(request: Request, env?: RuntimeEnv): Promise<Response> {
-  try {
-    const { runtime, serviceAdapter } = buildRuntime(env);
+  const { runtime, serviceAdapter } = buildRuntime(env);
 
-    const { handleRequest } = copilotRuntimeNextJSAppRouterEndpoint({
-      runtime,
-      serviceAdapter,
-      endpoint: COPILOT_ENDPOINT,
-    });
+  const { handleRequest } = copilotRuntimeNextJSAppRouterEndpoint({
+    runtime,
+    serviceAdapter,
+    endpoint: COPILOT_ENDPOINT,
+  });
 
-    const response = await handleRequest(await withSystemPrompt(request));
-    // When the worker is built with the SSR runtime stubs, `handleRequest` is a no-op
-    // returning null. Treat anything that isn't a real Response as "live chat off".
-    return response instanceof Response ? response : liveChatUnavailable();
-  } catch {
-    return liveChatUnavailable();
-  }
+  return handleRequest(await withSystemPrompt(request));
 }
