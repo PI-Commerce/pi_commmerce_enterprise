@@ -18,9 +18,10 @@
  */
 import "reflect-metadata";
 
-import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
+import { createOpenAI } from "@ai-sdk/openai";
 import {
-  AnthropicAdapter,
+  OpenAIAdapter,
   CopilotRuntime,
   EmptyAdapter,
   copilotRuntimeNextJSAppRouterEndpoint,
@@ -32,8 +33,49 @@ import { Observable } from "rxjs";
 
 import { COPILOT_ENDPOINT, PI_PROMPT_MARKER, PI_PROMPT_END } from "./endpoint";
 
-/** Default model when no override is supplied. Overridable via `PI_AGENT_MODEL`. */
-const DEFAULT_MODEL = "claude-sonnet-4-5";
+/**
+ * Default TrueFoundry-mediated model endpoint for the live agent. Overridable
+ * via env vars (see {@link buildRuntime}). TFY exposes an OpenAI-compatible
+ * surface at /openai/v1/* that transparently routes to Bedrock — so from our
+ * side it's a plain OpenAI client with a custom baseURL, and the model string
+ * is a TFY routing key (owner-prefixed provider path).
+ */
+const DEFAULT_BASE_URL = "https://llm.tfy.pi.mypaytm.com/openai/v1";
+const DEFAULT_MODEL = "pi-agentic/global.anthropic.claude-haiku-4-5-20251001-v1-0";
+
+/**
+ * OpenAIAdapter subclass that pins the LanguageModel to OpenAI's classic
+ * `/chat/completions` endpoint.
+ *
+ * Why: CopilotKit 1.61's AG-UI runtime builds a BuiltInAgent from
+ * `serviceAdapter.getLanguageModel()`. The stock {@link OpenAIAdapter}
+ * implementation returns `createOpenAI({...})(model)`, which resolves to the
+ * newer OpenAI **Responses API** (`/responses`) — a surface TFY's gateway
+ * doesn't proxy, so every run 404s ("Not Found"). Overriding to
+ * `.chat(model)` swaps that for the classic Chat Completions surface
+ * (`/chat/completions`), which TFY DOES expose and which we've probed as
+ * fully working (streaming SSE + tool use both round-trip cleanly).
+ *
+ * The classic API is also what @copilotkit/runtime's own `process()` path
+ * uses (`openai.chat.completions.create()` via the openai SDK), so agent runs
+ * and non-agent completions now hit the same endpoint via the same protocol.
+ */
+class TfyOpenAIAdapter extends OpenAIAdapter {
+  private readonly _client: OpenAI;
+  private readonly _model: string;
+  constructor(params: { openai: OpenAI; model: string; keepSystemRole?: boolean }) {
+    super(params);
+    this._client = params.openai;
+    this._model = params.model;
+  }
+  override getLanguageModel() {
+    return createOpenAI({
+      baseURL: this._client.baseURL,
+      // openai's `apiKey` is `string | null`; @ai-sdk/openai expects `string | undefined`.
+      apiKey: this._client.apiKey ?? undefined,
+    }).chat(this._model);
+  }
+}
 
 /**
  * The agent's system prompt. CopilotKit 1.61's AG-UI transport does NOT forward
@@ -132,31 +174,43 @@ class OfflinePiAgent extends AbstractAgent {
 }
 
 /**
- * Build a fresh runtime + serviceAdapter pair for a request. When a key is present
- * the AnthropicAdapter supplies model info and the runtime auto-builds a `default`
- * BuiltInAgent; otherwise we register the offline echo agent explicitly.
+ * Build a fresh runtime + serviceAdapter pair for a request. When a live-agent
+ * key is present we hand the runtime an {@link OpenAIAdapter} pointed at the
+ * configured gateway (TrueFoundry by default) and the runtime auto-builds a
+ * `default` BuiltInAgent; otherwise we register the offline echo agent so the
+ * chat round-trip is still exercisable without any secret.
+ *
+ * Env vars (accepts a Cloudflare `env` binding OR `process.env`, whichever has
+ * the string first):
+ *   PI_AGENT_API_KEY    — bearer token for the gateway. Also accepts the legacy
+ *                         ANTHROPIC_API_KEY name for backwards compatibility.
+ *   PI_AGENT_BASE_URL   — OpenAI-compat endpoint. Defaults to TFY's `/openai/v1`.
+ *   PI_AGENT_MODEL      — model routing string. Defaults to Haiku 4.5 via TFY.
  */
 function buildRuntime(env: RuntimeEnv): {
   runtime: CopilotRuntime;
   serviceAdapter: CopilotServiceAdapter;
 } {
-  const apiKey = readEnvString(env, "ANTHROPIC_API_KEY");
+  const apiKey =
+    readEnvString(env, "PI_AGENT_API_KEY") ?? readEnvString(env, "ANTHROPIC_API_KEY");
   if (!apiKey) {
     return {
       runtime: new CopilotRuntime({ agents: { default: new OfflinePiAgent() } }),
       serviceAdapter: new EmptyAdapter(),
     };
   }
+  const baseURL = readEnvString(env, "PI_AGENT_BASE_URL") ?? DEFAULT_BASE_URL;
   const model = readEnvString(env, "PI_AGENT_MODEL") ?? DEFAULT_MODEL;
-  // CopilotKit 1.61's AnthropicAdapter runs on the Vercel AI SDK (@ai-sdk/anthropic)
-  // and copies this client's `baseURL` verbatim into createAnthropic(). The
-  // @anthropic-ai/sdk default baseURL is "https://api.anthropic.com" (it appends
-  // "/v1" per request), but @ai-sdk/anthropic appends "/messages" directly — so the
-  // default drops "/v1" and every call 404s. Pin the version segment explicitly.
-  const anthropic = new Anthropic({ apiKey, baseURL: "https://api.anthropic.com/v1" });
+  // CopilotKit's OpenAIAdapter accepts a preconstructed openai client, which lets
+  // us point it at any OpenAI-compatible surface (here: TFY's LLM gateway, which
+  // proxies to Anthropic-on-Bedrock). `keepSystemRole` preserves "system" turns
+  // as-is — the newer OpenAI models switched to "developer", but the TFY-Bedrock
+  // pipeline follows classic OpenAI schema and Bedrock's Claude route expects
+  // "system", so we keep the classic label.
+  const openai = new OpenAI({ apiKey, baseURL });
   return {
     runtime: new CopilotRuntime(),
-    serviceAdapter: new AnthropicAdapter({ anthropic, model }),
+    serviceAdapter: new TfyOpenAIAdapter({ openai, model, keepSystemRole: true }),
   };
 }
 

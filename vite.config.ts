@@ -40,6 +40,8 @@ const RSH_ROOT_STUB = "\0virtual:rsh-root-ssr-stub";
 const RSH_STYLES_STUB = "\0virtual:rsh-styles-ssr-stub";
 const COPILOT_RUNTIME_STUB = "\0virtual:copilot-runtime-ssr-stub";
 const ANTHROPIC_STUB = "\0virtual:anthropic-ssr-stub";
+const OPENAI_STUB = "\0virtual:openai-ssr-stub";
+const AI_SDK_OPENAI_STUB = "\0virtual:ai-sdk-openai-ssr-stub";
 // `reflect-metadata` is intentionally NOT stubbed — it's a polyfill side-effect import.
 // `@ag-ui/{client,core}` and `@copilotkit/shared` are NOT stubbed either: they're pulled
 // in by @copilotkit/react-core (the SSR-rendered provider) with many named imports, and
@@ -51,6 +53,8 @@ const STUB_SSR_RSH_ROOT = /^react-syntax-highlighter(\/|$)/;
 const STUB_SSR_STREAMDOWN = /^streamdown(\/|$)/;
 const STUB_SSR_COPILOT_RUNTIME = /^@copilotkit\/runtime(\/|$)/;
 const STUB_SSR_ANTHROPIC = /^@anthropic-ai\/sdk(\/|$)/;
+const STUB_SSR_OPENAI = /^openai(\/|$)/;
+const STUB_SSR_AI_SDK_OPENAI = /^@ai-sdk\/openai(\/|$)/;
 function stubHeavyDepsInSsr() {
   return {
     name: "stub-genui-heavy-ssr",
@@ -66,6 +70,8 @@ function stubHeavyDepsInSsr() {
       if (STUB_SSR_STREAMDOWN.test(id)) return STREAMDOWN_STUB;
       if (STUB_SSR_COPILOT_RUNTIME.test(id)) return COPILOT_RUNTIME_STUB;
       if (STUB_SSR_ANTHROPIC.test(id)) return ANTHROPIC_STUB;
+      if (STUB_SSR_OPENAI.test(id)) return OPENAI_STUB;
+      if (STUB_SSR_AI_SDK_OPENAI.test(id)) return AI_SDK_OPENAI_STUB;
       return null;
     },
     load(id: string) {
@@ -98,11 +104,14 @@ function stubHeavyDepsInSsr() {
         // module that handles /api/copilotkit. Stubbed in SSR per the "offline-only deploy"
         // posture: in the deployed worker the chat path returns 503 (wizard mode still
         // works — that's the default and is fully offline). Local dev uses real modules.
+        // Named exports match every adapter/class that runtime.server.ts and its transitive
+        // consumers import from this package.
         return [
           "const noop = () => null;",
           "class Noop { constructor(){} }",
           "export default Noop;",
           "export const AnthropicAdapter = Noop;",
+          "export const OpenAIAdapter = Noop;",
           "export const CopilotRuntime = Noop;",
           "export const EmptyAdapter = Noop;",
           "export const copilotRuntimeNextJSAppRouterEndpoint = () => ({ handleRequest: noop, POST: noop });",
@@ -115,6 +124,33 @@ function stubHeavyDepsInSsr() {
           "class Anthropic { constructor() {} }",
           "export default Anthropic;",
           "export { Anthropic };",
+        ].join("\n");
+      }
+      if (id === OPENAI_STUB) {
+        // openai SDK — server-only HTTP client the runtime uses (default export is
+        // the OpenAI client class). Reached only via the lazy `runtime.server.ts` module.
+        // The stubbed client exposes only what the runtime constructs at import time —
+        // the actual API surface is never called because the parent OpenAIAdapter stub
+        // makes the whole path a no-op that the graceful-503 catch handles.
+        return [
+          "class OpenAI { constructor() { this.baseURL = ''; this.apiKey = null; } }",
+          "export default OpenAI;",
+          "export { OpenAI };",
+        ].join("\n");
+      }
+      if (id === AI_SDK_OPENAI_STUB) {
+        // @ai-sdk/openai — the Vercel AI SDK's OpenAI provider. `createOpenAI` returns
+        // a callable that also exposes `.chat(model)`. Our TfyOpenAIAdapter uses the
+        // `.chat()` form to pin the LanguageModel to /chat/completions instead of the
+        // Responses API. In production the whole adapter is Noop-stubbed and the 503
+        // catch handles the resulting invocation, so this stub just needs to satisfy
+        // rollup's static analysis at build time.
+        return [
+          "const noop = () => null;",
+          "const provider = () => noop; provider.chat = noop; provider.completion = noop;",
+          "export const createOpenAI = () => provider;",
+          "export const openai = provider;",
+          "export default provider;",
         ].join("\n");
       }
       if (id === RSH_STYLES_STUB) {
