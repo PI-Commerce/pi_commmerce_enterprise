@@ -505,17 +505,26 @@ export function WorkflowCanvas({
           onBuildingChange={setAiBuilding}
           onWizardSkeleton={(skel) => {
             setSelected(null);
-            setNodes(skel.nodes);
-            setEdges(skel.edges);
-            refit();
+            // The CopilotKit compiler emits nodes at fixed `{ x: 0, y: increasing }`
+            // (a top-down stack). Run the shared ELK layout so the skeleton comes up
+            // left-to-right, matching every other graph on this canvas.
+            void (async () => {
+              const laid = await elkLayout(skel.nodes, skel.edges);
+              setNodes(laid.nodes);
+              setEdges(laid.edges);
+              refit();
+            })();
           }}
           onWizardBuild={(plan) => {
             setSelected(null);
-            setNodes(plan.nodes);
-            setEdges(plan.edges);
-            onAiBuiltName?.(plan.name);
-            onDirty?.();
-            refit();
+            void (async () => {
+              const laid = await elkLayout(plan.nodes, plan.edges);
+              setNodes(laid.nodes);
+              setEdges(laid.edges);
+              onAiBuiltName?.(plan.name);
+              onDirty?.();
+              refit();
+            })();
           }}
           onSavedDraft={(v) => {
             onDirty?.();
