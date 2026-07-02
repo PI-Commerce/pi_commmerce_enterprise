@@ -33,8 +33,10 @@ export type CampaignStatus =
 
 export type RetryPolicy = { maxRetries: number; backoffSeconds: number };
 
-/** A labeled output port on a node — rendered as its own source handle on the canvas. */
-export type NodeOutputKind = "branch" | "variant" | "outcome" | "default";
+/** A labeled output port on a node — rendered as its own source handle on the canvas.
+ *  `exit` marks a terminal-facing port (e.g. an arm's "Welcome / send" node that flows
+ *  straight to End); the port renderer treats it the same as `default` visually. */
+export type NodeOutputKind = "branch" | "variant" | "outcome" | "default" | "exit";
 export type NodeOutput = { id: string; label: string; kind: NodeOutputKind };
 
 /**

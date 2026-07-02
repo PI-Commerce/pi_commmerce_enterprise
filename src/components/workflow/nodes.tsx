@@ -270,7 +270,7 @@ export function WorkflowNode({ id, data, selected }: NodeProps<WorkflowNodeData>
                 title={o.label}
                 className={cn(
                   "max-w-full truncate text-[10px] font-medium leading-tight",
-                  o.kind === "default" ? "text-muted-foreground" : "text-foreground/80",
+                  o.kind === "default" || o.kind === "exit" ? "text-muted-foreground" : "text-foreground/80",
                 )}
               >
                 {o.label}
@@ -281,7 +281,7 @@ export function WorkflowNode({ id, data, selected }: NodeProps<WorkflowNodeData>
                 position={Position.Right}
                 className={cn(
                   "!h-2 !w-2 !border-2 !border-background",
-                  o.kind === "default" ? "!bg-muted-foreground/40" : "!bg-foreground/60",
+                  o.kind === "default" || o.kind === "exit" ? "!bg-muted-foreground/40" : "!bg-foreground/60",
                 )}
               />
             </div>
