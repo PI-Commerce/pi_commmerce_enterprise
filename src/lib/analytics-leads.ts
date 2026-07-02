@@ -4,8 +4,8 @@
 import type { ChannelKind, RunRow, SankeyNode, SankeyNodeKind } from "@/lib/analytics-data";
 
 export type LeadStatus =
-  | "delivered" | "read" | "clicked" | "replied" | "converted"
-  | "connected" | "answered" | "interested" | "voicemail"
+  | "sent" | "delivered" | "read" | "clicked" | "replied" | "converted"
+  | "running" | "complete"
   | "failed" | "dropped" | "pending";
 
 export type Lead = {
@@ -33,13 +33,16 @@ function rng(seed: string) {
 }
 
 const STATUS_BY_KIND: Record<SankeyNodeKind, LeadStatus[]> = {
-  start:       ["pending"],
-  audience:    ["pending"],
-  abSplit:     ["pending"],
-  conditional: ["pending"],
-  delay:       ["pending"],
-  whatsapp:    ["delivered","read","clicked","replied","failed"],
-  voice:       ["connected","answered","interested","voicemail","failed"],
+  start:       [],
+  audience:    [],
+  abSplit:     [],
+  conditional: [],
+  delay:       [],
+  // Aligned to the Meta delivery callback set (clicked/replied are interaction
+  // events, not delivery statuses, so they're excluded here).
+  whatsapp:    ["sent","delivered","read","failed"],
+  // Dev team's current voice-call lifecycle statuses.
+  voice:       ["pending","running","complete","failed"],
   sms:         ["delivered","failed"],
   ads:         ["clicked","delivered"],
   end:         ["converted","dropped"],

@@ -19,8 +19,11 @@ const ICONS: Partial<Record<NodeKind, LucideIcon>> = {
   adsCampaign: Megaphone,
 };
 
+// Audience is omitted from the palette: every canvas already ships with exactly
+// one (non-deletable) Audience node as the single contact entry point, so it's
+// never addable here. The Data Nodes section is dropped since the only other
+// data node (API Tool Call) hasn't been ported over yet.
 const SECTIONS: Array<{ label: string; nodes: NodeKind[] }> = [
-  { label: "Data Nodes", nodes: ["audience"] },
   { label: "Logic Nodes", nodes: ["conditional", "abSplit", "delay"] },
   { label: "Action Nodes", nodes: ["voiceCall", "whatsapp", "sms"] },
   { label: "Ads Nodes", nodes: ["adsCampaign"] },

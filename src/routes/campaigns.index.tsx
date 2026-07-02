@@ -19,7 +19,7 @@ import {
 import {
   Plus, Search, MoreHorizontal, Copy, Workflow,
   CircleDashed, CircleCheck, CircleX, CirclePause, CircleDot,
-  Pause, Play, X, Square, ArrowUp, ArrowDown, ChevronsUpDown, Check,
+  Pause, Play, Square, ArrowUp, ArrowDown, ChevronsUpDown, Check,
   Upload, Download, FileSpreadsheet, Database, ChevronLeft, ChevronRight,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -93,7 +93,7 @@ const LAST_RUN_META: Record<LastRunStatus, { icon: typeof CircleDashed; tone: st
 
 // ============= Runs =============
 
-type RunStatus = "running" | "completed" | "paused" | "queued" | "failed" | "terminated" | "scheduled";
+type RunStatus = "running" | "completed" | "paused" | "queued" | "failed" | "terminated";
 
 const RUN_TONE: Record<RunStatus, string> = {
   running:    "border-success/30 bg-success/10 text-success",
@@ -102,10 +102,9 @@ const RUN_TONE: Record<RunStatus, string> = {
   queued:     "border-border bg-muted text-muted-foreground",
   failed:     "border-destructive/30 bg-destructive/10 text-destructive",
   terminated: "border-destructive/30 bg-destructive/10 text-destructive",
-  scheduled:  "border-ai/30 bg-ai/10 text-ai",
 };
 
-const RUN_STATUSES: RunStatus[] = ["running", "completed", "paused", "queued", "failed", "terminated", "scheduled"];
+const RUN_STATUSES: RunStatus[] = ["running", "completed", "paused", "queued", "failed", "terminated"];
 
 type TriggerMode = "manual" | "api";
 
@@ -127,7 +126,7 @@ const RUNS: RunRow[] = [
   { id: "r_8419", campaign: "BFSI · Collections",       status: "queued",     runType: "one-time",  triggerMode: "manual", startedAt: "Today, 11:48 AM",   completedAt: "ongoing",         leadsProcessed: 0,    leadsTotal: 820 },
   { id: "r_8418", campaign: "Retail · Winback",         status: "paused",     runType: "one-time",  triggerMode: "manual", startedAt: "Today, 11:32 AM",   completedAt: "ongoing",         leadsProcessed: 412,  leadsTotal: 750 },
   { id: "r_8417", campaign: "D2C · Cart Abandonment", status: "completed",  runType: "one-time",  triggerMode: "manual", startedAt: "Today, 10:00 AM",   completedAt: "Today, 11:14 AM", leadsProcessed: 1500, leadsTotal: 1500 },
-  { id: "r_8416", campaign: "Retail · Seasonal Sale",       status: "scheduled",  runType: "one-time",  triggerMode: "manual", startedAt: "Tomorrow, 09:00 AM",completedAt: "ongoing",         leadsProcessed: 0,    leadsTotal: 3200 },
+  { id: "r_8416", campaign: "Retail · Seasonal Sale",       status: "completed",  runType: "one-time",  triggerMode: "manual", startedAt: "Yesterday, 08:00 AM",completedAt: "Yesterday, 09:42 AM", leadsProcessed: 3200, leadsTotal: 3200 },
   { id: "r_8415", campaign: "BFSI · Insurance Renewal",   status: "terminated", runType: "one-time",  triggerMode: "api",    startedAt: "Yesterday, 04:20 PM",completedAt: "Yesterday, 04:38 PM", leadsProcessed: 240 },
   { id: "r_8414", campaign: "E-commerce · Price Drop",       status: "completed",  runType: "recurring", triggerMode: "api",    startedAt: "Yesterday, 09:00 AM",completedAt: "Yesterday, 10:12 AM", leadsProcessed: 980 },
 ];
@@ -672,7 +671,6 @@ function StateTag({ state }: { state: CampaignStatus }) {
 function RunRowMenu({ status, runId }: { status: RunStatus; runId: string }) {
   const canPause = status === "running";
   const canResume = status === "paused";
-  const canCancel = status === "scheduled";
   const canTerminate = status === "running" || status === "paused" || status === "queued";
 
   return (
@@ -689,15 +687,12 @@ function RunRowMenu({ status, runId }: { status: RunStatus; runId: string }) {
         {canResume && (
           <DropdownMenuItem className="gap-2 text-xs" onClick={() => toast.success("Run resumed", { description: runId })}><Play className="h-3.5 w-3.5" /> Resume</DropdownMenuItem>
         )}
-        {canCancel && (
-          <DropdownMenuItem className="gap-2 text-xs" onClick={() => toast.success("Run cancelled", { description: runId })}><X className="h-3.5 w-3.5" /> Cancel</DropdownMenuItem>
-        )}
         {canTerminate && (
           <DropdownMenuItem className="gap-2 text-xs text-destructive focus:text-destructive" onClick={() => toast.error("Run terminated", { description: `${runId} · cannot be resumed` })}>
             <Square className="h-3.5 w-3.5" /> Terminate
           </DropdownMenuItem>
         )}
-        {!canPause && !canResume && !canCancel && !canTerminate && (
+        {!canPause && !canResume && !canTerminate && (
           <DropdownMenuItem disabled className="gap-2 text-xs">No actions available</DropdownMenuItem>
         )}
       </DropdownMenuContent>

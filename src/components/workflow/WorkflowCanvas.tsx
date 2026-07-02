@@ -26,7 +26,7 @@ const SEED_NODES: Node<WorkflowNodeData>[] = [
   { id: "start", type: "workflow", position: { x: 0, y: 0 },
     data: { kind: "start", title: "Start", locked: true, valid: true } },
   { id: "audience", type: "workflow", position: { x: 0, y: 120 },
-    data: { kind: "audience", title: "Audience", subtitle: "CSV · 12,402 contacts", valid: true } },
+    data: { kind: "audience", title: "Audience", subtitle: "CSV · 12,402 contacts", valid: true, locked: true } },
   { id: "split", type: "workflow", position: { x: 0, y: 250 },
     data: { kind: "abSplit", title: "A/B Split", subtitle: "60% A · 40% B", valid: true,
       outputs: [
