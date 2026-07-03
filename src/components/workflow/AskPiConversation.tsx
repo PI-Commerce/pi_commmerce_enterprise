@@ -11,7 +11,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { buildSkeleton, type AskPiPlan } from "./AskPiWizard";
 import {
-  SEGMENTS, WA_TEMPLATES, VOICE_AGENTS, SPLIT_ATTRIBUTES,
+  SEGMENTS, WA_TEMPLATES, VOICE_AGENTS, SPLIT_ATTRIBUTES, PHONE_ATTRIBUTES,
   CHANNEL_META,
   matchTemplate, planFromBrief, analyzeBrief, suggestTemplates, channelsSummary,
   applyResolved, applyRefinement, applySplit, buildContentAbChannels, channelAbVariants,
@@ -375,11 +375,24 @@ export function AskPiConversation({
     onSkeleton(buildSkeleton(p));
     const done = setTimeout(() => {
       onBuild(p);
-      // Pre-fill duration defaults so the Resolve card opens ready.
+      // Pre-fill defaults so the Resolve card opens ready. Every kind that carries a
+      // `default` on its TemplateVar variant gets its value seeded — otherwise the
+      // wizard shows blank Selects for fields the compiler already knew the answer
+      // to (e.g. phoneField → "contact.phone", abFlow → "Send Voice (AI), then
+      // continue…", sendWindow → "10:00–19:00", frequencyCap → "2 / week").
       setResolved((prev) => {
         const next = { ...prev };
         for (const v of openVarsRef.current) {
-          if (v.kind === "duration" && !next[v.key]) next[v.key] = v.default;
+          const kindWithDefault =
+            v.kind === "duration" ||
+            v.kind === "window" ||
+            v.kind === "choice" ||
+            v.kind === "phoneField" ||
+            v.kind === "percent" ||
+            v.kind === "text";
+          if (kindWithDefault && "default" in v && v.default && !next[v.key]) {
+            next[v.key] = v.default;
+          }
         }
         return next;
       });
@@ -1233,6 +1246,70 @@ function ResolveField({
           placeholder={v.kind === "duration" ? v.default : v.kind === "percent" ? v.default : "e.g. 5000"}
           inputMode={v.kind === "threshold" || v.kind === "percent" ? "numeric" : undefined}
           className="h-8 text-[12.5px]"
+        />
+      ) : v.kind === "window" ? (
+        // Two <input type="time"> bound to the "HH:MM–HH:MM" wire format.
+        (() => {
+          const [start, end] = value.split(/[–-]/).map((s) => s.trim());
+          const set = (s: string, e: string) => onChange(`${s || "00:00"}–${e || "00:00"}`);
+          return (
+            <div className="flex items-center gap-1.5">
+              <input
+                type="time"
+                value={start ?? ""}
+                onChange={(e) => set(e.target.value, end ?? "")}
+                className="h-8 flex-1 rounded-md border border-border bg-transparent px-2 text-[12.5px]"
+              />
+              <span className="text-[11.5px] text-muted-foreground">to</span>
+              <input
+                type="time"
+                value={end ?? ""}
+                onChange={(e) => set(start ?? "", e.target.value)}
+                className="h-8 flex-1 rounded-md border border-border bg-transparent px-2 text-[12.5px]"
+              />
+            </div>
+          );
+        })()
+      ) : v.kind === "choice" ? (
+        // Fixed-option enum (e.g. WhatsApp follow-up disposition, frequency cap).
+        <Select value={value} onValueChange={onChange}>
+          <SelectTrigger className="h-8 text-[12.5px]">
+            <SelectValue placeholder="Select…" />
+          </SelectTrigger>
+          <SelectContent>
+            {v.options.map((o) => (
+              <SelectItem key={o} value={o} className="text-[12.5px]">{o}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      ) : v.kind === "phoneField" ? (
+        // Contact-number attribute picker (Mobile / WhatsApp / Alternate / Landline).
+        // Force open upward — the field is always the last row on the Audience step
+        // and the composer panel is bottom-anchored, so a downward popover clips.
+        <Select value={value || v.default} onValueChange={onChange}>
+          <SelectTrigger className="h-8 text-[12.5px]">
+            <SelectValue placeholder="Select…" />
+          </SelectTrigger>
+          <SelectContent position="popper" side="top" sideOffset={6} align="start">
+            {PHONE_ATTRIBUTES.map((p) => (
+              <SelectItem key={p.id} value={p.id} className="text-[12.5px]">
+                <span className="flex items-center gap-1.5">
+                  <Phone className="h-3 w-3 text-muted-foreground" /> {p.label}
+                </span>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      ) : v.kind === "text" ? (
+        // Free-text with default (e.g. per-A/B-variant "What happens next" flow
+        // description). Fall back to `v.default` when value is empty so the sensible
+        // seeded text is always visible even if the parent's state seeder missed.
+        <textarea
+          value={value || v.default}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={v.placeholder ?? v.default}
+          rows={2}
+          className="w-full resize-none rounded-md border border-border bg-transparent px-2.5 py-1.5 text-[12.5px] leading-relaxed"
         />
       ) : (
         <Select value={value} onValueChange={onChange}>
