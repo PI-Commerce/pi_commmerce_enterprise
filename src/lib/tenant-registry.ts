@@ -1121,8 +1121,34 @@ export function buildContentAbChannels(name: string, cfg: BriefConfig, resolved:
     { id: "e_audience_lin_ab0", source: "audience", target: "lin_ab0" },
   ];
   const variants = cfg.contentAb?.variants ?? [];
-  const bottomY = emitAbSplit("lin_ab0", 0, 260, variants, resolved, "end", nodes, edges);
-  nodes.push({ id: "end", type: "workflow", position: { x: 0, y: bottomY + 20 },
+  // When the brief pairs same-channel content A/B with a fallback on the other channel
+  // (e.g. "A/B different WA templates, voice as fallback"), inject a shared fallback
+  // node between the A/B variants and End: Start → Audience → A/B (WA_A | WA_B) → Wait
+  // → Voice fallback → End. The A/B variants all converge on the fallback wait first
+  // so a single voice touch covers both arms — matching how a marketer expresses this.
+  const onward = cfg.fallback ? "lin_ab_wait" : "end";
+  const bottomY = emitAbSplit("lin_ab0", 0, 260, variants, resolved, onward, nodes, edges);
+  let tailY = bottomY;
+  if (cfg.fallback) {
+    const { value, unit } = parseDuration(resolved.fallbackWindow ?? cfg.fallbackWait);
+    nodes.push({
+      id: "lin_ab_wait", type: "workflow", position: { x: 0, y: tailY + 40 },
+      data: {
+        kind: "delay",
+        title: `Wait ${value} ${unit === "Hours" ? (value === 1 ? "hour" : "hours") : unit === "Days" ? (value === 1 ? "day" : "days") : unit.toLowerCase()}`,
+        subtitle: "Fallback window",
+        valid: true,
+        config: { delayValue: value, delayUnit: unit },
+      },
+    });
+    tailY += 120;
+    const fbNode = channelNode(cfg.fallback, tailY, resolved);
+    nodes.push(fbNode);
+    edges.push({ id: "e_lin_ab_wait_fb", source: "lin_ab_wait", target: fbNode.id });
+    edges.push({ id: `e_${fbNode.id}_end`, source: fbNode.id, target: "end" });
+    tailY += 120;
+  }
+  nodes.push({ id: "end", type: "workflow", position: { x: 0, y: tailY + 20 },
     data: { kind: "end", title: "End", locked: true, valid: true } });
   return { nodes, edges, name };
 }
@@ -1549,6 +1575,16 @@ function channelOpenVars(cfg: BriefConfig): TemplateVar[] {
       vars.push({ key: `${meta.resourceKey}@lin_ab0_${v.id}`, kind: meta.resourceKind, label: `A/B · ${v.label} · ${noun}`, required: true, group: "A/B test" } as TemplateVar);
       vars.push({ key: `abFlow@lin_ab0_${v.id}`, kind: "text", label: `A/B · ${v.label} · What happens next`, default: v.flow ?? `Send ${meta.label}, then continue to the shared next step`, placeholder: "Describe this variant's flow in plain English", required: true, group: "A/B test" } as TemplateVar);
     });
+    // Hybrid: content A/B on the primary channel + a fallback on the other channel
+    // ("A/B different WA templates, voice as fallback"). Capture the fallback channel's
+    // resource + the fallback window so both surface on the Resolve card alongside the
+    // per-variant fields.
+    if (cfg.fallback) {
+      const fbMeta = CHANNEL_META[cfg.fallback];
+      const fbNoun = cfg.fallback === "whatsapp" ? "Template" : "Agent";
+      vars.push({ key: fbMeta.resourceKey, kind: fbMeta.resourceKind, label: `Fallback ${fbMeta.label} · ${fbNoun}`, required: true, group: "Fallback" } as TemplateVar);
+      vars.push({ key: "fallbackWindow", kind: "duration", label: "Fallback window", default: cfg.fallbackWait, required: false, group: "Fallback" });
+    }
     return vars;
   }
   const seen = new Set<string>();
@@ -1587,10 +1623,13 @@ export function channelsSummary(cfg: BriefConfig): string {
   if (cfg.contentAb) {
     const vs = cfg.contentAb.variants;
     const chs = Array.from(new Set(vs.map((v) => v.ch)));
-    if (chs.length > 1) {
-      return `A/B test — ${chs.map((c) => CHANNEL_META[c].label).join(" vs ")} on a split audience`;
-    }
-    return `A/B test — ${vs.length} ${CHANNEL_META[chs[0] ?? cfg.contentAb.ch].label} template variants on a split audience`;
+    const abPhrase = chs.length > 1
+      ? `A/B test — ${chs.map((c) => CHANNEL_META[c].label).join(" vs ")} on a split audience`
+      : `A/B test — ${vs.length} ${CHANNEL_META[chs[0] ?? cfg.contentAb.ch].label} template variants on a split audience`;
+    // Hybrid: same-channel content A/B PLUS a fallback on the other channel — reflect
+    // the fallback in the summary so the user sees both parts of the shape.
+    if (cfg.fallback) return `${abPhrase}, then fallback ${CHANNEL_META[cfg.fallback].label} (on non-delivery)`;
+    return abPhrase;
   }
   if (cfg.fallback) return `Primary ${p} → fallback ${CHANNEL_META[cfg.fallback].label} (on non-delivery)`;
   if (cfg.channels.length > 1) {
@@ -2095,6 +2134,30 @@ export function analyzeBrief(text: string): BriefConfig {
   // !conditional (an in-arm "if they don't respond" stays a branch, not a fallback).
   const nonResponse = /non-?responders?|\b(?:no|without)\s+(?:reply|response|answer)\b|(?:haven'?t|hasn'?t|didn'?t|don'?t|doesn'?t|never|not)\s+(?:respond(?:ed|s)?|repl(?:y|ied|ies)|answer(?:ed|s)?|pick(?:ed)?\s?up|engag\w*)/;
   const mentionsFallback = /fall\s?back|if .*(?:fail|not delivered|undelivered|no reply|doesn'?t)/.test(t) || nonResponse.test(t);
+  // Common shape: an A/B test on ONE channel (usually WhatsApp — "different templates
+  // to each branch") plus a fallback on the OTHER channel. Detect this hybrid so the
+  // fallback isn't silently dropped by the `!contentAb` gate below and so the A/B
+  // variants stay same-channel (not one-per-channel).
+  //
+  // Explicit signal: brief mentions BOTH an A/B keyword and a fallback keyword AND
+  // pins the two channels by role (either "<primary>...fallback...<secondary>" or the
+  // reverse). When this fires we return a config with `contentAb.ch = primary`,
+  // `contentAb.variants = 2 same-channel variants`, AND `fallback = secondary` set.
+  let isContentAbWithFallback = false;
+  if (contentAb && mentionsFallback && detected.length >= 2) {
+    const toChannel = (s: string): Channel => (/whats/.test(s) ? "whatsapp" : "voice");
+    const fbMatch =
+      t.match(/(whats\s?app|voice|call)\s+fall\s?back/) ??
+      t.match(/fall\s?back\s+(?:to|on|via|with|using)?\s*(whats\s?app|voice|call)/) ??
+      t.match(/fall\s?back[^.]{0,30}\bdo\s+(?:a\s+)?(voice|call|whats\s?app)/) ??
+      t.match(/(voice|call|whats\s?app)[^.]{0,30}\s+fall\s?back/);
+    if (fbMatch) {
+      fallback = toChannel(fbMatch[1]);
+      primary = detected.find((c) => c !== fallback) ?? primary;
+      isContentAbWithFallback = true;
+    }
+  }
+
   if (!contentAb && !conditional && mentionsFallback && detected.length >= 2) {
     // Pin the fallback channel from explicit phrasing: prefer "<channel> fallback"
     // (channel right before the word), then "fallback to/on/via <channel>".
@@ -2114,8 +2177,38 @@ export function analyzeBrief(text: string): BriefConfig {
   // A/B test config: with >=2 channels seed one variant PER channel (channel A/B);
   // with a single channel seed N same-channel template variants (content A/B). The
   // user confirms names/resources/percents on the Resolve card (never invented).
+  //
+  // Exception: when we detected the "content A/B on primary + fallback on secondary"
+  // hybrid, force SAME-channel content variants on the primary — otherwise the second
+  // channel would silently become an A/B peer (channel variant) instead of a fallback.
+  //
+  // Also try to lift an explicit split percentage from the brief ("60:40", "70/30",
+  // "70% and 30%", "80-20 split") so the A/B variants come up with the requested
+  // weights instead of defaulting to 50/50.
+  const splitPctMatch = t.match(/\b(\d{1,2})\s*[:/\-]\s*(\d{1,2})\b|\b(\d{1,2})\s*%\s*(?:and|vs|to|,)\s*(\d{1,2})\s*%/);
+  const splitPctRaw = splitPctMatch ? Number(splitPctMatch[1] ?? splitPctMatch[3]) : NaN;
+  const splitPct = Number.isFinite(splitPctRaw) && splitPctRaw > 0 && splitPctRaw < 100 ? String(splitPctRaw) : undefined;
+  // For same-channel content A/B (either explicit hybrid with fallback OR a single
+  // channel detected), seed variants via detectAbVariants and then apply the split %
+  // if the brief supplied one — channelAbVariants only honours splitPct on a 2-way
+  // multi-channel split, so we need to bolt the pcts onto detected variants ourselves.
+  const applySplitPct = (vs: AbVariant[]): AbVariant[] => {
+    if (!splitPct || vs.length !== 2) return vs;
+    const first = Number(splitPct);
+    return [
+      { ...vs[0], pct: first },
+      { ...vs[1], pct: 100 - first },
+    ];
+  };
   const contentAbCfg = contentAb
-    ? { ch: primary, variants: ordered.length >= 2 ? channelAbVariants(ordered) : detectAbVariants(t, primary) }
+    ? {
+        ch: primary,
+        variants: isContentAbWithFallback
+          ? applySplitPct(detectAbVariants(t, primary))
+          : ordered.length >= 2
+            ? channelAbVariants(ordered, splitPct)
+            : applySplitPct(detectAbVariants(t, primary)),
+      }
     : undefined;
   return {
     channels: ordered,
