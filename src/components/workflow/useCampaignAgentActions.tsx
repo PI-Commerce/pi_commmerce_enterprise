@@ -496,6 +496,12 @@ export function useCampaignAgentActions(cb: CampaignAgentCallbacks) {
       // per-variant resource gaps are on the Resolve card), so skip the placement
       // card — it only disambiguates 2+ channels with no fallback AND no A/B.
       const needsPlacement = !needsConditional && !cfg.contentAb && cfg.channels.length >= 2 && !cfg.fallback;
+      // Explicit flag the LLM can check to know the design shape was already framed
+      // by the brief (via A/B, conditional, or fallback), so the design question in
+      // PATH B step 1c should be SKIPPED. Without this the LLM only sees the two
+      // needs* flags and mistakenly asks "how should this be designed?" for a brief
+      // that already said "A/B split, two channels".
+      const designFramed = needsConditional || needsPlacement || !!cfg.contentAb || !!cfg.fallback;
       return {
         ok: true,
         name: bp.plan.name,
@@ -506,11 +512,14 @@ export function useCampaignAgentActions(cb: CampaignAgentCallbacks) {
         unavailable: cfg.unavailable ?? [],
         needsConditional,
         needsPlacement,
+        designFramed,
         message: needsConditional
-          ? "The brief frames a conditional branch on an audience attribute. Call resolveBriefCampaign FIRST so the user picks the audience + resources, then setConditionalBranch to define the Branch 1 / Branch 2 split on that audience."
+          ? "The brief frames a conditional branch on an audience attribute. Do NOT ask a design question. Call resolveBriefCampaign FIRST so the user picks the audience + resources, then setConditionalBranch to define the Branch 1 / Branch 2 split on that audience."
           : needsPlacement
-            ? "Two channels with no fallback. Call resolveBriefCampaign FIRST so the user picks the audience and each channel's resource, then setChannelPlacement to choose how the channels run on that audience (fallback / parallel split / A-B test)."
-            : "Draft rendered on the canvas. Call resolveBriefCampaign so the user fills the open variables.",
+            ? "Two channels with no fallback. Do NOT ask a design question — the placement card handles that. Call resolveBriefCampaign FIRST so the user picks the audience and each channel's resource, then setChannelPlacement to choose how the channels run on that audience (fallback / parallel split / A-B test)."
+            : cfg.contentAb
+              ? "The brief already declared an A/B split — an A/B Split node is drawn with per-variant resource gaps on the Resolve card. Do NOT ask a design question and do NOT call setChannelPlacement. Go straight to resolveBriefCampaign so the user names each variant's template and audience."
+              : "Draft rendered on the canvas with no design ambiguity. Do NOT ask a design question. Call resolveBriefCampaign so the user fills the open variables.",
       };
     },
   });
@@ -1403,7 +1412,10 @@ function ResolveField({
           <SelectTrigger className="h-8 text-[12.5px]">
             <SelectValue placeholder="Select…" />
           </SelectTrigger>
-          <SelectContent>
+          {/* The phone field is always the last row on the Audience step, so its
+              popover would open below the Next button (or off the bottom of the
+              bottom-anchored composer panel) and be invisible. Force it upward. */}
+          <SelectContent position="popper" side="top" sideOffset={6} align="start">
             {PHONE_ATTRIBUTES.map((p) => (
               <SelectItem key={p.id} value={p.id} className="text-[12.5px]">
                 <span className="flex items-center gap-1.5">
