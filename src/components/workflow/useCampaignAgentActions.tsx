@@ -1439,8 +1439,13 @@ function ResolveField({
           <span className="text-[11.5px] text-muted-foreground">% of traffic</span>
         </div>
       ) : v.kind === "text" ? (
+        // Fall back to `v.default` when `value` is empty so the user always sees the
+        // sensible default text on first render — the ResolveCard's useState seeder
+        // populates this on mount, but this guard covers late-mounted / re-seeded
+        // cases where the state initialiser can't run (e.g. vars added mid-flow via
+        // applyAnswers). onChange still owns the string once the user edits it.
         <textarea
-          value={value}
+          value={value || v.default}
           onChange={(e) => onChange(e.target.value)}
           placeholder={v.placeholder ?? v.default}
           rows={2}

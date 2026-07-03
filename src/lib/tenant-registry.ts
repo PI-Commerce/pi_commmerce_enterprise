@@ -1547,7 +1547,14 @@ function channelOpenVars(cfg: BriefConfig): TemplateVar[] {
           const noun = v.ch === "whatsapp" ? "Template" : "Agent";
           vars.push({ key: `splitPct@${rs.nodeId}_${v.id}`, kind: "percent", label: `${rs.armLabel} · ${v.label} · Traffic %`, default: String(v.pct ?? defaults[k]), required: false, group: rs.armLabel });
           vars.push({ key: `${meta.resourceKey}@${rs.nodeId}_${v.id}`, kind: meta.resourceKind, label: `${rs.armLabel} · ${v.label} · ${noun}`, required: true, group: rs.armLabel } as TemplateVar);
-          vars.push({ key: `abFlow@${rs.nodeId}_${v.id}`, kind: "text", label: `${rs.armLabel} · ${v.label} · What happens next`, default: v.flow ?? `Send ${meta.label}, then continue to the shared next step`, placeholder: "Describe this variant's flow in plain English", required: true, group: rs.armLabel } as TemplateVar);
+          // NOT required — the default is a sensible "Send <channel>, then continue to
+          // the shared next step" that covers the common case (both variants converge
+          // to End). Downstream compliance checks and node subtitles already fall back
+          // to `v.default` when `resolved[key]` is empty, so leaving this optional lets
+          // the user click Next without filling it — one less thing to answer for a
+          // clearly-described brief. Users who want a custom post-split flow can still
+          // edit the pre-populated default.
+          vars.push({ key: `abFlow@${rs.nodeId}_${v.id}`, kind: "text", label: `${rs.armLabel} · ${v.label} · What happens next`, default: v.flow || `Send ${meta.label}, then continue to the shared next step`, placeholder: "Describe this variant's flow in plain English", required: false, group: rs.armLabel } as TemplateVar);
         });
       } else if (rs.kind === "gate") {
         const st = findStateAttribute(rs.stateId);
@@ -1573,7 +1580,9 @@ function channelOpenVars(cfg: BriefConfig): TemplateVar[] {
       const noun = v.ch === "whatsapp" ? "Template" : "Agent";
       vars.push({ key: `splitPct@lin_ab0_${v.id}`, kind: "percent", label: `A/B · ${v.label} · Traffic %`, default: String(v.pct ?? defaults[k]), required: false, group: "A/B test" });
       vars.push({ key: `${meta.resourceKey}@lin_ab0_${v.id}`, kind: meta.resourceKind, label: `A/B · ${v.label} · ${noun}`, required: true, group: "A/B test" } as TemplateVar);
-      vars.push({ key: `abFlow@lin_ab0_${v.id}`, kind: "text", label: `A/B · ${v.label} · What happens next`, default: v.flow ?? `Send ${meta.label}, then continue to the shared next step`, placeholder: "Describe this variant's flow in plain English", required: true, group: "A/B test" } as TemplateVar);
+      // Same reasoning as the conditional-arm abFlow field above: default is sensible,
+      // downstream falls back to it, so we don't force the user to fill it.
+      vars.push({ key: `abFlow@lin_ab0_${v.id}`, kind: "text", label: `A/B · ${v.label} · What happens next`, default: v.flow || `Send ${meta.label}, then continue to the shared next step`, placeholder: "Describe this variant's flow in plain English", required: false, group: "A/B test" } as TemplateVar);
     });
     // Hybrid: content A/B on the primary channel + a fallback on the other channel
     // ("A/B different WA templates, voice as fallback"). Capture the fallback channel's
