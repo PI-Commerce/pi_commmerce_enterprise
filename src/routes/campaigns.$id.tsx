@@ -195,9 +195,7 @@ function CampaignBuilder() {
           campaignId={id}
           onValidityChange={handleValidity}
           onDirty={handleDirty}
-          autoStartAskPi={isNew}
           isNew={isNew}
-          onAiBuiltName={(n) => { setName(n); setDirty(true); }}
         />
       </div>
 

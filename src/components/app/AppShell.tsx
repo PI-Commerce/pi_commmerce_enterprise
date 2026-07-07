@@ -8,8 +8,6 @@ export function AppShell({
   children: React.ReactNode;
   /** When true, removes the page padding (use for full-bleed canvas pages) */
   bare?: boolean;
-  /** @deprecated Ask Pi is now scoped to the Campaign Builder only. */
-  showAskPi?: boolean;
 }) {
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground">

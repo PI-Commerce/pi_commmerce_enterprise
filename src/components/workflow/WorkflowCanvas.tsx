@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState, useEffect, useRef } from "react";
 import ReactFlow, {
   Background, BackgroundVariant, Controls, ControlButton, MiniMap,
-  addEdge, useEdgesState, useNodesState, getNodesBounds,
+  addEdge, useEdgesState, useNodesState,
   type Connection, type Edge, type Node, type NodeMouseHandler,
   type ReactFlowInstance,
 } from "reactflow";
@@ -15,7 +15,6 @@ import { EXAMPLE_CAMPAIGNS } from "@/lib/campaign-examples";
 import { elkLayout, type Point } from "@/lib/flow-layout";
 import { useRegion, localizeTzAbbrev, localizeCurrency } from "@/lib/region";
 import { ConfigPanel } from "./ConfigPanel";
-import { AiComposer } from "./AiComposer";
 import { NodePalette } from "./NodePalette";
 
 
@@ -70,12 +69,15 @@ let nodeCounter = 100;
 // A fresh canvas always has the three structural nodes — Start, Audience, End —
 // and all three are non-deletable (locked). Audience is the single entry point for
 // contacts, so it can be neither duplicated nor added a second time (see NodePalette).
+// Positions are pre-laid out left→right (same reading direction as example graphs
+// and the ELK layout used everywhere else). End sits after Audience as a placeholder
+// endpoint the user wires up once they've inserted action nodes.
 const BLANK_NODES: Node<WorkflowNodeData>[] = [
   { id: "start", type: "workflow", position: { x: 0, y: 0 },
     data: { kind: "start", title: "Start", locked: true, valid: true } },
-  { id: "audience", type: "workflow", position: { x: 0, y: 120 },
+  { id: "audience", type: "workflow", position: { x: 230, y: 0 },
     data: { kind: "audience", title: "Audience", subtitle: "Drop a CSV", locked: true, valid: false, error: "Select source" } },
-  { id: "end", type: "workflow", position: { x: 0, y: 260 },
+  { id: "end", type: "workflow", position: { x: 570, y: 0 },
     data: { kind: "end", title: "End", locked: true, valid: true } },
 ];
 
@@ -88,20 +90,16 @@ export function WorkflowCanvas({
   campaignId,
   onValidityChange,
   onDirty,
-  autoStartAskPi = false,
   isNew = false,
-  onAiBuiltName,
   previewOnly = false,
 }: {
   status: CampaignStatus;
   campaignId?: string;
   onValidityChange?: (validCount: number, total: number) => void;
   onDirty?: () => void;
-  autoStartAskPi?: boolean;
   isNew?: boolean;
-  onAiBuiltName?: (name: string) => void;
-  /** Read-only snapshot mode (e.g. Version History): no palette, no Ask Pi, no editing,
-   *  no run pulse — but nodes are still clickable and show their config read-only. */
+  /** Read-only snapshot mode (e.g. Version History): no palette, no editing, no run
+   *  pulse — but nodes are still clickable and show their config read-only. */
   previewOnly?: boolean;
 }) {
   // Pre-built example campaigns ship their own authored graph; everything else
@@ -115,16 +113,11 @@ export function WorkflowCanvas({
     isNew ? BLANK_EDGES : example?.edges ?? SEED_EDGES,
   );
   const [selected, setSelected] = useState<{ id: string; data: WorkflowNodeData } | null>(null);
-  const [askPiOpen, setAskPiOpen] = useState(false);
-  const [aiBuilding, setAiBuilding] = useState(false);
-  // ELK runs async at render-time; hide the graph until the initial layout lands
-  // so we never flash positionless nodes stacked at the origin. Blank new
-  // campaigns (just a Start node) need no initial layout, so they show at once.
+  // ELK runs async at render-time for example/seed graphs; hide the graph until the
+  // initial layout lands so we never flash positionless nodes stacked at the origin.
+  // Blank new campaigns ship pre-laid-out and render immediately.
   const [layingOut, setLayingOut] = useState(!isNew);
   const rfRef = useRef<ReactFlowInstance | null>(null);
-  const refitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const aiBuildingRef = useRef(aiBuilding);
-  useEffect(() => { aiBuildingRef.current = aiBuilding; }, [aiBuilding]);
   // Keep live nodes/edges in refs so the run-once layout effect reads current
   // state without re-triggering on every change.
   const nodesRef = useRef(nodes); nodesRef.current = nodes;
@@ -150,29 +143,8 @@ export function WorkflowCanvas({
     );
   }, [tzAbbrev, symbol, setNodes]);
 
-  const refit = useCallback(() => {
-    if (refitTimer.current) clearTimeout(refitTimer.current);
-    refitTimer.current = setTimeout(() => {
-      const rf = rfRef.current;
-      if (!rf) return;
-      const ns = rf.getNodes();
-      if (ns.length === 0) return;
-      const bounds = getNodesBounds(ns);
-      const overlay = aiBuildingRef.current ? 380 : 0;
-      // Inflate bottom of bounds so fitBounds reserves space below the graph,
-      // pushing the visible graph into the upper region above the overlay.
-      const inflated = { ...bounds, height: bounds.height + overlay };
-      rf.fitBounds(inflated, { padding: 0.2, duration: 500 });
-    }, 50);
-  }, []);
-
-  // Re-fit whenever the building overlay toggles
-  useEffect(() => {
-    refit();
-  }, [aiBuilding, refit]);
-
-  // Initial ELK layout for the example/seed graph (runs once on mount). Blank
-  // new campaigns and AI-built graphs are laid out elsewhere, so skip those.
+  // Initial ELK layout for the example/seed graph (runs once on mount). Blank new
+  // campaigns ship pre-laid-out (see BLANK_NODES) so skip them here.
   useEffect(() => {
     if (didLayoutRef.current || isNew) return;
     didLayoutRef.current = true;
@@ -191,15 +163,9 @@ export function WorkflowCanvas({
     return () => { cancelled = true; };
   }, [isNew, setNodes, setEdges]);
 
-  // Auto-launch Ask Pi for brand-new campaigns
-  useEffect(() => {
-    if (autoStartAskPi) setAskPiOpen(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoStartAskPi]);
-
   // Editing is allowed in every campaign status — even while a run is live
   // (publishing then mints a new version that only new leads follow).
-  const editable = !previewOnly && !aiBuilding;
+  const editable = !previewOnly;
 
   // Report validity upwards
   useEffect(() => {
@@ -386,12 +352,6 @@ export function WorkflowCanvas({
         edgeTypes={edgeTypes}
         nodesDraggable={editable}
         nodesConnectable={editable}
-        elementsSelectable={!aiBuilding}
-        nodesFocusable={!aiBuilding}
-        panOnDrag={!aiBuilding}
-        zoomOnScroll={!aiBuilding}
-        zoomOnPinch={!aiBuilding}
-        zoomOnDoubleClick={!aiBuilding}
         onInit={(inst) => { rfRef.current = inst; }}
         onNodesChange={(c) => {
           if (!editable) return;
@@ -403,7 +363,7 @@ export function WorkflowCanvas({
         onEdgesChange={(c) => { if (editable) onEdgesChange(c); }}
         onConnect={onConnect}
         isValidConnection={isValidConnection}
-        onNodeClick={aiBuilding ? undefined : onNodeClick}
+        onNodeClick={onNodeClick}
         onPaneClick={() => setSelected(null)}
         defaultEdgeOptions={defaultEdgeOptions}
         fitView
@@ -437,7 +397,7 @@ export function WorkflowCanvas({
 
       <ConfigPanel
         key={selected?.id}
-        node={aiBuilding ? null : selected}
+        node={selected}
         readOnly={!editable}
         onClose={() => setSelected(null)}
         onChange={(patch) => selected && updateNodeData(selected.id, patch)}
@@ -450,29 +410,6 @@ export function WorkflowCanvas({
           return !selected || !v.key.startsWith(`${ns}.`);
         })}
       />
-
-      {!previewOnly && (
-        <AiComposer
-          mode="wizard"
-          nudge={{ label: "Ask Pi to build your campaign", active: autoStartAskPi }}
-          autoOpenWizard={askPiOpen}
-          onBuildingChange={setAiBuilding}
-          onWizardSkeleton={(skel) => {
-            setSelected(null);
-            setNodes(skel.nodes);
-            setEdges(skel.edges);
-            refit();
-          }}
-          onWizardBuild={(plan) => {
-            setSelected(null);
-            setNodes(plan.nodes);
-            setEdges(plan.edges);
-            onAiBuiltName?.(plan.name);
-            onDirty?.();
-            refit();
-          }}
-        />
-      )}
     </div>
   );
 }

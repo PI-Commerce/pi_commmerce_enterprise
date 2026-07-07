@@ -50,50 +50,6 @@ export function WorkflowNode({ data, selected }: NodeProps<WorkflowNodeData>) {
   // downward with more ports instead of ballooning sideways.
   const nodeWidth = multiOut ? 240 : 224;
 
-  // Skeleton wireframe placeholder used during Ask Pi build phase.
-  if (data.building) {
-    return (
-      <div
-        className={cn(
-          "askpi-skeleton relative rounded-xl border border-ai/40 bg-ai/[0.04]",
-          isTerminal ? "h-8 w-[120px] rounded-full" : "h-[64px] w-[224px]",
-        )}
-      >
-        {!isTerminal && (
-          <Handle type="target" position={Position.Left} className="!h-2 !w-2 !border-2 !border-background !bg-ai/40" />
-        )}
-        {!isTerminal && (
-          <Handle type="source" position={Position.Right} className="!h-2 !w-2 !border-2 !border-background !bg-ai/40" />
-        )}
-        {isTerminal && data.kind !== "start" && (
-          <Handle type="target" position={Position.Left} className="!h-2 !w-2 !border-2 !border-background !bg-ai/40" />
-        )}
-        {isTerminal && data.kind !== "end" && (
-          <Handle type="source" position={Position.Right} className="!h-2 !w-2 !border-2 !border-background !bg-ai/40" />
-        )}
-        <div className="absolute inset-0 overflow-hidden rounded-[inherit]">
-          <div className="askpi-skeleton-shimmer h-full w-full" />
-        </div>
-        <style>{`
-          @keyframes askPiSkelPulse {
-            0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--ai) 0%, transparent); border-color: color-mix(in oklch, var(--ai) 35%, transparent); }
-            50%      { box-shadow: 0 0 22px -2px color-mix(in oklch, var(--ai) 55%, transparent); border-color: color-mix(in oklch, var(--ai) 70%, transparent); }
-          }
-          .askpi-skeleton { animation: askPiSkelPulse 1.8s ease-in-out infinite; }
-          @keyframes askPiSkelShimmer {
-            0% { transform: translateX(-100%); }
-            100% { transform: translateX(100%); }
-          }
-          .askpi-skeleton-shimmer {
-            background: linear-gradient(90deg, transparent, color-mix(in oklch, var(--ai) 22%, transparent), transparent);
-            animation: askPiSkelShimmer 1.8s linear infinite;
-          }
-        `}</style>
-      </div>
-    );
-  }
-
-
   // Terminal nodes render as a distinctive colored pill — no config, no validation chrome.
   if (isTerminal) {
     const isStart = data.kind === "start";

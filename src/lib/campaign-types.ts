@@ -168,8 +168,6 @@ export type WorkflowNodeData = {
   locked?: boolean;
   /** Analytics overlay: shown inline on the node in Campaign Analytics view */
   metrics?: { entered: number; exited: number; dropoffPct: number };
-  /** Render as a pulsating empty wireframe placeholder (used by Ask Pi build phase) */
-  building?: boolean;
   /** Labeled output ports — each becomes its own source handle on the canvas (branches, A/B variants, exit paths). */
   outputs?: NodeOutput[];
   /** Set when an action node runs as an A/B experiment — drives the canvas A/B badge. */
