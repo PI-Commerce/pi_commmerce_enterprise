@@ -28,7 +28,7 @@ export type ToolInput = {
   description: string;
 };
 
-export type ToolOutput = { path: string; varName: string; description: string };
+export type ToolOutput = { path: string; varName: string; description: string; dataType?: ToolDataType };
 
 export type ToolDef = {
   handle: string;
@@ -85,8 +85,8 @@ export const TOOLS: ToolDef[] = [
       { key: "body_text", dataType: "String", in: "body", source: "agent", description: "Resolved message body" },
     ],
     outputs: [
-      { path: "$.messages[0].id", varName: "message_id", description: "WhatsApp message id" },
-      { path: "$.messages[0].message_status", varName: "delivery_status", description: "queued / sent / delivered" },
+      { path: "$.messages[0].id", varName: "message_id", dataType: "String", description: "WhatsApp message id" },
+      { path: "$.messages[0].message_status", varName: "delivery_status", dataType: "String", description: "queued / sent / delivered" },
     ],
   },
   {
@@ -107,8 +107,8 @@ export const TOOLS: ToolDef[] = [
       { key: "Body", dataType: "String", in: "body", source: "agent", description: "SMS copy" },
     ],
     outputs: [
-      { path: "$.sid", varName: "sms_sid", description: "Message id" },
-      { path: "$.status", varName: "sms_status", description: "Delivery status" },
+      { path: "$.sid", varName: "sms_sid", dataType: "String", description: "Message id" },
+      { path: "$.status", varName: "sms_status", dataType: "String", description: "Delivery status" },
     ],
   },
   {
@@ -129,9 +129,9 @@ export const TOOLS: ToolDef[] = [
       { key: "agent_id", dataType: "String", in: "body", source: "constant", value: "voice_react_v3", description: "Voice agent to attach" },
     ],
     outputs: [
-      { path: "$.call.id", varName: "call_id", description: "Telephony call id" },
-      { path: "$.call.status", varName: "call_status", description: "answered / no_answer / busy" },
-      { path: "$.call.duration_sec", varName: "duration_sec", description: "Call length in seconds" },
+      { path: "$.call.id", varName: "call_id", dataType: "String", description: "Telephony call id" },
+      { path: "$.call.status", varName: "call_status", dataType: "String", description: "answered / no_answer / busy" },
+      { path: "$.call.duration_sec", varName: "duration_sec", dataType: "Number", description: "Call length in seconds" },
     ],
   },
   {
@@ -149,9 +149,9 @@ export const TOOLS: ToolDef[] = [
       { key: "customer_id", dataType: "String", in: "path", source: "campaign", value: "customer_id", description: "Internal customer id" },
     ],
     outputs: [
-      { path: "$.data.tier", varName: "tier", description: "Loyalty tier" },
-      { path: "$.data.lifetime_value", varName: "lifetime_value", description: "LTV in paise" },
-      { path: "$.data.churn_risk", varName: "churn_risk", description: "low / medium / high" },
+      { path: "$.data.tier", varName: "tier", dataType: "String", description: "Loyalty tier" },
+      { path: "$.data.lifetime_value", varName: "lifetime_value", dataType: "Number", description: "LTV in paise" },
+      { path: "$.data.churn_risk", varName: "churn_risk", dataType: "String", description: "low / medium / high" },
     ],
   },
   {
@@ -171,8 +171,8 @@ export const TOOLS: ToolDef[] = [
       { key: "data", dataType: "String", in: "body", source: "campaign", value: "phone", description: "Hashed phone to upload" },
     ],
     outputs: [
-      { path: "$.num_received", varName: "num_received", description: "Rows accepted" },
-      { path: "$.num_invalid_entries", varName: "num_invalid", description: "Rows rejected" },
+      { path: "$.num_received", varName: "num_received", dataType: "Number", description: "Rows accepted" },
+      { path: "$.num_invalid_entries", varName: "num_invalid", dataType: "Number", description: "Rows rejected" },
     ],
   },
   {
@@ -191,9 +191,9 @@ export const TOOLS: ToolDef[] = [
       { key: "include", dataType: "String", in: "query", source: "constant", value: "segment,last_seen,lang", description: "Context blocks to return" },
     ],
     outputs: [
-      { path: "$.segment", varName: "segment", description: "Behavioural segment" },
-      { path: "$.last_seen", varName: "last_seen", description: "Last active timestamp" },
-      { path: "$.preferred_lang", varName: "preferred_lang", description: "Preferred language" },
+      { path: "$.segment", varName: "segment", dataType: "String", description: "Behavioural segment" },
+      { path: "$.last_seen", varName: "last_seen", dataType: "String", description: "Last active timestamp" },
+      { path: "$.preferred_lang", varName: "preferred_lang", dataType: "String", description: "Preferred language" },
     ],
   },
   {
@@ -212,9 +212,9 @@ export const TOOLS: ToolDef[] = [
       { key: "order_id", dataType: "String", in: "query", source: "agent", description: "Order the customer is asking about" },
     ],
     outputs: [
-      { path: "$.order.delivery_status", varName: "delivered_status", description: "in_transit / delivered / returned" },
-      { path: "$.order.eta", varName: "eta", description: "Estimated delivery date" },
-      { path: "$.order.total", varName: "order_total", description: "Order value in paise" },
+      { path: "$.order.delivery_status", varName: "delivered_status", dataType: "String", description: "in_transit / delivered / returned" },
+      { path: "$.order.eta", varName: "eta", dataType: "String", description: "Estimated delivery date" },
+      { path: "$.order.total", varName: "order_total", dataType: "Number", description: "Order value in paise" },
     ],
   },
   {
@@ -235,8 +235,8 @@ export const TOOLS: ToolDef[] = [
       { key: "reason", dataType: "String", in: "body", source: "agent", description: "Why the customer wants a refund" },
     ],
     outputs: [
-      { path: "$.refund.id", varName: "refund_id", description: "Refund reference" },
-      { path: "$.refund.status", varName: "refund_status", description: "initiated / failed" },
+      { path: "$.refund.id", varName: "refund_id", dataType: "String", description: "Refund reference" },
+      { path: "$.refund.status", varName: "refund_status", dataType: "String", description: "initiated / failed" },
     ],
   },
   {
@@ -255,8 +255,8 @@ export const TOOLS: ToolDef[] = [
       { key: "top_k", dataType: "Number", in: "query", source: "constant", value: "3", description: "Passages to retrieve" },
     ],
     outputs: [
-      { path: "$.answer", varName: "answer", description: "Grounded answer" },
-      { path: "$.citations", varName: "citations", description: "Source passages" },
+      { path: "$.answer", varName: "answer", dataType: "String", description: "Grounded answer" },
+      { path: "$.citations", varName: "citations", dataType: "String", description: "Source passages" },
     ],
   },
 ];

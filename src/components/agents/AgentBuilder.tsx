@@ -51,14 +51,24 @@ export function AgentBuilder({ record }: { mode?: "create" | "edit"; type: Agent
         </div>
       </header>
 
-      {/* Body */}
+      {/* Body — wrapped in a disabled fieldset so the whole surface reads as read-only,
+          with `cursor: not-allowed` on every interactive control to signal it. */}
       <section className="flex min-h-0 flex-1 flex-col overflow-y-auto px-8 py-8">
-        <div className="mx-auto w-full max-w-3xl space-y-5">
+        <fieldset disabled className="agent-view-fieldset mx-auto block w-full max-w-3xl min-w-0 space-y-5 border-0 p-0">
+        <style>{`
+          /* :disabled pseudo-class (not [disabled] attribute) so controls inside a
+             disabled fieldset also match — they inherit the disabled state. */
+          .agent-view-fieldset,
+          .agent-view-fieldset button:disabled,
+          .agent-view-fieldset input:disabled,
+          .agent-view-fieldset textarea:disabled,
+          .agent-view-fieldset select:disabled { cursor: not-allowed !important; }
+        `}</style>
 
           {/* Agent details — read-only, name only */}
           <Card title="Agent details">
             <Field label="Agent name">
-              <Input value={name} readOnly className="h-9 font-mono text-sm" />
+              <Input value={name} disabled className="h-9 font-mono text-sm disabled:opacity-100" />
             </Field>
           </Card>
 
@@ -89,34 +99,23 @@ export function AgentBuilder({ record }: { mode?: "create" | "edit"; type: Agent
           {/* Eval — read-only */}
           <Card title="Eval" desc="How the transcript is evaluated after each conversation.">
             <Field label="Eval Prompt">
-              <Textarea value={evalPrompt} readOnly className="min-h-[80px] text-xs" />
+              <Textarea value={evalPrompt} disabled className="min-h-[80px] text-xs disabled:opacity-100" />
             </Field>
             <Field label="Eval Variables">
               {evalVariables.length === 0 ? (
                 <p className="text-[12px] text-muted-foreground">No variables configured.</p>
               ) : (
-                <div className="overflow-hidden rounded-lg border border-border">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-border bg-secondary/30 text-[10.5px] uppercase tracking-wider text-muted-foreground">
-                        <th className="w-1/3 px-3 py-2 text-left font-medium">Key</th>
-                        <th className="px-3 py-2 text-left font-medium">Value</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border">
-                      {evalVariables.map((v) => (
-                        <tr key={v.id} className="align-top">
-                          <td className="px-3 py-2 font-mono text-[12px] text-foreground">{v.name}</td>
-                          <td className="px-3 py-2 text-[12px] text-muted-foreground">{v.prompt}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                <pre className="overflow-x-auto rounded-lg border border-border bg-secondary/30 px-4 py-3 font-mono text-[12px] leading-relaxed text-foreground">
+{JSON.stringify(
+  Object.fromEntries(evalVariables.map((v) => [v.name, v.prompt])),
+  null,
+  2,
+)}
+                </pre>
               )}
             </Field>
           </Card>
-        </div>
+        </fieldset>
       </section>
 
       {/* Footer — Save + Cancel present but disabled (read-only) */}

@@ -49,7 +49,7 @@ type EditorInput = {
   value: string;
   description: string;
 };
-type EditorOutput = { id: string; path: string; varName: string; description: string };
+type EditorOutput = { id: string; path: string; varName: string; description: string; dataType?: ToolDataType };
 type PathMeta = { source: ToolSource; dataType: ToolDataType; value: string; description: string };
 
 type JwtAlg = "HS256" | "HS512" | "RS256" | "RS512";
@@ -120,7 +120,7 @@ function draftFromTool(t: ToolDef): ToolDraft {
       d[where].push(row);
     }
   }
-  d.outputs = t.outputs.map((o) => ({ id: uid("out"), path: o.path, varName: o.varName, description: o.description }));
+  d.outputs = t.outputs.map((o) => ({ id: uid("out"), path: o.path, varName: o.varName, dataType: o.dataType, description: o.description }));
   return d;
 }
 
@@ -170,10 +170,21 @@ function ToolEditor() {
       <section className="flex min-h-0 flex-1 flex-col overflow-y-auto px-8 py-8">
         <fieldset disabled className="tool-view-fieldset mx-auto block w-full max-w-3xl min-w-0 space-y-5 border-0 p-0">
         <style>{`
-          .tool-view-fieldset button[disabled],
-          .tool-view-fieldset input[disabled],
-          .tool-view-fieldset select[disabled],
-          .tool-view-fieldset textarea[disabled] { cursor: default; }
+          /* Everything inside the read-only surface signals not-editable on hover.
+             We use the :disabled pseudo-class (not the [disabled] attribute) because
+             controls inside a <fieldset disabled> are behaviourally disabled without
+             having their own disabled attribute set. */
+          .tool-view-fieldset,
+          .tool-view-fieldset button:disabled,
+          .tool-view-fieldset input:disabled,
+          .tool-view-fieldset select:disabled,
+          .tool-view-fieldset textarea:disabled,
+          .tool-view-fieldset [data-radix-select-trigger] { cursor: not-allowed !important; }
+          /* Kill hover affordances on the row-remove button — it would otherwise
+             turn red on hover even though clicks are ignored. */
+          .tool-view-fieldset .row-remove:hover { background: transparent !important; color: inherit !important; }
+          /* SubTabs (rendered as divs, not buttons) stay clickable + keep pointer cursor. */
+          .tool-view-fieldset .subtabs [role="tab"] { cursor: pointer !important; }
         `}</style>
 
           {/* 1 · Tool Details */}
@@ -345,7 +356,7 @@ function InputSchema({
                   <td className="px-2 py-1.5"><Input value={valueFor(r)} onChange={(e) => update(r.id, { value: e.target.value })} placeholder={placeholderFor(r.source)} disabled={r.source === "agent"} className="h-8 min-w-[120px] font-mono text-xs disabled:opacity-50" /></td>
                   <td className="px-2 py-1.5"><Input value={r.description} onChange={(e) => update(r.id, { description: e.target.value })} placeholder="Description" className="h-8 min-w-[120px] text-xs" /></td>
                   <td className="px-2 py-1.5 text-center">
-                    <button onClick={() => remove(r.id)} className="rounded-md p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" title="Remove">
+                    <button onClick={() => remove(r.id)} className="row-remove rounded-md p-1.5 text-muted-foreground" title="Remove">
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
                   </td>
@@ -394,16 +405,16 @@ function OutputSchema({ draft }: { draft: ToolDraft }) {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border bg-secondary/30 text-[10.5px] uppercase tracking-wider text-muted-foreground">
-                <th className="px-2 py-2 text-left font-medium">Path</th>
-                <th className="px-2 py-2 text-left font-medium">Variable</th>
+                <th className="px-2 py-2 text-left font-medium">Name</th>
+                <th className="px-2 py-2 text-left font-medium">Type</th>
                 <th className="px-2 py-2 text-left font-medium">Description</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {draft.outputs.map((o) => (
                 <tr key={o.id} className="align-middle">
-                  <td className="px-2 py-1.5 font-mono text-[11.5px] text-muted-foreground">{o.path}</td>
                   <td className="px-2 py-1.5 font-mono text-[12px] text-foreground">{o.varName}</td>
+                  <td className="px-2 py-1.5 text-[12px] text-muted-foreground">{o.dataType ?? "String"}</td>
                   <td className="px-2 py-1.5 text-[12px] text-muted-foreground">{o.description || "—"}</td>
                 </tr>
               ))}
@@ -443,20 +454,30 @@ function FormField({ label, required, children }: { label: string; required?: bo
 }
 
 function SubTabs({ tabs, value, onChange }: { tabs: { id: string; label: string; count?: number }[]; value: string; onChange: (v: string) => void }) {
+  // Rendered as div[role="tab"] rather than <button> so the tabs stay
+  // switchable even when wrapped in a <fieldset disabled> read-only surface.
   return (
-    <div className="inline-flex flex-wrap items-center gap-1 rounded-lg border border-border bg-secondary/30 p-1">
+    <div className="subtabs inline-flex flex-wrap items-center gap-1 rounded-lg border border-border bg-secondary/30 p-1">
       {tabs.map((t) => {
         const active = t.id === value;
         return (
-          <button key={t.id} onClick={() => onChange(t.id)} className={cn(
-            "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[12.5px] transition-colors",
-            active ? "bg-card font-medium text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
-          )}>
+          <div
+            key={t.id}
+            role="tab"
+            tabIndex={0}
+            aria-selected={active}
+            onClick={() => onChange(t.id)}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onChange(t.id); } }}
+            className={cn(
+              "inline-flex select-none items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[12.5px] transition-colors",
+              active ? "bg-card font-medium text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+            )}
+          >
             {t.label}
             {typeof t.count === "number" && t.count > 0 && (
               <span className={cn("rounded-full px-1.5 text-[10px]", active ? "bg-accent text-foreground" : "bg-muted text-muted-foreground")}>{t.count}</span>
             )}
-          </button>
+          </div>
         );
       })}
     </div>

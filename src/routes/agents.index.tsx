@@ -120,7 +120,6 @@ function Builder() {
                 >
                   <td className="px-4 py-3">
                     <p className="font-medium">{a.name}</p>
-                    <p className="font-mono text-[11px] text-muted-foreground">{a.id}</p>
                   </td>
                   <td className="px-4 py-3">
                     <StatusTag status={a.status} />
