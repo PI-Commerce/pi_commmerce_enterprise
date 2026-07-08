@@ -8,7 +8,7 @@ import {
 } from "@/components/ui/select";
 import { Wrench, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { TOOLS, AUTH_LABEL, TYPE_LABEL, STATUS_LABEL, type ToolType } from "@/lib/tool-registry";
+import { TOOLS, TYPE_LABEL, STATUS_LABEL, type ToolType } from "@/lib/tool-registry";
 
 export const Route = createFileRoute("/agents/")({
   component: Agents,
@@ -194,7 +194,6 @@ function Tools() {
               <tr className="border-b border-border bg-secondary/30 text-[11px] uppercase tracking-wider text-muted-foreground">
                 <th className="px-4 py-2.5 text-left font-medium">Tool</th>
                 <th className="px-4 py-2.5 text-left font-medium">Type</th>
-                <th className="px-4 py-2.5 text-left font-medium">Auth</th>
                 <th className="px-4 py-2.5 text-left font-medium">Status</th>
                 <th className="px-4 py-2.5 text-left font-medium">Created</th>
                 <th className="px-4 py-2.5 text-left font-medium">Updated</th>
@@ -222,9 +221,6 @@ function Tools() {
                     )}>
                       {TYPE_LABEL[t.type]}
                     </span>
-                  </td>
-                  <td className="px-4 py-3 text-[12px] text-muted-foreground">
-                    {AUTH_LABEL[t.auth]}
                   </td>
                   <td className="px-4 py-3">
                     <span className={cn(
