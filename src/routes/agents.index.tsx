@@ -1,23 +1,12 @@
 import { useState } from "react";
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { AppShell, PageHeader } from "@/components/app/AppShell";
 import { PageTabs } from "@/components/app/Tabs";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
-  Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
-} from "@/components/ui/tooltip";
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger,
-} from "@/components/ui/dialog";
-import { Plus, Phone, MessageCircle, Wrench, Search, MoreHorizontal, Workflow, Archive, Copy, Check, KeyRound, Pencil } from "lucide-react";
-import { toast } from "sonner";
+import { Wrench, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { TOOLS, AUTH_LABEL, TYPE_LABEL, STATUS_LABEL, type ToolType } from "@/lib/tool-registry";
 
@@ -45,7 +34,6 @@ function Agents() {
       <PageHeader
         title="Agents"
         description="Reusable voice and chat agents you can wire into any campaign."
-        actions={<NewAgentButton />}
       />
 
       <PageTabs<Tab>
@@ -60,47 +48,6 @@ function Agents() {
       {tab === "builder" && <Builder />}
       {tab === "tools" && <Tools />}
     </AppShell>
-  );
-}
-
-/** New-agent CTA → modal to pick voice vs chat → full-page builder. */
-function NewAgentButton() {
-  const navigate = useNavigate();
-  const [open, setOpen] = useState(false);
-  const choose = (type: "voice" | "chat") => {
-    setOpen(false);
-    navigate({ to: "/agents/new", search: { type } });
-  };
-  return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button size="sm" className="h-8 gap-1.5 text-xs"><Plus className="h-3.5 w-3.5" /> New agent</Button>
-      </DialogTrigger>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Create an agent</DialogTitle>
-          <DialogDescription>What kind of agent do you want to build?</DialogDescription>
-        </DialogHeader>
-        <div className="grid grid-cols-2 gap-3 pt-1">
-          {([
-            ["voice", "Voice agent", "Makes & takes phone calls", Phone, "text-ai"],
-            ["chat", "Chat agent", "Replies on WhatsApp & chat", MessageCircle, "text-success"],
-          ] as const).map(([type, title, desc, Icon, tone]) => (
-            <button
-              key={type}
-              onClick={() => choose(type)}
-              className="flex flex-col items-start gap-2 rounded-xl border border-border bg-card p-4 text-left transition-colors hover:border-foreground/30 hover:bg-accent"
-            >
-              <span className={cn("flex h-9 w-9 items-center justify-center rounded-lg bg-accent", tone)}>
-                <Icon className="h-4 w-4" />
-              </span>
-              <span className="text-sm font-semibold">{title}</span>
-              <span className="text-[12px] text-muted-foreground">{desc}</span>
-            </button>
-          ))}
-        </div>
-      </DialogContent>
-    </Dialog>
   );
 }
 
@@ -122,18 +69,10 @@ const AGENT_STATUSES: AgentStatus[] = ["live", "draft", "paused", "archived"];
 
 function Builder() {
   const navigate = useNavigate();
-  const [agents, setAgents] = useState<Agent[]>(INITIAL_AGENTS);
   const [query, setQuery] = useState("");
-  const [fType, setFType] = useState<"all" | AgentType>("all");
   const [fStatus, setFStatus] = useState<"all" | AgentStatus>("all");
 
-  const handleArchive = (a: Agent) => {
-    setAgents((prev) => prev.map((x) => (x.id === a.id ? { ...x, status: "archived" } : x)));
-    toast.success("Agent archived", { description: a.name });
-  };
-
-  const filtered = agents.filter((a) => {
-    if (fType !== "all" && a.type !== fType) return false;
+  const filtered = INITIAL_AGENTS.filter((a) => {
     if (fStatus !== "all" && a.status !== fStatus) return false;
     if (query && !a.name.toLowerCase().includes(query.toLowerCase())) return false;
     return true;
@@ -152,16 +91,6 @@ function Builder() {
           />
         </div>
         <FilterSelect
-          label="Type"
-          value={fType}
-          onChange={(v) => setFType(v as typeof fType)}
-          options={[
-            { value: "all", label: "All types" },
-            { value: "chat", label: "Chat" },
-            { value: "voice", label: "Voice" },
-          ]}
-        />
-        <FilterSelect
           label="Status"
           value={fStatus}
           onChange={(v) => setFStatus(v as typeof fStatus)}
@@ -174,98 +103,33 @@ function Builder() {
           <p className="text-sm text-muted-foreground">No agents match these filters.</p>
         </div>
       ) : (
-        <TooltipProvider delayDuration={150}>
         <div className="overflow-hidden rounded-xl border border-border bg-card">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border bg-secondary/30 text-[11px] uppercase tracking-wider text-muted-foreground">
                 <th className="px-4 py-2.5 text-left font-medium">Agent name</th>
-                <th className="px-4 py-2.5 text-left font-medium">Type</th>
                 <th className="px-4 py-2.5 text-left font-medium">Status</th>
-                <th className="px-4 py-2.5 text-right font-medium">Campaigns</th>
-                <th className="w-10 px-2 py-2.5" />
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {filtered.map((a) => {
-                const Icon = a.type === "voice" ? Phone : MessageCircle;
-                return (
-                  <tr key={a.id} className="transition-colors hover:bg-accent/30">
-                    <td className="px-4 py-3">
-                      <Link to="/agents/$id" params={{ id: a.id }} className="font-medium hover:underline">
-                        {a.name}
-                      </Link>
-                      <p className="font-mono text-[11px] text-muted-foreground">{a.id}</p>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className="inline-flex items-center gap-1.5 text-[12px] text-muted-foreground">
-                        <span className={cn("flex h-5 w-5 items-center justify-center rounded-md", a.type === "voice" ? "bg-ai/10 text-ai" : "bg-success/10 text-success")}>
-                          <Icon className="h-3 w-3" />
-                        </span>
-                        {a.type === "voice" ? "Voice" : "Chat"}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <StatusTag status={a.status} />
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      {a.campaignNames.length > 0 ? (
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <span className="inline-flex cursor-default items-center gap-1.5 font-mono text-[12px] underline decoration-dotted decoration-muted-foreground/40 underline-offset-4">
-                              <Workflow className="h-3 w-3 text-muted-foreground" />
-                              {a.campaignNames.length}
-                            </span>
-                          </TooltipTrigger>
-                          <TooltipContent align="end" className="max-w-xs p-0">
-                            <div className="border-b border-primary-foreground/15 px-3 py-1.5 text-[10px] font-medium uppercase tracking-wider opacity-70">
-                              In {a.campaignNames.length} campaign{a.campaignNames.length === 1 ? "" : "s"}
-                            </div>
-                            <ul className="px-3 py-1.5 text-left">
-                              {a.campaignNames.map((name) => (
-                                <li key={name} className="flex items-center gap-1.5 py-0.5 text-[12px]">
-                                  <Workflow className="h-3 w-3 shrink-0 opacity-60" />
-                                  {name}
-                                </li>
-                              ))}
-                            </ul>
-                          </TooltipContent>
-                        </Tooltip>
-                      ) : (
-                        <span className="font-mono text-[12px] text-muted-foreground">—</span>
-                      )}
-                    </td>
-                    <td className="px-2 py-3 text-right">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-7 w-7">
-                            <MoreHorizontal className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-40">
-                          <DropdownMenuItem
-                            onClick={() => navigate({ to: "/agents/$id", params: { id: a.id } })}
-                            className="gap-2 text-xs"
-                          >
-                            <Pencil className="h-3.5 w-3.5" /> Edit
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() => handleArchive(a)}
-                            disabled={a.status === "archived"}
-                            className="gap-2 text-xs"
-                          >
-                            <Archive className="h-3.5 w-3.5" /> Archive
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </td>
-                  </tr>
-                );
-              })}
+              {filtered.map((a) => (
+                <tr
+                  key={a.id}
+                  onClick={() => navigate({ to: "/agents/$id", params: { id: a.id } })}
+                  className="cursor-pointer transition-colors hover:bg-accent/30"
+                >
+                  <td className="px-4 py-3">
+                    <p className="font-medium">{a.name}</p>
+                    <p className="font-mono text-[11px] text-muted-foreground">{a.id}</p>
+                  </td>
+                  <td className="px-4 py-3">
+                    <StatusTag status={a.status} />
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
-        </TooltipProvider>
       )}
     </>
   );
@@ -285,12 +149,13 @@ function StatusTag({ status }: { status: AgentStatus }) {
 }
 
 function Tools() {
+  const navigate = useNavigate();
   const [query, setQuery] = useState("");
   const [fType, setFType] = useState<"all" | ToolType>("all");
 
   const filtered = TOOLS.filter((t) => {
     if (fType !== "all" && t.type !== fType) return false;
-    if (query && !t.handle.toLowerCase().includes(query.toLowerCase()) && !t.description.toLowerCase().includes(query.toLowerCase())) return false;
+    if (query && !t.handle.toLowerCase().includes(query.toLowerCase())) return false;
     return true;
   });
 
@@ -302,7 +167,7 @@ function Tools() {
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search by tool name or description…"
+            placeholder="Search by tool name…"
             className="h-8 pl-8 text-xs"
           />
         </div>
@@ -316,9 +181,6 @@ function Tools() {
             { value: "mcp", label: "MCP" },
           ]}
         />
-        <Button size="sm" className="ml-auto h-8 gap-1.5 text-xs" asChild>
-          <Link to="/agents/tools/new" search={{ tool: undefined }}><Plus className="h-3.5 w-3.5" /> Add tool</Link>
-        </Button>
       </div>
 
       {filtered.length === 0 ? (
@@ -336,21 +198,21 @@ function Tools() {
                 <th className="px-4 py-2.5 text-left font-medium">Status</th>
                 <th className="px-4 py-2.5 text-left font-medium">Created</th>
                 <th className="px-4 py-2.5 text-left font-medium">Updated</th>
-                <th className="w-10 px-2 py-2.5" />
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {filtered.map((t) => (
-                <tr key={t.handle} className="group transition-colors hover:bg-accent/30">
+                <tr
+                  key={t.handle}
+                  onClick={() => navigate({ to: "/agents/tools/new", search: { tool: t.handle } })}
+                  className="cursor-pointer transition-colors hover:bg-accent/30"
+                >
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2.5">
                       <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-accent text-foreground">
                         <Wrench className="h-3.5 w-3.5" />
                       </span>
-                      <div className="min-w-0">
-                        <HandleChip handle={t.handle} />
-                        <p className="mt-1 truncate text-[11.5px] text-muted-foreground">{t.description}</p>
-                      </div>
+                      <span className="font-mono text-[13px] text-foreground">{t.handle}</span>
                     </div>
                   </td>
                   <td className="px-4 py-3">
@@ -361,11 +223,8 @@ function Tools() {
                       {TYPE_LABEL[t.type]}
                     </span>
                   </td>
-                  <td className="px-4 py-3">
-                    <span className="inline-flex items-center gap-1.5 text-[12px] text-muted-foreground">
-                      <KeyRound className="h-3 w-3" />
-                      {AUTH_LABEL[t.auth]}
-                    </span>
+                  <td className="px-4 py-3 text-[12px] text-muted-foreground">
+                    {AUTH_LABEL[t.auth]}
                   </td>
                   <td className="px-4 py-3">
                     <span className={cn(
@@ -377,11 +236,6 @@ function Tools() {
                   </td>
                   <td className="px-4 py-3 text-[12px] text-muted-foreground">{t.createdAt}</td>
                   <td className="px-4 py-3 text-[12px] text-muted-foreground">{t.updatedAt}</td>
-                  <td className="px-2 py-3 text-right">
-                    <Link to="/agents/tools/new" search={{ tool: t.handle }} className="inline-flex items-center gap-1 text-[12px] text-muted-foreground opacity-0 transition-opacity hover:underline group-hover:opacity-100">
-                      <Pencil className="h-3 w-3" /> Edit
-                    </Link>
-                  </td>
                 </tr>
               ))}
             </tbody>
@@ -389,26 +243,6 @@ function Tools() {
         </div>
       )}
     </>
-  );
-}
-
-function HandleChip({ handle }: { handle: string }) {
-  const [copied, setCopied] = useState(false);
-  const ref = `@${handle}`;
-  const copy = () => {
-    navigator.clipboard?.writeText(ref).catch(() => {});
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1200);
-  };
-  return (
-    <button
-      onClick={copy}
-      title="Copy handle — paste into an agent prompt to enable this tool"
-      className="group inline-flex items-center gap-1.5 rounded-md border border-border bg-secondary/40 px-2 py-1 font-mono text-[11px] text-foreground transition-colors hover:border-foreground/20 hover:bg-accent"
-    >
-      {ref}
-      {copied ? <Check className="h-3 w-3 text-success" /> : <Copy className="h-3 w-3 text-muted-foreground group-hover:text-foreground" />}
-    </button>
   );
 }
 

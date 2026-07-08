@@ -1,6 +1,5 @@
 import { useMemo, useState } from "react";
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { toast } from "sonner";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -10,7 +9,7 @@ import {
 } from "@/components/ui/select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import {
-  ChevronLeft, Plus, Trash2, Save, Zap, Lock, Wand2,
+  ChevronLeft, Plus, Trash2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -129,53 +128,6 @@ function draftFromTool(t: ToolDef): ToolDraft {
   return d;
 }
 
-/* --------------------------------------------------------- */
-/* cURL parsing + sample response                            */
-/* --------------------------------------------------------- */
-
-function parseCurl(text: string): { method?: string; url?: string; headers: [string, string][]; bodyKeys: string[] } | null {
-  if (!/curl\s/i.test(text)) return null;
-  const headers: [string, string][] = [];
-  const mMethod = text.match(/-X\s+([A-Z]+)/i);
-  const mUrl = text.match(/curl\s+(?:-[A-Za-z]+\s+(?:'[^']*'|"[^"]*"|\S+)\s+)*?['"]?(https?:\/\/[^\s'"]+)['"]?/i)
-    ?? text.match(/(https?:\/\/[^\s'"]+)/i);
-  for (const m of text.matchAll(/-H\s+'([^']+)'|-H\s+"([^"]+)"/g)) {
-    const raw = m[1] ?? m[2] ?? "";
-    const i = raw.indexOf(":");
-    if (i > 0) headers.push([raw.slice(0, i).trim(), raw.slice(i + 1).trim()]);
-  }
-  let bodyKeys: string[] = [];
-  const mData = text.match(/(?:--data-raw|--data|-d)\s+'([\s\S]*?)'|(?:--data-raw|--data|-d)\s+"([\s\S]*?)"/);
-  if (mData) {
-    const body = mData[1] ?? mData[2] ?? "";
-    try { bodyKeys = Object.keys(JSON.parse(body)); } catch { /* not json */ }
-  }
-  const method = mMethod ? mMethod[1].toUpperCase() : mData ? "POST" : undefined;
-  return { method, url: mUrl?.[1], headers, bodyKeys };
-}
-
-const SAMPLE_RESPONSE = {
-  status: "ok",
-  data: {
-    id: "ord_8842",
-    delivered_status: "in_transit",
-    eta: "2026-06-20",
-    total: 249900,
-    currency: "INR",
-  },
-};
-
-function leafPaths(obj: unknown, prefix = "$"): { path: string; preview: string }[] {
-  if (!obj || typeof obj !== "object") return [{ path: prefix, preview: String(obj) }];
-  const out: { path: string; preview: string }[] = [];
-  for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
-    const p = `${prefix}.${k}`;
-    if (v && typeof v === "object" && !Array.isArray(v)) out.push(...leafPaths(v, p));
-    else out.push({ path: p, preview: Array.isArray(v) ? "[…]" : String(v) });
-  }
-  return out;
-}
-
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9_]/g, "_");
 
 /* --------------------------------------------------------- */
@@ -183,13 +135,16 @@ const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9_]/g, "_");
 /* --------------------------------------------------------- */
 
 function ToolEditor() {
-  const navigate = useNavigate();
   const { tool: editHandle } = Route.useSearch();
   const existing = editHandle ? getTool(editHandle) : undefined;
-  const [draft, setDraft] = useState<ToolDraft>(() => (existing ? draftFromTool(existing) : blankDraft()));
+  // Read-only view of a saved tool. State is initialised once from the tool
+  // registry and never mutated; every input/select is disabled via the
+  // wrapping fieldset below.
+  const [draft] = useState<ToolDraft>(() => (existing ? draftFromTool(existing) : blankDraft()));
 
-  const set = <K extends keyof ToolDraft>(key: K, value: ToolDraft[K]) =>
-    setDraft((d) => ({ ...d, [key]: value }));
+  const noop = <K extends keyof ToolDraft>(_key: K, _value: ToolDraft[K]) => { void _key; void _value; };
+  const set = noop;
+  const setDraft = (_updater: (d: ToolDraft) => ToolDraft) => { void _updater; };
 
   const pathKeys = useMemo(
     () => Array.from(draft.url.matchAll(/\{([^}]+)\}/g)).map((m) => m[1]),
@@ -197,41 +152,10 @@ function ToolEditor() {
   );
 
   const isHttp = draft.type === "http";
-  const definitionDone = draft.handle.trim().length > 1 && draft.url.trim().length > 4;
-
-  const close = () => navigate({ to: "/agents", search: { tab: "tools" } });
-
-  const applyCurl = (text: string) => {
-    const parsed = parseCurl(text);
-    if (!parsed) { toast.error("Couldn't read that", { description: "Paste a full curl command." }); return; }
-    setDraft((d) => ({
-      ...d,
-      method: parsed.method ?? d.method,
-      url: parsed.url ?? d.url,
-      headers: parsed.headers.length
-        ? parsed.headers.map(([k, v]) => newInput({ key: k, source: "constant", value: v, description: "" }))
-        : d.headers,
-      body: parsed.bodyKeys.length
-        ? parsed.bodyKeys.map((k) => newInput({ key: k, source: "agent", description: "" }))
-        : d.body,
-    }));
-    toast.success("Parsed cURL", { description: "Method, URL, headers and body filled in." });
-  };
-
-  const saveDraft = () => {
-    toast.success(`${draft.handle.trim() || "Untitled tool"} saved as draft`, { description: "Finish it later." });
-    close();
-  };
-  const saveTool = () => {
-    toast.success(`${draft.handle.trim() || "New tool"} saved`, {
-      description: `${draft.type === "mcp" ? "MCP" : "HTTP API"} tool is available in the registry.`,
-    });
-    close();
-  };
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground">
-      {/* Header */}
+      {/* Header — read-only view */}
       <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-border bg-background/90 px-3 backdrop-blur-xl">
         <div className="flex min-w-0 items-center gap-2">
           <Link
@@ -242,22 +166,19 @@ function ToolEditor() {
             <span className="hidden sm:inline">Tools</span>
           </Link>
           <span className="text-muted-foreground/40">/</span>
-          <span className="truncate font-mono text-[13.5px] font-medium">{draft.handle.trim() || (existing ? existing.handle : "New tool")}</span>
-          <span className="ml-2 inline-flex items-center gap-1.5 rounded-full border border-warning/30 bg-warning/10 px-2 py-0.5 text-[11px] font-medium text-warning">
-            <span className="h-1.5 w-1.5 rounded-full bg-warning" /> {existing ? "Editing" : "Draft"}
-          </span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={close}>Cancel</Button>
-          <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={saveDraft}>
-            <Save className="h-3.5 w-3.5" /> Save as draft
-          </Button>
+          <span className="truncate font-mono text-[13.5px] font-medium">{draft.handle.trim() || (existing ? existing.handle : "Tool")}</span>
         </div>
       </header>
 
-      {/* Body */}
+      {/* Body — everything wrapped in a disabled fieldset so inputs read as read-only */}
       <section className="flex min-h-0 flex-1 flex-col overflow-y-auto px-8 py-8">
-        <div className="mx-auto w-full max-w-3xl space-y-5">
+        <fieldset disabled className="tool-view-fieldset mx-auto block w-full max-w-3xl min-w-0 space-y-5 border-0 p-0">
+        <style>{`
+          .tool-view-fieldset button[disabled],
+          .tool-view-fieldset input[disabled],
+          .tool-view-fieldset select[disabled],
+          .tool-view-fieldset textarea[disabled] { cursor: default; }
+        `}</style>
 
           {/* 1 · Tool Details */}
           <Card title="Tool Details" desc="Identify the tool. The name is how agents reference it in a prompt.">
@@ -320,8 +241,6 @@ function ToolEditor() {
                 </div>
                 <p className="text-[11px] text-muted-foreground">Wrap path variables in <span className="font-mono">{"{braces}"}</span> — they appear automatically under Input Schema.</p>
               </div>
-
-              <CurlBox onParse={applyCurl} />
 
               <div className="grid grid-cols-2 gap-3">
                 <FormField label="Connect timeout (ms)"><Input value={draft.connectTimeout} onChange={(e) => set("connectTimeout", e.target.value)} className="h-9 font-mono text-xs" /></FormField>
@@ -391,25 +310,16 @@ function ToolEditor() {
             </Card>
           )}
 
-          {/* 4 · Output Schema (HTTP only, gated) */}
-          {isHttp && (
-            <OutputSchema
-              draft={draft}
-              definitionDone={definitionDone}
-              onLock={() => { set("locked", true); toast.success("Request saved", { description: "You can now fetch a live response and map outputs." }); }}
-              onAddOutput={(path) => setDraft((d) => d.outputs.some((o) => o.path === path) ? d : ({ ...d, outputs: [...d.outputs, { id: uid("out"), path, varName: slug(path.split(".").pop() || "field"), description: "" }] }))}
-              onUpdateOutput={(id, patch) => setDraft((d) => ({ ...d, outputs: d.outputs.map((o) => o.id === id ? { ...o, ...patch } : o) }))}
-              onRemoveOutput={(id) => setDraft((d) => ({ ...d, outputs: d.outputs.filter((o) => o.id !== id) }))}
-            />
-          )}
-        </div>
+          {/* 4 · Output Schema (HTTP only) */}
+          {isHttp && <OutputSchema draft={draft} />}
+        </fieldset>
       </section>
 
-      {/* Footer — centered actions */}
+      {/* Footer — Save + Cancel present but disabled (read-only) */}
       <footer className="flex h-14 shrink-0 items-center justify-center gap-3 border-t border-border px-4">
-        <Button variant="outline" size="sm" className="h-8 px-4 text-xs" onClick={close}>Cancel</Button>
-        <Button size="sm" className="h-8 gap-1.5 px-4 text-xs" disabled={draft.handle.trim().length < 2} onClick={saveTool}>
-          <Plus className="h-3.5 w-3.5" /> Save tool
+        <Button variant="outline" size="sm" className="h-8 px-4 text-xs" disabled>Cancel</Button>
+        <Button size="sm" className="h-8 gap-1.5 px-4 text-xs" disabled>
+          Save tool
         </Button>
       </footer>
     </div>
@@ -545,75 +455,17 @@ function SourceSelect({ value, onChange }: { value: ToolSource; onChange: (v: To
 /* Output schema (gated)                                     */
 /* --------------------------------------------------------- */
 
-function OutputSchema({
-  draft, definitionDone, onLock, onAddOutput, onUpdateOutput, onRemoveOutput,
-}: {
-  draft: ToolDraft;
-  definitionDone: boolean;
-  onLock: () => void;
-  onAddOutput: (path: string) => void;
-  onUpdateOutput: (id: string, patch: Partial<EditorOutput>) => void;
-  onRemoveOutput: (id: string) => void;
-}) {
-  const [fetched, setFetched] = useState(draft.outputs.length > 0);
-  const leaves = useMemo(() => leafPaths(SAMPLE_RESPONSE), []);
-  const chosen = new Set(draft.outputs.map((o) => o.path));
-
-  if (!draft.locked) {
-    return (
-      <Card title="Output Schema" desc="Map response fields into variables the agent can use.">
-        <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-border bg-card/40 px-4 py-8 text-center">
-          <Lock className="h-5 w-5 text-muted-foreground" />
-          <p className="max-w-sm text-[12.5px] text-muted-foreground">
-            Lock the request above first — outputs are read by calling the endpoint with your input schema.
-          </p>
-          <Button size="sm" className="h-8 gap-1.5 text-xs" disabled={!definitionDone} onClick={onLock}>
-            <Save className="h-3.5 w-3.5" /> Save &amp; enable output mapping
-          </Button>
-          {!definitionDone && <p className="text-[11px] text-muted-foreground">Add a tool name and endpoint to enable this.</p>}
-        </div>
-      </Card>
-    );
-  }
-
+/**
+ * Read-only view of the tool's output schema — Path, Variable, Description.
+ * The build-time gate ("lock the request", "fetch live response") is gone
+ * because the surface is now read-only: outputs are shown as they were saved.
+ */
+function OutputSchema({ draft }: { draft: ToolDraft }) {
   return (
-    <Card title="Output Schema" desc="Fetch a sample response, then click fields to expose them as variables.">
-      <div className="flex items-center justify-between">
-        <p className="text-[12px] text-muted-foreground">{draft.outputs.length} variable{draft.outputs.length === 1 ? "" : "s"} exposed</p>
-        <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => setFetched(true)}>
-          <Zap className="h-3.5 w-3.5" /> Fetch live response
-        </Button>
-      </div>
-
-      {fetched && (
-        <div className="rounded-lg border border-border bg-secondary/20 p-2">
-          <p className="px-1 pb-1.5 text-[10.5px] uppercase tracking-wider text-muted-foreground">Response · click a field to expose it</p>
-          <div className="space-y-0.5">
-            {leaves.map((l) => {
-              const on = chosen.has(l.path);
-              return (
-                <button
-                  key={l.path}
-                  onClick={() => onAddOutput(l.path)}
-                  disabled={on}
-                  className={cn(
-                    "flex w-full items-center justify-between gap-3 rounded-md px-2 py-1.5 text-left text-xs transition-colors",
-                    on ? "cursor-default bg-success/10" : "hover:bg-accent",
-                  )}
-                >
-                  <span className="font-mono text-foreground">{l.path}</span>
-                  <span className="flex items-center gap-2">
-                    <span className="font-mono text-muted-foreground">{l.preview}</span>
-                    {on ? <span className="text-[10px] text-success">added</span> : <Plus className="h-3 w-3 text-muted-foreground" />}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {draft.outputs.length > 0 && (
+    <Card title="Output Schema" desc="Fields exposed as variables the agent can use.">
+      {draft.outputs.length === 0 ? (
+        <p className="text-[12px] text-muted-foreground">No outputs mapped.</p>
+      ) : (
         <div className="overflow-hidden rounded-lg border border-border">
           <table className="w-full text-sm">
             <thead>
@@ -621,18 +473,14 @@ function OutputSchema({
                 <th className="px-2 py-2 text-left font-medium">Path</th>
                 <th className="px-2 py-2 text-left font-medium">Variable</th>
                 <th className="px-2 py-2 text-left font-medium">Description</th>
-                <th className="w-9 px-2 py-2" />
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
               {draft.outputs.map((o) => (
                 <tr key={o.id} className="align-middle">
                   <td className="px-2 py-1.5 font-mono text-[11.5px] text-muted-foreground">{o.path}</td>
-                  <td className="px-2 py-1.5"><Input value={o.varName} onChange={(e) => onUpdateOutput(o.id, { varName: slug(e.target.value) })} className="h-8 min-w-[120px] font-mono text-xs" /></td>
-                  <td className="px-2 py-1.5"><Input value={o.description} onChange={(e) => onUpdateOutput(o.id, { description: e.target.value })} placeholder="Description" className="h-8 min-w-[140px] text-xs" /></td>
-                  <td className="px-2 py-1.5 text-center">
-                    <button onClick={() => onRemoveOutput(o.id)} className="rounded-md p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" title="Remove"><Trash2 className="h-3.5 w-3.5" /></button>
-                  </td>
+                  <td className="px-2 py-1.5 font-mono text-[12px] text-foreground">{o.varName}</td>
+                  <td className="px-2 py-1.5 text-[12px] text-muted-foreground">{o.description || "—"}</td>
                 </tr>
               ))}
             </tbody>
@@ -698,60 +546,38 @@ const SAMPLE_MCP_TOOLS = [
   { name: "summarize", description: "Summarize a passage for the agent", inputs: "text, max_tokens" },
 ];
 
+/**
+ * Read-only preview of tools exposed by the MCP server. In the previous editor
+ * this had a "Fetch available tools" button; in the read-only view we always
+ * show the sample tool list so the shape of the surface is still visible.
+ */
 function McpToolsBlock({ url }: { url: string }) {
-  const [tools, setTools] = useState<typeof SAMPLE_MCP_TOOLS | null>(null);
+  void url;
   return (
     <div className="space-y-2 rounded-lg border border-dashed border-border bg-card/40 p-3">
-      <div className="flex items-center justify-between gap-3">
-        <p className="text-[12px] text-muted-foreground">
-          {tools ? `${tools.length} tools available on this server` : "Discover the tools this server exposes to agents."}
-        </p>
-        <Button
-          variant="outline" size="sm" className="h-8 shrink-0 gap-1.5 text-xs"
-          disabled={url.trim().length < 5}
-          onClick={() => { setTools(SAMPLE_MCP_TOOLS); toast.success("Tools fetched", { description: `${SAMPLE_MCP_TOOLS.length} tools discovered on the MCP server.` }); }}
-        >
-          <Zap className="h-3.5 w-3.5" /> Fetch available tools
-        </Button>
-      </div>
-      {tools && (
-        <div className="overflow-hidden rounded-lg border border-border bg-background">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border bg-secondary/30 text-[10.5px] uppercase tracking-wider text-muted-foreground">
-                <th className="px-3 py-2 text-left font-medium">Tool</th>
-                <th className="px-3 py-2 text-left font-medium">Description</th>
-                <th className="px-3 py-2 text-left font-medium">Inputs</th>
+      <p className="text-[12px] text-muted-foreground">
+        {SAMPLE_MCP_TOOLS.length} tools available on this server
+      </p>
+      <div className="overflow-hidden rounded-lg border border-border bg-background">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-border bg-secondary/30 text-[10.5px] uppercase tracking-wider text-muted-foreground">
+              <th className="px-3 py-2 text-left font-medium">Tool</th>
+              <th className="px-3 py-2 text-left font-medium">Description</th>
+              <th className="px-3 py-2 text-left font-medium">Inputs</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {SAMPLE_MCP_TOOLS.map((t) => (
+              <tr key={t.name}>
+                <td className="px-3 py-2 font-mono text-[12px] text-foreground">{t.name}</td>
+                <td className="px-3 py-2 text-[12px] text-muted-foreground">{t.description}</td>
+                <td className="px-3 py-2 font-mono text-[11.5px] text-muted-foreground">{t.inputs}</td>
               </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {tools.map((t) => (
-                <tr key={t.name}>
-                  <td className="px-3 py-2 font-mono text-[12px] text-foreground">{t.name}</td>
-                  <td className="px-3 py-2 text-[12px] text-muted-foreground">{t.description}</td>
-                  <td className="px-3 py-2 font-mono text-[11.5px] text-muted-foreground">{t.inputs}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function CurlBox({ onParse }: { onParse: (text: string) => void }) {
-  const [text, setText] = useState("");
-  return (
-    <div className="space-y-1.5 rounded-lg border border-dashed border-border bg-card/40 p-3">
-      <div className="flex items-center justify-between">
-        <Label className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Paste cURL</Label>
-        <Button variant="outline" size="sm" className="h-7 gap-1.5 text-[11px]" disabled={!text.trim()} onClick={() => onParse(text)}>
-          <Wand2 className="h-3 w-3" /> Parse
-        </Button>
+            ))}
+          </tbody>
+        </table>
       </div>
-      <Textarea value={text} onChange={(e) => setText(e.target.value)} placeholder={"curl -X POST https://api.example.com/v1/orders \\\n  -H 'Authorization: Bearer …' \\\n  -d '{\"customer_id\":\"123\"}'"} className="min-h-[64px] font-mono text-[11px]" />
-      <p className="text-[11px] text-muted-foreground">Fills method, URL, headers and body from a curl command.</p>
     </div>
   );
 }

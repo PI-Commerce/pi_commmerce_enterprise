@@ -16,6 +16,8 @@ export type AgentRecord = {
   masterPrompt: string;
   knowledgeBase: string;
   postCall: PostCallVar[];
+  /** Optional eval instruction; when omitted the builder shows a boilerplate default. */
+  evalPrompt?: string;
 };
 
 export const AGENT_RECORDS: Record<string, AgentRecord> = {
