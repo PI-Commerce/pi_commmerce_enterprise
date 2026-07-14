@@ -1,7 +1,7 @@
 name: Deploy to Cloudflare Workers
 
 # `uae` -> Worker `picom-enterprise-uae` (UAE market build; keeps region toggle
-#          and Al Tayer branding). Redirected configs can't contain `env`, so
+#          and Styli branding). Redirected configs can't contain `env`, so
 #          the build output is renamed just before `wrangler deploy`.
 on:
   push:
