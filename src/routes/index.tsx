@@ -207,7 +207,7 @@ function ShortcutCard({ icon: Icon, title, desc, to }: { icon: React.ComponentTy
 // Live runs, sorted by startedAtTs descending at render time.
 const LIVE_RUNS = [
   { id: "r_8423", campaign: "Dormant Trader Reactivation", startedAt: "Today, 12:04 PM", startedAtTs: 1719813840000, processed: 630,  total: 1500 as number | undefined },
-  { id: "r_8422", campaign: "Retail · Activation",         startedAt: "Today, 11:50 AM", startedAtTs: 1719813000000, processed: 1200, total: undefined },
+  { id: "r_8422", campaign: "Activation",         startedAt: "Today, 11:50 AM", startedAtTs: 1719813000000, processed: 1200, total: undefined },
   { id: "r_8421", campaign: "New Trader Onboarding",       startedAt: "Today, 11:32 AM", startedAtTs: 1719811920000, processed: 410,  total: 900 },
   { id: "r_8420", campaign: "KYC Drop-off Recovery",       startedAt: "Today, 10:58 AM", startedAtTs: 1719809880000, processed: 220,  total: 540 },
   { id: "r_8419", campaign: "High-Value Win-Back",         startedAt: "Today, 10:20 AM", startedAtTs: 1719807600000, processed: 75,   total: 300 },

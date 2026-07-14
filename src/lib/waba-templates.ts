@@ -298,7 +298,7 @@ export const SEED_TEMPLATES: WaTemplate[] = [
     body: "Hi {{1}}, your payment of ₹{{2}} for {{3}} is pending. Pay securely via the link below.", footer: "Paytm",
     buttons: [{ type: "URL", text: "Pay now" }] },
 
-  // Retail · Activation
+  // Activation
   { id: "10248298000501", name: "cart_link_v1", category: "Marketing", language: "en", format: "TEXT", status: "Approved", createdAt: "10 Jun 2026",
     body: "Hi {{1}}, your cart is ready. Complete your order in a tap and we'll get it on its way.", footer: "Reply STOP to opt out",
     buttons: [{ type: "URL", text: "Complete order" }] },
@@ -309,7 +309,7 @@ export const SEED_TEMPLATES: WaTemplate[] = [
     body: "{{1}}, enjoy free delivery on your first order this week. Tap to start shopping.", footer: "Reply STOP to opt out",
     buttons: [{ type: "URL", text: "Order now" }] },
 
-  // Retail · Reward Expiry
+  // Reward Expiry
   { id: "10248298000601", name: "redemption_link_v1", category: "Marketing", language: "en", format: "TEXT", status: "Approved", createdAt: "09 Jun 2026",
     body: "Hi {{1}}, you have {{2}} reward points expiring on {{3}}. Redeem them before they're gone.", footer: "Paytm",
     buttons: [{ type: "URL", text: "Redeem now" }] },
@@ -322,7 +322,7 @@ export const SEED_TEMPLATES: WaTemplate[] = [
     body: "{{1}}, turn your {{2}} points into ₹{{3}} off your next order. Redeem below.", footer: "Paytm",
     buttons: [{ type: "URL", text: "Redeem now" }, { type: "Quick Reply", text: "Not interested" }] },
 
-  // Retail · Winback
+  // Winback
   { id: "10248298000701", name: "purchase_link_v1", category: "Marketing", language: "en", format: "TEXT", status: "Approved", createdAt: "08 Jun 2026",
     body: "Hi {{1}}, the {{2}} you liked is back in your reach. Buy now and we'll ship it today.", footer: "Reply STOP to opt out",
     buttons: [{ type: "URL", text: "Buy now" }] },
@@ -333,7 +333,7 @@ export const SEED_TEMPLATES: WaTemplate[] = [
     body: "{{1}}, here's {{2}}% off to welcome you back. Shop your favourites before {{3}}.", footer: "Reply STOP to opt out",
     buttons: [{ type: "URL", text: "Shop now" }] },
 
-  // Retail · Subscription Conversion
+  // Subscription Conversion
   { id: "10248298000801", name: "subscription_link_v1", category: "Utility", language: "en", format: "TEXT", status: "Approved", createdAt: "07 Jun 2026",
     body: "Hi {{1}}, subscribe to {{2}} and never run out. Set it up in a tap below.", footer: "Paytm Commerce",
     buttons: [{ type: "URL", text: "Subscribe now" }] },
@@ -344,7 +344,7 @@ export const SEED_TEMPLATES: WaTemplate[] = [
     body: "{{1}}, your intro price for {{2}} ends {{3}}. Lock in the lower rate by subscribing today.", footer: "Paytm Commerce",
     buttons: [{ type: "URL", text: "Subscribe now" }] },
 
-  // Retail · Seasonal Sale
+  // Seasonal Sale
   { id: "10248298000901", name: "sale_link_v1", category: "Marketing", language: "en", format: "TEXT", status: "Approved", createdAt: "06 Jun 2026",
     body: "Hi {{1}}, our {{2}} sale is live with up to {{3}}% off. Shop the best deals now.", footer: "T&C apply",
     buttons: [{ type: "URL", text: "Shop the sale" }] },
