@@ -51,6 +51,7 @@ export type SankeyEdge = {
 export type CampaignAnalytics = {
   id: string;
   name: string;
+  useCase?: import("./campaign-types").UseCase;
   runs: RunRow[];
 };
 
@@ -322,6 +323,7 @@ export const CAMPAIGNS: CampaignAnalytics[] = Object.entries(
 ).map(([id, ex], i) => ({
   id,
   name: ex.name,
+  useCase: ex.useCase,
   // Alternate run types so both the badge and the Always-on-only date filter are demonstrable.
   runs: [
     deriveRun(

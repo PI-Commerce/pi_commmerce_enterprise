@@ -18,7 +18,6 @@ import { Route as AgentsRouteImport } from './routes/agents'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as LeadsIndexRouteImport } from './routes/leads.index'
 import { Route as IntegrationsIndexRouteImport } from './routes/integrations.index'
-import { Route as CollectionsIndexRouteImport } from './routes/collections.index'
 import { Route as ChannelsIndexRouteImport } from './routes/channels.index'
 import { Route as CampaignsIndexRouteImport } from './routes/campaigns.index'
 import { Route as AgentsIndexRouteImport } from './routes/agents.index'
@@ -74,11 +73,6 @@ const IntegrationsIndexRoute = IntegrationsIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => IntegrationsRoute,
-} as any)
-const CollectionsIndexRoute = CollectionsIndexRouteImport.update({
-  id: '/collections/',
-  path: '/collections/',
-  getParentRoute: () => rootRouteImport,
 } as any)
 const ChannelsIndexRoute = ChannelsIndexRouteImport.update({
   id: '/',
@@ -147,7 +141,6 @@ export interface FileRoutesByFullPath {
   '/agents/': typeof AgentsIndexRoute
   '/campaigns/': typeof CampaignsIndexRoute
   '/channels/': typeof ChannelsIndexRoute
-  '/collections/': typeof CollectionsIndexRoute
   '/integrations/': typeof IntegrationsIndexRoute
   '/leads/': typeof LeadsIndexRoute
   '/agents/tools/new': typeof AgentsToolsNewRoute
@@ -165,7 +158,6 @@ export interface FileRoutesByTo {
   '/agents': typeof AgentsIndexRoute
   '/campaigns': typeof CampaignsIndexRoute
   '/channels': typeof ChannelsIndexRoute
-  '/collections': typeof CollectionsIndexRoute
   '/integrations': typeof IntegrationsIndexRoute
   '/leads': typeof LeadsIndexRoute
   '/agents/tools/new': typeof AgentsToolsNewRoute
@@ -188,7 +180,6 @@ export interface FileRoutesById {
   '/agents/': typeof AgentsIndexRoute
   '/campaigns/': typeof CampaignsIndexRoute
   '/channels/': typeof ChannelsIndexRoute
-  '/collections/': typeof CollectionsIndexRoute
   '/integrations/': typeof IntegrationsIndexRoute
   '/leads/': typeof LeadsIndexRoute
   '/agents/tools/new': typeof AgentsToolsNewRoute
@@ -212,7 +203,6 @@ export interface FileRouteTypes {
     | '/agents/'
     | '/campaigns/'
     | '/channels/'
-    | '/collections/'
     | '/integrations/'
     | '/leads/'
     | '/agents/tools/new'
@@ -230,7 +220,6 @@ export interface FileRouteTypes {
     | '/agents'
     | '/campaigns'
     | '/channels'
-    | '/collections'
     | '/integrations'
     | '/leads'
     | '/agents/tools/new'
@@ -252,7 +241,6 @@ export interface FileRouteTypes {
     | '/agents/'
     | '/campaigns/'
     | '/channels/'
-    | '/collections/'
     | '/integrations/'
     | '/leads/'
     | '/agents/tools/new'
@@ -268,7 +256,6 @@ export interface RootRouteChildren {
   IntegrationsRoute: typeof IntegrationsRouteWithChildren
   SettingsRoute: typeof SettingsRoute
   LeadsIdRoute: typeof LeadsIdRoute
-  CollectionsIndexRoute: typeof CollectionsIndexRoute
   LeadsIndexRoute: typeof LeadsIndexRoute
 }
 
@@ -336,13 +323,6 @@ declare module '@tanstack/react-router' {
       fullPath: '/integrations/'
       preLoaderRoute: typeof IntegrationsIndexRouteImport
       parentRoute: typeof IntegrationsRoute
-    }
-    '/collections/': {
-      id: '/collections/'
-      path: '/collections'
-      fullPath: '/collections/'
-      preLoaderRoute: typeof CollectionsIndexRouteImport
-      parentRoute: typeof rootRouteImport
     }
     '/channels/': {
       id: '/channels/'
@@ -485,7 +465,6 @@ const rootRouteChildren: RootRouteChildren = {
   IntegrationsRoute: IntegrationsRouteWithChildren,
   SettingsRoute: SettingsRoute,
   LeadsIdRoute: LeadsIdRoute,
-  CollectionsIndexRoute: CollectionsIndexRoute,
   LeadsIndexRoute: LeadsIndexRoute,
 }
 export const routeTree = rootRouteImport

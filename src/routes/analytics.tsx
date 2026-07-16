@@ -3,6 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import type { EChartsOption } from "echarts";
 import { AppShell, PageHeader } from "@/components/app/AppShell";
 import { PageTabs } from "@/components/app/Tabs";
+import { BusinessAnalyticsPanel } from "@/components/analytics/BusinessAnalyticsPanel";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -479,6 +480,13 @@ function CampaignAnalytics({
           </FilterField>
         )}
       </div>
+
+      {/* Business Analytics — per-useCase pack, above Campaign Analytics.
+          Empty campaigns (no useCase) render a small hint instead of the pack. */}
+      <BusinessAnalyticsPanel useCase={campaign.useCase} />
+
+      {/* Campaign Analytics header, so the switch from Business → Campaign is obvious. */}
+      <h2 className="mb-3 mt-2 text-[13px] font-semibold uppercase tracking-wider text-muted-foreground">Campaign Analytics</h2>
 
       <div className="grid grid-cols-3 gap-3">
         <KPI

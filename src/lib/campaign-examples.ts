@@ -15,7 +15,7 @@
 import type { Edge, Node } from "reactflow";
 import type {
   CampaignStatus, WorkflowNodeData, NodeKind, NodeOutput, NodeOutputKind,
-  PresetConfig, PresetVarMap, PresetTransform,
+  PresetConfig, PresetVarMap, PresetTransform, UseCase,
 } from "./campaign-types";
 import { SERIAL_PREFIX } from "./campaign-types";
 import { whatsappOutputs, resolveWaTemplate } from "./wa-outputs";
@@ -23,6 +23,9 @@ import { whatsappOutputs, resolveWaTemplate } from "./wa-outputs";
 export type ExampleCampaign = {
   name: string;
   status: CampaignStatus;
+  /** BFSI vertical pack this campaign belongs to. Drives the Business Analytics
+   *  section that renders above Campaign Analytics for this campaign. */
+  useCase?: UseCase;
   nodes: Node<WorkflowNodeData>[];
   edges: Edge[];
 };
@@ -513,7 +516,7 @@ function assemble(rawNodes: Node<WorkflowNodeData>[], rawEdges: Edge[]): { nodes
   };
 }
 
-function buildCampaign(name: string, specs: Spec[], edges: SpecEdge[]): ExampleCampaign {
+function buildCampaign(name: string, specs: Spec[], edges: SpecEdge[], useCase?: UseCase): ExampleCampaign {
   const rawNodes: Node<WorkflowNodeData>[] = specs.map((s) => ({
     id: s.id, type: "workflow", position: { x: 0, y: 0 },
     data: {
@@ -538,7 +541,7 @@ function buildCampaign(name: string, specs: Spec[], edges: SpecEdge[]): ExampleC
     }
   });
   const { nodes, edges: laidEdges } = assemble(rawNodes, rawEdges);
-  return { name, status: "ready", nodes, edges: laidEdges };
+  return { name, status: "ready", useCase, nodes, edges: laidEdges };
 }
 
 /* ---- 1. BFSI · Lead Qualification -------------------------------------- */
@@ -637,7 +640,7 @@ const C_RENEWAL = buildCampaign("BFSI · Insurance Renewal", [
   ed("d1", "wfu"), ed("wfu", "rcLow"),
   ed("rcLow", "end", "yes"),
   ed("rcLow", "vFinal", "no"), ed("vFinal", "rlFinal"), ed("rlFinal", "end"),
-]);
+], "insurance_renewal");
 
 /* ---- 3. BFSI · Upsell / Cross-Sell ------------------------------------- */
 const C_UPSELL = buildCampaign("BFSI · Upsell / Cross-Sell", [
@@ -714,7 +717,7 @@ const C_COLLECT = buildCampaign("BFSI · Collections", [
   ed("dpd", "vEsc", "late"), ed("vEsc", "plLate"), ed("plLate", "d1"),
   ed("d1", "paid"), ed("paid", "end", "yes"),
   ed("paid", "vfu", "no"), ed("vfu", "plFu"), ed("plFu", "end"),
-]);
+], "personal_loan_collections");
 
 /* ============================================================== *
  *  FinServ · Personal-Loan Collections (Sprint 1 additions)
@@ -757,7 +760,7 @@ const PL_PREDUE = buildCampaign("Personal Loan · Pre-due EMI reminder", [
   ed("waPredue", "d1"), ed("d1", "apiPaidPredue"), ed("apiPaidPredue", "paid"),
   ed("paid", "end", "yes"),
   ed("paid", "waPtp", "no"), ed("waPtp", "end"),
-]);
+], "personal_loan_collections");
 
 /* ---- Personal-Loan · Due-day EMI reminder (T-0) ------------------------ */
 const PL_DUEDAY = buildCampaign("Personal Loan · Due-day EMI reminder", [
@@ -788,7 +791,7 @@ const PL_DUEDAY = buildCampaign("Personal Loan · Due-day EMI reminder", [
   ed("waDueday", "d1"), ed("d1", "apiPaidDueday"), ed("apiPaidDueday", "paid"),
   ed("paid", "end", "yes"),
   ed("paid", "vDueday", "no"), ed("vDueday", "end"),
-]);
+], "personal_loan_collections");
 
 /* ---- Personal-Loan · DPD 1–7 recovery --------------------------------- *
  *  Voice-led recovery keyed to the 9-disposition Collections agent. Six
@@ -864,7 +867,7 @@ const PL_DPD_EARLY = buildCampaign("Personal Loan · DPD 1–7 recovery", [
   ed("disp", "end", "wrong"),
   ed("disp", "end", "unable"),
   ed("disp", "end", "dispute"),
-]);
+], "personal_loan_collections");
 
 /* ---- 5. Retail · Activation -------------------------------------------- */
 const C_ACTIVATION = buildCampaign("Retail · Activation", [

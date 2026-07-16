@@ -244,10 +244,10 @@ function CampaignList() {
 
   // Duplicate & Archive campaign are OOS for v1 (scope D1/D2) — handlers removed.
 
-  const handleCreate = (name: string, description?: string, objective?: string) => {
+  const handleCreate = (name: string, description?: string, objective?: string, useCase?: string) => {
     setCreateOpen(false);
     toast.success("Campaign created", { description: `${name} · opening builder in Draft` });
-    navigate({ to: "/campaigns/$id", params: { id: "new" }, search: { name, description, objective } as never });
+    navigate({ to: "/campaigns/$id", params: { id: "new" }, search: { name, description, objective, useCase } as never });
   };
 
   // After an API-sourced run is created, surface its unique trigger endpoint in a
@@ -865,16 +865,17 @@ function CreateCampaignDialog({
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
-  onCreate: (name: string, description?: string, objective?: string) => void;
+  onCreate: (name: string, description?: string, objective?: string, useCase?: string) => void;
 }) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [objective, setObjective] = useState<string>("");
+  const [useCase, setUseCase] = useState<string>("");
 
-  const reset = () => { setName(""); setDescription(""); setObjective(""); };
+  const reset = () => { setName(""); setDescription(""); setObjective(""); setUseCase(""); };
   const submit = () => {
     if (!name.trim()) return;
-    onCreate(name.trim(), description.trim() || undefined, objective || undefined);
+    onCreate(name.trim(), description.trim() || undefined, objective || undefined, useCase || undefined);
     reset();
   };
 
@@ -912,6 +913,29 @@ function CreateCampaignDialog({
               rows={3}
               className="resize-none text-sm"
             />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs">
+              Use case <span className="text-muted-foreground">· BFSI vertical pack</span>
+            </Label>
+            <Select value={useCase} onValueChange={setUseCase}>
+              <SelectTrigger className="h-9 text-sm">
+                <SelectValue placeholder="Select a use case" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="personal_loan_collections">Personal Loan Collections</SelectItem>
+                <SelectItem value="insurance_renewal">Insurance Renewal</SelectItem>
+                <SelectItem value="credit_card_dues">Credit Card Dues</SelectItem>
+                <SelectItem value="kyc_onboarding">KYC / Onboarding</SelectItem>
+                <SelectItem value="cross_sell">Cross-sell</SelectItem>
+                <SelectItem value="generic">Generic BFSI</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-[10.5px] text-muted-foreground">
+              Drives the Business Analytics section shown above this campaign's Analytics runs,
+              and scopes which <span className="font-mono">lead.memory.*</span> variables surface in the builder.
+            </p>
           </div>
 
           <div className="space-y-1.5">

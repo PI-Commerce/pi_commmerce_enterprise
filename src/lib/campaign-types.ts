@@ -5,6 +5,42 @@
 
 export type NodeGroup = "system" | "data" | "logic" | "action" | "ai" | "ads";
 
+/**
+ * A campaign's BFSI **Use Case** — the vertical pack it belongs to.
+ *
+ * The use case drives (a) which business KPIs surface above Campaign Analytics
+ * for this campaign's runs, (b) which `lead.memory.<product>.*` keys appear in
+ * the variable picker, (c) suggested templates + agents at creation time, and
+ * (d) compliance defaults (RBI window for Collections, disclosure text, etc.).
+ *
+ * Extend this list to add a new BFSI pack — Onboarding, Claims, Cross-sell, etc.
+ */
+export type UseCase =
+  | "personal_loan_collections"
+  | "insurance_renewal"
+  | "credit_card_dues"
+  | "kyc_onboarding"
+  | "cross_sell"
+  | "generic";
+
+export const USE_CASE_LABEL: Record<UseCase, string> = {
+  personal_loan_collections: "Personal Loan Collections",
+  insurance_renewal:         "Insurance Renewal",
+  credit_card_dues:          "Credit Card Dues",
+  kyc_onboarding:            "KYC / Onboarding",
+  cross_sell:                "Cross-sell",
+  generic:                   "Generic BFSI",
+};
+
+export const USE_CASE_TINT: Record<UseCase, string> = {
+  personal_loan_collections: "text-chart-1 bg-chart-1/10 border-chart-1/25",
+  insurance_renewal:         "text-chart-2 bg-chart-2/10 border-chart-2/25",
+  credit_card_dues:          "text-chart-4 bg-chart-4/10 border-chart-4/25",
+  kyc_onboarding:            "text-chart-3 bg-chart-3/10 border-chart-3/25",
+  cross_sell:                "text-chart-5 bg-chart-5/10 border-chart-5/25",
+  generic:                   "text-muted-foreground bg-secondary border-border",
+};
+
 export type NodeKind =
   // system
   | "start"

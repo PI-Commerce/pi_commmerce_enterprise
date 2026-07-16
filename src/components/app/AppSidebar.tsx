@@ -1,14 +1,17 @@
 import { useEffect, useState } from "react";
 import { Link, useRouterState } from "@tanstack/react-router";
 import {
-  LayoutDashboard, Users, Megaphone, Bot, BarChart3, Landmark, Plug, Settings, Command,
+  LayoutDashboard, Users, Megaphone, Bot, BarChart3, Plug, Settings, Command,
   PanelLeftClose, PanelLeftOpen, Radio, ChevronRight, MessageCircle, MessageSquare, MessageSquareText,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+// Sidebar order: Dashboard → Leads (customer 360) → Campaigns → Agents → Analytics.
+// Collections is NOT a sidebar item — it's just one BFSI use case; Business Analytics
+// for a Collections campaign renders on the /analytics page driven by the campaign's
+// useCase (same for Insurance Renewal, Credit Card Dues, KYC, ...).
 const primary = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, exact: true },
-  { to: "/collections", label: "Collections", icon: Landmark },
   { to: "/leads", label: "Leads", icon: Users },
   { to: "/campaigns", label: "Campaigns", icon: Megaphone },
   { to: "/agents", label: "Agents", icon: Bot },
