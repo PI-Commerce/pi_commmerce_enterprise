@@ -20,6 +20,8 @@ export type NodeKind =
   | "voiceCall"
   | "whatsapp"
   | "sms"
+  // ai
+  | "aiTransform"
   // ads
   | "adsCampaign";
 
@@ -145,6 +147,13 @@ export type PresetConfig = {
   apiTool?: string;
   /** Maps each non-constant tool input (`v` = input key) to an upstream variable (`def`). */
   apiInputMap?: PresetVarMap[];
+  /**
+   * Tool output varNames that persist to per-lead memory when this node runs.
+   * Outputs listed here become `lead.memory.<varName>` variables downstream
+   * (in addition to the standard `api_N.<varName>` node output). Used to model
+   * out-of-box "context tools" (calculate_dpd, lookup_ptp_history, etc.).
+   */
+  saveToLeadMemory?: string[];
 };
 
 export type WorkflowNodeData = {
@@ -193,6 +202,7 @@ export const NODE_GROUPS: Record<NodeKind, NodeGroup> = {
   voiceCall: "action",
   whatsapp: "action",
   sms: "action",
+  aiTransform: "ai",
   adsCampaign: "ads",
 };
 
@@ -207,6 +217,7 @@ export const NODE_LABELS: Record<NodeKind, string> = {
   voiceCall: "Voice Call",
   whatsapp: "WhatsApp",
   sms: "SMS",
+  aiTransform: "AI Transformation",
   adsCampaign: "Ads Campaign Setup",
 };
 
@@ -227,6 +238,7 @@ export const SERIAL_PREFIX: Record<NodeKind, string> = {
   voiceCall: "voice",
   whatsapp: "whatsapp",
   sms: "sms",
+  aiTransform: "ait",
   adsCampaign: "ads",
 };
 

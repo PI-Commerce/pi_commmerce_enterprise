@@ -101,6 +101,7 @@ const STATUS_BY_KIND: Record<SankeyNodeKind, LeadStatus[]> = {
   start: [],
   audience: [],
   apiToolCall: [],
+  aiTransform: [],
   abSplit: [],
   conditional: [],
   delay: [],

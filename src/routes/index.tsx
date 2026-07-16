@@ -9,7 +9,7 @@ export const Route = createFileRoute("/")({
   component: Dashboard,
   head: () => ({
     meta: [
-      { title: "Dashboard · Pi Commerce Enterprise" },
+      { title: "Dashboard · Pi Agents FinServ" },
       { name: "description", content: "Operational overview of AI-driven campaigns and agents." },
     ],
   }),

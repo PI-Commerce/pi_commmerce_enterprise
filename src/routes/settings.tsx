@@ -5,7 +5,7 @@ import { Lock, ArrowLeft } from "lucide-react";
 
 export const Route = createFileRoute("/settings")({
   component: Settings,
-  head: () => ({ meta: [{ title: "Settings · Pi Commerce Enterprise" }] }),
+  head: () => ({ meta: [{ title: "Settings · Pi Agents FinServ" }] }),
 });
 
 /**

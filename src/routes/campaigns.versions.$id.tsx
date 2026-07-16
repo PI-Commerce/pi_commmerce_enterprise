@@ -9,7 +9,7 @@ import { VERSION_HISTORY, type CampaignVersion } from "@/lib/campaign-versions";
 export const Route = createFileRoute("/campaigns/versions/$id")({
   component: VersionHistoryPage,
   head: ({ params }) => ({
-    meta: [{ title: `Version history · Campaign ${params.id} · Pi Commerce Enterprise` }],
+    meta: [{ title: `Version history · Campaign ${params.id} · Pi Agents FinServ` }],
   }),
 });
 

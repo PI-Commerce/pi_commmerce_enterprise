@@ -15,7 +15,7 @@
 import type { Edge, Node } from "reactflow";
 import type {
   CampaignStatus, WorkflowNodeData, NodeKind, NodeOutput, NodeOutputKind,
-  PresetConfig, PresetVarMap,
+  PresetConfig, PresetVarMap, PresetTransform,
 } from "./campaign-types";
 import { SERIAL_PREFIX } from "./campaign-types";
 import { whatsappOutputs, resolveWaTemplate } from "./wa-outputs";
@@ -435,7 +435,7 @@ const sAbSplit = (
 const sVoice = (id: string, title: string, subtitle?: string, cfg?: Partial<PresetConfig>): Spec => ({
   id, kind: "voiceCall", title, subtitle,
   config: {
-    agent: "reactivation_voice",
+    agent: "collections_voice",
     voiceVarMap: [{ v: "{{name}}", def: "contact.first_name" }, { v: "{{phone}}", def: "contact.phone" }],
     callStart: "10:00", callEnd: "19:00", timezone: "Asia/Kolkata (IST)", maxAttempts: 2, retryInterval: "1 hour",
     ...cfg,
@@ -462,6 +462,40 @@ const sWa = (
 const sDelay = (id: string, value: number, unit: "Minutes" | "Hours" | "Days"): Spec => ({
   id, kind: "delay", title: `Delay · ${value} ${unit.toLowerCase()}`, subtitle: `Wait ${value} ${unit.toLowerCase()}`,
   config: { delayValue: value, delayUnit: unit },
+});
+
+/** API Tool Call node factory — call an out-of-box tool from the registry and
+ *  bind its inputs to CSV/audience columns or upstream variables. The tool's
+ *  outputs become `api_N.<varName>` downstream (serial numbering happens in
+ *  normalizeCampaign). Used to model "check payment status" before a paid?
+ *  conditional, "calculate DPD" before a DPD-bucket conditional, etc.
+ *
+ *  Pass `saveToLeadMemory` (list of output varNames) to also persist those
+ *  outputs on the borrower — they then appear as `lead.memory.<varName>` in
+ *  every downstream picker. Used by "context tools" like calculate_dpd. */
+const sApi = (
+  id: string, title: string, subtitle: string, toolHandle: string,
+  apiInputMap?: PresetVarMap[],
+  saveToLeadMemory?: string[],
+): Spec => ({
+  id, kind: "apiToolCall", title, subtitle,
+  config: {
+    apiTool: toolHandle,
+    apiInputMap: apiInputMap ?? [],
+    ...(saveToLeadMemory && saveToLeadMemory.length ? { saveToLeadMemory } : {}),
+  },
+});
+
+/** AI Transformation node factory — the previously-inline "AI Transformations"
+ *  section, now a first-class node kind. Each transform's `output` becomes an
+ *  `ait_N.<output>` workflow variable downstream. Used to derive personalized
+ *  opener lines, normalize dispositions, translate replies, format numbers, etc. */
+const sAiT = (
+  id: string, title: string, subtitle: string,
+  transforms: PresetTransform[],
+): Spec => ({
+  id, kind: "aiTransform", title, subtitle,
+  config: { transforms },
 });
 
 const ed = (from: string, to: string, port?: string): SpecEdge => ({ from, to, port });
@@ -680,6 +714,156 @@ const C_COLLECT = buildCampaign("BFSI · Collections", [
   ed("dpd", "vEsc", "late"), ed("vEsc", "plLate"), ed("plLate", "d1"),
   ed("d1", "paid"), ed("paid", "end", "yes"),
   ed("paid", "vfu", "no"), ed("vfu", "plFu"), ed("plFu", "end"),
+]);
+
+/* ============================================================== *
+ *  FinServ · Personal-Loan Collections (Sprint 1 additions)
+ *  Three templates keyed to the loan-repayment lifecycle:
+ *    - PL_PREDUE      : T-2 courtesy nudge (WhatsApp-only, PTP capture)
+ *    - PL_DUEDAY      : T-0 (WhatsApp reminder → Voice escalation if unpaid)
+ *    - PL_DPD_EARLY   : DPD 1–7 recovery (Voice-led, 6 dispositions, PTP loop)
+ *  All voice nodes reference the new `collections_voice` agent (agent-data.ts)
+ *  and honour the RBI/TRAI 07:00–19:00 IST recovery-calling window.
+ * ============================================================== */
+
+/* ---- Personal-Loan · Pre-due EMI reminder (T-2) ------------------------ */
+const PL_PREDUE = buildCampaign("Personal Loan · Pre-due EMI reminder", [
+  sStart(),
+  sAud("CSV · EMI due in 2 days", ["loan_id", "emi_amount", "due_date"]),
+  sWa("waPredue", "WhatsApp pre-due reminder", "T-2 · courtesy nudge", "collections_predue_v1",
+    { vars: [
+      { v: "{{1}}", def: "contact.first_name" },
+      { v: "{{2}}", def: "emi_amount" },
+      { v: "{{3}}", def: "due_date" },
+    ] }),
+  sDelay("d1", 4, "Hours"),
+  // Live LMS check — has the borrower actually paid since the WhatsApp nudge?
+  sApi("apiPaidPredue", "Check payment status", "LMS · has borrower paid?", "check_payment_status", [
+    { v: "loan_id",  def: "contact.loan_id" },
+    { v: "due_date", def: "contact.due_date" },
+  ]),
+  sCond("paid", "Already paid?", "api_1.payment_status", [
+    { id: "yes", label: "Yes · paid early",    value: "paid" },
+    { id: "no",  label: "No · still pending",  value: "unpaid" },
+  ]),
+  sWa("waPtp", "PTP confirmation + payment link", "WhatsApp · pay now", "payment_link_v1",
+    { vars: [
+      { v: "{{1}}", def: "contact.first_name" },
+      { v: "{{2}}", def: "emi_amount" },
+    ] }),
+  sEnd(),
+], [
+  ed("start", "aud"), ed("aud", "waPredue"),
+  ed("waPredue", "d1"), ed("d1", "apiPaidPredue"), ed("apiPaidPredue", "paid"),
+  ed("paid", "end", "yes"),
+  ed("paid", "waPtp", "no"), ed("waPtp", "end"),
+]);
+
+/* ---- Personal-Loan · Due-day EMI reminder (T-0) ------------------------ */
+const PL_DUEDAY = buildCampaign("Personal Loan · Due-day EMI reminder", [
+  sStart(),
+  sAud("CSV · EMI due today", ["loan_id", "emi_amount", "due_date"]),
+  sWa("waDueday", "WhatsApp due-day reminder", "T-0 · payment link", "collections_dueday_v1",
+    { vars: [
+      { v: "{{1}}", def: "contact.first_name" },
+      { v: "{{2}}", def: "emi_amount" },
+      { v: "{{3}}", def: "due_date" },
+    ] }),
+  sDelay("d1", 6, "Hours"),
+  // Live LMS check — did the borrower actually pay before we escalate to Voice?
+  sApi("apiPaidDueday", "Check payment status", "LMS · has borrower paid?", "check_payment_status", [
+    { v: "loan_id",  def: "contact.loan_id" },
+    { v: "due_date", def: "contact.due_date" },
+  ]),
+  sCond("paid", "Paid today?", "api_1.payment_status", [
+    { id: "yes", label: "Yes · settled",  value: "paid" },
+    { id: "no",  label: "No · pending",   value: "unpaid" },
+  ]),
+  sVoice("vDueday", "Voice AI due-day call", "Concierge · due-day nudge", {
+    agent: "collections_voice",
+  }),
+  sEnd(),
+], [
+  ed("start", "aud"), ed("aud", "waDueday"),
+  ed("waDueday", "d1"), ed("d1", "apiPaidDueday"), ed("apiPaidDueday", "paid"),
+  ed("paid", "end", "yes"),
+  ed("paid", "vDueday", "no"), ed("vDueday", "end"),
+]);
+
+/* ---- Personal-Loan · DPD 1–7 recovery --------------------------------- *
+ *  Voice-led recovery keyed to the 9-disposition Collections agent. Six
+ *  disposition branches are wired explicitly; the two "settled after the fact"
+ *  PTP states (Kept / Broken) are evaluated after a 24h delay by the follow-up
+ *  Conditional. The normalizeCampaign pass auto-wires the Conditional's default
+ *  handle to End, catching No-Answer / any unhandled disposition.
+ */
+const PL_DPD_EARLY = buildCampaign("Personal Loan · DPD 1–7 recovery", [
+  sStart(),
+  sAud("CSV · DPD 1–7 cohort", ["loan_id", "emi_amount", "due_date", "days_past_due", "segment", "last_ptp_date", "last_ptp_kept"]),
+  // Context tool: compute DPD from the borrower's due_date and PERSIST dpd_days +
+  // dpd_bucket to lead memory so any downstream picker (and any future campaign
+  // touching the same borrower) can read `lead.memory.dpd_bucket` / dpd_days.
+  sApi("apiCalcDpd", "Calculate DPD", "Context · derive + persist to lead memory", "calculate_dpd",
+    [{ v: "due_date", def: "contact.due_date" }],
+    ["dpd_days", "dpd_bucket"],
+  ),
+  // AI Transformation: derive a warm, segment-aware opener from lead history so the
+  // Voice agent doesn't cold-open. Output `ait_1.greeting_line` is available to the
+  // Voice node's variable mapping downstream.
+  sAiT("aiOpener", "Personalize opener", "Segment-aware greeting from PTP history", [
+    { id: "t_opener", type: "Custom AI Action",
+      input: "contact.first_name, contact.segment, lead.memory.dpd_bucket, contact.last_ptp_kept",
+      output: "greeting_line" },
+  ]),
+  sVoice("vColl", "Voice AI collections call", "Disposition + PTP capture", {
+    agent: "collections_voice",
+    callStart: "09:00", callEnd: "19:00", timezone: "Asia/Kolkata (IST)",
+    maxAttempts: 2, retryInterval: "4 hours",
+  }),
+  sCond("disp", "Disposition branch", "voice_1.disposition", [
+    { id: "ptp",      label: "PTP · Open",      value: "PTP-Open" },
+    { id: "paid",     label: "Already paid",    value: "Already-Paid" },
+    { id: "callback", label: "Callback later",  value: "Callback-Later" },
+    { id: "wrong",    label: "Wrong number",    value: "Wrong-Number" },
+    { id: "unable",   label: "Unable to pay",   value: "Unable-to-Pay" },
+    { id: "dispute",  label: "Disputes amount", value: "Dispute" },
+  ]),
+  // PTP-Open branch → confirm via WhatsApp → wait for the promised day → check paid
+  sWa("waPtpConfirm", "PTP confirmation", "WhatsApp · PTP + payment link", "collections_ptp_reminder_v1",
+    { vars: [
+      { v: "{{1}}", def: "contact.first_name" },
+      { v: "{{2}}", def: "voice_1.ptp_amount" },
+      { v: "{{3}}", def: "voice_1.ptp_date" },
+    ] }),
+  sDelay("dPtp", 24, "Hours"),
+  // Live LMS check — was the PTP kept? (payment received against this EMI)
+  sApi("apiPaidKept", "Check payment status", "LMS · did borrower keep the PTP?", "check_payment_status", [
+    { v: "loan_id",  def: "contact.loan_id" },
+    { v: "due_date", def: "contact.due_date" },
+  ]),
+  sCond("kept", "PTP kept?", "api_2.payment_status", [
+    { id: "yes", label: "Yes · payment received", value: "paid" },
+    { id: "no",  label: "No · broken PTP",        value: "unpaid" },
+  ]),
+  // Broken-PTP escalation (still WhatsApp — human escalation is a Sprint 2+ story)
+  sWa("waBroken", "Broken-PTP escalation", "WhatsApp · broken PTP + payment link", "collections_broken_ptp_v1",
+    { vars: [
+      { v: "{{1}}", def: "contact.first_name" },
+      { v: "{{2}}", def: "emi_amount" },
+    ] }),
+  sEnd(),
+], [
+  ed("start", "aud"), ed("aud", "apiCalcDpd"), ed("apiCalcDpd", "aiOpener"), ed("aiOpener", "vColl"), ed("vColl", "disp"),
+  // PTP-Open lane
+  ed("disp", "waPtpConfirm", "ptp"), ed("waPtpConfirm", "dPtp"), ed("dPtp", "apiPaidKept"), ed("apiPaidKept", "kept"),
+  ed("kept", "end", "yes"),
+  ed("kept", "waBroken", "no"), ed("waBroken", "end"),
+  // Terminal dispositions → End (default handle auto-wires the rest)
+  ed("disp", "end", "paid"),
+  ed("disp", "end", "callback"),
+  ed("disp", "end", "wrong"),
+  ed("disp", "end", "unable"),
+  ed("disp", "end", "dispute"),
 ]);
 
 /* ---- 5. Retail · Activation -------------------------------------------- */
@@ -1194,27 +1378,19 @@ const EX1_LAID = assemble(EX1_NODES, EX1_EDGES);
 const EX2_LAID = assemble(EX2_NODES, EX2_EDGES);
 
 const RAW_EXAMPLE_CAMPAIGNS: Record<string, ExampleCampaign> = {
-  // Order here drives the Campaigns-list order (the list staggers `lastEdited` by
-  // index). The ACME Corp FCC loyalty campaign leads, followed by the rest of the
-  // retail examples so the whole retail set sits on the front page. The two retained
-  // originals (kept in draft) and the other verticals follow.
-  c_ex17: C_ALTAYER,
-  c_ex7: C_ACTIVATION,
-  c_ex8: C_REWARD,
-  c_ex9: C_WINBACK,
-  c_ex10: C_SUBSCRIPTION,
-  c_ex11: C_SEASONAL,
-  c_ex1: { name: "Omni-channel React", status: "draft", nodes: EX1_LAID.nodes, edges: EX1_LAID.edges },
-  c_ex2: { name: "Voice-led win-back", status: "draft", nodes: EX2_LAID.nodes, edges: EX2_LAID.edges },
-  c_ex3: C_LEADQUAL,
+  // FinServ branch: order below drives the Campaigns-list order (the list
+  // staggers `lastEdited` by index — earliest entries appear as most recently
+  // edited). Personal-Loan Collections leads, then legacy BFSI carry-overs.
+  // The other retail constants (C_ALTAYER, C_ACTIVATION, C_REWARD, C_WINBACK,
+  // C_SUBSCRIPTION, C_SEASONAL, C_LEADQUAL, C_UPSELL, C_ORDERCONF, C_OUTBOUND,
+  // C_CART, C_PRICEDROP, C_BACKINSTOCK, EX1_LAID, EX2_LAID) remain defined in
+  // this file but are unregistered here so they don't appear in the Campaigns
+  // list — intentional to keep the file diff small and reversible on merge from main.
+  pl_predue: PL_PREDUE,
+  pl_dueday: PL_DUEDAY,
+  pl_dpd_early: PL_DPD_EARLY,
   c_ex4: C_RENEWAL,
-  c_ex5: C_UPSELL,
   c_ex6: C_COLLECT,
-  c_ex12: C_ORDERCONF,
-  c_ex13: C_OUTBOUND,
-  c_ex14: C_CART,
-  c_ex15: C_PRICEDROP,
-  c_ex16: C_BACKINSTOCK,
 };
 
 /* ---- normalization ------------------------------------------------------

@@ -70,7 +70,7 @@ import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/analytics")({
   component: Analytics,
-  head: () => ({ meta: [{ title: "Analytics · Pi Commerce Enterprise" }] }),
+  head: () => ({ meta: [{ title: "Analytics · Pi Agents FinServ" }] }),
 });
 
 type Tab = "campaign" | "channel";
@@ -117,6 +117,7 @@ const NODE_COLOR: Record<SankeyNodeKind, string> = {
   start: "#22c55e",
   audience: "#94a3b8",
   apiToolCall: "#0ea5e9",
+  aiTransform: "#a855f7",
   abSplit: "#64748b",
   whatsapp: "#22c55e",
   voice: "#a78bfa",
@@ -130,6 +131,7 @@ const NODE_TYPE_LABEL: Record<SankeyNodeKind, string> = {
   start: "Start",
   audience: "Audience",
   apiToolCall: "API Tool Call",
+  aiTransform: "AI Transformation",
   abSplit: "A/B Split",
   whatsapp: "WhatsApp",
   voice: "Voice Call",

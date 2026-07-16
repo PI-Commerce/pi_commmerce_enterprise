@@ -60,7 +60,7 @@ const DEFAULT_NODE_DATA: Record<NodeKind, Partial<WorkflowNodeData>> = {
   voiceCall: { subtitle: "AI voice outreach", valid: false, error: "Select agent", outputs: completedOutput() },
   whatsapp: { subtitle: "Send WhatsApp message", valid: false, error: "Pick template", outputs: whatsappOutputs(undefined) },
   sms: { subtitle: "Send SMS", valid: false, error: "Add message body", outputs: completedOutput() },
-  
+  aiTransform: { subtitle: "Derive an AI variable", valid: true },
   adsCampaign: { subtitle: "WhatsApp CTWA ad", valid: false, error: "Complete setup" },
 };
 

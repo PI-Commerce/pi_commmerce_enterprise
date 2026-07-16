@@ -5,7 +5,7 @@ import { getAgentRecord, AGENT_RECORDS } from "@/lib/agent-data";
 export const Route = createFileRoute("/agents/$id")({
   component: EditAgent,
   head: ({ params }) => ({
-    meta: [{ title: `Agent ${params.id} · Pi Commerce Enterprise` }],
+    meta: [{ title: `Agent ${params.id} · Pi Agents FinServ` }],
   }),
 });
 

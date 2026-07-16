@@ -17,7 +17,7 @@ export const Route = createFileRoute("/agents/")({
   }),
   head: () => ({
     meta: [
-      { title: "Agents · Pi Commerce Enterprise" },
+      { title: "Agents · Pi Agents FinServ" },
       { name: "description", content: "Voice & chat AI agents with tools and capabilities." },
     ],
   }),

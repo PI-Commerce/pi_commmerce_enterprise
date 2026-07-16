@@ -1,7 +1,7 @@
 import { useState } from "react";
 import {
   Users, GitBranch, Split, Phone, MessageCircle,
-  MessageSquare, Clock, Megaphone, Plus, X, Webhook,
+  MessageSquare, Clock, Plus, X, Webhook, Sparkles,
   type LucideIcon,
 } from "lucide-react";
 import type { NodeKind } from "@/lib/campaign-types";
@@ -17,21 +17,22 @@ const ICONS: Partial<Record<NodeKind, LucideIcon>> = {
   voiceCall: Phone,
   whatsapp: MessageCircle,
   sms: MessageSquare,
-  adsCampaign: Megaphone,
+  aiTransform: Sparkles,
 };
 
 // Audience is omitted: every canvas already ships with exactly one (non-deletable)
 // Audience node as the single contact entry point, so it's never addable here.
+// Meta Ads (adsCampaign) is removed on the FinServ branch — collections doesn't ride paid social.
 const SECTIONS: Array<{ label: string; nodes: NodeKind[] }> = [
   { label: "Data Nodes", nodes: ["apiToolCall"] },
   { label: "Logic Nodes", nodes: ["conditional", "abSplit", "delay"] },
   { label: "Action Nodes", nodes: ["voiceCall", "whatsapp", "sms"] },
-  { label: "Ads Nodes", nodes: ["adsCampaign"] },
+  { label: "AI Nodes", nodes: ["aiTransform"] },
 ];
 
 // Out of scope for v1: cannot be added to new campaigns (disabled in palette),
 // but retained in existing example campaigns (render + read-only config).
-const DISABLED_KINDS = new Set<NodeKind>(["sms", "adsCampaign"]);
+const DISABLED_KINDS = new Set<NodeKind>(["sms"]);
 
 export function NodePalette({
   onAdd, disabled,

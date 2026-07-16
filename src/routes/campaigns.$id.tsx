@@ -26,7 +26,7 @@ export const Route = createFileRoute("/campaigns/$id")({
   }),
   head: ({ params }) => ({
     meta: [
-      { title: `Campaign ${params.id} · Pi Commerce Enterprise` },
+      { title: `Campaign ${params.id} · Pi Agents FinServ` },
       { name: "description", content: "Full-screen orchestration canvas for AI-native campaigns." },
     ],
   }),

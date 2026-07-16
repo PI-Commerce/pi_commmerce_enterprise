@@ -22,7 +22,7 @@ export const Route = createFileRoute("/agents/tools/new")({
   }),
   head: () => ({
     meta: [
-      { title: "Tool · Pi Commerce Enterprise" },
+      { title: "Tool · Pi Agents FinServ" },
       { name: "description", content: "Register an HTTP API or MCP tool in the registry." },
     ],
   }),

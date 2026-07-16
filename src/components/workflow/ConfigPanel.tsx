@@ -23,6 +23,7 @@ import {
 import { toast } from "sonner";
 import type { WorkflowNodeData, NodeKind, PresetConfig, PresetBranch, PresetCondition, PresetVarMap, PresetValueRemap, NodeOutput } from "@/lib/campaign-types";
 import { NODE_LABELS, SAMPLE_WORKFLOW_VARIABLES, branchConditions } from "@/lib/campaign-types";
+import { LEAD_MEMORY_KEYS } from "@/lib/leads-data";
 import { SEED_TEMPLATES } from "@/lib/waba-templates";
 import { whatsappOutputs, resolveWaTemplate, completedOutput, isBranchableButton } from "@/lib/wa-outputs";
 import { getTool, TOOLS } from "@/lib/tool-registry";
@@ -34,10 +35,13 @@ const VOICE_AGENTS = voiceAgents();
  *  action nodes present in the flow — merged into the Conditional variable picker. */
 const ExtraVariablesContext = createContext<{ key: string; source: string }[]>([]);
 
-/** Merge flow-derived variables (from the live nodes) with the static sample set.
- *  Dedupes by key (derived wins). When the Audience node has contributed real
- *  `contact.*` fields from its edited schema, the static `contact.*` samples are
- *  dropped so the picker reflects the actual schema, not the demo defaults. */
+/** Merge flow-derived variables (from the live nodes) with the static sample set
+ *  and the per-lead memory keys (FinServ). Dedupes by key (derived wins). When
+ *  the Audience node has contributed real `contact.*` fields from its edited
+ *  schema, the static `contact.*` samples are dropped so the picker reflects the
+ *  actual schema, not the demo defaults. `lead.memory.*` entries always appear —
+ *  they're the persistent-per-borrower fields exposed by the Leads Management
+ *  surface (see leads-data.ts). */
 function mergeVariables(extra: { key: string; source: string }[]) {
   const hasDerivedContact = extra.some((v) => v.key.startsWith("contact."));
   const sample = hasDerivedContact
@@ -45,7 +49,7 @@ function mergeVariables(extra: { key: string; source: string }[]) {
     : SAMPLE_WORKFLOW_VARIABLES;
   const seen = new Set<string>();
   const out: { key: string; source: string }[] = [];
-  for (const v of [...extra, ...sample]) {
+  for (const v of [...extra, ...sample, ...LEAD_MEMORY_KEYS]) {
     if (seen.has(v.key)) continue;
     seen.add(v.key);
     out.push(v);
@@ -388,7 +392,45 @@ function KindFields({
 
     case "adsCampaign":
       return <AdsCampaignFields readOnly={readOnly} mark={mark} />;
+
+    case "aiTransform":
+      return <AiTransformFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
   }
+}
+
+/** Standalone AI Transformation node config — the previously-inline
+ *  AiTransformationsSection lifted out of Action nodes into its own node kind.
+ *  Manages the transform list locally and persists it on every change. */
+function AiTransformFields({
+  config, readOnly, mark, onChange,
+}: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
+  const [transforms, setTransformsState] = useState<AiTransform[]>(
+    () => (config?.transforms ?? []).map((t) => ({ ...t, open: false })),
+  );
+  const setTransforms: React.Dispatch<React.SetStateAction<AiTransform[]>> = (updater) => {
+    setTransformsState((prev) => {
+      const next = typeof updater === "function"
+        ? (updater as (p: AiTransform[]) => AiTransform[])(prev)
+        : updater;
+      onChange({ config: { ...(config ?? {}), transforms: next.map(({ open: _o, ...rest }) => rest) } });
+      return next;
+    });
+  };
+  // Always valid — 0 or more transforms is a legal configuration. The node
+  // simply becomes a pass-through when empty. Marked once on mount.
+  useEffect(() => { mark(true); }, []);
+  return (
+    <>
+      <div className="mb-4 flex items-start gap-2 rounded-md border border-ai/30 bg-ai/5 px-2.5 py-2 text-[11.5px] text-ai">
+        <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        <span>
+          Define AI-generated variables from upstream data. Each transform's <span className="font-mono">output</span> becomes a workflow variable
+          (<span className="font-mono">ait_1.&lt;name&gt;</span>) available to downstream nodes.
+        </span>
+      </div>
+      <AiTransformationsSection readOnly={readOnly} transforms={transforms} setTransforms={setTransforms} />
+    </>
+  );
 }
 
 /* --------------------------- Audience --------------------------- */
@@ -880,17 +922,46 @@ function ApiToolCallFields({
 
       {selected && tool.outputs.length > 0 && (
         <Section title="Outputs → downstream variables">
-          <div className="rounded-xl border border-border bg-card/50 p-3 space-y-1.5">
+          <div className="rounded-xl border border-border bg-card/50 p-3 space-y-2">
             <p className="text-[11px] text-muted-foreground">
-              These response fields are available to later nodes as{" "}
+              Each field is available to later nodes as{" "}
               <span className="font-mono text-foreground">{"{node}.{field}"}</span>.
+              Tick <span className="font-mono">Save to lead memory</span> to also persist the
+              value on the borrower — it then appears as{" "}
+              <span className="font-mono text-foreground">lead.memory.{"{field}"}</span> in every
+              downstream picker across campaigns.
             </p>
-            {tool.outputs.map((o) => (
-              <div key={o.varName} className="flex items-center justify-between gap-3 text-[11.5px]">
-                <span className="font-mono text-ai">{o.varName}</span>
-                <span className="truncate text-muted-foreground" title={o.description}>{o.description}</span>
-              </div>
-            ))}
+            {tool.outputs.map((o) => {
+              const saved = (config?.saveToLeadMemory ?? []).includes(o.varName);
+              const toggleSave = () => {
+                if (readOnly) return;
+                const cur = config?.saveToLeadMemory ?? [];
+                const next = saved ? cur.filter((k) => k !== o.varName) : [...cur, o.varName];
+                onChange({ config: { ...config, apiTool: handle, saveToLeadMemory: next } });
+              };
+              return (
+                <div key={o.varName} className="flex items-center justify-between gap-3 rounded-md border border-border/50 bg-background/40 px-2.5 py-1.5 text-[11.5px]">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-ai">{o.varName}</span>
+                      {saved && (
+                        <span className="inline-flex items-center gap-1 rounded-full border border-ai/30 bg-ai/10 px-1.5 py-0.5 text-[9.5px] font-medium uppercase tracking-wide text-ai">
+                          <Sparkles className="h-2.5 w-2.5" /> lead.memory
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-0.5 truncate text-[10.5px] text-muted-foreground" title={o.description}>{o.description}</p>
+                  </div>
+                  <label className={cn(
+                    "flex shrink-0 cursor-pointer items-center gap-1.5 text-[11px]",
+                    readOnly && "cursor-not-allowed opacity-50",
+                  )}>
+                    <Switch checked={saved} disabled={readOnly} onCheckedChange={toggleSave} />
+                    <span className="text-muted-foreground">Save to lead memory</span>
+                  </label>
+                </div>
+              );
+            })}
           </div>
         </Section>
       )}
@@ -966,6 +1037,23 @@ function VoiceCallCore({ config, readOnly, mark, onChange }: { config?: PresetCo
   const { tzLabel } = useRegion();
   const [agent, setAgent] = useState<string>(config?.agent ?? "");
   const agentSelected = !!agent;
+
+  // RBI/TRAI compliance — controlled callStart/callEnd so the warning reacts
+  // to user edits (not just the initial preset). Outbound recovery calling is
+  // permitted only within 07:00–19:00 IST; times outside turn the band RED.
+  const [callStart, setCallStart] = useState<string>(config?.callStart ?? "10:00");
+  const [callEnd, setCallEnd] = useState<string>(config?.callEnd ?? "19:00");
+  const startOutside = callStart < "07:00";
+  const endOutside = callEnd > "19:00";
+  const rbiViolation = startOutside || endOutside;
+  const persistCallStart = (v: string) => {
+    setCallStart(v);
+    onChange({ config: { ...config, callStart: v } });
+  };
+  const persistCallEnd = (v: string) => {
+    setCallEnd(v);
+    onChange({ config: { ...config, callEnd: v } });
+  };
   const varMap = config?.voiceVarMap ?? [
     { v: "{{name}}", def: "contact.first_name" },
     { v: "{{phone}}", def: "contact.phone" },
@@ -1088,9 +1176,43 @@ function VoiceCallCore({ config, readOnly, mark, onChange }: { config?: PresetCo
       )}
 
       <Section title="Call window">
+        {/* RBI/TRAI compliance band: neutral by default, RED when the currently-
+            configured Start/End fall outside the 07:00–19:00 IST window. The
+            offending input(s) also get a red border for direct affordance. */}
+        <div className={cn(
+          "mb-2.5 flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-[11px]",
+          rbiViolation
+            ? "border-destructive/50 bg-destructive/10 text-destructive"
+            : "border-border/60 bg-muted/30 text-muted-foreground",
+        )}>
+          <Clock className="h-3 w-3 shrink-0" />
+          <span>RBI/TRAI window · 07:00–19:00 IST</span>
+          {rbiViolation && (
+            <span className="ml-auto inline-flex items-center gap-1 font-medium">
+              <AlertCircle className="h-3 w-3" />
+              Configured times fall outside window
+            </span>
+          )}
+        </div>
         <div className="grid grid-cols-2 gap-2">
-          <Field label="Start time"><Input disabled={readOnly} type="time" defaultValue={config?.callStart ?? "09:00"} className="h-9" /></Field>
-          <Field label="End time"><Input disabled={readOnly} type="time" defaultValue={config?.callEnd ?? "20:00"} className="h-9" /></Field>
+          <Field label="Start time">
+            <Input
+              disabled={readOnly}
+              type="time"
+              value={callStart}
+              onChange={(e) => persistCallStart(e.target.value)}
+              className={cn("h-9", startOutside && "border-destructive focus-visible:ring-destructive")}
+            />
+          </Field>
+          <Field label="End time">
+            <Input
+              disabled={readOnly}
+              type="time"
+              value={callEnd}
+              onChange={(e) => persistCallEnd(e.target.value)}
+              className={cn("h-9", endOutside && "border-destructive focus-visible:ring-destructive")}
+            />
+          </Field>
         </div>
         <Field label="Timezone">
           <SelectLike disabled={readOnly} options={["Asia/Kolkata (IST)", "Asia/Dubai (GST)", "America/New_York (EST)", "Europe/London (GMT)"]} onPick={() => undefined} defaultValue={tzLabel} />
@@ -1725,10 +1847,6 @@ function ActionNodeShell({
   onChange: (patch: Partial<WorkflowNodeData>) => void;
   renderCore: (mark: (v: boolean, e?: string) => void) => React.ReactNode;
 }) {
-  const [transforms, setTransforms] = useState<AiTransform[]>(
-    () => (config?.transforms ?? []).map((t) => ({ ...t, open: false })),
-  );
-
   // A/B experiment is the top-level mode switch: off → one config; on → per-variant config only.
   const [abEnabled, setAbEnabled] = useState(config?.abEnabled ?? false);
   const [variants, setVariants] = useState<Variant[]>(
@@ -1854,16 +1972,9 @@ function ActionNodeShell({
         </div>
       )}
 
-      {/* AI Transformations are OOS for v1 (scope A5) — the editable builder no longer
-          exposes them. Only shown read-only when an example campaign actually authored
-          transforms (none do in v1), so clean preset nodes never render an empty section. */}
-      {readOnly && transforms.length > 0 && (
-        <AiTransformationsSection
-          readOnly={readOnly}
-          transforms={transforms}
-          setTransforms={setTransforms}
-        />
-      )}
+      {/* AI Transformations moved out — they're a first-class node kind now
+          (`aiTransform`) in the AI Nodes palette section. Add one upstream of
+          this Action node to derive computed variables from lead data. */}
     </>
   );
 }

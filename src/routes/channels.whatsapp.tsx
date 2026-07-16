@@ -11,7 +11,7 @@ import { useWabaConnection, setWabaConnection } from "@/lib/waba-store";
 
 export const Route = createFileRoute("/channels/whatsapp")({
   component: WhatsAppManage,
-  head: () => ({ meta: [{ title: "WhatsApp Business · Pi Commerce Enterprise" }] }),
+  head: () => ({ meta: [{ title: "WhatsApp Business · Pi Agents FinServ" }] }),
 });
 
 type Tab = "overview" | "templates";

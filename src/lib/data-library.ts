@@ -47,31 +47,24 @@ export function makeCsvAsset(
   return { ...init, uploadedTs: ts, uploadedAt: fmt(ts) };
 }
 
-// Seed library — includes the CSVs referenced by the two example campaigns so
-// the demo's Data tab feels populated and consistent with the Audience cards.
+// Seed library — FinServ branch keeps only BFSI-relevant cohorts.
+// - collections_personal_loan_jul26.csv is the primary Collections cohort,
+//   consumed by pl_predue / pl_dueday / pl_dpd_early via CSV-audience mapping.
+// - kyc_dropoffs and dormant_traders are legacy BFSI carry-overs.
+// - The retail CSVs (high_value_traders, winback_lapsed_premium) are removed
+//   on this branch to match the retail-example trim in campaign-examples.ts.
 export const CSV_LIBRARY: CsvAsset[] = [
   makeCsvAsset({
-    id: "csv_high_value_traders",
-    name: "high_value_traders.csv",
-    uploadedTs: NOW - 1 * DAY,
+    id: "csv_collections_pl_jul26",
+    name: "collections_personal_loan_jul26.csv",
+    uploadedTs: NOW - 0 * DAY,
     columns: [
-      "customer_id", "phone", "first_name", "favorite_category",
-      "lifetime_order_value", "discount_value", "preferred_lang",
+      "customer_id", "phone", "first_name", "loan_id", "product",
+      "emi_amount", "due_date", "days_past_due", "bucket",
+      "outstanding", "last_ptp_date", "last_ptp_kept", "segment",
     ],
-    rowCount: 18432,
-    sizeKb: 1240,
-    source: "uploaded",
-  }),
-  makeCsvAsset({
-    id: "csv_winback_lapsed_premium",
-    name: "winback_lapsed_premium.csv",
-    uploadedTs: NOW - 3 * DAY,
-    columns: [
-      "customer_id", "phone", "first_name", "avg_basket_value",
-      "weeks_inactive", "last_item", "reorder_url", "preferred_lang",
-    ],
-    rowCount: 6107,
-    sizeKb: 512,
+    rowCount: 4823,
+    sizeKb: 612,
     source: "uploaded",
   }),
   makeCsvAsset({

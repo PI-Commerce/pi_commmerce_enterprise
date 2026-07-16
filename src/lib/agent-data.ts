@@ -1,6 +1,12 @@
 /**
  * Agent records — seed data for the agent builder (create starts blank, edit
  * hydrates from here). Tools are referenced by handle from the tool registry.
+ *
+ * FinServ branch: pruned to a single Collections voice agent. Retail/other
+ * agents (pi_concierge, reactivation_voice, kyc_helper, pricing_qa,
+ * winback_voice, l1_support) are removed on this branch — a clean Collections
+ * demo without unrelated agent clutter. Add new BFSI agents (Onboarding,
+ * Renewals, etc.) here as future packs land.
  */
 import { getTool } from "./tool-registry";
 
@@ -21,174 +27,29 @@ export type AgentRecord = {
 };
 
 export const AGENT_RECORDS: Record<string, AgentRecord> = {
-  a_concierge: {
-    id: "a_concierge",
-    name: "pi_concierge",
-    type: "chat",
-    status: "live",
-    tools: ["send_whatsapp", "order_lookup", "knowledge_lookup"],
-    masterPrompt:
-      "# Role\nYou are **Pi Concierge**, the first line of help for Paytm customers on WhatsApp.\n\n## Goals\n- Understand why the customer reached out and resolve it on first contact.\n- Be warm, concise, and never over-promise.\n\n## Tools\nUse {{order_lookup}} to check delivery status before answering order questions, and {{knowledge_lookup}} for policy or how-to questions. Send confirmations with {{send_whatsapp}}.\n\n## Guardrails\n- Never give investment advice.\n- Escalate anything involving a failed payment over ₹10,000 to a human.",
-    knowledgeBase:
-      "## Refund policy\nRefunds are processed within **5–7 business days** to the original payment method.\n\n## Delivery SLAs\n- Metro cities: 2–3 days\n- Tier-2/3: 4–6 days\n\n## Escalation\nFor disputes above ₹10,000, collect the order id and route to the payments desk.",
-    postCall: [
-      {
-        id: "p1",
-        name: "resolution_status",
-        prompt:
-          "Did the agent resolve the customer's issue? Answer one of: resolved, pending, escalated.",
-      },
-      {
-        id: "p2",
-        name: "csat_estimate",
-        prompt:
-          "Estimate the customer's satisfaction from 1-5 based on their tone in the transcript.",
-      },
-    ],
-  },
-  a_voice_react: {
-    id: "a_voice_react",
-    name: "reactivation_voice",
+  a_collections: {
+    id: "a_collections",
+    name: "collections_voice",
     type: "voice",
     status: "live",
-    tools: ["place_call", "crm_query", "order_lookup"],
+    tools: ["place_call", "crm_lookup", "payment_link_gen", "check_payment_status", "kyc_status_check", "human_escalation"],
     masterPrompt:
-      "# Role\nYou are **Reactivation Voice**, calling dormant Paytm traders to bring them back.\n\n## Opening\nGreet the customer by first name and reference how long they've been away.\n\n## Tools\nPull context with {{crm_query}} at the start of the call so you can personalize the pitch.\n\n## Guardrails\n- Keep the call under 3 minutes.\n- If the customer asks to stop, apologize and end the call immediately.",
+      "# Role\nYou are the **AcmeBank Collections Voice Agent**, calling borrowers whose Personal-Loan EMIs are due or past due.\n\n## Mandatory disclosure (RBI compliance)\nOpen every call with: *\"Namaste, this call is from AcmeBank collections. This call may be recorded for quality and compliance purposes.\"* Identify yourself as an AI assistant if the borrower asks directly.\n\n## Goals\n1. **Right-party verification** — confirm you're speaking to {{first_name}}. If not, disposition as `Wrong-Number` and end politely.\n2. **State the case** — outstanding EMI (₹{{emi_amount}}), due date, and current DPD.\n3. **Offer to pay now** — share a Razorpay link via {{payment_link_gen}}, OR capture a **Promise-to-Pay** (specific date + amount).\n4. **Handle objections** — if the borrower disputes the amount or is unable to pay, capture the reason. Hand off to L2 via {{human_escalation}} only when the borrower asks for a human or the case exceeds the AI's authority.\n\n## Tools\n- {{crm_lookup}} at call open to pull borrower name, segment, active loans, risk grade\n- {{check_payment_status}} to verify whether payment landed (esp. after \"Already-Paid\" claim)\n- {{payment_link_gen}} to share a payment link over WhatsApp\n- {{kyc_status_check}} if the borrower mentions KYC/document issues blocking payment\n- {{human_escalation}} for dispute / complex refusal cases\n\n## Guardrails\n- Calls only within the **07:00–19:00 IST** RBI/TRAI recovery window.\n- Never threaten, intimidate, or use abusive language. Never disclose the debt to third parties.\n- If the borrower asks to stop calling, apologize, end the call, and disposition as `Refuses`.\n- Keep calls under 4 minutes.",
     knowledgeBase:
-      '## Win-back offer\nEligible traders get **zero brokerage for 30 days**.\n\n## Objection handling\n- "Too busy": offer a callback at a time they choose.\n- "Not interested": thank them and close politely.',
+      "## Promise-to-Pay capture\nAsk for a specific date AND amount. Confirm both before ending. Accept partial promises (any positive amount below the outstanding).\n\n## Settlement authority\nThe AI has no settlement authority. If the borrower asks for a settlement/waiver, offer to escalate to L2 via {{human_escalation}}.\n\n## Payment methods supported\nRazorpay UPI, cards, netbanking. NEFT/RTGS is not supported through the generated link — direct the borrower to internet banking if they insist.\n\n## Common objections\n- **\"Already paid\"** — ask for payment mode + date, then verify with {{check_payment_status}}. If unverified, capture the details and disposition as `Already-Paid` with a note.\n- **\"Salary not credited\"** — capture PTP for the next salary date (typical 1st or 7th of the month).\n- **\"Not my loan\"** — if the borrower is adamant, disposition as `Dispute` and escalate.\n- **\"KYC pending\"** — run {{kyc_status_check}}; if stuck at Video KYC, direct to the Digio self-serve link.",
     postCall: [
-      {
-        id: "p1",
-        name: "call_sentiment",
-        prompt:
-          "Overall customer sentiment during the call: positive, neutral, or negative.",
-      },
-      {
-        id: "p2",
-        name: "engagement_intent",
-        prompt:
-          "Primary reason the customer gave about using the app (e.g. not interested, technical issue, using a different app).",
-      },
-      {
-        id: "p3",
-        name: "user_availability",
-        prompt:
-          "Was the customer available to talk? available, busy, or requested a callback.",
-      },
-      {
-        id: "p4",
-        name: "competitor_app",
-        prompt:
-          "If the customer mentioned a competing app they use instead, capture its name; otherwise none.",
-      },
-      {
-        id: "p5",
-        name: "credit_card_added",
-        prompt:
-          "Does the customer have a credit card added to the app? added or not added.",
-      },
-      {
-        id: "p6",
-        name: "charges_feedback",
-        prompt:
-          "Did the customer mention the charges being high? Capture their view.",
-      },
-      {
-        id: "p7",
-        name: "callback_requested",
-        prompt:
-          "Did the customer ask for a callback? If yes, capture the requested time.",
-      },
-      {
-        id: "p8",
-        name: "final_lead_status",
-        prompt:
-          "Final disposition of the lead after the call (e.g. interested, follow-up, not interested).",
-      },
-    ],
-  },
-  a_kyc: {
-    id: "a_kyc",
-    name: "kyc_helper",
-    type: "chat",
-    status: "live",
-    tools: ["knowledge_lookup", "customer_context"],
-    masterPrompt:
-      "# Role\nYou are **KYC Helper**. You guide customers through completing KYC.\n\n## Tools\nUse {{customer_context}} to see which KYC stage the customer is stuck at, then give the exact next step.\n\n## Guardrails\n- Never ask the customer to share OTPs or passwords.",
-    knowledgeBase:
-      "## KYC stages\n1. PAN verification\n2. Aadhaar e-KYC\n3. Video KYC\n\n## Common blockers\n- Name mismatch between PAN and Aadhaar — direct to the correction flow.",
-    postCall: [
-      {
-        id: "p1",
-        name: "kyc_stage_reached",
-        prompt:
-          "Which KYC stage did the customer reach by the end of the conversation?",
-      },
-    ],
-  },
-  a_pricing: {
-    id: "a_pricing",
-    name: "pricing_qa",
-    type: "chat",
-    status: "draft",
-    tools: ["knowledge_lookup"],
-    masterPrompt:
-      "# Role\nYou answer pricing and plan questions for Paytm products.\n\n## Tools\nGround every answer in {{knowledge_lookup}} — never invent prices.",
-    knowledgeBase:
-      "## Plans\n- Basic: free\n- Pro: ₹299/mo\n- Enterprise: custom",
-    postCall: [
-      {
-        id: "p1",
-        name: "plan_interest",
-        prompt: "Which plan did the customer show the most interest in?",
-      },
-    ],
-  },
-  a_winback: {
-    id: "a_winback",
-    name: "winback_voice",
-    type: "voice",
-    status: "paused",
-    tools: ["place_call", "crm_query", "refund_initiate"],
-    masterPrompt:
-      "# Role\nYou are **Win-back Voice**, calling high-value lapsed customers.\n\n## Tools\nCheck history with {{crm_query}}. If the customer left over a billing dispute, you may offer a goodwill refund via {{refund_initiate}} (max ₹2,000).\n\n## Guardrails\n- Confirm the refund amount with the customer before initiating.",
-    knowledgeBase:
-      "## Goodwill refunds\nCap: ₹2,000. Requires the customer to confirm verbally.",
-    postCall: [
-      {
-        id: "p1",
-        name: "refund_offered",
-        prompt:
-          "Did the agent offer a goodwill refund? Capture the amount if so.",
-      },
-    ],
-  },
-  a_support: {
-    id: "a_support",
-    name: "l1_support",
-    type: "chat",
-    status: "live",
-    tools: [
-      "send_whatsapp",
-      "order_lookup",
-      "refund_initiate",
-      "knowledge_lookup",
-    ],
-    masterPrompt:
-      "# Role\nYou are **L1 Support** for Paytm orders and payments.\n\n## Tools\nLook up orders with {{order_lookup}}, answer policy questions with {{knowledge_lookup}}, and for confirmed failures initiate a refund with {{refund_initiate}}.\n\n## Guardrails\n- Verify the order belongs to the customer before any refund.",
-    knowledgeBase:
-      "## Refund eligibility\nOnly orders marked `returned` or `failed` are refundable.",
-    postCall: [
-      {
-        id: "p1",
-        name: "issue_category",
-        prompt: "Categorize the issue: delivery, payment, refund, or other.",
-      },
-      {
-        id: "p2",
-        name: "refund_initiated",
-        prompt: "Was a refund initiated during this conversation? yes or no.",
-      },
+      { id: "p1", name: "disposition", prompt:
+        "Classify the call into EXACTLY ONE of: PTP-Open, PTP-Kept, PTP-Partial, PTP-Broken, Already-Paid, Unable-to-Pay, Wrong-Number, Callback-Later, Dispute, Refuses, No-Answer. PTP-Kept / PTP-Partial / PTP-Broken are ONLY for follow-up calls where a prior promise existed — for a first call the correct PTP outcome is PTP-Open." },
+      { id: "p2", name: "ptp_date", prompt:
+        "If disposition is PTP-Open (or any PTP variant with a promised date), extract the promised payment date in YYYY-MM-DD; otherwise null." },
+      { id: "p3", name: "ptp_amount", prompt:
+        "If a PTP amount was captured, extract the amount in rupees as a number; otherwise null." },
+      { id: "p4", name: "callback_time", prompt:
+        "If disposition is Callback-Later, extract the borrower's preferred callback date and time; otherwise null." },
+      { id: "p5", name: "call_sentiment", prompt:
+        "Overall borrower sentiment during the call: positive, neutral, or negative." },
+      { id: "p6", name: "escalation_reason", prompt:
+        "If {{human_escalation}} was invoked, capture the short reason for escalation; otherwise null." },
     ],
   },
 };
@@ -210,7 +71,7 @@ export function voiceAgents(): AgentRecord[] {
   return Object.values(AGENT_RECORDS).filter((a) => a.type === "voice");
 }
 
-/** Output variables an agent's tools expose downstream (e.g. `order_lookup.delivered_status`). */
+/** Output variables an agent's tools expose downstream (e.g. `check_payment_status.payment_status`). */
 export function agentToolOutputVars(
   nameOrId?: string,
 ): { key: string; source: string }[] {

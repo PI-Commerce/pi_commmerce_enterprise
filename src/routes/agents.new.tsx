@@ -9,7 +9,7 @@ export const Route = createFileRoute("/agents/new")({
   }),
   head: () => ({
     meta: [
-      { title: "New agent · Pi Commerce Enterprise" },
+      { title: "New agent · Pi Agents FinServ" },
       { name: "description", content: "Create a new voice or chat AI agent." },
     ],
   }),

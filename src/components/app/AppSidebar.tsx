@@ -1,14 +1,15 @@
 import { useEffect, useState } from "react";
 import { Link, useRouterState } from "@tanstack/react-router";
 import {
-  LayoutDashboard, Megaphone, Bot, BarChart3, Plug, Settings, Command,
+  LayoutDashboard, Users, Megaphone, Bot, BarChart3, Landmark, Plug, Settings, Command,
   PanelLeftClose, PanelLeftOpen, Radio, ChevronRight, MessageCircle, MessageSquare, MessageSquareText,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useRegion } from "@/lib/region";
 
 const primary = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, exact: true },
+  { to: "/collections", label: "Collections", icon: Landmark },
+  { to: "/leads", label: "Leads", icon: Users },
   { to: "/campaigns", label: "Campaigns", icon: Megaphone },
   { to: "/agents", label: "Agents", icon: Bot },
   { to: "/analytics", label: "Analytics", icon: BarChart3 },
@@ -17,13 +18,14 @@ const primary = [
 type ChannelChild = { label: string; icon: React.ComponentType<{ className?: string }>; to?: string };
 const channelChildren: ChannelChild[] = [
   { to: "/channels/whatsapp", label: "WhatsApp", icon: MessageCircle },
-  { label: "Meta Ads", icon: Megaphone },
+  // Meta Ads removed on the FinServ branch — recovery calls don't ride paid social.
+  // SMS + RCS stay as "Coming soon" chips (no dedicated route yet on this branch).
   { label: "SMS", icon: MessageSquare },
   { label: "RCS", icon: MessageSquareText },
 ];
 
 const secondary = [
-  { to: "/integrations", label: "Integrations", icon: Plug, disabled: true },
+  { to: "/integrations", label: "Integrations", icon: Plug },
   { to: "/settings", label: "Settings", icon: Settings, disabled: true },
 ] as const;
 
@@ -31,7 +33,6 @@ const STORAGE_KEY = "pc_sidebar_collapsed";
 
 export function AppSidebar() {
   const path = useRouterState({ select: (s) => s.location.pathname });
-  const { label: regionLabel, code: regionCode } = useRegion();
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     if (typeof window === "undefined") return false;
     return window.localStorage.getItem(STORAGE_KEY) === "1";
@@ -57,8 +58,8 @@ export function AppSidebar() {
         </div>
         {!collapsed && (
           <div className="min-w-0">
-            <p className="truncate text-[13px] font-semibold leading-tight">Pi Commerce</p>
-            <p className="truncate text-[10.5px] text-muted-foreground">ACME Corp · {regionLabel} ({regionCode})</p>
+            <p className="truncate text-[13px] font-semibold leading-tight">Pi Agents</p>
+            <p className="truncate text-[10.5px] text-muted-foreground">FinServ · Collections</p>
           </div>
         )}
       </div>

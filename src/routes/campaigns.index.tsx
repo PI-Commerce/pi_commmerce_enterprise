@@ -35,7 +35,7 @@ export const Route = createFileRoute("/campaigns/")({
   component: CampaignList,
   head: () => ({
     meta: [
-      { title: "Campaigns · Pi Commerce Enterprise" },
+      { title: "Campaigns · Pi Agents FinServ" },
       { name: "description", content: "Design, run and review every orchestrated campaign." },
     ],
   }),

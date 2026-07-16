@@ -15,6 +15,7 @@ export type SankeyNodeKind =
   | "start"
   | "audience"
   | "apiToolCall"
+  | "aiTransform"
   | "abSplit"
   | "whatsapp"
   | "voice"
@@ -99,12 +100,16 @@ const KIND_TO_SANKEY: Record<NodeKind, SankeyNodeKind> = {
   // lead flows through. It shows Common Metrics + a Configuration Snapshot, but
   // has no channel funnel of its own.
   apiToolCall: "apiToolCall",
+  // AI Transformation is a pass-through processing step too — every lead flows
+  // through, computing derived variables that downstream nodes can reference.
+  aiTransform: "aiTransform",
 };
 
 const PASS_RATE: Record<SankeyNodeKind, number> = {
   start: 1,
   audience: 1,
   apiToolCall: 1,
+  aiTransform: 1,
   conditional: 1,
   abSplit: 1,
   delay: 1,
@@ -333,20 +338,22 @@ export const CAMPAIGNS: CampaignAnalytics[] = Object.entries(
 export const NODE_METRICS: Partial<
   Record<SankeyNodeKind, { label: string; value: number }[]>
 > = {
+  // FinServ Collections metric labels — Voice funnel is RPC-oriented and
+  // WhatsApp funnel ends in Recovered rather than a generic conversion.
   whatsapp: [
     { label: "Sent", value: 7441 },
     { label: "Delivered", value: 6998 },
     { label: "Read", value: 4120 },
-    { label: "Clicked", value: 2380 },
-    { label: "Replied", value: 1180 },
-    { label: "Conversion", value: 1120 },
+    { label: "Clicked (Pay link)", value: 2380 },
+    { label: "PTP captured", value: 1180 },
+    { label: "Recovered", value: 1120 },
   ],
   voice: [
     { label: "Attempted", value: 4961 },
     { label: "Connected", value: 3372 },
-    { label: "Answered", value: 3372 },
-    { label: "Interested", value: 1410 },
-    { label: "Conversion", value: 720 },
+    { label: "RPC (right-party)", value: 2810 },
+    { label: "PTP captured", value: 1410 },
+    { label: "Recovered", value: 720 },
   ],
   sms: [
     { label: "Sent", value: 12580 },
@@ -390,25 +397,13 @@ export const CHANNEL_CAMPAIGN_BREAKDOWN: {
   converted: number;
   rate: number;
 }[] = [
-  {
-    campaign: "Dormant Trader Reactivation",
-    sent: 50000,
-    converted: 5330,
-    rate: 10.7,
-  },
-  {
-    campaign: "New Trader Onboarding",
-    sent: 4820,
-    converted: 1840,
-    rate: 38.2,
-  },
-  {
-    campaign: "KYC Drop-off Recovery",
-    sent: 9802,
-    converted: 1402,
-    rate: 14.3,
-  },
-  { campaign: "High-Value Win-Back", sent: 8420, converted: 982, rate: 11.7 },
+  // FinServ Collections breakdown — sent = messages/calls attempted, converted =
+  // borrowers who paid (or made a kept PTP) within the campaign window.
+  { campaign: "Personal Loan · Pre-due EMI reminder", sent: 12480, converted: 8210, rate: 65.8 },
+  { campaign: "Personal Loan · Due-day EMI reminder", sent: 9840,  converted: 5620, rate: 57.1 },
+  { campaign: "Personal Loan · DPD 1–7 recovery",     sent: 4820,  converted: 1970, rate: 40.9 },
+  { campaign: "BFSI · Insurance Renewal",             sent: 8620,  converted: 3410, rate: 39.6 },
+  { campaign: "BFSI · Collections",                   sent: 6210,  converted: 1820, rate: 29.3 },
 ];
 /* ───────────── Node configuration (read-only summary for Drawer) ───────────── */
 
