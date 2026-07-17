@@ -158,10 +158,10 @@ export const TOOLS: ToolDef[] = [
   },
   {
     handle: "payment_link_gen",
-    description: "Generate a Razorpay payment link for an EMI amount",
+    description: "Generate a Paytm PG payment link for an EMI amount",
     type: "http",
     method: "POST",
-    url: "https://api.razorpay.com/v1/payment_links",
+    url: "https://securegw.paytm.in/link/create",
     auth: "apiKey",
     health: "ok",
     status: "live",
@@ -174,7 +174,7 @@ export const TOOLS: ToolDef[] = [
       { key: "expires_in_hours", dataType: "Number", in: "body", source: "constant", value: "48", description: "Link validity" },
     ],
     outputs: [
-      { path: "$.short_url", varName: "payment_url", dataType: "String", description: "Razorpay short link" },
+      { path: "$.short_url", varName: "payment_url", dataType: "String", description: "Paytm PG short link" },
       { path: "$.id", varName: "payment_link_id", dataType: "String", description: "Payment link id" },
       { path: "$.status", varName: "link_status", dataType: "String", description: "created / paid / expired" },
     ],

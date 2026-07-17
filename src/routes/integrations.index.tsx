@@ -3,7 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { AppShell, PageHeader } from "@/components/app/AppShell";
 import { PageTabs } from "@/components/app/Tabs";
 import { Button } from "@/components/ui/button";
-import { Building2, Contact, ShieldCheck, Wallet, Webhook, Key, Code2 } from "lucide-react";
+import { Building2, Contact, ShieldCheck, Webhook, Key, Code2 } from "lucide-react";
 
 export const Route = createFileRoute("/integrations/")({
   component: Integrations,
@@ -45,7 +45,15 @@ function Integrations() {
  *  vertical shape reads at a glance. Each card also carries a category chip
  *  so the classification is visible even when a card is seen in isolation. */
 type VendorCategory = "LMS" | "CRM" | "KYC" | "Payments";
-type Vendor = { name: string; icon: React.ComponentType<{ className?: string }>; connected: boolean; meta: string; category: VendorCategory };
+type Vendor = {
+  name: string;
+  /** Either a Lucide icon component OR a hosted logo image URL — one is required. */
+  icon?: React.ComponentType<{ className?: string }>;
+  logoUrl?: string;
+  connected: boolean;
+  meta: string;
+  category: VendorCategory;
+};
 
 const VENDORS: Vendor[] = [
   // Loan Management Systems
@@ -58,8 +66,14 @@ const VENDORS: Vendor[] = [
   { category: "CRM", name: "Zoho CRM",    icon: Contact,   connected: false, meta: "Contacts · deals · workflows" },
   // KYC
   { category: "KYC", name: "Digio",       icon: ShieldCheck, connected: true, meta: "Aadhaar eSign · Video KYC · document verification" },
-  // Payment gateway
-  { category: "Payments", name: "Razorpay", icon: Wallet,   connected: true,  meta: "UPI · cards · netbanking · payment links" },
+  // Payment gateway — AcmeBank uses Paytm PG on the FinServ branch.
+  {
+    category: "Payments",
+    name: "Paytm Payment Gateway",
+    logoUrl: "https://upload.wikimedia.org/wikipedia/commons/thumb/2/24/Paytm_Logo_%28standalone%29.svg/250px-Paytm_Logo_%28standalone%29.svg.png",
+    connected: true,
+    meta: "UPI · cards · netbanking · wallet · EMI · payment links",
+  },
 ];
 
 const CATEGORY_META: Record<VendorCategory, { label: string; tint: string }> = {
@@ -87,7 +101,7 @@ function Connectors() {
             </div>
             <div className="grid grid-cols-2 gap-3">
               {items.map((v) => (
-                <Card key={v.name} icon={v.icon} title={v.name} meta={v.meta} connected={v.connected} category={v.category} />
+                <Card key={v.name} icon={v.icon} logoUrl={v.logoUrl} title={v.name} meta={v.meta} connected={v.connected} category={v.category} />
               ))}
             </div>
           </section>
@@ -158,12 +172,27 @@ function Developer() {
   );
 }
 
-function Card({ icon: Icon, title, meta, connected, category }: { icon: React.ComponentType<{ className?: string }>; title: string; meta: string; connected: boolean; category: VendorCategory }) {
+function Card({
+  icon: Icon, logoUrl, title, meta, connected, category,
+}: {
+  icon?: React.ComponentType<{ className?: string }>;
+  logoUrl?: string;
+  title: string;
+  meta: string;
+  connected: boolean;
+  category: VendorCategory;
+}) {
   return (
     <div className="rounded-xl border border-border bg-card p-4">
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2">
-          <div className="flex h-9 w-9 items-center justify-center rounded-md bg-accent text-foreground"><Icon className="h-4 w-4" /></div>
+          <div className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-md bg-accent text-foreground">
+            {logoUrl ? (
+              <img src={logoUrl} alt={title} className="h-6 w-auto object-contain" />
+            ) : Icon ? (
+              <Icon className="h-4 w-4" />
+            ) : null}
+          </div>
           <span className={`inline-flex items-center rounded-full border px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-wide ${CATEGORY_META[category].tint}`}>
             {category}
           </span>
