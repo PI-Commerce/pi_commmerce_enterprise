@@ -159,6 +159,12 @@ export type LeadRecord = {
   segment: Segment;
   riskGrade: RiskGrade;
   products: LeadProduct[];              // 1..3 for the seed
+  /** ISO date the lead was first onboarded. Drives the Lead Creation column + filter. */
+  createdAt: string;
+  /** ISO date the lead memory was last touched (interaction / PTP / campaign event). */
+  lastUpdatedAt: string;
+  /** ISO date + channel of the most recent interaction (surfaces in the table). */
+  lastInteractionAt: string;
   preferences: LeadPreferences;
   contactFrequency: LeadContactFrequency;
   interactions: InteractionEntry[];
@@ -455,6 +461,11 @@ function makeLead(i: number): LeadRecord {
 
   const { register, rate } = buildPtpRegister(products);
 
+  // Date fields: creation is somewhere in the last 30–720 days; lastUpdatedAt is
+  // more recent (1–90 days); lastInteractionAt is closest to today (0–30 days).
+  const createdDays  = 30 + Math.abs(jitter(0, i * 3.7, 690));
+  const updatedDays  = 1  + Math.abs(jitter(0, i * 5.1, 89));
+  const interactedDays = Math.abs(jitter(0, i * 7.3, 30));
   return {
     id: `L_${String(300_000 + i * 97).padStart(6, "0")}`,
     customerId, customerName, phone,
@@ -462,6 +473,9 @@ function makeLead(i: number): LeadRecord {
     segment: pick(SEGMENTS, i * 3.1),
     riskGrade: pick(GRADES, i * 1.7),
     products,
+    createdAt: offsetDate(-createdDays),
+    lastUpdatedAt: offsetDate(-updatedDays),
+    lastInteractionAt: offsetDate(-interactedDays),
     preferences: {
       preferredDow: DOW.slice(0, 3 + (i % 3)),
       preferredTod: pick(TODS, i * 2.3),

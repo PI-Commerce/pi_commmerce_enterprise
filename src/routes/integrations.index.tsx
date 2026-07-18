@@ -55,23 +55,27 @@ type Vendor = {
   category: VendorCategory;
 };
 
+// v1: All FinServ integrations are in TBD stage — cards render but none show a
+// live connection. LMS + CRM scope depends on client-by-client negotiation;
+// KYC is out-of-scope for v1 but stays in the catalog for the roadmap story;
+// Paytm PG is the target payment gateway but not yet activated.
 const VENDORS: Vendor[] = [
   // Loan Management Systems
-  { category: "LMS", name: "CloudBankin", icon: Building2, connected: true,  meta: "Loan portfolio · disbursals · repayments · DPD" },
+  { category: "LMS", name: "CloudBankin", icon: Building2, connected: false, meta: "Loan portfolio · disbursals · repayments · DPD" },
   { category: "LMS", name: "Finezza",     icon: Building2, connected: false, meta: "Loan lifecycle · underwriting · collections" },
   { category: "LMS", name: "FinFlux",     icon: Building2, connected: false, meta: "Retail loans · SME loans · co-lending" },
   // CRMs
-  { category: "CRM", name: "Salesforce",  icon: Contact,   connected: true,  meta: "Contacts · leads · opportunities · cases" },
+  { category: "CRM", name: "Salesforce",  icon: Contact,   connected: false, meta: "Contacts · leads · opportunities · cases" },
   { category: "CRM", name: "Leadsquared", icon: Contact,   connected: false, meta: "Lead capture · scoring · nurturing" },
   { category: "CRM", name: "Zoho CRM",    icon: Contact,   connected: false, meta: "Contacts · deals · workflows" },
-  // KYC
-  { category: "KYC", name: "Digio",       icon: ShieldCheck, connected: true, meta: "Aadhaar eSign · Video KYC · document verification" },
-  // Payment gateway — AcmeBank uses Paytm PG on the FinServ branch.
+  // KYC (out-of-scope for v1, kept in the catalog for the roadmap story)
+  { category: "KYC", name: "Digio",       icon: ShieldCheck, connected: false, meta: "Aadhaar eSign · Video KYC · document verification" },
+  // Payment gateway
   {
     category: "Payments",
     name: "Paytm Payment Gateway",
     logoUrl: "https://upload.wikimedia.org/wikipedia/commons/thumb/2/24/Paytm_Logo_%28standalone%29.svg/250px-Paytm_Logo_%28standalone%29.svg.png",
-    connected: true,
+    connected: false,
     meta: "UPI · cards · netbanking · wallet · EMI · payment links",
   },
 ];

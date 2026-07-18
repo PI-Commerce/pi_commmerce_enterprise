@@ -45,6 +45,16 @@ export type ToolDef = {
   updatedAt: string;
   inputs: ToolInput[];
   outputs: ToolOutput[];
+  /**
+   * When true, this entry is a **Skill** — deterministic compute over lead
+   * memory / CSV / upstream vars, returning a typed value (enum · number ·
+   * boolean). No external API call, no side-effects, no auth. Skills surface
+   * in the Skills tab on /agents; Tools surface in the Tools tab.
+   */
+  isSkill?: boolean;
+  /** For enum outputs on Skills — the allowed values. Displayed as chips on the
+   *  Skill card and used as the enum source in the campaign-builder picker. */
+  outputEnumValues?: Partial<Record<string, string[]>>;
 };
 
 export const AUTH_LABEL: Record<ToolAuthKind, string> = {
@@ -241,72 +251,111 @@ export const TOOLS: ToolDef[] = [
       { path: "$.transfer.wait_sec", varName: "wait_sec", dataType: "Number", description: "Estimated wait in seconds" },
     ],
   },
-  /* ---- FinServ · Context tools (Sprint 2) ---- *
-   * "Context tools" derive lead-level attributes that get written back to lead
-   * memory when the API Tool Call node has "Save output to lead memory" ticked.
-   * Downstream nodes then reference them as `lead.memory.<key>`. Model both a
-   * pure computation (calculate_dpd) and lookups (LMS / interactions store).
+  /* ---- FinServ · Skills (v1) ------------------------------------------ *
+   * Skills = deterministic compute over lead memory + upstream vars, returning
+   * a typed value (enum / number / boolean). No external URL, no auth, no
+   * side-effects. Every Skill has isSkill=true and surfaces on the Skills tab
+   * of /agents. Skills are still invokable from an API Tool Call node in the
+   * campaign builder — the picker groups Skills + Tools together.
    */
   {
-    handle: "calculate_dpd",
-    description: "Compute Days-Past-Due from an EMI due date — derives dpd_days + dpd_bucket",
-    type: "http",
-    method: "GET",
-    url: "https://api.piagents.com/context/v1/dpd",
-    auth: "bearer",
+    handle: "calculate_dpd_status",
+    description: "Derive DPD status from an EMI due date (Skill · deterministic compute)",
+    type: "http",           // stored as "http" so the shared schema fits; UI treats it as Skill via isSkill
+    method: "COMPUTE",
+    url: "local://skill/calculate_dpd_status",
+    auth: "none",
     health: "ok",
     status: "live",
     createdAt: "16 Jul 2026",
-    updatedAt: "16 Jul 2026",
+    updatedAt: "17 Jul 2026",
+    isSkill: true,
     inputs: [
-      { key: "due_date", dataType: "String", in: "query", source: "campaign", value: "due_date", description: "EMI due date (YYYY-MM-DD)" },
-      { key: "as_of",    dataType: "String", in: "query", source: "constant", value: "today", description: "Reference date; defaults to today" },
+      { key: "due_date", dataType: "String", in: "body", source: "campaign", value: "due_date", description: "EMI due date (YYYY-MM-DD)" },
     ],
     outputs: [
-      { path: "$.dpd_days",   varName: "dpd_days",   dataType: "Number", description: "Days past due (0 for pre-due, negative if not yet due)" },
-      { path: "$.dpd_bucket", varName: "dpd_bucket", dataType: "String", description: "Pre-due / Early / Mid — canonical bucket label" },
+      { path: "$.dpd_status", varName: "dpd_status", dataType: "String", description: "pre_due / due_today / post_due" },
+    ],
+    outputEnumValues: { dpd_status: ["pre_due", "due_today", "post_due"] },
+  },
+  {
+    handle: "calculate_dpd_bucket",
+    description: "If DPD status is post_due, classify into DPD bucket (Skill · deterministic compute)",
+    type: "http",
+    method: "COMPUTE",
+    url: "local://skill/calculate_dpd_bucket",
+    auth: "none",
+    health: "ok",
+    status: "live",
+    createdAt: "16 Jul 2026",
+    updatedAt: "17 Jul 2026",
+    isSkill: true,
+    inputs: [
+      { key: "due_date", dataType: "String", in: "body", source: "campaign", value: "due_date", description: "EMI due date (YYYY-MM-DD)" },
+    ],
+    outputs: [
+      { path: "$.dpd_bucket", varName: "dpd_bucket", dataType: "String", description: "early_bucket / mid_bucket / late_bucket · null if not post_due" },
+    ],
+    outputEnumValues: { dpd_bucket: ["early_bucket (1–7d)", "mid_bucket", "late_bucket (30+ d)"] },
+  },
+  {
+    handle: "calculate_ptp_rate",
+    description: "Compute lead's Promise-to-Pay kept rate from PTP register (Skill · deterministic compute)",
+    type: "http",
+    method: "COMPUTE",
+    url: "local://skill/calculate_ptp_rate",
+    auth: "none",
+    health: "ok",
+    status: "live",
+    createdAt: "17 Jul 2026",
+    updatedAt: "17 Jul 2026",
+    isSkill: true,
+    inputs: [
+      { key: "customer_id", dataType: "String", in: "body", source: "campaign", value: "customer_id", description: "Borrower id" },
+    ],
+    outputs: [
+      { path: "$.ptp_rate_pct", varName: "ptp_rate_pct", dataType: "Number", description: "(promises_kept / promises_made) × 100" },
     ],
   },
   {
-    handle: "lookup_ptp_history",
-    description: "Look up a borrower's Promise-to-Pay history — derives ptp_rate and last-PTP outcome",
+    handle: "check_ptp_status",
+    description: "Classify PTP status for the current EMI (Skill · deterministic compute)",
     type: "http",
-    method: "GET",
-    url: "https://api.acmebank.in/lms/v1/borrowers/{customer_id}/ptp",
-    auth: "oauth2",
+    method: "COMPUTE",
+    url: "local://skill/check_ptp_status",
+    auth: "none",
     health: "ok",
     status: "live",
-    createdAt: "16 Jul 2026",
-    updatedAt: "16 Jul 2026",
+    createdAt: "17 Jul 2026",
+    updatedAt: "17 Jul 2026",
+    isSkill: true,
     inputs: [
-      { key: "customer_id", dataType: "String", in: "path", source: "campaign", value: "customer_id", description: "Internal borrower id" },
+      { key: "loan_id",  dataType: "String", in: "body", source: "campaign", value: "loan_id",  description: "Loan reference" },
+      { key: "due_date", dataType: "String", in: "body", source: "campaign", value: "due_date", description: "EMI due date" },
     ],
     outputs: [
-      { path: "$.rate_pct",     varName: "ptp_rate_pct",   dataType: "Number",  description: "Historical PTP kept rate (%)" },
-      { path: "$.last.date",    varName: "last_ptp_date",  dataType: "String",  description: "Most recent PTP promised date" },
-      { path: "$.last.kept",    varName: "last_ptp_kept",  dataType: "Boolean", description: "Was the most recent PTP kept?" },
-      { path: "$.total_made",   varName: "ptp_total_made", dataType: "Number",  description: "Total promises captured" },
+      { path: "$.ptp_status", varName: "ptp_status", dataType: "String", description: "no_ptp / kept / broken" },
     ],
+    outputEnumValues: { ptp_status: ["no_ptp", "kept", "broken"] },
   },
   {
-    handle: "lookup_contact_frequency",
-    description: "Look up how often the borrower has been contacted per channel in the last 30 days",
+    handle: "check_right_party_connectivity",
+    description: "Was the last outreach on a given channel a Right-Party Contact? (Skill · deterministic compute)",
     type: "http",
-    method: "GET",
-    url: "https://api.piagents.com/context/v1/contact-frequency",
-    auth: "bearer",
+    method: "COMPUTE",
+    url: "local://skill/check_rpc",
+    auth: "none",
     health: "ok",
     status: "live",
-    createdAt: "16 Jul 2026",
-    updatedAt: "16 Jul 2026",
+    createdAt: "17 Jul 2026",
+    updatedAt: "17 Jul 2026",
+    isSkill: true,
     inputs: [
-      { key: "customer_id", dataType: "String", in: "query", source: "campaign", value: "customer_id", description: "Internal borrower id" },
-      { key: "window_days", dataType: "Number", in: "query", source: "constant", value: "30", description: "Look-back window" },
+      { key: "customer_id", dataType: "String", in: "body", source: "campaign", value: "customer_id", description: "Borrower id" },
+      { key: "channel",     dataType: "String", in: "body", source: "agent",                              description: "voice / whatsapp / sms" },
     ],
     outputs: [
-      { path: "$.whatsapp_30d", varName: "contact_whatsapp_30d", dataType: "Number", description: "WhatsApp touches in the window" },
-      { path: "$.voice_30d",    varName: "contact_voice_30d",    dataType: "Number", description: "Voice touches in the window" },
-      { path: "$.sms_30d",      varName: "contact_sms_30d",      dataType: "Number", description: "SMS touches in the window" },
+      { path: "$.is_rpc", varName: "is_rpc", dataType: "Boolean", description: "true if the last touch on this channel reached the right party" },
     ],
   },
 ];

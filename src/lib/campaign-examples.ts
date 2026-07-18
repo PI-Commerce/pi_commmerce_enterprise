@@ -806,16 +806,18 @@ const PL_DPD_EARLY = buildCampaign("Personal Loan · DPD 1–7 recovery", [
   // Context tool: compute DPD from the borrower's due_date and PERSIST dpd_days +
   // dpd_bucket to lead memory so any downstream picker (and any future campaign
   // touching the same borrower) can read `lead.memory.dpd_bucket` / dpd_days.
-  sApi("apiCalcDpd", "Calculate DPD", "Context · derive + persist to lead memory", "calculate_dpd",
+  // Skill (deterministic compute) — persists dpd_status to lead memory so any
+  // downstream picker (and any future campaign on the same borrower) can read it.
+  sApi("apiCalcDpd", "Calculate DPD Status", "Skill · derive + persist to lead memory", "calculate_dpd_status",
     [{ v: "due_date", def: "contact.due_date" }],
-    ["dpd_days", "dpd_bucket"],
+    ["dpd_status"],
   ),
   // AI Transformation: derive a warm, segment-aware opener from lead history so the
   // Voice agent doesn't cold-open. Output `ait_1.greeting_line` is available to the
   // Voice node's variable mapping downstream.
   sAiT("aiOpener", "Personalize opener", "Segment-aware greeting from PTP history", [
     { id: "t_opener", type: "Custom AI Action",
-      input: "contact.first_name, contact.segment, lead.memory.dpd_bucket, contact.last_ptp_kept",
+      input: "contact.first_name, lead.memory.personal_loan.dpd_bucket, contact.last_ptp_kept",
       output: "greeting_line" },
   ]),
   sVoice("vColl", "Voice AI collections call", "Disposition + PTP capture", {
@@ -1381,19 +1383,13 @@ const EX1_LAID = assemble(EX1_NODES, EX1_EDGES);
 const EX2_LAID = assemble(EX2_NODES, EX2_EDGES);
 
 const RAW_EXAMPLE_CAMPAIGNS: Record<string, ExampleCampaign> = {
-  // FinServ branch: order below drives the Campaigns-list order (the list
-  // staggers `lastEdited` by index — earliest entries appear as most recently
-  // edited). Personal-Loan Collections leads, then legacy BFSI carry-overs.
-  // The other retail constants (C_ALTAYER, C_ACTIVATION, C_REWARD, C_WINBACK,
-  // C_SUBSCRIPTION, C_SEASONAL, C_LEADQUAL, C_UPSELL, C_ORDERCONF, C_OUTBOUND,
-  // C_CART, C_PRICEDROP, C_BACKINSTOCK, EX1_LAID, EX2_LAID) remain defined in
-  // this file but are unregistered here so they don't appear in the Campaigns
-  // list — intentional to keep the file diff small and reversible on merge from main.
+  // FinServ v1 scope — Personal Loan Collections ONLY. Renewal (c_ex4) and legacy
+  // Collections (c_ex6) are unregistered so the demo stays tight to the pack.
+  // All retail constants remain defined in this file but unused; the diff stays
+  // reversible on merge from main.
   pl_predue: PL_PREDUE,
   pl_dueday: PL_DUEDAY,
   pl_dpd_early: PL_DPD_EARLY,
-  c_ex4: C_RENEWAL,
-  c_ex6: C_COLLECT,
 };
 
 /* ---- normalization ------------------------------------------------------

@@ -176,8 +176,13 @@ export type PresetConfig = {
   senderId?: string;
   smsBody?: string;
   // ---- Delay ----
+  /** Delay v2: `fixed` = classic value+unit; `variable` = wait UNTIL the datetime
+   *  in `delayVariable` (e.g. a Voice-agent PTP date or a borrower callback time). */
+  delayMode?: "fixed" | "variable";
   delayValue?: number;
   delayUnit?: "Minutes" | "Hours" | "Days";
+  /** For `delayMode: "variable"` — the upstream variable holding the target datetime. */
+  delayVariable?: string;
   // ---- API Tool Call ----
   /** Handle of the registry tool this node calls (see {@link file://./tool-registry.ts}). */
   apiTool?: string;

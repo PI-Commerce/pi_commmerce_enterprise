@@ -370,16 +370,7 @@ function KindFields({
       return <AbSplitFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
 
     case "delay":
-      return (
-        <Section title="Delay">
-          <Field label="Duration" required>
-            <div className="grid grid-cols-2 gap-2">
-              <Input disabled={readOnly} type="number" defaultValue={config?.delayValue ?? 24} className="h-9" onChange={() => mark(true)} />
-              <SelectLike disabled={readOnly} options={["Minutes", "Hours", "Days"]} onPick={() => mark(true)} defaultValue={config?.delayUnit ?? "Hours"} />
-            </div>
-          </Field>
-        </Section>
-      );
+      return <DelayFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
 
     case "voiceCall":
       return <VoiceCallFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
@@ -430,6 +421,96 @@ function AiTransformFields({
       </div>
       <AiTransformationsSection readOnly={readOnly} transforms={transforms} setTransforms={setTransforms} />
     </>
+  );
+}
+
+/* --------------------------- Delay (v2) --------------------------- *
+ *  v1 = fixed duration only. v2 adds a second mode: wait UNTIL a specific
+ *  datetime carried in an upstream variable (Voice-agent callback_time, PTP
+ *  date, etc.). Node advances when the current time reaches the resolved value.
+ */
+function DelayFields({
+  config, readOnly, mark, onChange,
+}: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
+  const [mode, setMode] = useState<"fixed" | "variable">(config?.delayMode ?? "fixed");
+  const setDelayMode = (m: "fixed" | "variable") => {
+    setMode(m);
+    onChange({ config: { ...(config ?? {}), delayMode: m } });
+    mark(true);
+  };
+  return (
+    <Section title="Delay">
+      {/* Mode picker — two radio-style tiles so both options are equally discoverable */}
+      <div className="mb-3 grid grid-cols-2 gap-2">
+        <ModeTile
+          selected={mode === "fixed"}
+          onClick={() => !readOnly && setDelayMode("fixed")}
+          icon={<Clock className="h-3.5 w-3.5" />}
+          title="Fixed duration"
+          subtitle="Wait N minutes/hours/days"
+          disabled={readOnly}
+        />
+        <ModeTile
+          selected={mode === "variable"}
+          onClick={() => !readOnly && setDelayMode("variable")}
+          icon={<Variable className="h-3.5 w-3.5" />}
+          title="Until datetime"
+          subtitle="Wait until a variable's datetime"
+          disabled={readOnly}
+        />
+      </div>
+      {mode === "fixed" ? (
+        <Field label="Duration" required>
+          <div className="grid grid-cols-2 gap-2">
+            <Input disabled={readOnly} type="number" defaultValue={config?.delayValue ?? 24} className="h-9" onChange={() => mark(true)} />
+            <SelectLike disabled={readOnly} options={["Minutes", "Hours", "Days"]} onPick={() => mark(true)} defaultValue={config?.delayUnit ?? "Hours"} />
+          </div>
+        </Field>
+      ) : (
+        <>
+          <Field label="Wait until (datetime variable)" required>
+            <VariablePicker
+              defaultValue={config?.delayVariable ?? ""}
+              disabled={readOnly}
+              onChange={(v) => {
+                onChange({ config: { ...(config ?? {}), delayMode: "variable", delayVariable: v } });
+                mark(!!v, v ? undefined : "Pick a datetime variable");
+              }}
+            />
+          </Field>
+          <div className="mt-2 flex items-start gap-2 rounded-md border border-dashed border-border bg-muted/30 px-2.5 py-2 text-[11px] text-muted-foreground">
+            <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>
+              Node advances when the current time reaches the value in the picked variable — typically a
+              Voice-agent output like <span className="font-mono text-foreground">voice_1.callback_time</span> or
+              <span className="font-mono text-foreground"> voice_1.ptp_date</span>. If the datetime is in the past when the
+              lead arrives, the node advances immediately.
+            </span>
+          </div>
+        </>
+      )}
+    </Section>
+  );
+}
+
+function ModeTile({ selected, onClick, icon, title, subtitle, disabled }: { selected: boolean; onClick: () => void; icon: React.ReactNode; title: string; subtitle: string; disabled?: boolean }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={cn(
+        "flex flex-col items-start gap-1 rounded-lg border px-2.5 py-2 text-left transition-colors",
+        selected ? "border-ai/50 bg-ai/5" : "border-border bg-card hover:bg-accent/40",
+        disabled && "cursor-not-allowed opacity-60",
+      )}
+    >
+      <div className={cn("flex items-center gap-1.5", selected ? "text-ai" : "text-muted-foreground")}>
+        {icon}
+        <span className="text-[12px] font-medium">{title}</span>
+      </div>
+      <span className="text-[10.5px] text-muted-foreground">{subtitle}</span>
+    </button>
   );
 }
 
