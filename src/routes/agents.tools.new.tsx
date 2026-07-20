@@ -148,6 +148,9 @@ function ToolEditor() {
   );
 
   const isHttp = draft.type === "http";
+  // Skills open the same read-only editor as tools but their back-nav returns
+  // to the Skills tab (not Tools), so the surface feels dedicated to skills.
+  const isSkillView = existing?.isSkill === true;
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground">
@@ -155,11 +158,11 @@ function ToolEditor() {
       <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-border bg-background/90 px-3 backdrop-blur-xl">
         <div className="flex min-w-0 items-center gap-2">
           <Link
-            to="/agents" search={{ tab: "tools" }}
+            to="/agents" search={{ tab: isSkillView ? "skills" : "tools" }}
             className="flex h-8 items-center gap-1 rounded-md px-2 text-[12.5px] text-muted-foreground hover:bg-accent hover:text-foreground"
           >
             <ChevronLeft className="h-4 w-4" />
-            <span className="hidden sm:inline">Tools</span>
+            <span className="hidden sm:inline">{isSkillView ? "Skills" : "Tools"}</span>
           </Link>
           <span className="text-muted-foreground/40">/</span>
           <span className="truncate font-mono text-[13.5px] font-medium">{draft.handle.trim() || (existing ? existing.handle : "Tool")}</span>

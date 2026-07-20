@@ -410,18 +410,10 @@ function AiTransformFields({
   // Always valid — 0 or more transforms is a legal configuration. The node
   // simply becomes a pass-through when empty. Marked once on mount.
   useEffect(() => { mark(true); }, []);
-  return (
-    <>
-      <div className="mb-4 flex items-start gap-2 rounded-md border border-ai/30 bg-ai/5 px-2.5 py-2 text-[11.5px] text-ai">
-        <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-        <span>
-          Define AI-generated variables from upstream data. Each transform's <span className="font-mono">output</span> becomes a workflow variable
-          (<span className="font-mono">ait_1.&lt;name&gt;</span>) available to downstream nodes.
-        </span>
-      </div>
-      <AiTransformationsSection readOnly={readOnly} transforms={transforms} setTransforms={setTransforms} />
-    </>
-  );
+  // Standalone rendering: no wrapper collapsible + no top banner. The parent
+  // config panel already labels the node ("AI Transformation"); the list of
+  // transforms is the only content this panel needs to show.
+  return <AiTransformationsSection readOnly={readOnly} transforms={transforms} setTransforms={setTransforms} standalone />;
 }
 
 /* --------------------------- Delay (v2) --------------------------- *
@@ -2121,11 +2113,15 @@ function CollapsibleSection({
 /* --------------------------- AI Transformations --------------------------- */
 
 function AiTransformationsSection({
-  readOnly, transforms, setTransforms,
+  readOnly, transforms, setTransforms, standalone,
 }: {
   readOnly?: boolean;
   transforms: AiTransform[];
   setTransforms: React.Dispatch<React.SetStateAction<AiTransform[]>>;
+  /** When true, renders the list directly (no outer collapsible, no title bar).
+   *  Used by the standalone AI Transformation node — the config panel already
+   *  labels the node, so a nested collapse is redundant. */
+  standalone?: boolean;
 }) {
   const move = (id: string, dir: -1 | 1) => {
     setTransforms((xs) => {
@@ -2141,21 +2137,11 @@ function AiTransformationsSection({
     id: uid("t"), type: "Translate", input: "", output: "", open: true,
   }]);
 
-  return (
-    <CollapsibleSection
-      title="AI Transformations"
-      icon={Sparkles}
-      defaultOpen={transforms.length > 0}
-      badge={transforms.length || undefined}
-      headerRight={
-        <Button size="sm" variant="ghost" disabled={readOnly} onClick={(e) => { e.stopPropagation(); add(); }} className="h-7 gap-1 px-2 text-[11px]">
-          <Plus className="h-3 w-3" /> Add
-        </Button>
-      }
-    >
+  const body = (
+    <>
       {transforms.length === 0 ? (
         <div className="rounded-md border border-dashed border-border bg-muted/30 px-3 py-4 text-center text-[11.5px] text-muted-foreground">
-          No transformations. Outputs you define here become variables on downstream nodes.
+          No transformations yet. Add one to define an AI-generated variable that downstream nodes can use.
         </div>
       ) : (
         <div className="space-y-2">
@@ -2205,6 +2191,44 @@ function AiTransformationsSection({
           ))}
         </div>
       )}
+    </>
+  );
+
+  if (standalone) {
+    return (
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Sparkles className="h-3.5 w-3.5 text-ai" />
+            <span className="text-[12px] font-medium">Transformations</span>
+            {transforms.length > 0 && (
+              <span className="rounded-full border border-ai/25 bg-ai/10 px-1.5 py-0.5 text-[10.5px] font-semibold text-ai">
+                {transforms.length}
+              </span>
+            )}
+          </div>
+          <Button size="sm" variant="ghost" disabled={readOnly} onClick={add} className="h-7 gap-1 px-2 text-[11px]">
+            <Plus className="h-3 w-3" /> Add
+          </Button>
+        </div>
+        {body}
+      </div>
+    );
+  }
+
+  return (
+    <CollapsibleSection
+      title="AI Transformations"
+      icon={Sparkles}
+      defaultOpen={transforms.length > 0}
+      badge={transforms.length || undefined}
+      headerRight={
+        <Button size="sm" variant="ghost" disabled={readOnly} onClick={(e) => { e.stopPropagation(); add(); }} className="h-7 gap-1 px-2 text-[11px]">
+          <Plus className="h-3 w-3" /> Add
+        </Button>
+      }
+    >
+      {body}
     </CollapsibleSection>
   );
 }

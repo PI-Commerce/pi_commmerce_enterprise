@@ -9,9 +9,15 @@
  *
  * Scope per the FinServ v1 doc:
  *   KPI cards (4): RPC rate · PTP conversion rate · Amount Recovered · Upcoming Promises
- *   Charts (2 groups):
+ *   Charts:
  *     - PTP Funnel: captured / kept / broken
- *     - Recovery Analytics: recovery rate, recovery cycle, channel effectiveness
+ *     - Recovery Rate (single-number card)
+ *     - Recovery Cycle (single-number card)
+ *     - Channel Effectiveness (horizontal bar)
+ *
+ * All figures are "run-to-date" — i.e. across every lead touched in this
+ * campaign run. No trailing-window framing (no "last 7 days"). The KPIs and
+ * cards below carry no `timeframe` field for that reason.
  */
 
 import type { UseCase } from "./campaign-types";
@@ -22,58 +28,85 @@ export type Kpi = {
   label: string;
   value: string | number;
   unit: string;
-  timeframe: string;
+  /** Plain-English explanation for the info button. No variable syntax, no
+   *  jargon — the ICP is a non-technical business user. */
   info: string;
 };
 
 export type FunnelStage = { stage: string; value: number };
 
-/** Recovery Analytics is a small composite: an overall recovery-rate figure +
- *  a median recovery-cycle figure + a per-channel breakdown of ₹ recovered. */
-export type RecoveryAnalytics = {
-  recoveryRate: { pct: number; totalLeads: number; recovered: number };
-  recoveryCycle: { medianDays: number; sampleSize: number };
-  channelEffectiveness: { channel: string; recovered: number; tint: string }[];
-};
+export type ChannelEffectivenessRow = { channel: string; recovered: number; tint: string };
 
 export type BusinessAnalyticsPack = {
   kpis: Kpi[];
-  ptpFunnel?: { title: string; subtitle?: string; stages: FunnelStage[]; tint?: string };
-  recoveryAnalytics?: { title: string; subtitle?: string; data: RecoveryAnalytics };
+  ptpFunnel?: { title: string; stages: FunnelStage[]; tint?: string; info: string };
+  /** Three separate cards under Recovery Analytics — not merged into one. */
+  recoveryRate?: { title: string; pct: number; totalLeads: number; recovered: number; info: string };
+  recoveryCycle?: { title: string; medianDays: number; sampleSize: number; info: string };
+  channelEffectiveness?: { title: string; rows: ChannelEffectivenessRow[]; info: string };
 };
 
 /* ------------------------ Personal Loan Collections ------------------------ */
 
 const PL_COLLECTIONS: BusinessAnalyticsPack = {
   kpis: [
-    { label: "Right-party contact rate",   value: 72.4,      unit: "%",       timeframe: "Last 7 days",   info: "Share of connected calls that reached the right party (borrower or authorized speaker). Calculated from Voice-agent dispositions." },
-    { label: "PTP → recovered conversion", value: 46.8,      unit: "%",       timeframe: "Last 7 days",   info: "PTPs captured that resulted in payment_status = received within the promised date + grace period." },
-    { label: "Amount recovered",           value: "₹18.4L",  unit: "recovered", timeframe: "Last 7 days", info: "Sum of emi_amount across leads where payment_status = received during the campaign window." },
-    { label: "Upcoming promises",          value: 84,        unit: "PTPs",    timeframe: "Next 3 days",   info: "Open PTPs (PTP = true, kept = null) whose promised date falls within the next 3 days." },
+    {
+      label: "Right-Party Contact Rate",
+      value: 72.4,
+      unit: "%",
+      info: "Share of calls where the AI actually reached the borrower (not a family member, wrong number, or voicemail). Only right-party contacts can capture a promise-to-pay.",
+    },
+    {
+      label: "PTP Conversion Rate",
+      value: 46.8,
+      unit: "%",
+      info: "Of the promises the AI captured, how many were kept and turned into actual payments.",
+    },
+    {
+      label: "Amount Recovered",
+      value: "₹18.4L",
+      unit: "",
+      info: "Total money collected from all borrowers in this campaign run.",
+    },
+    {
+      label: "Upcoming Promises",
+      value: 84,
+      unit: "",
+      info: "Open promises where the borrower is due to pay in the next 3 days.",
+    },
   ],
   ptpFunnel: {
     title: "PTP Funnel",
-    subtitle: "Captured → kept → broken",
     stages: [
       { stage: "PTP captured", value: 1180 },
       { stage: "PTP kept",     value: 862  },
       { stage: "PTP broken",   value: 318  },
     ],
     tint: "#22c55e",
+    info: "How every promise-to-pay played out. Every captured promise either becomes a kept payment or a broken PTP that needs re-work.",
   },
-  recoveryAnalytics: {
-    title: "Recovery Analytics",
-    subtitle: "Rate · Cycle · Channel effectiveness",
-    data: {
-      recoveryRate:  { pct: 38.2, totalLeads: 4823, recovered: 1842 },
-      recoveryCycle: { medianDays: 4.2, sampleSize: 1842 },
-      channelEffectiveness: [
-        { channel: "Voice AI",  recovered: 1_340_000, tint: "#a78bfa" },
-        { channel: "WhatsApp",  recovered: 1_250_000, tint: "#22c55e" },
-        { channel: "SMS",       recovered:   188_000, tint: "#f59e0b" },
-        { channel: "Human L2",  recovered:    62_000, tint: "#64748b" },
-      ],
-    },
+  recoveryRate: {
+    title: "Recovery Rate",
+    pct: 38.2,
+    totalLeads: 4823,
+    recovered: 1842,
+    info: "Share of leads in this campaign run where the borrower has paid.",
+  },
+  recoveryCycle: {
+    title: "Recovery Cycle",
+    medianDays: 4.2,
+    sampleSize: 1842,
+    info: "Median number of days between the first outreach and payment received. Lower is better.",
+  },
+  channelEffectiveness: {
+    title: "Channel Effectiveness",
+    rows: [
+      { channel: "Voice AI",  recovered: 1_340_000, tint: "#a78bfa" },
+      { channel: "WhatsApp",  recovered: 1_250_000, tint: "#22c55e" },
+      { channel: "SMS",       recovered:   188_000, tint: "#f59e0b" },
+      { channel: "Human L2",  recovered:    62_000, tint: "#64748b" },
+    ],
+    info: "Money recovered attributed to each channel. Attribution follows the last-touch channel before payment.",
   },
 };
 

@@ -871,6 +871,82 @@ const PL_DPD_EARLY = buildCampaign("Personal Loan · DPD 1–7 recovery", [
   ed("disp", "end", "dispute"),
 ], "personal_loan_collections");
 
+/* ---- Personal-Loan · PTP reminder (T-1 before promised date) ----------- *
+ *  A borrower captured a PTP earlier in DPD_EARLY. This campaign runs the
+ *  day before the promised date: a gentle WhatsApp nudge with the same
+ *  payment link → 4h delay → LMS paid check → Voice escalation only if
+ *  payment still hasn't landed.
+ */
+const PL_PTP_REMINDER = buildCampaign("Personal Loan · PTP reminder", [
+  sStart(),
+  sAud("CSV · open PTPs due tomorrow", ["loan_id", "emi_amount", "ptp_date", "ptp_amount"]),
+  sWa("waPtpRem", "WhatsApp PTP reminder", "T-1 · gentle nudge + payment link", "collections_ptp_reminder_v1",
+    { vars: [
+      { v: "{{1}}", def: "contact.first_name" },
+      { v: "{{2}}", def: "ptp_amount" },
+      { v: "{{3}}", def: "ptp_date" },
+    ] }),
+  sDelay("d1", 4, "Hours"),
+  sApi("apiPaidPtp", "Check payment status", "LMS · has borrower paid?", "check_payment_status", [
+    { v: "loan_id",  def: "contact.loan_id" },
+    { v: "due_date", def: "contact.ptp_date" },
+  ]),
+  sCond("paid", "Paid?", "api_1.payment_status", [
+    { id: "yes", label: "Yes · PTP kept",  value: "paid" },
+    { id: "no",  label: "No · still open", value: "unpaid" },
+  ]),
+  sVoice("vPtpEsc", "Voice AI PTP reminder call", "Concierge · reconfirm PTP", {
+    agent: "collections_voice",
+  }),
+  sEnd(),
+], [
+  ed("start", "aud"), ed("aud", "waPtpRem"),
+  ed("waPtpRem", "d1"), ed("d1", "apiPaidPtp"), ed("apiPaidPtp", "paid"),
+  ed("paid", "end", "yes"),
+  ed("paid", "vPtpEsc", "no"), ed("vPtpEsc", "end"),
+], "personal_loan_collections");
+
+/* ---- Personal-Loan · Broken PTP recovery ------------------------------- *
+ *  The day AFTER a promised date passed with no payment. Voice-led recovery
+ *  with a tight disposition branch: capture a fresh PTP or escalate to a
+ *  human L2 queue for the hardest cases.
+ */
+const PL_BROKEN_PTP = buildCampaign("Personal Loan · Broken PTP recovery", [
+  sStart(),
+  sAud("CSV · broken PTPs (promised yesterday, unpaid)", ["loan_id", "emi_amount", "due_date", "last_ptp_date", "last_ptp_amount"]),
+  sWa("waBrokenLead", "WhatsApp broken-PTP nudge", "T+1 · payment link + escalation notice", "collections_broken_ptp_v1",
+    { vars: [
+      { v: "{{1}}", def: "contact.first_name" },
+      { v: "{{2}}", def: "emi_amount" },
+    ] }),
+  sDelay("d1", 2, "Hours"),
+  sVoice("vBroken", "Voice AI broken-PTP call", "Fresh PTP capture or L2 escalation", {
+    agent: "collections_voice",
+    callStart: "09:00", callEnd: "19:00", timezone: "Asia/Kolkata (IST)",
+    maxAttempts: 2, retryInterval: "3 hours",
+  }),
+  sCond("disp", "Disposition branch", "voice_1.disposition", [
+    { id: "ptp",      label: "PTP · Open (new)",  value: "PTP-Open" },
+    { id: "paid",     label: "Already paid",      value: "Already-Paid" },
+    { id: "unable",   label: "Unable to pay",     value: "Unable-to-Pay" },
+    { id: "dispute",  label: "Disputes amount",   value: "Dispute" },
+  ]),
+  // Fresh-PTP branch: WhatsApp confirmation with new promised date
+  sWa("waNewPtp", "New PTP confirmation", "WhatsApp · new PTP + payment link", "collections_ptp_reminder_v1",
+    { vars: [
+      { v: "{{1}}", def: "contact.first_name" },
+      { v: "{{2}}", def: "voice_1.ptp_amount" },
+      { v: "{{3}}", def: "voice_1.ptp_date" },
+    ] }),
+  sEnd(),
+], [
+  ed("start", "aud"), ed("aud", "waBrokenLead"), ed("waBrokenLead", "d1"), ed("d1", "vBroken"), ed("vBroken", "disp"),
+  ed("disp", "waNewPtp", "ptp"), ed("waNewPtp", "end"),
+  ed("disp", "end", "paid"),
+  ed("disp", "end", "unable"),
+  ed("disp", "end", "dispute"),
+], "personal_loan_collections");
+
 /* ---- 5. Retail · Activation -------------------------------------------- */
 const C_ACTIVATION = buildCampaign("Retail · Activation", [
   sStart(),
@@ -1390,6 +1466,8 @@ const RAW_EXAMPLE_CAMPAIGNS: Record<string, ExampleCampaign> = {
   pl_predue: PL_PREDUE,
   pl_dueday: PL_DUEDAY,
   pl_dpd_early: PL_DPD_EARLY,
+  pl_ptp_reminder: PL_PTP_REMINDER,
+  pl_broken_ptp: PL_BROKEN_PTP,
 };
 
 /* ---- normalization ------------------------------------------------------

@@ -46,15 +46,29 @@ export type ToolDef = {
   inputs: ToolInput[];
   outputs: ToolOutput[];
   /**
-   * When true, this entry is a **Skill** — deterministic compute over lead
-   * memory / CSV / upstream vars, returning a typed value (enum · number ·
-   * boolean). No external API call, no side-effects, no auth. Skills surface
-   * in the Skills tab on /agents; Tools surface in the Tools tab.
+   * When true, this entry is a **Skill** — an internally-available capability
+   * (no external API, no auth, no side-effects) that agents and campaign nodes
+   * can invoke. Skills surface on the Skills tab of /agents; Tools surface on
+   * the Tools tab.
    */
   isSkill?: boolean;
+  /**
+   * Skills come in two flavours:
+   *   - "function" — a piece of deterministic compute (e.g. calculate DPD from
+   *     a date). Returns a typed value (enum · number · boolean).
+   *   - "llm"      — a prompt template (a markdown-authored instruction) the
+   *     agent invokes with variables. Returns free-form text.
+   * Undefined when isSkill is not true.
+   */
+  skillType?: "function" | "llm";
   /** For enum outputs on Skills — the allowed values. Displayed as chips on the
    *  Skill card and used as the enum source in the campaign-builder picker. */
   outputEnumValues?: Partial<Record<string, string[]>>;
+};
+
+export const SKILL_TYPE_LABEL: Record<"function" | "llm", string> = {
+  function: "Function",
+  llm: "LLM Skill",
 };
 
 export const AUTH_LABEL: Record<ToolAuthKind, string> = {
@@ -270,6 +284,7 @@ export const TOOLS: ToolDef[] = [
     createdAt: "16 Jul 2026",
     updatedAt: "17 Jul 2026",
     isSkill: true,
+    skillType: "function",
     inputs: [
       { key: "due_date", dataType: "String", in: "body", source: "campaign", value: "due_date", description: "EMI due date (YYYY-MM-DD)" },
     ],
@@ -290,6 +305,7 @@ export const TOOLS: ToolDef[] = [
     createdAt: "16 Jul 2026",
     updatedAt: "17 Jul 2026",
     isSkill: true,
+    skillType: "function",
     inputs: [
       { key: "due_date", dataType: "String", in: "body", source: "campaign", value: "due_date", description: "EMI due date (YYYY-MM-DD)" },
     ],
@@ -310,6 +326,7 @@ export const TOOLS: ToolDef[] = [
     createdAt: "17 Jul 2026",
     updatedAt: "17 Jul 2026",
     isSkill: true,
+    skillType: "function",
     inputs: [
       { key: "customer_id", dataType: "String", in: "body", source: "campaign", value: "customer_id", description: "Borrower id" },
     ],
@@ -329,6 +346,7 @@ export const TOOLS: ToolDef[] = [
     createdAt: "17 Jul 2026",
     updatedAt: "17 Jul 2026",
     isSkill: true,
+    skillType: "function",
     inputs: [
       { key: "loan_id",  dataType: "String", in: "body", source: "campaign", value: "loan_id",  description: "Loan reference" },
       { key: "due_date", dataType: "String", in: "body", source: "campaign", value: "due_date", description: "EMI due date" },
@@ -350,12 +368,43 @@ export const TOOLS: ToolDef[] = [
     createdAt: "17 Jul 2026",
     updatedAt: "17 Jul 2026",
     isSkill: true,
+    skillType: "function",
     inputs: [
       { key: "customer_id", dataType: "String", in: "body", source: "campaign", value: "customer_id", description: "Borrower id" },
       { key: "channel",     dataType: "String", in: "body", source: "agent",                              description: "voice / whatsapp / sms" },
     ],
     outputs: [
       { path: "$.is_rpc", varName: "is_rpc", dataType: "Boolean", description: "true if the last touch on this channel reached the right party" },
+    ],
+  },
+  /* ---- LLM Skill · one prompt-template example -----------------------
+   * LLM Skills are markdown-authored instructions the agent invokes with
+   * variables. The engine sends the prompt + variables to the LLM and returns
+   * the response as a free-form text output. No enum, no typed compute — the
+   * value of the skill is the prompt itself, versioned + reusable across
+   * campaigns and agents.
+   */
+  {
+    handle: "compose_pl_call_summary",
+    description: "Compose a 2-line disposition summary for a Personal-Loan collections call (LLM Skill · prompt template)",
+    type: "http",
+    method: "COMPUTE",
+    url: "local://skill/compose_pl_call_summary",
+    auth: "none",
+    health: "ok",
+    status: "live",
+    createdAt: "17 Jul 2026",
+    updatedAt: "18 Jul 2026",
+    isSkill: true,
+    skillType: "llm",
+    inputs: [
+      { key: "disposition",      dataType: "String", in: "body", source: "agent", description: "Voice agent's captured disposition" },
+      { key: "ptp_date",         dataType: "String", in: "body", source: "agent", description: "Promised-to-pay date if captured" },
+      { key: "ptp_amount",       dataType: "Number", in: "body", source: "agent", description: "Promised amount if captured" },
+      { key: "borrower_context", dataType: "String", in: "body", source: "campaign", value: "segment", description: "Any context lines from the lead memory" },
+    ],
+    outputs: [
+      { path: "$.summary", varName: "call_summary", dataType: "String", description: "Two-line CRM-friendly summary of the call" },
     ],
   },
 ];
