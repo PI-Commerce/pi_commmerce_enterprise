@@ -274,11 +274,14 @@ export const TOOLS: ToolDef[] = [
     ],
   },
   /* ---- FinServ · Skills (v1) ------------------------------------------ *
-   * Skills = deterministic compute over lead memory + upstream vars, returning
-   * a typed value (enum / number / boolean). No external URL, no auth, no
-   * side-effects. Every Skill has isSkill=true and surfaces on the Skills tab
-   * of /agents. Skills are still invokable from an API Tool Call node in the
-   * campaign builder — the picker groups Skills + Tools together.
+   * Skills come in two flavours (see skillType): Function (deterministic
+   * compute) and LLM Skill (prompt template). None make external HTTP calls.
+   *
+   * Invocation model: Skills are NOT invoked from a Tool node. Instead each
+   * useCase declares which skills auto-attach to a campaign (see
+   * lib/skills-registry.ts). At Audience ingestion the attached skills run
+   * once per lead — inputs mapped on the Audience node's "Skill inputs"
+   * subsection, outputs written to lead memory (`lead.memory.<field>`).
    */
   {
     handle: "calculate_dpd_status",
@@ -431,54 +434,6 @@ export const TOOLS: ToolDef[] = [
   // WhatsApp / SMS: an inbound reply from the borrower is proof of RPC.
   return last.inbound_reply === true;
 }`,
-  },
-  /* ---- LLM Skill · one prompt-template example -----------------------
-   * LLM Skills are markdown-authored instructions the agent invokes with
-   * variables. The engine sends the prompt + variables to the LLM and returns
-   * the response as a free-form text output. No enum, no typed compute — the
-   * value of the skill is the prompt itself, versioned + reusable across
-   * campaigns and agents.
-   */
-  {
-    handle: "compose_pl_call_summary",
-    description: "Compose a 2-line disposition summary for a Personal-Loan collections call (LLM Skill · prompt template)",
-    type: "http",
-    method: "COMPUTE",
-    url: "local://skill/compose_pl_call_summary",
-    auth: "none",
-    health: "ok",
-    status: "live",
-    createdAt: "17 Jul 2026",
-    updatedAt: "18 Jul 2026",
-    isSkill: true,
-    skillType: "llm",
-    inputs: [
-      { key: "disposition",      dataType: "String", in: "body", source: "agent", description: "Voice agent's captured disposition" },
-      { key: "ptp_date",         dataType: "String", in: "body", source: "agent", description: "Promised-to-pay date if captured" },
-      { key: "ptp_amount",       dataType: "Number", in: "body", source: "agent", description: "Promised amount if captured" },
-      { key: "borrower_context", dataType: "String", in: "body", source: "campaign", value: "segment", description: "Any context lines from the lead memory" },
-    ],
-    outputs: [
-      { path: "$.summary", varName: "call_summary", dataType: "String", description: "Two-line CRM-friendly summary of the call" },
-    ],
-    skillPromptModel: "claude-sonnet-4.5",
-    skillPromptTemplate: `You are a Personal-Loan collections analyst writing a two-line
-disposition summary that a human agent will read in the CRM.
-
-Write in plain, non-judgemental English. Never quote the borrower.
-Never repeat account numbers. Do not invent facts that aren't in the
-inputs. If a promised date is captured, include it in ISO format
-(YYYY-MM-DD).
-
-Inputs:
-- disposition       : {{disposition}}
-- ptp_date          : {{ptp_date}}
-- ptp_amount (INR)  : {{ptp_amount}}
-- borrower context  : {{borrower_context}}
-
-Output format:
-Line 1 — What happened on the call (≤ 90 chars).
-Line 2 — What the human agent should do next (≤ 90 chars).`,
   },
 ];
 

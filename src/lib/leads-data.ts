@@ -185,38 +185,23 @@ export type LeadRecord = {
 import type { UseCase } from "./campaign-types";
 export type { UseCase };
 
+/**
+ * `lead.memory.*` = the values produced by Skills of the campaign's active
+ * useCase pack. In v1 this is the ONLY source of lead memory — no static
+ * per-product profile, no imaginary policy / credit-card / application
+ * fields. Entries are keyed off the skill's declared output varName.
+ *
+ * When more BFSI packs come online, add their Skill outputs here (scoped by
+ * useCase); the picker filters by the campaign's current useCase.
+ */
 export const LEAD_MEMORY_KEYS: { key: string; source: string; description: string; useCase?: UseCase }[] = [
-  // Identity — always available
-  { key: "lead.memory.segment",               source: "Lead Memory · identity", description: "Retail / SME / HNI" },
-  { key: "lead.memory.risk_grade",            source: "Lead Memory · identity", description: "A / B / C / D" },
-  { key: "lead.memory.contact_whatsapp_30d",  source: "Lead Memory · identity", description: "WhatsApp touches in last 30 days" },
-  { key: "lead.memory.contact_voice_30d",     source: "Lead Memory · identity", description: "Voice touches in last 30 days" },
-  { key: "lead.memory.contact_sms_30d",       source: "Lead Memory · identity", description: "SMS touches in last 30 days" },
-  { key: "lead.memory.preferred_tod",         source: "Lead Memory · identity", description: "Morning / Afternoon / Evening" },
-  { key: "lead.memory.language",              source: "Lead Memory · identity", description: "Preferred language (ISO code)" },
-  // Personal Loan Collections
-  { key: "lead.memory.personal_loan.dpd_bucket",     source: "Lead Memory · Personal Loan", description: "Pre-due / Early / Mid",         useCase: "personal_loan_collections" },
-  { key: "lead.memory.personal_loan.dpd_days",       source: "Lead Memory · Personal Loan", description: "Days past due",                 useCase: "personal_loan_collections" },
-  { key: "lead.memory.personal_loan.outstanding",    source: "Lead Memory · Personal Loan", description: "Outstanding principal (₹)",     useCase: "personal_loan_collections" },
-  { key: "lead.memory.personal_loan.emi_amount",     source: "Lead Memory · Personal Loan", description: "EMI amount (₹)",                useCase: "personal_loan_collections" },
-  { key: "lead.memory.personal_loan.ptp_rate_pct",   source: "Lead Memory · Personal Loan", description: "Historical PTP kept rate (%)",  useCase: "personal_loan_collections" },
-  { key: "lead.memory.personal_loan.last_ptp_kept",  source: "Lead Memory · Personal Loan", description: "Was the last PTP kept?",        useCase: "personal_loan_collections" },
-  // Insurance Renewal
-  { key: "lead.memory.policy.renewal_date",     source: "Lead Memory · Policy", description: "Next renewal date",                useCase: "insurance_renewal" },
-  { key: "lead.memory.policy.days_to_renewal",  source: "Lead Memory · Policy", description: "Days until renewal (negative = lapsed)", useCase: "insurance_renewal" },
-  { key: "lead.memory.policy.premium",          source: "Lead Memory · Policy", description: "Annual premium (₹)",               useCase: "insurance_renewal" },
-  { key: "lead.memory.policy.sum_insured",      source: "Lead Memory · Policy", description: "Sum insured (₹)",                  useCase: "insurance_renewal" },
-  { key: "lead.memory.policy.type",             source: "Lead Memory · Policy", description: "Health / Life / Auto / Home",      useCase: "insurance_renewal" },
-  { key: "lead.memory.policy.last_claim_status",source: "Lead Memory · Policy", description: "Settled / Rejected / In-review / none", useCase: "insurance_renewal" },
-  // Credit Card Dues
-  { key: "lead.memory.credit_card.dpd_bucket",  source: "Lead Memory · Credit Card", description: "Pre-due / Early / Mid",       useCase: "credit_card_dues" },
-  { key: "lead.memory.credit_card.outstanding", source: "Lead Memory · Credit Card", description: "Statement balance (₹)",       useCase: "credit_card_dues" },
-  { key: "lead.memory.credit_card.min_due",     source: "Lead Memory · Credit Card", description: "Minimum due (₹)",              useCase: "credit_card_dues" },
-  { key: "lead.memory.credit_card.credit_limit",source: "Lead Memory · Credit Card", description: "Credit limit (₹)",             useCase: "credit_card_dues" },
-  // KYC Onboarding
-  { key: "lead.memory.application.stage",       source: "Lead Memory · Application", description: "Current onboarding stage",    useCase: "kyc_onboarding" },
-  { key: "lead.memory.application.kyc_status",  source: "Lead Memory · Application", description: "Pending / Verified / Failed", useCase: "kyc_onboarding" },
-  { key: "lead.memory.application.applying_for",source: "Lead Memory · Application", description: "Product the customer applied for", useCase: "kyc_onboarding" },
+  // All entries share the same `source` label so the variable picker collapses
+  // them under ONE "Lead Memory" group — not one group per producing skill.
+  { key: "lead.memory.dpd_status",      source: "Lead Memory", description: "pre_due / due_today / post_due",              useCase: "personal_loan_collections" },
+  { key: "lead.memory.dpd_bucket",      source: "Lead Memory", description: "early_bucket / mid_bucket / late_bucket",     useCase: "personal_loan_collections" },
+  { key: "lead.memory.ptp_rate_pct",    source: "Lead Memory", description: "Historical PTP kept rate (%)",                useCase: "personal_loan_collections" },
+  { key: "lead.memory.ptp_status",      source: "Lead Memory", description: "no_ptp / kept / broken",                      useCase: "personal_loan_collections" },
+  { key: "lead.memory.is_rpc",          source: "Lead Memory", description: "Was the last outreach a right-party contact?", useCase: "personal_loan_collections" },
 ];
 
 /* ------------------------------------------------------------------ *

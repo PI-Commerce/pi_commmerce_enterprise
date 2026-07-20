@@ -2,8 +2,9 @@ import { useCallback, useEffect, useState } from "react";
 import { createFileRoute, useNavigate, useBlocker } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { WorkflowCanvas } from "@/components/workflow/WorkflowCanvas";
+import { CampaignUseCaseContext } from "@/components/workflow/ConfigPanel";
 import { BuilderTopBar } from "@/components/workflow/BuilderTopBar";
-import type { CampaignStatus } from "@/lib/campaign-types";
+import type { CampaignStatus, UseCase } from "@/lib/campaign-types";
 import { EXAMPLE_CAMPAIGNS } from "@/lib/campaign-examples";
 import { VERSION_HISTORY, makeVersion, type CampaignVersion } from "@/lib/campaign-versions";
 import {
@@ -19,10 +20,11 @@ import {
 
 export const Route = createFileRoute("/campaigns/$id")({
   component: CampaignBuilder,
-  validateSearch: (search: Record<string, unknown>): { name?: string; description?: string; objective?: string } => ({
+  validateSearch: (search: Record<string, unknown>): { name?: string; description?: string; objective?: string; useCase?: string } => ({
     name: typeof search.name === "string" ? search.name : undefined,
     description: typeof search.description === "string" ? search.description : undefined,
     objective: typeof search.objective === "string" ? search.objective : undefined,
+    useCase: typeof search.useCase === "string" ? search.useCase : undefined,
   }),
   head: ({ params }) => ({
     meta: [
@@ -34,7 +36,7 @@ export const Route = createFileRoute("/campaigns/$id")({
 
 function CampaignBuilder() {
   const { id } = Route.useParams();
-  const { name: seedName, description: seedDescription, objective: seedObjective } = Route.useSearch();
+  const { name: seedName, description: seedDescription, objective: seedObjective, useCase: seedUseCase } = Route.useSearch();
   const navigate = useNavigate();
   const isNew = id === "new";
   const example = EXAMPLE_CAMPAIGNS[id];
@@ -171,7 +173,12 @@ function CampaignBuilder() {
   const handleValidity = useCallback((v: number, t: number) => { setValidCount(v); setTotal(t); }, []);
   const handleDirty = useCallback(() => setDirty(true), []);
 
+  // Resolve the campaign's useCase — from the loaded example (existing campaign)
+  // OR from the search param the create dialog forwarded (new campaign).
+  const campaignUseCase: UseCase | undefined = example?.useCase ?? (seedUseCase as UseCase | undefined);
+
   return (
+    <CampaignUseCaseContext.Provider value={campaignUseCase}>
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground">
       <BuilderTopBar
         campaignId={id}
@@ -233,5 +240,6 @@ function CampaignBuilder() {
         </AlertDialogContent>
       </AlertDialog>
     </div>
+    </CampaignUseCaseContext.Provider>
   );
 }

@@ -32,11 +32,10 @@ function Integrations() {
         onChange={setTab}
         tabs={[
           { id: "connectors", label: "Connectors" },
-          { id: "developer", label: "Developer" },
+          { id: "developer", label: "Developer", disabled: true },
         ]}
       />
       {tab === "connectors" && <Connectors />}
-      {tab === "developer" && <Developer />}
     </AppShell>
   );
 }

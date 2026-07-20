@@ -131,7 +131,7 @@ const NODE_COLOR: Record<SankeyNodeKind, string> = {
 const NODE_TYPE_LABEL: Record<SankeyNodeKind, string> = {
   start: "Start",
   audience: "Audience",
-  apiToolCall: "API Tool Call",
+  apiToolCall: "Tool",
   aiTransform: "AI Transformation",
   abSplit: "A/B Split",
   whatsapp: "WhatsApp",

@@ -18,7 +18,7 @@
 
 import { useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { ChevronLeft, Code2, FileText, Sparkles } from "lucide-react";
+import { ChevronLeft, Code2, FileText } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getTool, SKILL_TYPE_LABEL, type ToolDef, type ToolInput, type ToolOutput } from "@/lib/tool-registry";
 
@@ -94,38 +94,26 @@ function SkillEditor() {
 function FunctionSkillView({ skill }: { skill: ToolDef }) {
   return (
     <>
-      <Card
-        title="Skill details"
-        subtitle="A Function skill is deterministic compute — no external API, no auth, no side-effects."
-      >
+      <Card title="Skill details">
         <FormRow label="Skill name">
           <ReadInput value={skill.handle} className="font-mono" />
-          <Hint>Lowercase, no spaces — how agents and campaign nodes reference this skill.</Hint>
         </FormRow>
         <FormRow label="Description">
           <ReadTextarea value={skill.description.replace(/\s*\(Skill.*\)\s*$/i, "")} rows={2} />
         </FormRow>
       </Card>
 
-      <Card title="Definition" subtitle="The executable logic. Read-only preview — v1 runtime is out of scope.">
+      <Card title="Definition">
         <CodeBlock>{skill.skillFunctionBody ?? "// No definition seeded for this skill."}</CodeBlock>
       </Card>
 
-      <Card title="Inputs" subtitle="The arguments this skill needs. Wire each one to lead memory or CSV data when you drop the skill into a campaign.">
+      <Card title="Inputs">
         <InputsTable rows={skill.inputs} />
       </Card>
 
-      <Card title="Outputs" subtitle="Values this skill returns. They become downstream variables agents and conditionals can read.">
+      <Card title="Outputs">
         <OutputsTable rows={skill.outputs} enumValues={skill.outputEnumValues} />
       </Card>
-
-      <UsageCallout>
-        Drop this skill upstream of a Voice / WhatsApp node via an{" "}
-        <span className="font-mono text-foreground">API Tool Call</span> node — or reference{" "}
-        <span className="font-mono text-foreground">@{skill.handle}</span> in an Agent's tool list.
-        The campaign builder maps each input to a lead field; the skill's outputs then appear
-        in the downstream variable picker.
-      </UsageCallout>
     </>
   );
 }
@@ -137,13 +125,9 @@ function FunctionSkillView({ skill }: { skill: ToolDef }) {
 function LlmSkillView({ skill }: { skill: ToolDef }) {
   return (
     <>
-      <Card
-        title="Skill details"
-        subtitle="An LLM skill is a prompt template invoked with variables. The output is free-form model text."
-      >
+      <Card title="Skill details">
         <FormRow label="Skill name">
           <ReadInput value={skill.handle} className="font-mono" />
-          <Hint>Lowercase, no spaces — referenced from agents and campaign nodes.</Hint>
         </FormRow>
         <FormRow label="Description">
           <ReadTextarea value={skill.description.replace(/\s*\(LLM Skill.*\)\s*$/i, "")} rows={2} />
@@ -153,24 +137,17 @@ function LlmSkillView({ skill }: { skill: ToolDef }) {
         </FormRow>
       </Card>
 
-      <Card title="Prompt template" subtitle="Markdown-authored instruction. Variables in {{double braces}} are filled from the mapped inputs at run-time.">
+      <Card title="Prompt template">
         <PromptBlock>{skill.skillPromptTemplate ?? "// No prompt template seeded."}</PromptBlock>
       </Card>
 
-      <Card title="Inputs" subtitle="Variables referenced from the prompt template. Wire each one to lead memory or CSV data in the campaign builder.">
+      <Card title="Inputs">
         <InputsTable rows={skill.inputs} />
       </Card>
 
-      <Card title="Output" subtitle="A single free-form value returned by the model.">
+      <Card title="Output">
         <OutputsTable rows={skill.outputs} enumValues={skill.outputEnumValues} />
       </Card>
-
-      <UsageCallout>
-        Reference <span className="font-mono text-foreground">@{skill.handle}</span> from an Agent's
-        tool list, or drop it upstream of a WhatsApp / CRM-write node via an{" "}
-        <span className="font-mono text-foreground">API Tool Call</span> node. The model returns a
-        text value that downstream nodes read via <span className="font-mono text-foreground">{`{{skill.${skill.outputs[0]?.varName ?? "output"}}}`}</span>.
-      </UsageCallout>
     </>
   );
 }
@@ -179,12 +156,11 @@ function LlmSkillView({ skill }: { skill: ToolDef }) {
 /* Shared building blocks                                             */
 /* ------------------------------------------------------------------ */
 
-function Card({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
+function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="rounded-xl border border-border bg-card p-5">
       <div className="mb-4">
         <h2 className="text-[15px] font-semibold">{title}</h2>
-        {subtitle && <p className="mt-0.5 text-[12px] text-muted-foreground">{subtitle}</p>}
       </div>
       <div className="space-y-3">{children}</div>
     </div>
@@ -228,10 +204,6 @@ function ReadTextarea({ value, rows = 3 }: { value: string; rows?: number }) {
   );
 }
 
-function Hint({ children }: { children: React.ReactNode }) {
-  return <p className="mt-1 text-[11px] text-muted-foreground">{children}</p>;
-}
-
 function CodeBlock({ children }: { children: React.ReactNode }) {
   return (
     <pre className="max-h-[420px] overflow-auto rounded-lg border border-border bg-muted/40 p-4 font-mono text-[12.5px] leading-relaxed text-foreground">
@@ -259,8 +231,7 @@ function InputsTable({ rows }: { rows: ToolInput[] }) {
           <tr className="border-b border-border bg-secondary/40 text-[10.5px] uppercase tracking-wider text-muted-foreground">
             <th className="px-3 py-2 text-left font-medium">Name</th>
             <th className="px-3 py-2 text-left font-medium">Type</th>
-            <th className="px-3 py-2 text-left font-medium">Default binding</th>
-            <th className="px-3 py-2 text-left font-medium">Description</th>
+            <th className="px-3 py-2 text-left font-medium">Expected format</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-border">
@@ -269,15 +240,6 @@ function InputsTable({ rows }: { rows: ToolInput[] }) {
               <td className="px-3 py-2 font-mono">{r.key}</td>
               <td className="px-3 py-2">
                 <span className="rounded-md border border-border bg-secondary/40 px-1.5 py-0.5 text-[11px]">{r.dataType}</span>
-              </td>
-              <td className="px-3 py-2 text-muted-foreground">
-                {r.source === "campaign" && r.value ? (
-                  <span className="font-mono">contact.{r.value}</span>
-                ) : r.source === "constant" && r.value ? (
-                  <span className="font-mono">{r.value}</span>
-                ) : (
-                  <span className="italic">— set in campaign builder —</span>
-                )}
               </td>
               <td className="px-3 py-2 text-muted-foreground">{r.description}</td>
             </tr>
@@ -327,15 +289,6 @@ function OutputsTable({ rows, enumValues }: { rows: ToolOutput[]; enumValues?: P
           })}
         </tbody>
       </table>
-    </div>
-  );
-}
-
-function UsageCallout({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="flex items-start gap-2 rounded-lg border border-border bg-muted/30 p-3 text-[12px] text-muted-foreground">
-      <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-ai" />
-      <p className="leading-snug">{children}</p>
     </div>
   );
 }

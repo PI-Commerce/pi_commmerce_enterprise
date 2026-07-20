@@ -868,25 +868,38 @@ function CreateCampaignDialog({
   onCreate: (name: string, description?: string, objective?: string, useCase?: string) => void;
 }) {
   const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [objective, setObjective] = useState<string>("");
-  const [useCase, setUseCase] = useState<string>("");
+  const [objective, setObjective] = useState("");
+  const [stage, setStage] = useState<string>("");
+  const [product, setProduct] = useState<string>("");
+  const [template, setTemplate] = useState<string>("");
 
-  const reset = () => { setName(""); setDescription(""); setObjective(""); setUseCase(""); };
+  const reset = () => { setName(""); setObjective(""); setStage(""); setProduct(""); setTemplate(""); };
   const submit = () => {
     if (!name.trim()) return;
-    onCreate(name.trim(), description.trim() || undefined, objective || undefined, useCase || undefined);
+    // Legacy handler shape: (name, description, objective, useCase). Map the
+    // new dropdowns → the useCase key the rest of the app understands.
+    const useCase = stage === "Recovery" && product === "personal_loan"
+      ? "personal_loan_collections"
+      : undefined;
+    // Description slot now carries the campaign objective (renamed to
+    // "Campaign objective" in the UI). Template selection is passed via a
+    // convention on `name` — the builder can pre-select it in a later cut.
+    onCreate(name.trim(), objective.trim() || undefined, template || undefined, useCase);
     reset();
   };
+
+  // When stage or product changes, reset the template — otherwise the picker
+  // could show a stale selection that no longer belongs to the current combo.
+  const setStageAndReset = (v: string) => { setStage(v); setTemplate(""); };
+  const setProductAndReset = (v: string) => { setProduct(v); setTemplate(""); };
+
+  const templates = TEMPLATES_FOR[`${stage}|${product}`] ?? [];
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) reset(); onOpenChange(v); }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="text-base">Create a Campaign</DialogTitle>
-          <DialogDescription className="text-xs">
-            Name your campaign. You'll design the orchestration in the next step.
-          </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-2">
@@ -897,63 +910,101 @@ function CreateCampaignDialog({
               autoFocus
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Dormant Trader Reactivation"
+              placeholder="e.g. Q3 Personal Loan Collections"
               className="h-9 text-sm"
               onKeyDown={(e) => { if (e.key === "Enter" && name.trim()) submit(); }}
             />
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="cdesc" className="text-xs">Description</Label>
+            <Label htmlFor="cobj" className="text-xs">Campaign objective</Label>
             <Textarea
-              id="cdesc"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Briefly describe the goal of this campaign…"
-              rows={3}
+              id="cobj"
+              value={objective}
+              onChange={(e) => setObjective(e.target.value)}
+              placeholder="What does this campaign need to achieve?"
+              rows={2}
               className="resize-none text-sm"
             />
           </div>
 
           <div className="space-y-1.5">
-            <Label className="text-xs">
-              Use case <span className="text-muted-foreground">· BFSI vertical pack</span>
-            </Label>
-            <Select value={useCase} onValueChange={setUseCase}>
+            <Label className="text-xs">Lifecycle stage</Label>
+            <Select value={stage} onValueChange={setStageAndReset}>
               <SelectTrigger className="h-9 text-sm">
-                <SelectValue placeholder="Select a use case" />
+                <SelectValue placeholder="Select a stage" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="personal_loan_collections">Personal Loan Collections</SelectItem>
-                <SelectItem value="insurance_renewal">Insurance Renewal</SelectItem>
-                <SelectItem value="credit_card_dues">Credit Card Dues</SelectItem>
-                <SelectItem value="kyc_onboarding">KYC / Onboarding</SelectItem>
-                <SelectItem value="cross_sell">Cross-sell</SelectItem>
-                <SelectItem value="generic">Generic BFSI</SelectItem>
+                {LIFECYCLE_STAGES.map((s) => (
+                  <SelectItem key={s} value={s}>{s}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
-            <p className="text-[10.5px] text-muted-foreground">
-              Drives the Business Analytics section shown above this campaign's Analytics runs,
-              and scopes which <span className="font-mono">lead.memory.*</span> variables surface in the builder.
-            </p>
           </div>
 
           <div className="space-y-1.5">
-            <Label className="text-xs">Objective</Label>
-            <Select value={objective} onValueChange={setObjective}>
+            <Label className="text-xs">Industry &amp; product</Label>
+            <Select value={product} onValueChange={setProductAndReset}>
               <SelectTrigger className="h-9 text-sm">
-                <SelectValue placeholder="Select an objective" />
+                <SelectValue placeholder="Select a product" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="reactivation">Reactivation</SelectItem>
-                <SelectItem value="onboarding">Onboarding</SelectItem>
-                <SelectItem value="retention">Retention</SelectItem>
-                <SelectItem value="conversion">Conversion</SelectItem>
-                <SelectItem value="winback">Win-back</SelectItem>
-                <SelectItem value="awareness">Awareness</SelectItem>
+                <div className="px-2 py-1 text-[10.5px] uppercase tracking-wider text-muted-foreground">Financial Services</div>
+                {FS_PRODUCTS.map((p) => (
+                  <SelectItem key={p.value} value={p.value} disabled={p.disabled}>
+                    <span className="flex items-center gap-2">
+                      {p.label}
+                      {p.disabled && <span className="rounded-full border border-border bg-secondary px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-muted-foreground">Soon</span>}
+                    </span>
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
+
+          {/* Inline template picker — appears when both stage + product resolve to a matching set */}
+          {stage && product && (
+            <div className="space-y-1.5">
+              <Label className="text-xs">Template</Label>
+              {templates.length ? (
+                <div className="space-y-1.5">
+                  {templates.map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => setTemplate(t.id)}
+                      className={cn(
+                        "flex w-full items-center gap-2 rounded-md border px-2.5 py-2 text-left text-[12.5px] transition-colors",
+                        template === t.id
+                          ? "border-foreground bg-accent/40"
+                          : "border-border bg-card hover:bg-accent/20",
+                      )}
+                    >
+                      <span className="flex-1">{t.label}</span>
+                      {template === t.id && <span className="text-[10.5px] text-muted-foreground">Selected</span>}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => setTemplate("blank")}
+                    className={cn(
+                      "flex w-full items-center gap-2 rounded-md border px-2.5 py-2 text-left text-[12.5px] transition-colors",
+                      template === "blank"
+                        ? "border-foreground bg-accent/40"
+                        : "border-dashed border-border bg-card hover:bg-accent/20",
+                    )}
+                  >
+                    <span className="flex-1 text-muted-foreground">Start blank</span>
+                    {template === "blank" && <span className="text-[10.5px] text-muted-foreground">Selected</span>}
+                  </button>
+                </div>
+              ) : (
+                <p className="rounded-md border border-dashed border-border bg-muted/30 px-3 py-2 text-[11.5px] text-muted-foreground">
+                  No templates for this combination yet. Pick a different stage + product, or start blank.
+                </p>
+              )}
+            </div>
+          )}
         </div>
 
         <DialogFooter>
@@ -964,3 +1015,38 @@ function CreateCampaignDialog({
     </Dialog>
   );
 }
+
+/* ----------------------------------------------------------------- *
+ *  Campaign creation — vocabulary + template mapping                *
+ * ----------------------------------------------------------------- */
+
+const LIFECYCLE_STAGES = [
+  "Awareness",
+  "Acquisition",
+  "Onboarding",
+  "Activation",
+  "Retention",
+  "Support",
+  "Recovery",
+] as const;
+
+const FS_PRODUCTS: { value: string; label: string; disabled?: boolean }[] = [
+  { value: "personal_loan",       label: "Personal Loan" },
+  { value: "credit_card",         label: "Credit Card",         disabled: true },
+  { value: "personal_insurance",  label: "Personal Insurance",  disabled: true },
+  { value: "business_insurance",  label: "Business Insurance",  disabled: true },
+  { value: "business_loan",       label: "Business Loan",       disabled: true },
+];
+
+/** Templates surfaced inline when the (stage · product) combo resolves. Keys
+ *  are `${stage}|${product}` for direct lookup. Only Recovery × Personal Loan
+ *  has real templates in v1; every other combo will show "no templates yet". */
+const TEMPLATES_FOR: Record<string, { id: string; label: string }[]> = {
+  "Recovery|personal_loan": [
+    { id: "pl_predue",             label: "Pre-due EMI Reminder" },
+    { id: "pl_dueday",             label: "Due-day EMI Reminder" },
+    { id: "pl_predue_collections", label: "Pre-due EMI Reminder & Collections" },
+    { id: "pl_dueday_collections", label: "Due-day EMI Reminder & Collections" },
+    { id: "pl_dpd_early",          label: "Early DPD Reminder + Recovery" },
+  ],
+};

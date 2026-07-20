@@ -730,7 +730,7 @@ const C_COLLECT = buildCampaign("BFSI · Collections", [
  * ============================================================== */
 
 /* ---- Personal-Loan · Pre-due EMI reminder (T-2) ------------------------ */
-const PL_PREDUE = buildCampaign("Personal Loan · Pre-due EMI reminder", [
+const PL_PREDUE = buildCampaign("Personal Loan · Pre-due EMI Reminder", [
   sStart(),
   sAud("CSV · EMI due in 2 days", ["loan_id", "emi_amount", "due_date"]),
   sWa("waPredue", "WhatsApp pre-due reminder", "T-2 · courtesy nudge", "collections_predue_v1",
@@ -739,31 +739,67 @@ const PL_PREDUE = buildCampaign("Personal Loan · Pre-due EMI reminder", [
       { v: "{{2}}", def: "emi_amount" },
       { v: "{{3}}", def: "due_date" },
     ] }),
-  sDelay("d1", 4, "Hours"),
-  // Live LMS check — has the borrower actually paid since the WhatsApp nudge?
+  sEnd(),
+], [
+  ed("start", "aud"), ed("aud", "waPredue"), ed("waPredue", "end"),
+], "personal_loan_collections");
+
+/* ---- Personal-Loan · Due-day EMI Reminder (T-0) ----------------------- *
+ *  Slim WhatsApp-only nudge on the due date. No paid-check, no escalation —
+ *  those live in the "& Collections" variants below.
+ */
+const PL_DUEDAY = buildCampaign("Personal Loan · Due-day EMI Reminder", [
+  sStart(),
+  sAud("CSV · EMI due today", ["loan_id", "emi_amount", "due_date"]),
+  sWa("waDueday", "WhatsApp due-day reminder", "T-0 · payment link", "collections_dueday_v1",
+    { vars: [
+      { v: "{{1}}", def: "contact.first_name" },
+      { v: "{{2}}", def: "emi_amount" },
+      { v: "{{3}}", def: "due_date" },
+    ] }),
+  sEnd(),
+], [
+  ed("start", "aud"), ed("aud", "waDueday"), ed("waDueday", "end"),
+], "personal_loan_collections");
+
+/* ---- Personal-Loan · Pre-due EMI Reminder & Collections --------------- *
+ *  Pre-due WhatsApp nudge; if the borrower hasn't paid within a few hours,
+ *  escalate to a Voice recovery call. This is the "reminder + safety net"
+ *  variant of the plain Pre-due template.
+ */
+const PL_PREDUE_COLLECTIONS = buildCampaign("Personal Loan · Pre-due EMI Reminder & Collections", [
+  sStart(),
+  sAud("CSV · EMI due in 2 days", ["loan_id", "emi_amount", "due_date"]),
+  sWa("waPredue", "WhatsApp pre-due reminder", "T-2 · courtesy nudge", "collections_predue_v1",
+    { vars: [
+      { v: "{{1}}", def: "contact.first_name" },
+      { v: "{{2}}", def: "emi_amount" },
+      { v: "{{3}}", def: "due_date" },
+    ] }),
+  sDelay("d1", 6, "Hours"),
   sApi("apiPaidPredue", "Check payment status", "LMS · has borrower paid?", "check_payment_status", [
     { v: "loan_id",  def: "contact.loan_id" },
     { v: "due_date", def: "contact.due_date" },
   ]),
   sCond("paid", "Already paid?", "api_1.payment_status", [
-    { id: "yes", label: "Yes · paid early",    value: "paid" },
-    { id: "no",  label: "No · still pending",  value: "unpaid" },
+    { id: "yes", label: "Yes · paid early",   value: "paid" },
+    { id: "no",  label: "No · still pending", value: "unpaid" },
   ]),
-  sWa("waPtp", "PTP confirmation + payment link", "WhatsApp · pay now", "payment_link_v1",
-    { vars: [
-      { v: "{{1}}", def: "contact.first_name" },
-      { v: "{{2}}", def: "emi_amount" },
-    ] }),
+  sVoice("vRecover", "Voice AI recovery call", "Concierge · escalate", {
+    agent: "collections_voice",
+  }),
   sEnd(),
 ], [
   ed("start", "aud"), ed("aud", "waPredue"),
   ed("waPredue", "d1"), ed("d1", "apiPaidPredue"), ed("apiPaidPredue", "paid"),
   ed("paid", "end", "yes"),
-  ed("paid", "waPtp", "no"), ed("waPtp", "end"),
+  ed("paid", "vRecover", "no"), ed("vRecover", "end"),
 ], "personal_loan_collections");
 
-/* ---- Personal-Loan · Due-day EMI reminder (T-0) ------------------------ */
-const PL_DUEDAY = buildCampaign("Personal Loan · Due-day EMI reminder", [
+/* ---- Personal-Loan · Due-day EMI Reminder & Collections --------------- *
+ *  Due-day WhatsApp; if unpaid after a few hours, Voice recovery call.
+ */
+const PL_DUEDAY_COLLECTIONS = buildCampaign("Personal Loan · Due-day EMI Reminder & Collections", [
   sStart(),
   sAud("CSV · EMI due today", ["loan_id", "emi_amount", "due_date"]),
   sWa("waDueday", "WhatsApp due-day reminder", "T-0 · payment link", "collections_dueday_v1",
@@ -773,14 +809,13 @@ const PL_DUEDAY = buildCampaign("Personal Loan · Due-day EMI reminder", [
       { v: "{{3}}", def: "due_date" },
     ] }),
   sDelay("d1", 6, "Hours"),
-  // Live LMS check — did the borrower actually pay before we escalate to Voice?
   sApi("apiPaidDueday", "Check payment status", "LMS · has borrower paid?", "check_payment_status", [
     { v: "loan_id",  def: "contact.loan_id" },
     { v: "due_date", def: "contact.due_date" },
   ]),
   sCond("paid", "Paid today?", "api_1.payment_status", [
-    { id: "yes", label: "Yes · settled",  value: "paid" },
-    { id: "no",  label: "No · pending",   value: "unpaid" },
+    { id: "yes", label: "Yes · settled", value: "paid" },
+    { id: "no",  label: "No · pending",  value: "unpaid" },
   ]),
   sVoice("vDueday", "Voice AI due-day call", "Concierge · due-day nudge", {
     agent: "collections_voice",
@@ -800,24 +835,20 @@ const PL_DUEDAY = buildCampaign("Personal Loan · Due-day EMI reminder", [
  *  Conditional. The normalizeCampaign pass auto-wires the Conditional's default
  *  handle to End, catching No-Answer / any unhandled disposition.
  */
-const PL_DPD_EARLY = buildCampaign("Personal Loan · DPD 1–7 recovery", [
+const PL_DPD_EARLY = buildCampaign("Personal Loan · Early DPD Reminder + Recovery", [
   sStart(),
-  sAud("CSV · DPD 1–7 cohort", ["loan_id", "emi_amount", "due_date", "days_past_due", "segment", "last_ptp_date", "last_ptp_kept"]),
-  // Context tool: compute DPD from the borrower's due_date and PERSIST dpd_days +
-  // dpd_bucket to lead memory so any downstream picker (and any future campaign
-  // touching the same borrower) can read `lead.memory.dpd_bucket` / dpd_days.
-  // Skill (deterministic compute) — persists dpd_status to lead memory so any
-  // downstream picker (and any future campaign on the same borrower) can read it.
-  sApi("apiCalcDpd", "Calculate DPD Status", "Skill · derive + persist to lead memory", "calculate_dpd_status",
-    [{ v: "due_date", def: "contact.due_date" }],
-    ["dpd_status"],
-  ),
-  // AI Transformation: derive a warm, segment-aware opener from lead history so the
-  // Voice agent doesn't cold-open. Output `ait_1.greeting_line` is available to the
+  sAud("CSV · DPD 1–7 cohort", ["loan_id", "emi_amount", "due_date", "days_past_due"]),
+  // No Tool call for DPD compute here — Skills of the Personal-Loan Collections
+  // pack (calculate_dpd_status, calculate_dpd_bucket, calculate_ptp_rate, …) are
+  // auto-attached to this campaign's useCase and run at Audience ingestion.
+  // Their outputs are already available downstream as lead.memory.<field>.
+  //
+  // AI Transformation: warm, segment-aware opener from lead memory so the Voice
+  // agent doesn't cold-open. Output `ait_1.greeting_line` is available to the
   // Voice node's variable mapping downstream.
-  sAiT("aiOpener", "Personalize opener", "Segment-aware greeting from PTP history", [
+  sAiT("aiOpener", "Personalize opener", "Segment-aware greeting", [
     { id: "t_opener", type: "Custom AI Action",
-      input: "contact.first_name, lead.memory.personal_loan.dpd_bucket, contact.last_ptp_kept",
+      input: "contact.first_name, lead.memory.dpd_bucket, lead.memory.ptp_status",
       output: "greeting_line" },
   ]),
   sVoice("vColl", "Voice AI collections call", "Disposition + PTP capture", {
@@ -846,7 +877,7 @@ const PL_DPD_EARLY = buildCampaign("Personal Loan · DPD 1–7 recovery", [
     { v: "loan_id",  def: "contact.loan_id" },
     { v: "due_date", def: "contact.due_date" },
   ]),
-  sCond("kept", "PTP kept?", "api_2.payment_status", [
+  sCond("kept", "PTP kept?", "api_1.payment_status", [
     { id: "yes", label: "Yes · payment received", value: "paid" },
     { id: "no",  label: "No · broken PTP",        value: "unpaid" },
   ]),
@@ -858,7 +889,7 @@ const PL_DPD_EARLY = buildCampaign("Personal Loan · DPD 1–7 recovery", [
     ] }),
   sEnd(),
 ], [
-  ed("start", "aud"), ed("aud", "apiCalcDpd"), ed("apiCalcDpd", "aiOpener"), ed("aiOpener", "vColl"), ed("vColl", "disp"),
+  ed("start", "aud"), ed("aud", "aiOpener"), ed("aiOpener", "vColl"), ed("vColl", "disp"),
   // PTP-Open lane
   ed("disp", "waPtpConfirm", "ptp"), ed("waPtpConfirm", "dPtp"), ed("dPtp", "apiPaidKept"), ed("apiPaidKept", "kept"),
   ed("kept", "end", "yes"),
@@ -867,82 +898,6 @@ const PL_DPD_EARLY = buildCampaign("Personal Loan · DPD 1–7 recovery", [
   ed("disp", "end", "paid"),
   ed("disp", "end", "callback"),
   ed("disp", "end", "wrong"),
-  ed("disp", "end", "unable"),
-  ed("disp", "end", "dispute"),
-], "personal_loan_collections");
-
-/* ---- Personal-Loan · PTP reminder (T-1 before promised date) ----------- *
- *  A borrower captured a PTP earlier in DPD_EARLY. This campaign runs the
- *  day before the promised date: a gentle WhatsApp nudge with the same
- *  payment link → 4h delay → LMS paid check → Voice escalation only if
- *  payment still hasn't landed.
- */
-const PL_PTP_REMINDER = buildCampaign("Personal Loan · PTP reminder", [
-  sStart(),
-  sAud("CSV · open PTPs due tomorrow", ["loan_id", "emi_amount", "ptp_date", "ptp_amount"]),
-  sWa("waPtpRem", "WhatsApp PTP reminder", "T-1 · gentle nudge + payment link", "collections_ptp_reminder_v1",
-    { vars: [
-      { v: "{{1}}", def: "contact.first_name" },
-      { v: "{{2}}", def: "ptp_amount" },
-      { v: "{{3}}", def: "ptp_date" },
-    ] }),
-  sDelay("d1", 4, "Hours"),
-  sApi("apiPaidPtp", "Check payment status", "LMS · has borrower paid?", "check_payment_status", [
-    { v: "loan_id",  def: "contact.loan_id" },
-    { v: "due_date", def: "contact.ptp_date" },
-  ]),
-  sCond("paid", "Paid?", "api_1.payment_status", [
-    { id: "yes", label: "Yes · PTP kept",  value: "paid" },
-    { id: "no",  label: "No · still open", value: "unpaid" },
-  ]),
-  sVoice("vPtpEsc", "Voice AI PTP reminder call", "Concierge · reconfirm PTP", {
-    agent: "collections_voice",
-  }),
-  sEnd(),
-], [
-  ed("start", "aud"), ed("aud", "waPtpRem"),
-  ed("waPtpRem", "d1"), ed("d1", "apiPaidPtp"), ed("apiPaidPtp", "paid"),
-  ed("paid", "end", "yes"),
-  ed("paid", "vPtpEsc", "no"), ed("vPtpEsc", "end"),
-], "personal_loan_collections");
-
-/* ---- Personal-Loan · Broken PTP recovery ------------------------------- *
- *  The day AFTER a promised date passed with no payment. Voice-led recovery
- *  with a tight disposition branch: capture a fresh PTP or escalate to a
- *  human L2 queue for the hardest cases.
- */
-const PL_BROKEN_PTP = buildCampaign("Personal Loan · Broken PTP recovery", [
-  sStart(),
-  sAud("CSV · broken PTPs (promised yesterday, unpaid)", ["loan_id", "emi_amount", "due_date", "last_ptp_date", "last_ptp_amount"]),
-  sWa("waBrokenLead", "WhatsApp broken-PTP nudge", "T+1 · payment link + escalation notice", "collections_broken_ptp_v1",
-    { vars: [
-      { v: "{{1}}", def: "contact.first_name" },
-      { v: "{{2}}", def: "emi_amount" },
-    ] }),
-  sDelay("d1", 2, "Hours"),
-  sVoice("vBroken", "Voice AI broken-PTP call", "Fresh PTP capture or L2 escalation", {
-    agent: "collections_voice",
-    callStart: "09:00", callEnd: "19:00", timezone: "Asia/Kolkata (IST)",
-    maxAttempts: 2, retryInterval: "3 hours",
-  }),
-  sCond("disp", "Disposition branch", "voice_1.disposition", [
-    { id: "ptp",      label: "PTP · Open (new)",  value: "PTP-Open" },
-    { id: "paid",     label: "Already paid",      value: "Already-Paid" },
-    { id: "unable",   label: "Unable to pay",     value: "Unable-to-Pay" },
-    { id: "dispute",  label: "Disputes amount",   value: "Dispute" },
-  ]),
-  // Fresh-PTP branch: WhatsApp confirmation with new promised date
-  sWa("waNewPtp", "New PTP confirmation", "WhatsApp · new PTP + payment link", "collections_ptp_reminder_v1",
-    { vars: [
-      { v: "{{1}}", def: "contact.first_name" },
-      { v: "{{2}}", def: "voice_1.ptp_amount" },
-      { v: "{{3}}", def: "voice_1.ptp_date" },
-    ] }),
-  sEnd(),
-], [
-  ed("start", "aud"), ed("aud", "waBrokenLead"), ed("waBrokenLead", "d1"), ed("d1", "vBroken"), ed("vBroken", "disp"),
-  ed("disp", "waNewPtp", "ptp"), ed("waNewPtp", "end"),
-  ed("disp", "end", "paid"),
   ed("disp", "end", "unable"),
   ed("disp", "end", "dispute"),
 ], "personal_loan_collections");
@@ -1463,11 +1418,11 @@ const RAW_EXAMPLE_CAMPAIGNS: Record<string, ExampleCampaign> = {
   // Collections (c_ex6) are unregistered so the demo stays tight to the pack.
   // All retail constants remain defined in this file but unused; the diff stays
   // reversible on merge from main.
-  pl_predue: PL_PREDUE,
-  pl_dueday: PL_DUEDAY,
-  pl_dpd_early: PL_DPD_EARLY,
-  pl_ptp_reminder: PL_PTP_REMINDER,
-  pl_broken_ptp: PL_BROKEN_PTP,
+  pl_predue:             PL_PREDUE,
+  pl_dueday:             PL_DUEDAY,
+  pl_predue_collections: PL_PREDUE_COLLECTIONS,
+  pl_dueday_collections: PL_DUEDAY_COLLECTIONS,
+  pl_dpd_early:          PL_DPD_EARLY,
 };
 
 /* ---- normalization ------------------------------------------------------

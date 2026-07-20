@@ -53,7 +53,7 @@ const DEFAULT_NODE_DATA: Record<NodeKind, Partial<WorkflowNodeData>> = {
   start: { valid: true, locked: true },
   end: { valid: true, locked: true },
   audience: { subtitle: "CSV or runtime API", valid: false, error: "Select source" },
-  apiToolCall: { subtitle: "Call an API", valid: false, error: "Select API tool", outputs: apiOutcomeOutputs() },
+  apiToolCall: { subtitle: "Call a tool", valid: false, error: "Select a tool", outputs: apiOutcomeOutputs() },
   conditional: { subtitle: "Route on variable", valid: false, error: "Add a branch" },
   abSplit: { subtitle: "Split traffic", valid: false, error: "Set split %" },
   delay: { subtitle: "Wait", valid: false, error: "Set duration" },

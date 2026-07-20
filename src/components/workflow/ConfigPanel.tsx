@@ -21,13 +21,22 @@ import {
   AlertDialogFooter, AlertDialogTitle, AlertDialogDescription, AlertDialogAction, AlertDialogCancel,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
-import type { WorkflowNodeData, NodeKind, PresetConfig, PresetBranch, PresetCondition, PresetVarMap, PresetValueRemap, NodeOutput } from "@/lib/campaign-types";
+import type { WorkflowNodeData, NodeKind, PresetConfig, PresetBranch, PresetCondition, PresetVarMap, PresetValueRemap, NodeOutput, UseCase } from "@/lib/campaign-types";
 import { NODE_LABELS, SAMPLE_WORKFLOW_VARIABLES, branchConditions } from "@/lib/campaign-types";
 import { LEAD_MEMORY_KEYS } from "@/lib/leads-data";
 import { SEED_TEMPLATES } from "@/lib/waba-templates";
 import { whatsappOutputs, resolveWaTemplate, completedOutput, isBranchableButton } from "@/lib/wa-outputs";
 import { getTool, TOOLS } from "@/lib/tool-registry";
 import { resolveAgent, voiceAgents } from "@/lib/agent-data";
+import { skillsForUseCase } from "@/lib/skills-registry";
+
+/**
+ * The campaign's useCase — set by the builder route so downstream Fields
+ * (currently just AudienceFields) can look up the attached Skill pack.
+ * Unset for legacy campaigns that don't carry one; Skill Inputs simply
+ * doesn't render in that case.
+ */
+export const CampaignUseCaseContext = createContext<UseCase | undefined>(undefined);
 
 const VOICE_AGENTS = voiceAgents();
 
@@ -617,7 +626,67 @@ function AudienceFields({ config, readOnly, mark }: { config?: PresetConfig; rea
         )}
         <p className="text-[11px] text-muted-foreground">Required when the workflow contains Voice or WhatsApp nodes. Must be a String field.</p>
       </Section>
+
+      {/* Section: Skill inputs — auto-attached from the campaign's useCase pack.
+          Every skill's declared input becomes a mapping row here (like phone).
+          Skills evaluate once per lead at ingestion; their outputs land in
+          lead.memory.<skill_output> and become available in downstream pickers. */}
+      <SkillInputsSection csvKeys={keys} readOnly={readOnly} />
     </>
+  );
+}
+
+/** "Skill inputs" mapping section on the Audience node. Renders one row per
+ *  unique input across every skill attached to the campaign's useCase. */
+function SkillInputsSection({ csvKeys, readOnly }: { csvKeys: string[]; readOnly?: boolean }) {
+  const useCase = useContext(CampaignUseCaseContext);
+  const skills = skillsForUseCase(useCase);
+  if (!useCase || skills.length === 0) return null;
+  // De-dupe inputs across skills — DPD status and DPD bucket both take `due_date`;
+  // the user maps it once here.
+  const seen = new Set<string>();
+  const rows: { key: string; dataType: string }[] = [];
+  for (const s of skills) {
+    for (const inp of s.inputs) {
+      if (inp.source === "agent") continue;
+      if (seen.has(inp.key)) continue;
+      seen.add(inp.key);
+      rows.push({ key: inp.key, dataType: inp.dataType });
+    }
+  }
+  return (
+    <Section title="Skill inputs">
+      <div className="overflow-hidden rounded-md border border-border">
+        <table className="w-full text-[11.5px]">
+          <thead>
+            <tr className="border-b border-border bg-secondary/40 text-[10px] uppercase tracking-wider text-muted-foreground">
+              <th className="px-3 py-1.5 text-left font-medium">Skill input</th>
+              <th className="px-3 py-1.5 text-left font-medium">Type</th>
+              <th className="px-3 py-1.5 text-left font-medium">Key</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {rows.map((r) => (
+              <tr key={r.key}>
+                <td className="px-3 py-1.5 font-mono text-foreground">{r.key}</td>
+                <td className="px-3 py-1.5">
+                  <span className="rounded-sm border border-border bg-secondary/40 px-1 py-0.5 text-[10px]">{r.dataType}</span>
+                </td>
+                <td className="px-3 py-1.5">
+                  <SelectLike
+                    disabled={readOnly}
+                    options={csvKeys}
+                    placeholder={csvKeys.length ? "Select a key…" : "Add a schema field first"}
+                    defaultValue={csvKeys.includes(r.key) ? r.key : undefined}
+                    onPick={() => { /* readonly demo — mapping isn't persisted in v1 */ }}
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Section>
   );
 }
 
@@ -719,7 +788,7 @@ function ConditionalFields({ config, readOnly, mark, onChange }: { config?: Pres
   }, [branches]);
 
   return (
-    <Section title="Branches (evaluated top → bottom)">
+    <Section title="Branches (evaluated top to bottom)">
       <div className="space-y-2">
         {branches.map((b, i) => {
           const conds = b.conditions ?? [];
@@ -852,12 +921,16 @@ function AbSplitFields({ config, readOnly, mark, onChange }: { config?: PresetCo
   );
 }
 
-/* --------------------------- API Tool Call --------------------------- */
-
-// Direct API call inside a workflow — distinct from a Voice Agent calling a tool.
-// Pick a registered tool, map its non-constant request params to upstream variables,
-// and its response fields are exposed downstream as `<node>.<field>`. Validation
-// rules (e.g. requiring every input mapped) are intentionally deferred to a later pass.
+/* --------------------------- Tool node --------------------------- *
+ * Direct tool invocation inside a workflow — distinct from a Voice Agent
+ * calling a tool. Sections rendered in this order:
+ *   1. Selected tool  — pick a tool; show endpoint + description clearly.
+ *   2. Input mapping  — map non-constant request params to upstream vars.
+ *   3. Outputs        — read-only listing of what this tool returns.
+ *
+ * v1 does not persist tool outputs to lead memory (Skills own that surface).
+ * The old "Save to lead memory" toggle has been removed from this node.
+ */
 function ApiToolCallFields({
   config, readOnly, mark, onChange,
 }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
@@ -868,20 +941,15 @@ function ApiToolCallFields({
   const mappable = (tool?.inputs ?? []).filter((i) => i.source !== "constant");
   const constants = (tool?.inputs ?? []).filter((i) => i.source === "constant");
 
-  // Persist the chosen tool + input map to node config so the node restores on
-  // reopen AND downstream nodes can resolve its outputs (see deriveNodeOutcomeVariables).
   const pickTool = (h: string) => {
     setHandle(h);
     const t = getTool(h);
     onChange({ config: { ...config, apiTool: h, apiInputMap: [] } });
-    // Valid once a tool is picked; if it has mappable inputs the user still maps them,
-    // but for this UI-first demo selecting the tool is enough to flip the node valid.
-    mark(!!t, t ? undefined : "Select an API tool");
+    mark(!!t, t ? undefined : "Select a tool");
   };
   const setMapping = (key: string, def: string, mode?: "variable" | "constant") => {
     const existing = inputMap.find((m) => m.v === key);
     const next = inputMap.filter((m) => m.v !== key);
-    // Preserve any value-remap when the source variable changes; constants don't remap.
     if (def) next.push({ v: key, def, mode, remap: mode === "constant" ? undefined : existing?.remap });
     onChange({ config: { ...config, apiTool: handle, apiInputMap: next } });
   };
@@ -891,154 +959,150 @@ function ApiToolCallFields({
     next.push({ v: key, def: existing?.def ?? "", mode: existing?.mode, remap: remap.length ? remap : undefined });
     onChange({ config: { ...config, apiTool: handle, apiInputMap: next } });
   };
+  // Filter out any registry entries flagged as Skills — Skills are not invoked
+  // via a Tool node. They auto-attach to a campaign by useCase and run at
+  // audience ingestion (see AudienceFields → Skill inputs).
+  const toolOptions = TOOLS.filter((t) => !t.isSkill).map((t) => t.handle);
+  const outputsVisible = selected && !!tool && tool.outputs.length > 0;
   return (
-    <>
-      <Section title="API tool">
-        <div className="rounded-xl border border-border bg-card/50 p-4 space-y-4">
-          {/* Step 1: pick the API tool */}
-          <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <StepChip n={1} done={selected} />
-              <Label className="flex items-center gap-1 text-[12px] font-medium text-foreground">
-                API tool <span className="text-destructive">*</span>
-              </Label>
-            </div>
-            <SelectLike
-              disabled={readOnly}
-              options={TOOLS.map((t) => t.handle)}
-              defaultValue={config?.apiTool}
-              onPick={pickTool}
-              placeholder="Select an API tool…"
-            />
-            {tool && (
-              <p className="text-[11px] text-muted-foreground">
-                <span className="font-mono text-foreground">{tool.method ?? tool.type.toUpperCase()}</span>{" "}
-                <span className="font-mono">{tool.url}</span> — {tool.description}
-              </p>
-            )}
+    <Section title="Tool">
+      <div className="rounded-xl border border-border bg-card/50 p-4 space-y-4">
+        {/* Step 1 — pick the tool. Endpoint (line 1) + description (line 2)
+            appear inside the same numbered block for a compact, familiar layout. */}
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <StepChip n={1} done={selected} />
+            <Label className="flex items-center gap-1 text-[12px] font-medium text-foreground">
+              Tool <span className="text-destructive">*</span>
+            </Label>
           </div>
-
-          <div className="border-t border-border/60" />
-
-          {/* Step 2: map request params to upstream variables */}
-          <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <StepChip n={2} muted={!selected} />
-              <Label className="text-[12px] font-medium text-foreground">Input mapping</Label>
+          <SelectLike
+            disabled={readOnly}
+            options={toolOptions}
+            defaultValue={config?.apiTool}
+            onPick={pickTool}
+            placeholder="Select a tool…"
+          />
+          {tool && (
+            <div className="space-y-1">
+              <p className="font-mono text-[11.5px] text-foreground">
+                <span className="text-muted-foreground">{tool.method ?? tool.type.toUpperCase()}</span>{" "}
+                {tool.url}
+              </p>
+              <p className="text-[11.5px] text-muted-foreground leading-snug">{tool.description}</p>
             </div>
-            <p className="text-[11px] text-muted-foreground">
-              Map each request parameter to an upstream workflow variable (e.g. a CSV column).
-            </p>
-            {selected ? (
-              mappable.length > 0 ? (
-                <div className="space-y-2 pt-1">
-                  {mappable.map((inp) => {
-                    const row = inputMap.find((m) => m.v === inp.key);
-                    const def = row?.def
-                      ?? (inp.source === "campaign" ? `contact.${inp.value ?? inp.key}` : "");
-                    // A value-remap only makes sense for a variable source (you remap the
-                    // resolved value); a hardcoded constant is already the final value.
-                    const isVarMapped = (row?.mode ?? "variable") === "variable" && !!def;
-                    return (
-                      <div key={inp.key} className="space-y-1.5">
-                        <div className="grid grid-cols-[130px_1fr] items-center gap-2">
-                          <span className="truncate font-mono text-[11.5px] text-muted-foreground" title={inp.description}>
-                            {inp.key}
-                          </span>
-                          <VariablePicker
-                            defaultValue={def}
+          )}
+        </div>
+
+        <div className="border-t border-border/60" />
+
+        {/* Step 2 — input mapping */}
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <StepChip n={2} muted={!selected} />
+            <Label className="text-[12px] font-medium text-foreground">Input mapping</Label>
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            Map each request parameter to an upstream workflow variable (e.g. a CSV column).
+          </p>
+          {selected ? (
+            mappable.length > 0 ? (
+              <div className="space-y-2 pt-1">
+                {mappable.map((inp) => {
+                  const row = inputMap.find((m) => m.v === inp.key);
+                  const def = row?.def
+                    ?? (inp.source === "campaign" ? `contact.${inp.value ?? inp.key}` : "");
+                  const isVarMapped = (row?.mode ?? "variable") === "variable" && !!def;
+                  return (
+                    <div key={inp.key} className="space-y-1.5">
+                      <div className="grid grid-cols-[130px_1fr] items-center gap-2">
+                        <span className="truncate font-mono text-[11.5px] text-muted-foreground" title={inp.description}>
+                          {inp.key}
+                        </span>
+                        <VariablePicker
+                          defaultValue={def}
+                          disabled={readOnly}
+                          allowConstant
+                          mode={row?.mode}
+                          onChange={(v, mode) => setMapping(inp.key, v, mode)}
+                        />
+                      </div>
+                      {isVarMapped && (
+                        <div className="pl-[138px]">
+                          <ValueRemapEditor
+                            value={row?.remap ?? []}
                             disabled={readOnly}
-                            allowConstant
-                            mode={row?.mode}
-                            onChange={(v, mode) => setMapping(inp.key, v, mode)}
+                            onChange={(rm) => setRemap(inp.key, rm)}
                           />
                         </div>
-                        {isVarMapped && (
-                          <div className="pl-[138px]">
-                            <ValueRemapEditor
-                              value={row?.remap ?? []}
-                              disabled={readOnly}
-                              onChange={(rm) => setRemap(inp.key, rm)}
-                            />
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="rounded-md border border-dashed border-border bg-muted/30 px-3 py-3 text-[11.5px] text-muted-foreground">
-                  All parameters are fixed at the tool — no mapping needed.
-                </div>
-              )
-            ) : (
-              <div className="rounded-md border border-dashed border-border bg-muted/30 px-3 py-3 text-[11.5px] text-muted-foreground">
-                Select an API tool above to map its inputs.
-              </div>
-            )}
-          </div>
-        </div>
-      </Section>
-
-      {selected && constants.length > 0 && (
-        <Section title="Fixed parameters">
-          <div className="rounded-xl border border-border bg-card/50 p-3 space-y-1.5">
-            {constants.map((c) => (
-              <div key={c.key} className="flex items-center justify-between gap-3 text-[11.5px]">
-                <span className="font-mono text-muted-foreground">{c.key}</span>
-                <span className="truncate font-mono text-foreground" title={c.value}>{c.value}</span>
-              </div>
-            ))}
-          </div>
-        </Section>
-      )}
-
-      {selected && tool.outputs.length > 0 && (
-        <Section title="Outputs → downstream variables">
-          <div className="rounded-xl border border-border bg-card/50 p-3 space-y-2">
-            <p className="text-[11px] text-muted-foreground">
-              Each field is available to later nodes as{" "}
-              <span className="font-mono text-foreground">{"{node}.{field}"}</span>.
-              Tick <span className="font-mono">Save to lead memory</span> to also persist the
-              value on the borrower — it then appears as{" "}
-              <span className="font-mono text-foreground">lead.memory.{"{field}"}</span> in every
-              downstream picker across campaigns.
-            </p>
-            {tool.outputs.map((o) => {
-              const saved = (config?.saveToLeadMemory ?? []).includes(o.varName);
-              const toggleSave = () => {
-                if (readOnly) return;
-                const cur = config?.saveToLeadMemory ?? [];
-                const next = saved ? cur.filter((k) => k !== o.varName) : [...cur, o.varName];
-                onChange({ config: { ...config, apiTool: handle, saveToLeadMemory: next } });
-              };
-              return (
-                <div key={o.varName} className="flex items-center justify-between gap-3 rounded-md border border-border/50 bg-background/40 px-2.5 py-1.5 text-[11.5px]">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono text-ai">{o.varName}</span>
-                      {saved && (
-                        <span className="inline-flex items-center gap-1 rounded-full border border-ai/30 bg-ai/10 px-1.5 py-0.5 text-[9.5px] font-medium uppercase tracking-wide text-ai">
-                          <Sparkles className="h-2.5 w-2.5" /> lead.memory
-                        </span>
                       )}
                     </div>
-                    <p className="mt-0.5 truncate text-[10.5px] text-muted-foreground" title={o.description}>{o.description}</p>
-                  </div>
-                  <label className={cn(
-                    "flex shrink-0 cursor-pointer items-center gap-1.5 text-[11px]",
-                    readOnly && "cursor-not-allowed opacity-50",
-                  )}>
-                    <Switch checked={saved} disabled={readOnly} onCheckedChange={toggleSave} />
-                    <span className="text-muted-foreground">Save to lead memory</span>
-                  </label>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="rounded-md border border-dashed border-border bg-muted/30 px-3 py-3 text-[11.5px] text-muted-foreground">
+                All parameters are fixed at the tool — no mapping needed.
+              </div>
+            )
+          ) : (
+            <div className="rounded-md border border-dashed border-border bg-muted/30 px-3 py-3 text-[11.5px] text-muted-foreground">
+              Select a tool above to map its inputs.
+            </div>
+          )}
+        </div>
+
+        {selected && constants.length > 0 && (
+          <>
+            <div className="border-t border-border/60" />
+            <div className="space-y-1.5">
+              <Label className="text-[12px] font-medium text-foreground">Fixed parameters</Label>
+              {constants.map((c) => (
+                <div key={c.key} className="flex items-center justify-between gap-3 text-[11.5px]">
+                  <span className="font-mono text-muted-foreground">{c.key}</span>
+                  <span className="truncate font-mono text-foreground" title={c.value}>{c.value}</span>
                 </div>
-              );
-            })}
-          </div>
-        </Section>
-      )}
-    </>
+              ))}
+            </div>
+          </>
+        )}
+
+        {/* Step 3 — outputs (read-only, informational only) */}
+        {outputsVisible && (
+          <>
+            <div className="border-t border-border/60" />
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <StepChip n={3} muted={!selected} />
+                <Label className="text-[12px] font-medium text-foreground">Outputs</Label>
+              </div>
+              <div className="overflow-hidden rounded-md border border-border">
+                <table className="w-full text-[11.5px]">
+                  <thead>
+                    <tr className="border-b border-border bg-secondary/40 text-[10px] uppercase tracking-wider text-muted-foreground">
+                      <th className="px-3 py-1.5 text-left font-medium">Name</th>
+                      <th className="px-3 py-1.5 text-left font-medium">Type</th>
+                      <th className="px-3 py-1.5 text-left font-medium">Description</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {tool.outputs.map((o) => (
+                      <tr key={o.varName}>
+                        <td className="px-3 py-1.5 font-mono text-ai">{o.varName}</td>
+                        <td className="px-3 py-1.5">
+                          <span className="rounded-sm border border-border bg-secondary/40 px-1 py-0.5 text-[10px]">{o.dataType ?? "String"}</span>
+                        </td>
+                        <td className="px-3 py-1.5 text-muted-foreground">{o.description}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    </Section>
   );
 }
 

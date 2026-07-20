@@ -24,7 +24,7 @@ export type UseCase =
   | "generic";
 
 export const USE_CASE_LABEL: Record<UseCase, string> = {
-  personal_loan_collections: "Personal Loan Collections",
+  personal_loan_collections: "Personal Loan",
   insurance_renewal:         "Insurance Renewal",
   credit_card_dues:          "Credit Card Dues",
   kyc_onboarding:            "KYC / Onboarding",
@@ -32,25 +32,34 @@ export const USE_CASE_LABEL: Record<UseCase, string> = {
   generic:                   "Generic BFSI",
 };
 
+/**
+ * Tailwind v4 in this repo only exposes these tokens: background, foreground,
+ * card, popover, primary, secondary, muted, accent, destructive, border,
+ * input, ring, ai, success, warning. No `chart-N` tokens — so we deliberately
+ * do NOT use them here.
+ *
+ * v1 only has one useCase in scope (personal_loan_collections). Every entry
+ * below uses the `ai` token — it's the brand's "smart" color and it renders
+ * reliably. When more BFSI packs come online, differentiate them by icon or
+ * label; do not introduce chart-N tokens without defining them in styles.css.
+ */
 export const USE_CASE_TINT: Record<UseCase, string> = {
-  personal_loan_collections: "text-chart-1 bg-chart-1/10 border-chart-1/25",
-  insurance_renewal:         "text-chart-2 bg-chart-2/10 border-chart-2/25",
-  credit_card_dues:          "text-chart-4 bg-chart-4/10 border-chart-4/25",
-  kyc_onboarding:            "text-chart-3 bg-chart-3/10 border-chart-3/25",
-  cross_sell:                "text-chart-5 bg-chart-5/10 border-chart-5/25",
+  personal_loan_collections: "text-ai bg-ai/10 border-ai/30",
+  insurance_renewal:         "text-ai bg-ai/10 border-ai/30",
+  credit_card_dues:          "text-ai bg-ai/10 border-ai/30",
+  kyc_onboarding:            "text-ai bg-ai/10 border-ai/30",
+  cross_sell:                "text-ai bg-ai/10 border-ai/30",
   generic:                   "text-muted-foreground bg-secondary border-border",
 };
 
-/** Solid variant of USE_CASE_TINT — for higher-emphasis badges (e.g. the
- *  Business Analytics header) where the subtle border+tint variant reads
- *  invisible. Uses foreground-on-color for readability. */
+/** Solid variant — for higher-emphasis badges (e.g. Business Analytics header). */
 export const USE_CASE_TINT_SOLID: Record<UseCase, string> = {
-  personal_loan_collections: "bg-chart-1 text-background border-transparent",
-  insurance_renewal:         "bg-chart-2 text-background border-transparent",
-  credit_card_dues:          "bg-chart-4 text-background border-transparent",
-  kyc_onboarding:            "bg-chart-3 text-background border-transparent",
-  cross_sell:                "bg-chart-5 text-background border-transparent",
-  generic:                   "bg-muted-foreground text-background border-transparent",
+  personal_loan_collections: "bg-ai text-ai-foreground border-transparent",
+  insurance_renewal:         "bg-ai text-ai-foreground border-transparent",
+  credit_card_dues:          "bg-ai text-ai-foreground border-transparent",
+  kyc_onboarding:            "bg-ai text-ai-foreground border-transparent",
+  cross_sell:                "bg-ai text-ai-foreground border-transparent",
+  generic:                   "bg-foreground text-background border-transparent",
 };
 
 export type NodeKind =
@@ -263,7 +272,7 @@ export const NODE_LABELS: Record<NodeKind, string> = {
   start: "Start",
   end: "End",
   audience: "Audience",
-  apiToolCall: "API Tool Call",
+  apiToolCall: "Tool",
   conditional: "Conditional Branch",
   abSplit: "A/B Split",
   delay: "Delay",
