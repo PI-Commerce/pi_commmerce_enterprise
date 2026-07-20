@@ -402,40 +402,25 @@ export const TOOLS: ToolDef[] = [
   return ptp.kept === true ? "kept" : "broken";
 }`,
   },
-  {
-    handle: "check_right_party_connectivity",
-    description: "Was the last outreach on a given channel a Right-Party Contact? (Skill · deterministic compute)",
-    type: "http",
-    method: "COMPUTE",
-    url: "local://skill/check_rpc",
-    auth: "none",
-    health: "ok",
-    status: "live",
-    createdAt: "17 Jul 2026",
-    updatedAt: "17 Jul 2026",
-    isSkill: true,
-    skillType: "function",
-    inputs: [
-      { key: "customer_id", dataType: "String", in: "body", source: "campaign", value: "customer_id", description: "Borrower id" },
-      { key: "channel",     dataType: "String", in: "body", source: "agent",                              description: "voice / whatsapp / sms" },
-    ],
-    outputs: [
-      { path: "$.is_rpc", varName: "is_rpc", dataType: "Boolean", description: "true if the last touch on this channel reached the right party" },
-    ],
-    skillFunctionBody: `function check_right_party_connectivity(customer_id: string, channel: "voice" | "whatsapp" | "sms"): boolean {
-  const last = lead_memory.get(customer_id, "interactions")
-    ?.filter((i) => i.channel === channel)
-    ?.at(-1);
-  if (!last) return false;
-  // Voice: any disposition other than Wrong-Number / No-Answer counts as RPC.
-  if (channel === "voice") {
-    return last.disposition !== "Wrong-Number" && last.disposition !== "No-Answer";
-  }
-  // WhatsApp / SMS: an inbound reply from the borrower is proof of RPC.
-  return last.inbound_reply === true;
-}`,
-  },
 ];
+
+/**
+ * RPC (Right-Party Contact) is NOT a Skill.
+ *
+ * RPC is a cohort-reachability rollup computed at analytics time. Per lead:
+ *   is_rpc(lead) = ∃ voice interaction in the run where
+ *                    disposition ∉ {"Wrong-Number", "No-Answer", null}
+ *
+ * RPC rate = # leads with is_rpc=true / # leads with any voice attempt.
+ *
+ * The rule aggregates across every Voice AI node in the campaign (multi-voice
+ * flows just work). WhatsApp / SMS do not contribute to RPC in v1 — an inbound
+ * reply is a separate signal (engagement), not the same as reaching the right
+ * party on a call.
+ *
+ * The tech team implements this in the analytics pipeline; there is no user
+ * config, no per-node toggle, and no lead-memory Skill for it.
+ */
 
 export function getTool(handle: string): ToolDef | undefined {
   return TOOLS.find((t) => t.handle === handle);

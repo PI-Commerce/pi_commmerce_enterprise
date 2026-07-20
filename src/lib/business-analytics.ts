@@ -48,13 +48,27 @@ export type BusinessAnalyticsPack = {
 
 /* ------------------------ Personal Loan Collections ------------------------ */
 
+/**
+ * RPC (Right-Party Contact) — analytics-only, computed by the tech team's
+ * analytics pipeline. Not a Skill, not a lead-memory attribute.
+ *
+ * Definition (per lead, per run):
+ *   is_rpc(lead) = ∃ voice interaction in this run where
+ *                    disposition ∉ {"Wrong-Number", "No-Answer", null}
+ *
+ * KPI value:
+ *   RPC rate = # leads with is_rpc=true / # leads with any voice attempt.
+ *
+ * Aggregates across every Voice AI node in the campaign — multi-voice flows
+ * just work. WhatsApp / SMS do not contribute to RPC in v1.
+ */
 const PL_COLLECTIONS: BusinessAnalyticsPack = {
   kpis: [
     {
       label: "Right-Party Contact Rate",
       value: 72.4,
       unit: "%",
-      info: "Share of calls where the AI actually reached the borrower (not a family member, wrong number, or voicemail). Only right-party contacts can capture a promise-to-pay.",
+      info: "Share of the cohort we successfully reached by voice at least once. Calculated per lead across every voice attempt in the run.",
     },
     {
       label: "PTP Conversion Rate",

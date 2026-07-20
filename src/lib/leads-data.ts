@@ -197,11 +197,10 @@ export type { UseCase };
 export const LEAD_MEMORY_KEYS: { key: string; source: string; description: string; useCase?: UseCase }[] = [
   // All entries share the same `source` label so the variable picker collapses
   // them under ONE "Lead Memory" group — not one group per producing skill.
-  { key: "lead.memory.dpd_status",      source: "Lead Memory", description: "pre_due / due_today / post_due",              useCase: "personal_loan_collections" },
-  { key: "lead.memory.dpd_bucket",      source: "Lead Memory", description: "early_bucket / mid_bucket / late_bucket",     useCase: "personal_loan_collections" },
-  { key: "lead.memory.ptp_rate_pct",    source: "Lead Memory", description: "Historical PTP kept rate (%)",                useCase: "personal_loan_collections" },
-  { key: "lead.memory.ptp_status",      source: "Lead Memory", description: "no_ptp / kept / broken",                      useCase: "personal_loan_collections" },
-  { key: "lead.memory.is_rpc",          source: "Lead Memory", description: "Was the last outreach a right-party contact?", useCase: "personal_loan_collections" },
+  { key: "lead.memory.dpd_status",      source: "Lead Memory", description: "pre_due / due_today / post_due",          useCase: "personal_loan_collections" },
+  { key: "lead.memory.dpd_bucket",      source: "Lead Memory", description: "early_bucket / mid_bucket / late_bucket", useCase: "personal_loan_collections" },
+  { key: "lead.memory.ptp_rate_pct",    source: "Lead Memory", description: "Historical PTP kept rate (%)",            useCase: "personal_loan_collections" },
+  { key: "lead.memory.ptp_status",      source: "Lead Memory", description: "no_ptp / kept / broken",                  useCase: "personal_loan_collections" },
 ];
 
 /* ------------------------------------------------------------------ *

@@ -22,7 +22,6 @@ export const USE_CASE_SKILLS: Partial<Record<UseCase, string[]>> = {
     "calculate_dpd_bucket",
     "calculate_ptp_rate",
     "check_ptp_status",
-    "check_right_party_connectivity",
   ],
 };
 
