@@ -64,6 +64,14 @@ export type ToolDef = {
   /** For enum outputs on Skills — the allowed values. Displayed as chips on the
    *  Skill card and used as the enum source in the campaign-builder picker. */
   outputEnumValues?: Partial<Record<string, string[]>>;
+  /** Function-Skill body — the executable logic, shown read-only on the Skill
+   *  detail page. UI-only preview; the runtime is out of scope in v1. */
+  skillFunctionBody?: string;
+  /** LLM-Skill prompt template — the markdown-authored instruction the agent
+   *  sends with `{{input}}` variable references. Shown read-only on the detail
+   *  page. Optional model override lives on `skillPromptModel`. */
+  skillPromptTemplate?: string;
+  skillPromptModel?: string;
 };
 
 export const SKILL_TYPE_LABEL: Record<"function" | "llm", string> = {
@@ -292,6 +300,16 @@ export const TOOLS: ToolDef[] = [
       { path: "$.dpd_status", varName: "dpd_status", dataType: "String", description: "pre_due / due_today / post_due" },
     ],
     outputEnumValues: { dpd_status: ["pre_due", "due_today", "post_due"] },
+    skillFunctionBody: `function calculate_dpd_status(due_date: string): "pre_due" | "due_today" | "post_due" {
+  const today = new Date();
+  const due   = new Date(due_date);
+  // Normalize both to midnight IST so intra-day time doesn't skew the bucket.
+  today.setHours(0, 0, 0, 0);
+  due.setHours(0, 0, 0, 0);
+  if (due.getTime() >  today.getTime()) return "pre_due";
+  if (due.getTime() === today.getTime()) return "due_today";
+  return "post_due";
+}`,
   },
   {
     handle: "calculate_dpd_bucket",
@@ -313,6 +331,17 @@ export const TOOLS: ToolDef[] = [
       { path: "$.dpd_bucket", varName: "dpd_bucket", dataType: "String", description: "early_bucket / mid_bucket / late_bucket · null if not post_due" },
     ],
     outputEnumValues: { dpd_bucket: ["early_bucket (1–7d)", "mid_bucket", "late_bucket (30+ d)"] },
+    skillFunctionBody: `function calculate_dpd_bucket(due_date: string): "early_bucket" | "mid_bucket" | "late_bucket" | null {
+  const today = new Date();
+  const due   = new Date(due_date);
+  today.setHours(0, 0, 0, 0);
+  due.setHours(0, 0, 0, 0);
+  const dpd = Math.floor((today.getTime() - due.getTime()) / 86_400_000);
+  if (dpd <= 0)  return null;          // not post-due yet
+  if (dpd <= 7)  return "early_bucket";
+  if (dpd <= 29) return "mid_bucket";
+  return "late_bucket";
+}`,
   },
   {
     handle: "calculate_ptp_rate",
@@ -333,6 +362,14 @@ export const TOOLS: ToolDef[] = [
     outputs: [
       { path: "$.ptp_rate_pct", varName: "ptp_rate_pct", dataType: "Number", description: "(promises_kept / promises_made) × 100" },
     ],
+    skillFunctionBody: `function calculate_ptp_rate(customer_id: string): number {
+  // Reads the borrower's PTP register from lead memory.
+  const ptps = lead_memory.get(customer_id, "personal_loan.ptp_history") ?? [];
+  const made = ptps.length;
+  if (made === 0) return 0;
+  const kept = ptps.filter((p) => p.kept === true).length;
+  return Math.round((kept / made) * 100 * 10) / 10; // one decimal place
+}`,
   },
   {
     handle: "check_ptp_status",
@@ -355,6 +392,12 @@ export const TOOLS: ToolDef[] = [
       { path: "$.ptp_status", varName: "ptp_status", dataType: "String", description: "no_ptp / kept / broken" },
     ],
     outputEnumValues: { ptp_status: ["no_ptp", "kept", "broken"] },
+    skillFunctionBody: `function check_ptp_status(loan_id: string, due_date: string): "no_ptp" | "kept" | "broken" {
+  const ptp = lead_memory.get(loan_id, "personal_loan.ptp_history")
+    ?.find((p) => p.emi_due_date === due_date);
+  if (!ptp) return "no_ptp";
+  return ptp.kept === true ? "kept" : "broken";
+}`,
   },
   {
     handle: "check_right_party_connectivity",
@@ -376,6 +419,18 @@ export const TOOLS: ToolDef[] = [
     outputs: [
       { path: "$.is_rpc", varName: "is_rpc", dataType: "Boolean", description: "true if the last touch on this channel reached the right party" },
     ],
+    skillFunctionBody: `function check_right_party_connectivity(customer_id: string, channel: "voice" | "whatsapp" | "sms"): boolean {
+  const last = lead_memory.get(customer_id, "interactions")
+    ?.filter((i) => i.channel === channel)
+    ?.at(-1);
+  if (!last) return false;
+  // Voice: any disposition other than Wrong-Number / No-Answer counts as RPC.
+  if (channel === "voice") {
+    return last.disposition !== "Wrong-Number" && last.disposition !== "No-Answer";
+  }
+  // WhatsApp / SMS: an inbound reply from the borrower is proof of RPC.
+  return last.inbound_reply === true;
+}`,
   },
   /* ---- LLM Skill · one prompt-template example -----------------------
    * LLM Skills are markdown-authored instructions the agent invokes with
@@ -406,6 +461,24 @@ export const TOOLS: ToolDef[] = [
     outputs: [
       { path: "$.summary", varName: "call_summary", dataType: "String", description: "Two-line CRM-friendly summary of the call" },
     ],
+    skillPromptModel: "claude-sonnet-4.5",
+    skillPromptTemplate: `You are a Personal-Loan collections analyst writing a two-line
+disposition summary that a human agent will read in the CRM.
+
+Write in plain, non-judgemental English. Never quote the borrower.
+Never repeat account numbers. Do not invent facts that aren't in the
+inputs. If a promised date is captured, include it in ISO format
+(YYYY-MM-DD).
+
+Inputs:
+- disposition       : {{disposition}}
+- ptp_date          : {{ptp_date}}
+- ptp_amount (INR)  : {{ptp_amount}}
+- borrower context  : {{borrower_context}}
+
+Output format:
+Line 1 — What happened on the call (≤ 90 chars).
+Line 2 — What the human agent should do next (≤ 90 chars).`,
   },
 ];
 

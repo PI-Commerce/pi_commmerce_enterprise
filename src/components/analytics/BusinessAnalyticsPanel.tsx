@@ -19,10 +19,10 @@ import { useMemo } from "react";
 import type { EChartsOption } from "echarts";
 import { EChart } from "@/components/analytics/EChart";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { Info, Sparkles } from "lucide-react";
+import { Info } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { analyticsFor, type BusinessAnalyticsPack, type FunnelStage, type ChannelEffectivenessRow } from "@/lib/business-analytics";
-import { USE_CASE_LABEL, USE_CASE_TINT, type UseCase } from "@/lib/campaign-types";
+import { USE_CASE_LABEL, USE_CASE_TINT, USE_CASE_TINT_SOLID, type UseCase } from "@/lib/campaign-types";
 
 export function BusinessAnalyticsPanel({ useCase }: { useCase?: UseCase }) {
   const pack = analyticsFor(useCase);
@@ -38,8 +38,7 @@ export function BusinessAnalyticsPanel({ useCase }: { useCase?: UseCase }) {
     return (
       <div className="mb-5 rounded-xl border border-dashed border-border bg-card/40 px-4 py-4 text-[12px] text-muted-foreground">
         <div className="flex items-center gap-2">
-          <span className={cn("inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10.5px] font-semibold uppercase tracking-wide", USE_CASE_TINT[useCase])}>
-            <Sparkles className="h-2.5 w-2.5 mr-1" />
+          <span className={cn("inline-flex items-center rounded-full border px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-wide", USE_CASE_TINT[useCase])}>
             {USE_CASE_LABEL[useCase]}
           </span>
           <span>· Business Analytics pack is scope: TBD for v1.</span>
@@ -62,8 +61,7 @@ function PackHeader({ useCase }: { useCase: UseCase }) {
   return (
     <div className="mb-2 flex items-center gap-2">
       <h2 className="text-[13px] font-semibold uppercase tracking-wider text-muted-foreground">Business Analytics</h2>
-      <span className={cn("inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10.5px] font-semibold uppercase tracking-wide", USE_CASE_TINT[useCase])}>
-        <Sparkles className="h-2.5 w-2.5 mr-1" />
+      <span className={cn("inline-flex items-center rounded-full border px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-wide", USE_CASE_TINT_SOLID[useCase])}>
         {USE_CASE_LABEL[useCase]}
       </span>
     </div>

@@ -28,6 +28,7 @@ import { Route as AgentsNewRouteImport } from './routes/agents.new'
 import { Route as AgentsIdRouteImport } from './routes/agents.$id'
 import { Route as CampaignsVersionsIdRouteImport } from './routes/campaigns.versions.$id'
 import { Route as AgentsToolsNewRouteImport } from './routes/agents.tools.new'
+import { Route as AgentsSkillsNewRouteImport } from './routes/agents.skills.new'
 
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
@@ -124,6 +125,11 @@ const AgentsToolsNewRoute = AgentsToolsNewRouteImport.update({
   path: '/tools/new',
   getParentRoute: () => AgentsRoute,
 } as any)
+const AgentsSkillsNewRoute = AgentsSkillsNewRouteImport.update({
+  id: '/skills/new',
+  path: '/skills/new',
+  getParentRoute: () => AgentsRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -143,6 +149,7 @@ export interface FileRoutesByFullPath {
   '/channels/': typeof ChannelsIndexRoute
   '/integrations/': typeof IntegrationsIndexRoute
   '/leads/': typeof LeadsIndexRoute
+  '/agents/skills/new': typeof AgentsSkillsNewRoute
   '/agents/tools/new': typeof AgentsToolsNewRoute
   '/campaigns/versions/$id': typeof CampaignsVersionsIdRoute
 }
@@ -160,6 +167,7 @@ export interface FileRoutesByTo {
   '/channels': typeof ChannelsIndexRoute
   '/integrations': typeof IntegrationsIndexRoute
   '/leads': typeof LeadsIndexRoute
+  '/agents/skills/new': typeof AgentsSkillsNewRoute
   '/agents/tools/new': typeof AgentsToolsNewRoute
   '/campaigns/versions/$id': typeof CampaignsVersionsIdRoute
 }
@@ -182,6 +190,7 @@ export interface FileRoutesById {
   '/channels/': typeof ChannelsIndexRoute
   '/integrations/': typeof IntegrationsIndexRoute
   '/leads/': typeof LeadsIndexRoute
+  '/agents/skills/new': typeof AgentsSkillsNewRoute
   '/agents/tools/new': typeof AgentsToolsNewRoute
   '/campaigns/versions/$id': typeof CampaignsVersionsIdRoute
 }
@@ -205,6 +214,7 @@ export interface FileRouteTypes {
     | '/channels/'
     | '/integrations/'
     | '/leads/'
+    | '/agents/skills/new'
     | '/agents/tools/new'
     | '/campaigns/versions/$id'
   fileRoutesByTo: FileRoutesByTo
@@ -222,6 +232,7 @@ export interface FileRouteTypes {
     | '/channels'
     | '/integrations'
     | '/leads'
+    | '/agents/skills/new'
     | '/agents/tools/new'
     | '/campaigns/versions/$id'
   id:
@@ -243,6 +254,7 @@ export interface FileRouteTypes {
     | '/channels/'
     | '/integrations/'
     | '/leads/'
+    | '/agents/skills/new'
     | '/agents/tools/new'
     | '/campaigns/versions/$id'
   fileRoutesById: FileRoutesById
@@ -394,6 +406,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AgentsToolsNewRouteImport
       parentRoute: typeof AgentsRoute
     }
+    '/agents/skills/new': {
+      id: '/agents/skills/new'
+      path: '/skills/new'
+      fullPath: '/agents/skills/new'
+      preLoaderRoute: typeof AgentsSkillsNewRouteImport
+      parentRoute: typeof AgentsRoute
+    }
   }
 }
 
@@ -401,6 +420,7 @@ interface AgentsRouteChildren {
   AgentsIdRoute: typeof AgentsIdRoute
   AgentsNewRoute: typeof AgentsNewRoute
   AgentsIndexRoute: typeof AgentsIndexRoute
+  AgentsSkillsNewRoute: typeof AgentsSkillsNewRoute
   AgentsToolsNewRoute: typeof AgentsToolsNewRoute
 }
 
@@ -408,6 +428,7 @@ const AgentsRouteChildren: AgentsRouteChildren = {
   AgentsIdRoute: AgentsIdRoute,
   AgentsNewRoute: AgentsNewRoute,
   AgentsIndexRoute: AgentsIndexRoute,
+  AgentsSkillsNewRoute: AgentsSkillsNewRoute,
   AgentsToolsNewRoute: AgentsToolsNewRoute,
 }
 

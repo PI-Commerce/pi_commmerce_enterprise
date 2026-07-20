@@ -304,7 +304,7 @@ function Skills() {
               {filtered.map((s) => (
                 <tr
                   key={s.handle}
-                  onClick={() => navigate({ to: "/agents/tools/new", search: { tool: s.handle } })}
+                  onClick={() => navigate({ to: "/agents/skills/new", search: { skill: s.handle } })}
                   className="cursor-pointer transition-colors hover:bg-accent/30"
                 >
                   <td className="px-4 py-3">

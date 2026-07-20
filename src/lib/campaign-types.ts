@@ -41,6 +41,18 @@ export const USE_CASE_TINT: Record<UseCase, string> = {
   generic:                   "text-muted-foreground bg-secondary border-border",
 };
 
+/** Solid variant of USE_CASE_TINT — for higher-emphasis badges (e.g. the
+ *  Business Analytics header) where the subtle border+tint variant reads
+ *  invisible. Uses foreground-on-color for readability. */
+export const USE_CASE_TINT_SOLID: Record<UseCase, string> = {
+  personal_loan_collections: "bg-chart-1 text-background border-transparent",
+  insurance_renewal:         "bg-chart-2 text-background border-transparent",
+  credit_card_dues:          "bg-chart-4 text-background border-transparent",
+  kyc_onboarding:            "bg-chart-3 text-background border-transparent",
+  cross_sell:                "bg-chart-5 text-background border-transparent",
+  generic:                   "bg-muted-foreground text-background border-transparent",
+};
+
 export type NodeKind =
   // system
   | "start"
