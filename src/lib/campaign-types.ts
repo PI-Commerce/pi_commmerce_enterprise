@@ -20,6 +20,8 @@ export type NodeKind =
   | "voiceCall"
   | "whatsapp"
   | "sms"
+  // ai
+  | "aiTransform"
   // ads
   | "adsCampaign";
 
@@ -138,9 +140,14 @@ export type PresetConfig = {
   senderId?: string;
   smsBody?: string;
   // ---- Delay ----
+  /** Delay v2: `fixed` = classic value+unit; `variable` = wait UNTIL the datetime
+   *  in `delayVariable` (e.g. a callback time or a scheduled follow-up). */
+  delayMode?: "fixed" | "variable";
   delayValue?: number;
   delayUnit?: "Minutes" | "Hours" | "Days";
-  // ---- API Tool Call ----
+  /** For `delayMode: "variable"` — the upstream variable holding the target datetime. */
+  delayVariable?: string;
+  // ---- Tool (API Tool Call) ----
   /** Handle of the registry tool this node calls (see {@link file://./tool-registry.ts}). */
   apiTool?: string;
   /** Maps each non-constant tool input (`v` = input key) to an upstream variable (`def`). */
@@ -193,6 +200,7 @@ export const NODE_GROUPS: Record<NodeKind, NodeGroup> = {
   voiceCall: "action",
   whatsapp: "action",
   sms: "action",
+  aiTransform: "ai",
   adsCampaign: "ads",
 };
 
@@ -200,13 +208,14 @@ export const NODE_LABELS: Record<NodeKind, string> = {
   start: "Start",
   end: "End",
   audience: "Audience",
-  apiToolCall: "API Tool Call",
+  apiToolCall: "Tool",
   conditional: "Conditional Branch",
   abSplit: "A/B Split",
   delay: "Delay",
   voiceCall: "Voice Call",
   whatsapp: "WhatsApp",
   sms: "SMS",
+  aiTransform: "AI Transformation",
   adsCampaign: "Ads Campaign Setup",
 };
 
@@ -227,6 +236,7 @@ export const SERIAL_PREFIX: Record<NodeKind, string> = {
   voiceCall: "voice",
   whatsapp: "whatsapp",
   sms: "sms",
+  aiTransform: "ait",
   adsCampaign: "ads",
 };
 

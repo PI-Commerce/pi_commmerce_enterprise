@@ -1,8 +1,15 @@
 name: Deploy to Cloudflare Workers
 
+# `main` -> Worker `pi-commerce-enterprise` (production demo).
+# `v2`   -> Worker `pi-commerce-enterprise-v2` (next-gen surface: new Leads section,
+#           Delay v2, Tool node redesign, AI Transformation node, Integrations).
+# nitro's build output includes a wrangler.json whose `name` we rewrite just
+# before deploy — Wrangler's redirected-config format can't carry `env` blocks,
+# so a runtime rewrite is the cleanest branch-to-worker mapping.
+
 on:
   push:
-    branches: [main]
+    branches: [main, v2]
   workflow_dispatch:
 
 jobs:
@@ -22,6 +29,10 @@ jobs:
 
       - name: Build
         run: bun run build
+
+      - name: Point build at the v2 Worker
+        if: github.ref == 'refs/heads/v2'
+        run: node -e "const f='dist/server/wrangler.json',fs=require('fs');const c=JSON.parse(fs.readFileSync(f));c.name='pi-commerce-enterprise-v2';fs.writeFileSync(f,JSON.stringify(c,null,2));console.log('Deploying Worker:',c.name)"
 
       - name: Deploy to Cloudflare Workers
         run: bunx wrangler deploy

@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -10,6 +10,7 @@ import {
 import {
   ChevronLeft, Trash2,
 } from "lucide-react";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
   getTool, type ToolDef, type ToolType, type ToolSource, type ToolDataType, type ToolParamIn,
@@ -131,16 +132,18 @@ const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9_]/g, "_");
 /* --------------------------------------------------------- */
 
 function ToolEditor() {
+  const navigate = useNavigate();
   const { tool: editHandle } = Route.useSearch();
   const existing = editHandle ? getTool(editHandle) : undefined;
-  // Read-only view of a saved tool. State is initialised once from the tool
-  // registry and never mutated; every input/select is disabled via the
-  // wrapping fieldset below.
-  const [draft] = useState<ToolDraft>(() => (existing ? draftFromTool(existing) : blankDraft()));
+  // Editable draft: seeded from the registry when editing an existing tool,
+  // else from `blankDraft()` for a brand-new one. Field changes flow through
+  // `set(key, value)`; Save toasts + navigates back. No runtime persistence in
+  // v1 — the TOOLS array stays untouched — so edits/creates live until reload.
+  const [draft, setDraftState] = useState<ToolDraft>(() => (existing ? draftFromTool(existing) : blankDraft()));
 
-  const noop = <K extends keyof ToolDraft>(_key: K, _value: ToolDraft[K]) => { void _key; void _value; };
-  const set = noop;
-  const setDraft = (_updater: (d: ToolDraft) => ToolDraft) => { void _updater; };
+  const set = <K extends keyof ToolDraft>(key: K, value: ToolDraft[K]) => {
+    setDraftState((d) => ({ ...d, [key]: value }));
+  };
 
   const pathKeys = useMemo(
     () => Array.from(draft.url.matchAll(/\{([^}]+)\}/g)).map((m) => m[1]),
@@ -148,6 +151,18 @@ function ToolEditor() {
   );
 
   const isHttp = draft.type === "http";
+  const isNew = !existing;
+
+  const handleSave = () => {
+    if (!draft.handle.trim()) {
+      toast.error("Tool name is required");
+      return;
+    }
+    toast.success(isNew ? "Tool created" : "Tool saved", {
+      description: draft.handle,
+    });
+    navigate({ to: "/agents", search: { tab: "tools" } });
+  };
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground">
@@ -166,27 +181,9 @@ function ToolEditor() {
         </div>
       </header>
 
-      {/* Body — everything wrapped in a disabled fieldset so inputs read as read-only */}
+      {/* Body — editable */}
       <section className="flex min-h-0 flex-1 flex-col overflow-y-auto px-8 py-8">
-        <fieldset disabled className="tool-view-fieldset mx-auto block w-full max-w-3xl min-w-0 space-y-5 border-0 p-0">
-        <style>{`
-          /* Everything inside the read-only surface signals not-editable on hover.
-             We use the :disabled pseudo-class (not the [disabled] attribute) because
-             controls inside a <fieldset disabled> are behaviourally disabled without
-             having their own disabled attribute set. */
-          .tool-view-fieldset,
-          .tool-view-fieldset button:disabled,
-          .tool-view-fieldset input:disabled,
-          .tool-view-fieldset select:disabled,
-          .tool-view-fieldset textarea:disabled,
-          .tool-view-fieldset [data-radix-select-trigger] { cursor: not-allowed !important; }
-          /* Kill hover affordances on the row-remove button — it would otherwise
-             turn red on hover even though clicks are ignored. */
-          .tool-view-fieldset .row-remove:hover { background: transparent !important; color: inherit !important; }
-          /* SubTabs (rendered as divs, not buttons) stay clickable + keep pointer cursor. */
-          .tool-view-fieldset .subtabs [role="tab"] { cursor: pointer !important; }
-        `}</style>
-
+        <div className="mx-auto block w-full max-w-3xl min-w-0 space-y-5 border-0 p-0">
           {/* 1 · Tool Details */}
           <Card title="Tool Details" desc="Identify the tool. The name is how agents reference it in a prompt.">
             <FormField label="Tool name" required>
@@ -283,14 +280,15 @@ function ToolEditor() {
 
           {/* 4 · Output Schema (HTTP only) */}
           {isHttp && <OutputSchema draft={draft} />}
-        </fieldset>
+        </div>
       </section>
 
-      {/* Footer — Save + Cancel present but disabled (read-only) */}
       <footer className="flex h-14 shrink-0 items-center justify-center gap-3 border-t border-border px-4">
-        <Button variant="outline" size="sm" className="h-8 px-4 text-xs" disabled>Cancel</Button>
-        <Button size="sm" className="h-8 gap-1.5 px-4 text-xs" disabled>
-          Save tool
+        <Button asChild variant="outline" size="sm" className="h-8 px-4 text-xs">
+          <Link to="/agents" search={{ tab: "tools" }}>Cancel</Link>
+        </Button>
+        <Button size="sm" className="h-8 gap-1.5 px-4 text-xs" onClick={handleSave}>
+          {isNew ? "Create tool" : "Save tool"}
         </Button>
       </footer>
     </div>

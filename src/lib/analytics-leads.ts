@@ -111,6 +111,7 @@ const STATUS_BY_KIND: Record<SankeyNodeKind, LeadStatus[]> = {
   voice: ["pending", "running", "completed", "failed"],
   sms: ["delivered", "failed"],
   ads: ["clicked", "delivered"],
+  aiTransform: [],
   end: [],
 };
 

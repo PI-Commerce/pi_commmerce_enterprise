@@ -3,6 +3,7 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import {
   LayoutDashboard, Megaphone, Bot, BarChart3, Plug, Settings, Command,
   PanelLeftClose, PanelLeftOpen, Radio, ChevronRight, MessageCircle, MessageSquare, MessageSquareText,
+  Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useRegion } from "@/lib/region";
@@ -11,6 +12,7 @@ const primary = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, exact: true },
   { to: "/campaigns", label: "Campaigns", icon: Megaphone },
   { to: "/agents", label: "Agents", icon: Bot },
+  { to: "/leads", label: "Leads", icon: Users },
   { to: "/analytics", label: "Analytics", icon: BarChart3 },
 ] as const;
 
@@ -23,7 +25,7 @@ const channelChildren: ChannelChild[] = [
 ];
 
 const secondary = [
-  { to: "/integrations", label: "Integrations", icon: Plug, disabled: true },
+  { to: "/integrations", label: "Integrations", icon: Plug },
   { to: "/settings", label: "Settings", icon: Settings, disabled: true },
 ] as const;
 

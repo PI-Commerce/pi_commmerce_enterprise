@@ -6,7 +6,8 @@ import { Input } from "@/components/ui/input";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Wrench, Search } from "lucide-react";
+import { Wrench, Search, Plus } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { TOOLS, TYPE_LABEL, STATUS_LABEL, type ToolType } from "@/lib/tool-registry";
 
@@ -180,6 +181,15 @@ function Tools() {
             { value: "mcp", label: "MCP" },
           ]}
         />
+        <div className="ml-auto">
+          <Button
+            size="sm"
+            className="h-8 gap-1.5 text-xs"
+            onClick={() => navigate({ to: "/agents/tools/new", search: {} })}
+          >
+            <Plus className="h-3.5 w-3.5" /> New tool
+          </Button>
+        </div>
       </div>
 
       {filtered.length === 0 ? (

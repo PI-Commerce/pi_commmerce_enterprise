@@ -16,10 +16,12 @@ import { Route as CampaignsRouteImport } from './routes/campaigns'
 import { Route as AnalyticsRouteImport } from './routes/analytics'
 import { Route as AgentsRouteImport } from './routes/agents'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as LeadsIndexRouteImport } from './routes/leads.index'
 import { Route as IntegrationsIndexRouteImport } from './routes/integrations.index'
 import { Route as ChannelsIndexRouteImport } from './routes/channels.index'
 import { Route as CampaignsIndexRouteImport } from './routes/campaigns.index'
 import { Route as AgentsIndexRouteImport } from './routes/agents.index'
+import { Route as LeadsIdRouteImport } from './routes/leads.$id'
 import { Route as ChannelsWhatsappRouteImport } from './routes/channels.whatsapp'
 import { Route as CampaignsIdRouteImport } from './routes/campaigns.$id'
 import { Route as AgentsNewRouteImport } from './routes/agents.new'
@@ -62,6 +64,11 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const LeadsIndexRoute = LeadsIndexRouteImport.update({
+  id: '/leads/',
+  path: '/leads/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IntegrationsIndexRoute = IntegrationsIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -81,6 +88,11 @@ const AgentsIndexRoute = AgentsIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => AgentsRoute,
+} as any)
+const LeadsIdRoute = LeadsIdRouteImport.update({
+  id: '/leads/$id',
+  path: '/leads/$id',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const ChannelsWhatsappRoute = ChannelsWhatsappRouteImport.update({
   id: '/whatsapp',
@@ -125,10 +137,12 @@ export interface FileRoutesByFullPath {
   '/agents/new': typeof AgentsNewRoute
   '/campaigns/$id': typeof CampaignsIdRoute
   '/channels/whatsapp': typeof ChannelsWhatsappRoute
+  '/leads/$id': typeof LeadsIdRoute
   '/agents/': typeof AgentsIndexRoute
   '/campaigns/': typeof CampaignsIndexRoute
   '/channels/': typeof ChannelsIndexRoute
   '/integrations/': typeof IntegrationsIndexRoute
+  '/leads/': typeof LeadsIndexRoute
   '/agents/tools/new': typeof AgentsToolsNewRoute
   '/campaigns/versions/$id': typeof CampaignsVersionsIdRoute
 }
@@ -140,10 +154,12 @@ export interface FileRoutesByTo {
   '/agents/new': typeof AgentsNewRoute
   '/campaigns/$id': typeof CampaignsIdRoute
   '/channels/whatsapp': typeof ChannelsWhatsappRoute
+  '/leads/$id': typeof LeadsIdRoute
   '/agents': typeof AgentsIndexRoute
   '/campaigns': typeof CampaignsIndexRoute
   '/channels': typeof ChannelsIndexRoute
   '/integrations': typeof IntegrationsIndexRoute
+  '/leads': typeof LeadsIndexRoute
   '/agents/tools/new': typeof AgentsToolsNewRoute
   '/campaigns/versions/$id': typeof CampaignsVersionsIdRoute
 }
@@ -160,10 +176,12 @@ export interface FileRoutesById {
   '/agents/new': typeof AgentsNewRoute
   '/campaigns/$id': typeof CampaignsIdRoute
   '/channels/whatsapp': typeof ChannelsWhatsappRoute
+  '/leads/$id': typeof LeadsIdRoute
   '/agents/': typeof AgentsIndexRoute
   '/campaigns/': typeof CampaignsIndexRoute
   '/channels/': typeof ChannelsIndexRoute
   '/integrations/': typeof IntegrationsIndexRoute
+  '/leads/': typeof LeadsIndexRoute
   '/agents/tools/new': typeof AgentsToolsNewRoute
   '/campaigns/versions/$id': typeof CampaignsVersionsIdRoute
 }
@@ -181,10 +199,12 @@ export interface FileRouteTypes {
     | '/agents/new'
     | '/campaigns/$id'
     | '/channels/whatsapp'
+    | '/leads/$id'
     | '/agents/'
     | '/campaigns/'
     | '/channels/'
     | '/integrations/'
+    | '/leads/'
     | '/agents/tools/new'
     | '/campaigns/versions/$id'
   fileRoutesByTo: FileRoutesByTo
@@ -196,10 +216,12 @@ export interface FileRouteTypes {
     | '/agents/new'
     | '/campaigns/$id'
     | '/channels/whatsapp'
+    | '/leads/$id'
     | '/agents'
     | '/campaigns'
     | '/channels'
     | '/integrations'
+    | '/leads'
     | '/agents/tools/new'
     | '/campaigns/versions/$id'
   id:
@@ -215,10 +237,12 @@ export interface FileRouteTypes {
     | '/agents/new'
     | '/campaigns/$id'
     | '/channels/whatsapp'
+    | '/leads/$id'
     | '/agents/'
     | '/campaigns/'
     | '/channels/'
     | '/integrations/'
+    | '/leads/'
     | '/agents/tools/new'
     | '/campaigns/versions/$id'
   fileRoutesById: FileRoutesById
@@ -231,6 +255,8 @@ export interface RootRouteChildren {
   ChannelsRoute: typeof ChannelsRouteWithChildren
   IntegrationsRoute: typeof IntegrationsRouteWithChildren
   SettingsRoute: typeof SettingsRoute
+  LeadsIdRoute: typeof LeadsIdRoute
+  LeadsIndexRoute: typeof LeadsIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -284,6 +310,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/leads/': {
+      id: '/leads/'
+      path: '/leads'
+      fullPath: '/leads/'
+      preLoaderRoute: typeof LeadsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/integrations/': {
       id: '/integrations/'
       path: '/'
@@ -311,6 +344,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/agents/'
       preLoaderRoute: typeof AgentsIndexRouteImport
       parentRoute: typeof AgentsRoute
+    }
+    '/leads/$id': {
+      id: '/leads/$id'
+      path: '/leads/$id'
+      fullPath: '/leads/$id'
+      preLoaderRoute: typeof LeadsIdRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/channels/whatsapp': {
       id: '/channels/whatsapp'
@@ -424,6 +464,8 @@ const rootRouteChildren: RootRouteChildren = {
   ChannelsRoute: ChannelsRouteWithChildren,
   IntegrationsRoute: IntegrationsRouteWithChildren,
   SettingsRoute: SettingsRoute,
+  LeadsIdRoute: LeadsIdRoute,
+  LeadsIndexRoute: LeadsIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -22,6 +22,7 @@ const ICONS: Record<NodeKind, LucideIcon> = {
   voiceCall: Phone,
   whatsapp: MessageCircle,
   sms: MessageSquare,
+  aiTransform: Sparkles,
   adsCampaign: Megaphone,
 };
 

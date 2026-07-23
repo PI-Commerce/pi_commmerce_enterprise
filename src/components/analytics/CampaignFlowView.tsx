@@ -27,6 +27,7 @@ const KIND_MAP: Record<SankeyNodeKind, NodeKind> = {
   ads: "adsCampaign",
   conditional: "conditional",
   delay: "delay",
+  aiTransform: "aiTransform",
   end: "end",
 };
 

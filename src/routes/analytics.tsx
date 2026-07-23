@@ -124,12 +124,13 @@ const NODE_COLOR: Record<SankeyNodeKind, string> = {
   ads: "#06b6d4",
   conditional: "#64748b",
   delay: "#94a3b8",
+  aiTransform: "#a855f7",
   end: "#f59e0b",
 };
 const NODE_TYPE_LABEL: Record<SankeyNodeKind, string> = {
   start: "Start",
   audience: "Audience",
-  apiToolCall: "API Tool Call",
+  apiToolCall: "Tool",
   abSplit: "A/B Split",
   whatsapp: "WhatsApp",
   voice: "Voice Call",
@@ -137,6 +138,7 @@ const NODE_TYPE_LABEL: Record<SankeyNodeKind, string> = {
   ads: "Ads Campaign",
   conditional: "Conditional Branch",
   delay: "Delay",
+  aiTransform: "AI Transformation",
   end: "End",
 };
 const STATUS_TONE: Record<string, string> = {

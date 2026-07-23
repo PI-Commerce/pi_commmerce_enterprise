@@ -366,16 +366,10 @@ function KindFields({
       return <AbSplitFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
 
     case "delay":
-      return (
-        <Section title="Delay">
-          <Field label="Duration" required>
-            <div className="grid grid-cols-2 gap-2">
-              <Input disabled={readOnly} type="number" defaultValue={config?.delayValue ?? 24} className="h-9" onChange={() => mark(true)} />
-              <SelectLike disabled={readOnly} options={["Minutes", "Hours", "Days"]} onPick={() => mark(true)} defaultValue={config?.delayUnit ?? "Hours"} />
-            </div>
-          </Field>
-        </Section>
-      );
+      return <DelayFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
+
+    case "aiTransform":
+      return <AiTransformFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
 
     case "voiceCall":
       return <VoiceCallFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
@@ -776,32 +770,36 @@ function ApiToolCallFields({
     next.push({ v: key, def: existing?.def ?? "", mode: existing?.mode, remap: remap.length ? remap : undefined });
     onChange({ config: { ...config, apiTool: handle, apiInputMap: next } });
   };
+  const outputsVisible = selected && !!tool && tool.outputs.length > 0;
   return (
-    <>
-      <Section title="API tool">
-        <div className="rounded-xl border border-border bg-card/50 p-4 space-y-4">
-          {/* Step 1: pick the API tool */}
-          <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <StepChip n={1} done={selected} />
-              <Label className="flex items-center gap-1 text-[12px] font-medium text-foreground">
-                API tool <span className="text-destructive">*</span>
-              </Label>
-            </div>
-            <SelectLike
-              disabled={readOnly}
-              options={TOOLS.map((t) => t.handle)}
-              defaultValue={config?.apiTool}
-              onPick={pickTool}
-              placeholder="Select an API tool…"
-            />
-            {tool && (
-              <p className="text-[11px] text-muted-foreground">
-                <span className="font-mono text-foreground">{tool.method ?? tool.type.toUpperCase()}</span>{" "}
-                <span className="font-mono">{tool.url}</span> — {tool.description}
-              </p>
-            )}
+    <Section title="Tool">
+      <div className="rounded-xl border border-border bg-card/50 p-4 space-y-4">
+        {/* Step 1: pick the tool. Endpoint + description live inside the same
+            numbered block so the layout stays compact. */}
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <StepChip n={1} done={selected} />
+            <Label className="flex items-center gap-1 text-[12px] font-medium text-foreground">
+              Tool <span className="text-destructive">*</span>
+            </Label>
           </div>
+          <SelectLike
+            disabled={readOnly}
+            options={TOOLS.map((t) => t.handle)}
+            defaultValue={config?.apiTool}
+            onPick={pickTool}
+            placeholder="Select a tool…"
+          />
+          {tool && (
+            <div className="space-y-1">
+              <p className="font-mono text-[11.5px] text-foreground">
+                <span className="text-muted-foreground">{tool.method ?? tool.type.toUpperCase()}</span>{" "}
+                {tool.url}
+              </p>
+              <p className="text-[11.5px] text-muted-foreground leading-snug">{tool.description}</p>
+            </div>
+          )}
+        </div>
 
           <div className="border-t border-border/60" />
 
@@ -815,86 +813,105 @@ function ApiToolCallFields({
               Map each request parameter to an upstream workflow variable (e.g. a CSV column).
             </p>
             {selected ? (
-              mappable.length > 0 ? (
-                <div className="space-y-2 pt-1">
-                  {mappable.map((inp) => {
-                    const row = inputMap.find((m) => m.v === inp.key);
-                    const def = row?.def
-                      ?? (inp.source === "campaign" ? `contact.${inp.value ?? inp.key}` : "");
-                    // A value-remap only makes sense for a variable source (you remap the
-                    // resolved value); a hardcoded constant is already the final value.
-                    const isVarMapped = (row?.mode ?? "variable") === "variable" && !!def;
-                    return (
-                      <div key={inp.key} className="space-y-1.5">
-                        <div className="grid grid-cols-[130px_1fr] items-center gap-2">
-                          <span className="truncate font-mono text-[11.5px] text-muted-foreground" title={inp.description}>
-                            {inp.key}
-                          </span>
-                          <VariablePicker
-                            defaultValue={def}
+            mappable.length > 0 ? (
+              <div className="space-y-2 pt-1">
+                {mappable.map((inp) => {
+                  const row = inputMap.find((m) => m.v === inp.key);
+                  const def = row?.def
+                    ?? (inp.source === "campaign" ? `contact.${inp.value ?? inp.key}` : "");
+                  // A value-remap only makes sense for a variable source (you remap the
+                  // resolved value); a hardcoded constant is already the final value.
+                  const isVarMapped = (row?.mode ?? "variable") === "variable" && !!def;
+                  return (
+                    <div key={inp.key} className="space-y-1.5">
+                      <div className="grid grid-cols-[130px_1fr] items-center gap-2">
+                        <span className="truncate font-mono text-[11.5px] text-muted-foreground" title={inp.description}>
+                          {inp.key}
+                        </span>
+                        <VariablePicker
+                          defaultValue={def}
+                          disabled={readOnly}
+                          allowConstant
+                          mode={row?.mode}
+                          onChange={(v, mode) => setMapping(inp.key, v, mode)}
+                        />
+                      </div>
+                      {isVarMapped && (
+                        <div className="pl-[138px]">
+                          <ValueRemapEditor
+                            value={row?.remap ?? []}
                             disabled={readOnly}
-                            allowConstant
-                            mode={row?.mode}
-                            onChange={(v, mode) => setMapping(inp.key, v, mode)}
+                            onChange={(rm) => setRemap(inp.key, rm)}
                           />
                         </div>
-                        {isVarMapped && (
-                          <div className="pl-[138px]">
-                            <ValueRemapEditor
-                              value={row?.remap ?? []}
-                              disabled={readOnly}
-                              onChange={(rm) => setRemap(inp.key, rm)}
-                            />
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="rounded-md border border-dashed border-border bg-muted/30 px-3 py-3 text-[11.5px] text-muted-foreground">
-                  All parameters are fixed at the tool — no mapping needed.
-                </div>
-              )
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             ) : (
               <div className="rounded-md border border-dashed border-border bg-muted/30 px-3 py-3 text-[11.5px] text-muted-foreground">
-                Select an API tool above to map its inputs.
+                All parameters are fixed at the tool — no mapping needed.
               </div>
-            )}
-          </div>
+            )
+          ) : (
+            <div className="rounded-md border border-dashed border-border bg-muted/30 px-3 py-3 text-[11.5px] text-muted-foreground">
+              Select a tool above to map its inputs.
+            </div>
+          )}
         </div>
-      </Section>
 
-      {selected && constants.length > 0 && (
-        <Section title="Fixed parameters">
-          <div className="rounded-xl border border-border bg-card/50 p-3 space-y-1.5">
-            {constants.map((c) => (
-              <div key={c.key} className="flex items-center justify-between gap-3 text-[11.5px]">
-                <span className="font-mono text-muted-foreground">{c.key}</span>
-                <span className="truncate font-mono text-foreground" title={c.value}>{c.value}</span>
-              </div>
-            ))}
-          </div>
-        </Section>
-      )}
+        {selected && constants.length > 0 && (
+          <>
+            <div className="border-t border-border/60" />
+            <div className="space-y-1.5">
+              <Label className="text-[12px] font-medium text-foreground">Fixed parameters</Label>
+              {constants.map((c) => (
+                <div key={c.key} className="flex items-center justify-between gap-3 text-[11.5px]">
+                  <span className="font-mono text-muted-foreground">{c.key}</span>
+                  <span className="truncate font-mono text-foreground" title={c.value}>{c.value}</span>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
 
-      {selected && tool.outputs.length > 0 && (
-        <Section title="Outputs → downstream variables">
-          <div className="rounded-xl border border-border bg-card/50 p-3 space-y-1.5">
-            <p className="text-[11px] text-muted-foreground">
-              These response fields are available to later nodes as{" "}
-              <span className="font-mono text-foreground">{"{node}.{field}"}</span>.
-            </p>
-            {tool.outputs.map((o) => (
-              <div key={o.varName} className="flex items-center justify-between gap-3 text-[11.5px]">
-                <span className="font-mono text-ai">{o.varName}</span>
-                <span className="truncate text-muted-foreground" title={o.description}>{o.description}</span>
+        {/* Step 3 — outputs (read-only, informational only) */}
+        {outputsVisible && (
+          <>
+            <div className="border-t border-border/60" />
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <StepChip n={3} muted={!selected} />
+                <Label className="text-[12px] font-medium text-foreground">Outputs</Label>
               </div>
-            ))}
-          </div>
-        </Section>
-      )}
-    </>
+              <div className="overflow-hidden rounded-md border border-border">
+                <table className="w-full text-[11.5px]">
+                  <thead>
+                    <tr className="border-b border-border bg-secondary/40 text-[10px] uppercase tracking-wider text-muted-foreground">
+                      <th className="px-3 py-1.5 text-left font-medium">Name</th>
+                      <th className="px-3 py-1.5 text-left font-medium">Type</th>
+                      <th className="px-3 py-1.5 text-left font-medium">Description</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {tool.outputs.map((o) => (
+                      <tr key={o.varName}>
+                        <td className="px-3 py-1.5 font-mono text-ai">{o.varName}</td>
+                        <td className="px-3 py-1.5">
+                          <span className="rounded-sm border border-border bg-secondary/40 px-1 py-0.5 text-[10px]">{o.dataType ?? "String"}</span>
+                        </td>
+                        <td className="px-3 py-1.5 text-muted-foreground">{o.description}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    </Section>
   );
 }
 
@@ -1929,11 +1946,15 @@ function CollapsibleSection({
 /* --------------------------- AI Transformations --------------------------- */
 
 function AiTransformationsSection({
-  readOnly, transforms, setTransforms,
+  readOnly, transforms, setTransforms, standalone,
 }: {
   readOnly?: boolean;
   transforms: AiTransform[];
   setTransforms: React.Dispatch<React.SetStateAction<AiTransform[]>>;
+  /** When true, renders the list directly (no outer collapsible, no title bar).
+   *  Used by the standalone AI Transformation node — the config panel already
+   *  labels the node, so a nested collapse is redundant. */
+  standalone?: boolean;
 }) {
   const move = (id: string, dir: -1 | 1) => {
     setTransforms((xs) => {
@@ -1949,21 +1970,11 @@ function AiTransformationsSection({
     id: uid("t"), type: "Translate", input: "", output: "", open: true,
   }]);
 
-  return (
-    <CollapsibleSection
-      title="AI Transformations"
-      icon={Sparkles}
-      defaultOpen={transforms.length > 0}
-      badge={transforms.length || undefined}
-      headerRight={
-        <Button size="sm" variant="ghost" disabled={readOnly} onClick={(e) => { e.stopPropagation(); add(); }} className="h-7 gap-1 px-2 text-[11px]">
-          <Plus className="h-3 w-3" /> Add
-        </Button>
-      }
-    >
+  const body = (
+    <>
       {transforms.length === 0 ? (
         <div className="rounded-md border border-dashed border-border bg-muted/30 px-3 py-4 text-center text-[11.5px] text-muted-foreground">
-          No transformations. Outputs you define here become variables on downstream nodes.
+          No transformations yet. Add one to define an AI-generated variable that downstream nodes can use.
         </div>
       ) : (
         <div className="space-y-2">
@@ -2013,6 +2024,156 @@ function AiTransformationsSection({
           ))}
         </div>
       )}
+    </>
+  );
+
+  if (standalone) {
+    return (
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Sparkles className="h-3.5 w-3.5 text-ai" />
+            <span className="text-[12px] font-medium">Transformations</span>
+            {transforms.length > 0 && (
+              <span className="rounded-full border border-ai/25 bg-ai/10 px-1.5 py-0.5 text-[10.5px] font-semibold text-ai">
+                {transforms.length}
+              </span>
+            )}
+          </div>
+          <Button size="sm" variant="ghost" disabled={readOnly} onClick={add} className="h-7 gap-1 px-2 text-[11px]">
+            <Plus className="h-3 w-3" /> Add
+          </Button>
+        </div>
+        {body}
+      </div>
+    );
+  }
+
+  return (
+    <CollapsibleSection
+      title="AI Transformations"
+      icon={Sparkles}
+      defaultOpen={transforms.length > 0}
+      badge={transforms.length || undefined}
+      headerRight={
+        <Button size="sm" variant="ghost" disabled={readOnly} onClick={(e) => { e.stopPropagation(); add(); }} className="h-7 gap-1 px-2 text-[11px]">
+          <Plus className="h-3 w-3" /> Add
+        </Button>
+      }
+    >
+      {body}
     </CollapsibleSection>
+  );
+}
+
+/** Standalone AI Transformation node config — the previously-inline
+ *  AiTransformationsSection lifted out of Action nodes into its own node kind.
+ *  Manages the transform list locally and persists it on every change. */
+function AiTransformFields({
+  config, readOnly, mark, onChange,
+}: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
+  const [transforms, setTransformsState] = useState<AiTransform[]>(
+    () => (config?.transforms ?? []).map((t) => ({ ...t, open: false })),
+  );
+  const setTransforms: React.Dispatch<React.SetStateAction<AiTransform[]>> = (updater) => {
+    setTransformsState((prev) => {
+      const next = typeof updater === "function"
+        ? (updater as (p: AiTransform[]) => AiTransform[])(prev)
+        : updater;
+      onChange({ config: { ...(config ?? {}), transforms: next.map(({ open: _o, ...rest }) => rest) } });
+      return next;
+    });
+  };
+  // Always valid — 0 or more transforms is a legal configuration. The node
+  // simply becomes a pass-through when empty. Marked once on mount.
+  useEffect(() => { mark(true); }, []);
+  return <AiTransformationsSection readOnly={readOnly} transforms={transforms} setTransforms={setTransforms} standalone />;
+}
+
+/* --------------------------- Delay (v2) --------------------------- *
+ *  v1 = fixed duration only. v2 adds a second mode: wait UNTIL a specific
+ *  datetime carried in an upstream variable (Voice-agent callback_time, PTP
+ *  date, etc.). Node advances when the current time reaches the resolved value.
+ */
+function DelayFields({
+  config, readOnly, mark, onChange,
+}: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
+  const [mode, setMode] = useState<"fixed" | "variable">(config?.delayMode ?? "fixed");
+  const setDelayMode = (m: "fixed" | "variable") => {
+    setMode(m);
+    onChange({ config: { ...(config ?? {}), delayMode: m } });
+    mark(true);
+  };
+  return (
+    <Section title="Delay">
+      {/* Mode picker — two radio-style tiles so both options are equally discoverable */}
+      <div className="mb-3 grid grid-cols-2 gap-2">
+        <ModeTile
+          selected={mode === "fixed"}
+          onClick={() => !readOnly && setDelayMode("fixed")}
+          icon={<Clock className="h-3.5 w-3.5" />}
+          title="Fixed duration"
+          subtitle="Wait N minutes/hours/days"
+          disabled={readOnly}
+        />
+        <ModeTile
+          selected={mode === "variable"}
+          onClick={() => !readOnly && setDelayMode("variable")}
+          icon={<Variable className="h-3.5 w-3.5" />}
+          title="Until datetime"
+          subtitle="Wait until a variable's datetime"
+          disabled={readOnly}
+        />
+      </div>
+      {mode === "fixed" ? (
+        <Field label="Duration" required>
+          <div className="grid grid-cols-2 gap-2">
+            <Input disabled={readOnly} type="number" defaultValue={config?.delayValue ?? 24} className="h-9" onChange={() => mark(true)} />
+            <SelectLike disabled={readOnly} options={["Minutes", "Hours", "Days"]} onPick={() => mark(true)} defaultValue={config?.delayUnit ?? "Hours"} />
+          </div>
+        </Field>
+      ) : (
+        <>
+          <Field label="Wait until (datetime variable)" required>
+            <VariablePicker
+              defaultValue={config?.delayVariable ?? ""}
+              disabled={readOnly}
+              onChange={(v) => {
+                onChange({ config: { ...(config ?? {}), delayMode: "variable", delayVariable: v } });
+                mark(!!v, v ? undefined : "Pick a datetime variable");
+              }}
+            />
+          </Field>
+          <div className="mt-2 flex items-start gap-2 rounded-md border border-dashed border-border bg-muted/30 px-2.5 py-2 text-[11px] text-muted-foreground">
+            <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>
+              Node advances when the current time reaches the value in the picked variable — typically an upstream node's output like
+              <span className="font-mono text-foreground"> voice_1.callback_time</span> or a scheduled follow-up datetime. If the datetime is in the past when the lead arrives, the node advances immediately.
+            </span>
+          </div>
+        </>
+      )}
+    </Section>
+  );
+}
+
+function ModeTile({ selected, onClick, icon, title, subtitle, disabled }: { selected: boolean; onClick: () => void; icon: React.ReactNode; title: string; subtitle: string; disabled?: boolean }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={cn(
+        "flex flex-col items-start gap-1 rounded-lg border px-2.5 py-2 text-left transition-colors",
+        selected ? "border-ai/50 bg-ai/5" : "border-border bg-card hover:bg-accent/40",
+        disabled && "cursor-not-allowed opacity-60",
+      )}
+    >
+      <div className={cn("flex items-center gap-1.5", selected ? "text-ai" : "text-muted-foreground")}>
+        {icon}
+        <span className="text-[12px] font-medium">{title}</span>
+      </div>
+      <span className="text-[10.5px] text-muted-foreground">{subtitle}</span>
+    </button>
   );
 }

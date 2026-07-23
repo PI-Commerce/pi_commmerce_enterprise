@@ -22,6 +22,7 @@ export type SankeyNodeKind =
   | "ads"
   | "conditional"
   | "delay"
+  | "aiTransform"
   | "end";
 
 export type SankeyNode = {
@@ -99,6 +100,7 @@ const KIND_TO_SANKEY: Record<NodeKind, SankeyNodeKind> = {
   // lead flows through. It shows Common Metrics + a Configuration Snapshot, but
   // has no channel funnel of its own.
   apiToolCall: "apiToolCall",
+  aiTransform: "aiTransform",
 };
 
 const PASS_RATE: Record<SankeyNodeKind, number> = {
@@ -108,6 +110,7 @@ const PASS_RATE: Record<SankeyNodeKind, number> = {
   conditional: 1,
   abSplit: 1,
   delay: 1,
+  aiTransform: 1,
   end: 1,
   voice: 0.72,
   whatsapp: 0.82,
