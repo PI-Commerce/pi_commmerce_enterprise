@@ -23,7 +23,8 @@ export type SankeyNodeKind =
   | "ads"
   | "conditional"
   | "delay"
-  | "end";
+  | "end"
+  | "needsReview";
 
 export type SankeyNode = {
   id: string;
@@ -52,6 +53,7 @@ export type CampaignAnalytics = {
   id: string;
   name: string;
   useCase?: import("./campaign-types").UseCase;
+  product?: import("./campaign-types").Product;
   runs: RunRow[];
 };
 
@@ -104,6 +106,8 @@ const KIND_TO_SANKEY: Record<NodeKind, SankeyNodeKind> = {
   // AI Transformation is a pass-through processing step too — every lead flows
   // through, computing derived variables that downstream nodes can reference.
   aiTransform: "aiTransform",
+  // Human Escalation (terminal): counts as a distinct exit lane in analytics.
+  needsReview: "needsReview",
 };
 
 const PASS_RATE: Record<SankeyNodeKind, number> = {
@@ -119,6 +123,7 @@ const PASS_RATE: Record<SankeyNodeKind, number> = {
   whatsapp: 0.82,
   sms: 0.9,
   ads: 0.95,
+  needsReview: 1, // terminal — all leads that reach it are counted as flagged.
 };
 
 /** Stable string hash for deterministic per-node variance. */
@@ -324,6 +329,7 @@ export const CAMPAIGNS: CampaignAnalytics[] = Object.entries(
   id,
   name: ex.name,
   useCase: ex.useCase,
+  product: ex.product,
   // Alternate run types so both the badge and the Always-on-only date filter are demonstrable.
   runs: [
     deriveRun(
@@ -401,9 +407,9 @@ export const CHANNEL_CAMPAIGN_BREAKDOWN: {
 }[] = [
   // FinServ Collections breakdown — sent = messages/calls attempted, converted =
   // borrowers who paid (or made a kept PTP) within the campaign window.
-  { campaign: "Personal Loan · Pre-due EMI reminder", sent: 12480, converted: 8210, rate: 65.8 },
-  { campaign: "Personal Loan · Due-day EMI reminder", sent: 9840,  converted: 5620, rate: 57.1 },
-  { campaign: "Personal Loan · DPD 1–7 recovery",     sent: 4820,  converted: 1970, rate: 40.9 },
+  { campaign: "Loan · Pre-due EMI Reminder", sent: 12480, converted: 8210, rate: 65.8 },
+  { campaign: "Loan · Due-day EMI Reminder", sent: 9840,  converted: 5620, rate: 57.1 },
+  { campaign: "Loan · Early DPD Reminder + Recovery",     sent: 4820,  converted: 1970, rate: 40.9 },
   { campaign: "BFSI · Insurance Renewal",             sent: 8620,  converted: 3410, rate: 39.6 },
   { campaign: "BFSI · Collections",                   sent: 6210,  converted: 1820, rate: 29.3 },
 ];

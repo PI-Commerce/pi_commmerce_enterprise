@@ -62,6 +62,9 @@ const DEFAULT_NODE_DATA: Record<NodeKind, Partial<WorkflowNodeData>> = {
   sms: { subtitle: "Send SMS", valid: false, error: "Add message body", outputs: completedOutput() },
   aiTransform: { subtitle: "Derive an AI variable", valid: true },
   adsCampaign: { subtitle: "WhatsApp CTWA ad", valid: false, error: "Complete setup" },
+  // Terminal: on drop, WorkflowCanvas auto-wires an edge from this node to
+  // the End node. Users can't wire anything out of it (validation enforces).
+  needsReview: { subtitle: "Flag & optionally notify", valid: true },
 };
 
 let nodeCounter = 100;
@@ -88,6 +91,7 @@ const BLANK_EDGES: Edge[] = [
 export function WorkflowCanvas({
   status,
   campaignId,
+  templateId,
   onValidityChange,
   onDirty,
   isNew = false,
@@ -95,6 +99,9 @@ export function WorkflowCanvas({
 }: {
   status: CampaignStatus;
   campaignId?: string;
+  /** When creating a new campaign FROM a template, this is the template's id
+   *  (a key into EXAMPLE_CAMPAIGNS). Its authored graph seeds the canvas. */
+  templateId?: string;
   onValidityChange?: (validCount: number, total: number) => void;
   onDirty?: () => void;
   isNew?: boolean;
@@ -102,21 +109,27 @@ export function WorkflowCanvas({
    *  pulse — but nodes are still clickable and show their config read-only. */
   previewOnly?: boolean;
 }) {
-  // Pre-built example campaigns ship their own authored graph; everything else
-  // (the existing demo campaigns) falls back to the shared seed graph.
+  // Existing campaigns: pull the example's authored graph. New campaigns:
+  //   - with a template → use the template's authored graph (also from EXAMPLE_CAMPAIGNS)
+  //   - without a template → blank Start/Audience/End skeleton
   const example = campaignId ? EXAMPLE_CAMPAIGNS[campaignId] : undefined;
+  const template = templateId ? EXAMPLE_CAMPAIGNS[templateId] : undefined;
   const { tzAbbrev, symbol } = useRegion();
-  const [nodes, setNodes, onNodesChange] = useNodesState(
-    isNew ? BLANK_NODES : example?.nodes ?? SEED_NODES,
-  );
-  const [edges, setEdges, onEdgesChange] = useEdgesState(
-    isNew ? BLANK_EDGES : example?.edges ?? SEED_EDGES,
-  );
+  const initialNodes = isNew
+    ? (template?.nodes ?? BLANK_NODES)
+    : (example?.nodes ?? SEED_NODES);
+  const initialEdges = isNew
+    ? (template?.edges ?? BLANK_EDGES)
+    : (example?.edges ?? SEED_EDGES);
+  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
   const [selected, setSelected] = useState<{ id: string; data: WorkflowNodeData } | null>(null);
-  // ELK runs async at render-time for example/seed graphs; hide the graph until the
-  // initial layout lands so we never flash positionless nodes stacked at the origin.
-  // Blank new campaigns ship pre-laid-out and render immediately.
-  const [layingOut, setLayingOut] = useState(!isNew);
+  // ELK runs async at render-time for example/seed/template graphs; hide the
+  // graph until the initial layout lands so we never flash positionless nodes
+  // stacked at the origin. Blank new campaigns (no template) ship pre-laid-out
+  // and render immediately.
+  const needsLayout = !isNew || !!template;
+  const [layingOut, setLayingOut] = useState(needsLayout);
   const rfRef = useRef<ReactFlowInstance | null>(null);
   // Keep live nodes/edges in refs so the run-once layout effect reads current
   // state without re-triggering on every change.
@@ -143,10 +156,11 @@ export function WorkflowCanvas({
     );
   }, [tzAbbrev, symbol, setNodes]);
 
-  // Initial ELK layout for the example/seed graph (runs once on mount). Blank new
-  // campaigns ship pre-laid-out (see BLANK_NODES) so skip them here.
+  // Initial ELK layout for the example/seed/template graph (runs once on
+  // mount). Blank new campaigns (no template) ship pre-laid-out (see
+  // BLANK_NODES) so skip layout there.
   useEffect(() => {
-    if (didLayoutRef.current || isNew) return;
+    if (didLayoutRef.current || !needsLayout) return;
     didLayoutRef.current = true;
     let cancelled = false;
     (async () => {
@@ -317,9 +331,28 @@ export function WorkflowCanvas({
           },
         ];
       });
+      // Human Escalation is terminal — auto-wire an edge to End on drop so the
+      // "always ends in End" invariant is preserved without user work. The
+      // edge is a normal routed edge and can be re-routed by dragging, but
+      // the target End is the only valid destination (validation enforces).
+      if (kind === "needsReview") {
+        setEdges((eds) => {
+          const end = nodesRef.current.find((n) => n.data.kind === "end");
+          if (!end) return eds;
+          return [
+            ...eds,
+            {
+              id: `e_${newId}_end`,
+              source: newId,
+              target: end.id,
+              type: "routed" as const,
+            },
+          ];
+        });
+      }
       onDirty?.();
     },
-    [setNodes, onDirty],
+    [setNodes, setEdges, onDirty],
   );
 
   const defaultEdgeOptions = useMemo(() => ({ type: "routed" as const }), []);

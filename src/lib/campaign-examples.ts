@@ -15,7 +15,7 @@
 import type { Edge, Node } from "reactflow";
 import type {
   CampaignStatus, WorkflowNodeData, NodeKind, NodeOutput, NodeOutputKind,
-  PresetConfig, PresetVarMap, PresetTransform, UseCase,
+  PresetConfig, PresetVarMap, PresetTransform, UseCase, Product,
 } from "./campaign-types";
 import { SERIAL_PREFIX } from "./campaign-types";
 import { whatsappOutputs, resolveWaTemplate } from "./wa-outputs";
@@ -26,6 +26,9 @@ export type ExampleCampaign = {
   /** BFSI vertical pack this campaign belongs to. Drives the Business Analytics
    *  section that renders above Campaign Analytics for this campaign. */
   useCase?: UseCase;
+  /** Domain object the campaign operates on. Drives Business Rules visibility
+   *  on the Start node and the analytics badge label. */
+  product?: Product;
   nodes: Node<WorkflowNodeData>[];
   edges: Edge[];
 };
@@ -516,7 +519,7 @@ function assemble(rawNodes: Node<WorkflowNodeData>[], rawEdges: Edge[]): { nodes
   };
 }
 
-function buildCampaign(name: string, specs: Spec[], edges: SpecEdge[], useCase?: UseCase): ExampleCampaign {
+function buildCampaign(name: string, specs: Spec[], edges: SpecEdge[], useCase?: UseCase, product?: Product): ExampleCampaign {
   const rawNodes: Node<WorkflowNodeData>[] = specs.map((s) => ({
     id: s.id, type: "workflow", position: { x: 0, y: 0 },
     data: {
@@ -541,7 +544,7 @@ function buildCampaign(name: string, specs: Spec[], edges: SpecEdge[], useCase?:
     }
   });
   const { nodes, edges: laidEdges } = assemble(rawNodes, rawEdges);
-  return { name, status: "ready", useCase, nodes, edges: laidEdges };
+  return { name, status: "ready", useCase, product, nodes, edges: laidEdges };
 }
 
 /* ---- 1. BFSI · Lead Qualification -------------------------------------- */
@@ -640,7 +643,7 @@ const C_RENEWAL = buildCampaign("BFSI · Insurance Renewal", [
   ed("d1", "wfu"), ed("wfu", "rcLow"),
   ed("rcLow", "end", "yes"),
   ed("rcLow", "vFinal", "no"), ed("vFinal", "rlFinal"), ed("rlFinal", "end"),
-], "insurance_renewal");
+], "retention");
 
 /* ---- 3. BFSI · Upsell / Cross-Sell ------------------------------------- */
 const C_UPSELL = buildCampaign("BFSI · Upsell / Cross-Sell", [
@@ -717,10 +720,10 @@ const C_COLLECT = buildCampaign("BFSI · Collections", [
   ed("dpd", "vEsc", "late"), ed("vEsc", "plLate"), ed("plLate", "d1"),
   ed("d1", "paid"), ed("paid", "end", "yes"),
   ed("paid", "vfu", "no"), ed("vfu", "plFu"), ed("plFu", "end"),
-], "personal_loan_collections");
+], "collections", "loan");
 
 /* ============================================================== *
- *  FinServ · Personal-Loan Collections (Sprint 1 additions)
+ *  FinServ · Loan Collections (Sprint 1 additions)
  *  Three templates keyed to the loan-repayment lifecycle:
  *    - PL_PREDUE      : T-2 courtesy nudge (WhatsApp-only, PTP capture)
  *    - PL_DUEDAY      : T-0 (WhatsApp reminder → Voice escalation if unpaid)
@@ -729,8 +732,8 @@ const C_COLLECT = buildCampaign("BFSI · Collections", [
  *  and honour the RBI/TRAI 07:00–19:00 IST recovery-calling window.
  * ============================================================== */
 
-/* ---- Personal-Loan · Pre-due EMI reminder (T-2) ------------------------ */
-const PL_PREDUE = buildCampaign("Personal Loan · Pre-due EMI Reminder", [
+/* ---- Loan · Pre-due EMI reminder (T-2) ------------------------ */
+const PL_PREDUE = buildCampaign("Loan · Pre-due EMI Reminder", [
   sStart(),
   sAud("CSV · EMI due in 2 days", ["loan_id", "emi_amount", "due_date"]),
   sWa("waPredue", "WhatsApp pre-due reminder", "T-2 · courtesy nudge", "collections_predue_v1",
@@ -742,13 +745,13 @@ const PL_PREDUE = buildCampaign("Personal Loan · Pre-due EMI Reminder", [
   sEnd(),
 ], [
   ed("start", "aud"), ed("aud", "waPredue"), ed("waPredue", "end"),
-], "personal_loan_collections");
+], "collections", "loan");
 
-/* ---- Personal-Loan · Due-day EMI Reminder (T-0) ----------------------- *
+/* ---- Loan · Due-day EMI Reminder (T-0) ----------------------- *
  *  Slim WhatsApp-only nudge on the due date. No paid-check, no escalation —
  *  those live in the "& Collections" variants below.
  */
-const PL_DUEDAY = buildCampaign("Personal Loan · Due-day EMI Reminder", [
+const PL_DUEDAY = buildCampaign("Loan · Due-day EMI Reminder", [
   sStart(),
   sAud("CSV · EMI due today", ["loan_id", "emi_amount", "due_date"]),
   sWa("waDueday", "WhatsApp due-day reminder", "T-0 · payment link", "collections_dueday_v1",
@@ -760,14 +763,14 @@ const PL_DUEDAY = buildCampaign("Personal Loan · Due-day EMI Reminder", [
   sEnd(),
 ], [
   ed("start", "aud"), ed("aud", "waDueday"), ed("waDueday", "end"),
-], "personal_loan_collections");
+], "collections", "loan");
 
-/* ---- Personal-Loan · Pre-due EMI Reminder & Collections --------------- *
+/* ---- Loan · Pre-due EMI Reminder & Collections --------------- *
  *  Pre-due WhatsApp nudge; if the borrower hasn't paid within a few hours,
  *  escalate to a Voice recovery call. This is the "reminder + safety net"
  *  variant of the plain Pre-due template.
  */
-const PL_PREDUE_COLLECTIONS = buildCampaign("Personal Loan · Pre-due EMI Reminder & Collections", [
+const PL_PREDUE_COLLECTIONS = buildCampaign("Loan · Pre-due EMI Reminder & Collections", [
   sStart(),
   sAud("CSV · EMI due in 2 days", ["loan_id", "emi_amount", "due_date"]),
   sWa("waPredue", "WhatsApp pre-due reminder", "T-2 · courtesy nudge", "collections_predue_v1",
@@ -794,12 +797,12 @@ const PL_PREDUE_COLLECTIONS = buildCampaign("Personal Loan · Pre-due EMI Remind
   ed("waPredue", "d1"), ed("d1", "apiPaidPredue"), ed("apiPaidPredue", "paid"),
   ed("paid", "end", "yes"),
   ed("paid", "vRecover", "no"), ed("vRecover", "end"),
-], "personal_loan_collections");
+], "collections", "loan");
 
-/* ---- Personal-Loan · Due-day EMI Reminder & Collections --------------- *
+/* ---- Loan · Due-day EMI Reminder & Collections --------------- *
  *  Due-day WhatsApp; if unpaid after a few hours, Voice recovery call.
  */
-const PL_DUEDAY_COLLECTIONS = buildCampaign("Personal Loan · Due-day EMI Reminder & Collections", [
+const PL_DUEDAY_COLLECTIONS = buildCampaign("Loan · Due-day EMI Reminder & Collections", [
   sStart(),
   sAud("CSV · EMI due today", ["loan_id", "emi_amount", "due_date"]),
   sWa("waDueday", "WhatsApp due-day reminder", "T-0 · payment link", "collections_dueday_v1",
@@ -826,19 +829,19 @@ const PL_DUEDAY_COLLECTIONS = buildCampaign("Personal Loan · Due-day EMI Remind
   ed("waDueday", "d1"), ed("d1", "apiPaidDueday"), ed("apiPaidDueday", "paid"),
   ed("paid", "end", "yes"),
   ed("paid", "vDueday", "no"), ed("vDueday", "end"),
-], "personal_loan_collections");
+], "collections", "loan");
 
-/* ---- Personal-Loan · DPD 1–7 recovery --------------------------------- *
+/* ---- Loan · DPD 1–7 recovery --------------------------------- *
  *  Voice-led recovery keyed to the 9-disposition Collections agent. Six
  *  disposition branches are wired explicitly; the two "settled after the fact"
  *  PTP states (Kept / Broken) are evaluated after a 24h delay by the follow-up
  *  Conditional. The normalizeCampaign pass auto-wires the Conditional's default
  *  handle to End, catching No-Answer / any unhandled disposition.
  */
-const PL_DPD_EARLY = buildCampaign("Personal Loan · Early DPD Reminder + Recovery", [
+const PL_DPD_EARLY = buildCampaign("Loan · Early DPD Reminder + Recovery", [
   sStart(),
   sAud("CSV · DPD 1–7 cohort", ["loan_id", "emi_amount", "due_date", "days_past_due"]),
-  // No Tool call for DPD compute here — Skills of the Personal-Loan Collections
+  // No Tool call for DPD compute here — Skills of the Loan Collections
   // pack (calculate_dpd_status, calculate_dpd_bucket, calculate_ptp_rate, …) are
   // auto-attached to this campaign's useCase and run at Audience ingestion.
   // Their outputs are already available downstream as lead.memory.<field>.
@@ -900,7 +903,51 @@ const PL_DPD_EARLY = buildCampaign("Personal Loan · Early DPD Reminder + Recove
   ed("disp", "end", "wrong"),
   ed("disp", "end", "unable"),
   ed("disp", "end", "dispute"),
-], "personal_loan_collections");
+], "collections", "loan");
+
+/* ============================================================== *
+ *  FinServ · Insurance Retention (Sprint 2 additions)
+ *  Two templates keyed to the premium-renewal cycle:
+ *    - INS_PREDUE             : T-7 gentle premium reminder (WA only)
+ *    - INS_PREDUE_COLLECTIONS : Pre-due WA reminder + paid-check + Voice
+ * ============================================================== */
+
+const INS_PREDUE = buildCampaign("Insurance · Pre-due Premium Reminder", [
+  sStart(),
+  sAud("CSV · policies renewing in 7 days", ["policy_id", "premium_amount", "renewal_date"]),
+  sWa("waRenewal", "WhatsApp premium reminder", "T-7 · renewal nudge", "renewal_v1",
+    { vars: [
+      { v: "{{1}}", def: "contact.first_name" },
+      { v: "{{2}}", def: "premium_amount" },
+      { v: "{{3}}", def: "renewal_date" },
+    ] }),
+  sEnd(),
+], [
+  ed("start", "aud"), ed("aud", "waRenewal"), ed("waRenewal", "end"),
+], "retention", "insurance");
+
+const INS_PREDUE_COLLECTIONS = buildCampaign("Insurance · Pre-due Premium Reminder & Collections", [
+  sStart(),
+  sAud("CSV · policies renewing in 7 days", ["policy_id", "premium_amount", "renewal_date"]),
+  sWa("waRenewal", "WhatsApp premium reminder", "T-7 · renewal nudge", "renewal_v1",
+    { vars: [
+      { v: "{{1}}", def: "contact.first_name" },
+      { v: "{{2}}", def: "premium_amount" },
+      { v: "{{3}}", def: "renewal_date" },
+    ] }),
+  sDelay("d1", 24, "Hours"),
+  // Insurance doesn't have a "paid" LMS API in v1 — instead Signals on the
+  // Start node (payment_received webhook) let the client's SoR yank paid
+  // policies out of this campaign automatically. Downstream stays optimistic:
+  // if the lead is still in-flight after the delay, escalate to a Voice call.
+  sVoice("vRecover", "Voice AI renewal call", "Concierge · renewal follow-up", {
+    agent: "collections_voice",
+  }),
+  sEnd(),
+], [
+  ed("start", "aud"), ed("aud", "waRenewal"),
+  ed("waRenewal", "d1"), ed("d1", "vRecover"), ed("vRecover", "end"),
+], "retention", "insurance");
 
 /* ---- 5. Retail · Activation -------------------------------------------- */
 const C_ACTIVATION = buildCampaign("Retail · Activation", [
@@ -1414,15 +1461,17 @@ const EX1_LAID = assemble(EX1_NODES, EX1_EDGES);
 const EX2_LAID = assemble(EX2_NODES, EX2_EDGES);
 
 const RAW_EXAMPLE_CAMPAIGNS: Record<string, ExampleCampaign> = {
-  // FinServ v1 scope — Personal Loan Collections ONLY. Renewal (c_ex4) and legacy
+  // FinServ v1 scope — Loan Collections ONLY. Renewal (c_ex4) and legacy
   // Collections (c_ex6) are unregistered so the demo stays tight to the pack.
   // All retail constants remain defined in this file but unused; the diff stays
   // reversible on merge from main.
-  pl_predue:             PL_PREDUE,
-  pl_dueday:             PL_DUEDAY,
-  pl_predue_collections: PL_PREDUE_COLLECTIONS,
-  pl_dueday_collections: PL_DUEDAY_COLLECTIONS,
-  pl_dpd_early:          PL_DPD_EARLY,
+  pl_predue:              PL_PREDUE,
+  pl_dueday:              PL_DUEDAY,
+  pl_predue_collections:  PL_PREDUE_COLLECTIONS,
+  pl_dueday_collections:  PL_DUEDAY_COLLECTIONS,
+  pl_dpd_early:           PL_DPD_EARLY,
+  ins_predue:             INS_PREDUE,
+  ins_predue_collections: INS_PREDUE_COLLECTIONS,
 };
 
 /* ---- normalization ------------------------------------------------------

@@ -45,38 +45,6 @@ export type ToolDef = {
   updatedAt: string;
   inputs: ToolInput[];
   outputs: ToolOutput[];
-  /**
-   * When true, this entry is a **Skill** — an internally-available capability
-   * (no external API, no auth, no side-effects) that agents and campaign nodes
-   * can invoke. Skills surface on the Skills tab of /agents; Tools surface on
-   * the Tools tab.
-   */
-  isSkill?: boolean;
-  /**
-   * Skills come in two flavours:
-   *   - "function" — a piece of deterministic compute (e.g. calculate DPD from
-   *     a date). Returns a typed value (enum · number · boolean).
-   *   - "llm"      — a prompt template (a markdown-authored instruction) the
-   *     agent invokes with variables. Returns free-form text.
-   * Undefined when isSkill is not true.
-   */
-  skillType?: "function" | "llm";
-  /** For enum outputs on Skills — the allowed values. Displayed as chips on the
-   *  Skill card and used as the enum source in the campaign-builder picker. */
-  outputEnumValues?: Partial<Record<string, string[]>>;
-  /** Function-Skill body — the executable logic, shown read-only on the Skill
-   *  detail page. UI-only preview; the runtime is out of scope in v1. */
-  skillFunctionBody?: string;
-  /** LLM-Skill prompt template — the markdown-authored instruction the agent
-   *  sends with `{{input}}` variable references. Shown read-only on the detail
-   *  page. Optional model override lives on `skillPromptModel`. */
-  skillPromptTemplate?: string;
-  skillPromptModel?: string;
-};
-
-export const SKILL_TYPE_LABEL: Record<"function" | "llm", string> = {
-  function: "Function",
-  llm: "LLM Skill",
 };
 
 export const AUTH_LABEL: Record<ToolAuthKind, string> = {
@@ -273,153 +241,25 @@ export const TOOLS: ToolDef[] = [
       { path: "$.transfer.wait_sec", varName: "wait_sec", dataType: "Number", description: "Estimated wait in seconds" },
     ],
   },
-  /* ---- FinServ · Skills (v1) ------------------------------------------ *
-   * Skills come in two flavours (see skillType): Function (deterministic
-   * compute) and LLM Skill (prompt template). None make external HTTP calls.
-   *
-   * Invocation model: Skills are NOT invoked from a Tool node. Instead each
-   * useCase declares which skills auto-attach to a campaign (see
-   * lib/skills-registry.ts). At Audience ingestion the attached skills run
-   * once per lead — inputs mapped on the Audience node's "Skill inputs"
-   * subsection, outputs written to lead memory (`lead.memory.<field>`).
-   */
-  {
-    handle: "calculate_dpd_status",
-    description: "Derive DPD status from an EMI due date (Skill · deterministic compute)",
-    type: "http",           // stored as "http" so the shared schema fits; UI treats it as Skill via isSkill
-    method: "COMPUTE",
-    url: "local://skill/calculate_dpd_status",
-    auth: "none",
-    health: "ok",
-    status: "live",
-    createdAt: "16 Jul 2026",
-    updatedAt: "17 Jul 2026",
-    isSkill: true,
-    skillType: "function",
-    inputs: [
-      { key: "due_date", dataType: "String", in: "body", source: "campaign", value: "due_date", description: "EMI due date (YYYY-MM-DD)" },
-    ],
-    outputs: [
-      { path: "$.dpd_status", varName: "dpd_status", dataType: "String", description: "pre_due / due_today / post_due" },
-    ],
-    outputEnumValues: { dpd_status: ["pre_due", "due_today", "post_due"] },
-    skillFunctionBody: `function calculate_dpd_status(due_date: string): "pre_due" | "due_today" | "post_due" {
-  const today = new Date();
-  const due   = new Date(due_date);
-  // Normalize both to midnight IST so intra-day time doesn't skew the bucket.
-  today.setHours(0, 0, 0, 0);
-  due.setHours(0, 0, 0, 0);
-  if (due.getTime() >  today.getTime()) return "pre_due";
-  if (due.getTime() === today.getTime()) return "due_today";
-  return "post_due";
-}`,
-  },
-  {
-    handle: "calculate_dpd_bucket",
-    description: "If DPD status is post_due, classify into DPD bucket (Skill · deterministic compute)",
-    type: "http",
-    method: "COMPUTE",
-    url: "local://skill/calculate_dpd_bucket",
-    auth: "none",
-    health: "ok",
-    status: "live",
-    createdAt: "16 Jul 2026",
-    updatedAt: "17 Jul 2026",
-    isSkill: true,
-    skillType: "function",
-    inputs: [
-      { key: "due_date", dataType: "String", in: "body", source: "campaign", value: "due_date", description: "EMI due date (YYYY-MM-DD)" },
-    ],
-    outputs: [
-      { path: "$.dpd_bucket", varName: "dpd_bucket", dataType: "String", description: "early_bucket / mid_bucket / late_bucket · null if not post_due" },
-    ],
-    outputEnumValues: { dpd_bucket: ["early_bucket (1–7d)", "mid_bucket", "late_bucket (30+ d)"] },
-    skillFunctionBody: `function calculate_dpd_bucket(due_date: string): "early_bucket" | "mid_bucket" | "late_bucket" | null {
-  const today = new Date();
-  const due   = new Date(due_date);
-  today.setHours(0, 0, 0, 0);
-  due.setHours(0, 0, 0, 0);
-  const dpd = Math.floor((today.getTime() - due.getTime()) / 86_400_000);
-  if (dpd <= 0)  return null;          // not post-due yet
-  if (dpd <= 7)  return "early_bucket";
-  if (dpd <= 29) return "mid_bucket";
-  return "late_bucket";
-}`,
-  },
-  {
-    handle: "calculate_ptp_rate",
-    description: "Compute lead's Promise-to-Pay kept rate from PTP register (Skill · deterministic compute)",
-    type: "http",
-    method: "COMPUTE",
-    url: "local://skill/calculate_ptp_rate",
-    auth: "none",
-    health: "ok",
-    status: "live",
-    createdAt: "17 Jul 2026",
-    updatedAt: "17 Jul 2026",
-    isSkill: true,
-    skillType: "function",
-    inputs: [
-      { key: "customer_id", dataType: "String", in: "body", source: "campaign", value: "customer_id", description: "Borrower id" },
-    ],
-    outputs: [
-      { path: "$.ptp_rate_pct", varName: "ptp_rate_pct", dataType: "Number", description: "(promises_kept / promises_made) × 100" },
-    ],
-    skillFunctionBody: `function calculate_ptp_rate(customer_id: string): number {
-  // Reads the borrower's PTP register from lead memory.
-  const ptps = lead_memory.get(customer_id, "personal_loan.ptp_history") ?? [];
-  const made = ptps.length;
-  if (made === 0) return 0;
-  const kept = ptps.filter((p) => p.kept === true).length;
-  return Math.round((kept / made) * 100 * 10) / 10; // one decimal place
-}`,
-  },
-  {
-    handle: "check_ptp_status",
-    description: "Classify PTP status for the current EMI (Skill · deterministic compute)",
-    type: "http",
-    method: "COMPUTE",
-    url: "local://skill/check_ptp_status",
-    auth: "none",
-    health: "ok",
-    status: "live",
-    createdAt: "17 Jul 2026",
-    updatedAt: "17 Jul 2026",
-    isSkill: true,
-    skillType: "function",
-    inputs: [
-      { key: "loan_id",  dataType: "String", in: "body", source: "campaign", value: "loan_id",  description: "Loan reference" },
-      { key: "due_date", dataType: "String", in: "body", source: "campaign", value: "due_date", description: "EMI due date" },
-    ],
-    outputs: [
-      { path: "$.ptp_status", varName: "ptp_status", dataType: "String", description: "no_ptp / kept / broken" },
-    ],
-    outputEnumValues: { ptp_status: ["no_ptp", "kept", "broken"] },
-    skillFunctionBody: `function check_ptp_status(loan_id: string, due_date: string): "no_ptp" | "kept" | "broken" {
-  const ptp = lead_memory.get(loan_id, "personal_loan.ptp_history")
-    ?.find((p) => p.emi_due_date === due_date);
-  if (!ptp) return "no_ptp";
-  return ptp.kept === true ? "kept" : "broken";
-}`,
-  },
 ];
 
 /**
- * RPC (Right-Party Contact) is NOT a Skill.
+ * Note for the tech team on lead-memory computed fields.
  *
- * RPC is a cohort-reachability rollup computed at analytics time. Per lead:
+ * v1 does not surface Skills as a user-facing construct. The four fields that
+ * populate `lead.memory.*` for the collections useCase — dpd_status,
+ * dpd_bucket, ptp_rate_pct, ptp_status — are engine computations governed by
+ * per-campaign Business Rules (configured on the Start node → Business Rules
+ * panel; see Phase 3). Same story for retention when it comes online.
+ *
+ * RPC (Right-Party Contact) is a cohort-reachability rollup computed at
+ * analytics time. Per lead:
  *   is_rpc(lead) = ∃ voice interaction in the run where
  *                    disposition ∉ {"Wrong-Number", "No-Answer", null}
+ *   RPC rate    = # leads with is_rpc=true / # leads with any voice attempt.
  *
- * RPC rate = # leads with is_rpc=true / # leads with any voice attempt.
- *
- * The rule aggregates across every Voice AI node in the campaign (multi-voice
- * flows just work). WhatsApp / SMS do not contribute to RPC in v1 — an inbound
- * reply is a separate signal (engagement), not the same as reaching the right
- * party on a call.
- *
- * The tech team implements this in the analytics pipeline; there is no user
- * config, no per-node toggle, and no lead-memory Skill for it.
+ * Aggregates across every Voice AI node in the campaign (multi-voice flows
+ * just work). WhatsApp / SMS do not contribute to RPC in v1.
  */
 
 export function getTool(handle: string): ToolDef | undefined {

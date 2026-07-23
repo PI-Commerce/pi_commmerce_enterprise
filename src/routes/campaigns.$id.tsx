@@ -2,9 +2,9 @@ import { useCallback, useEffect, useState } from "react";
 import { createFileRoute, useNavigate, useBlocker } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { WorkflowCanvas } from "@/components/workflow/WorkflowCanvas";
-import { CampaignUseCaseContext } from "@/components/workflow/ConfigPanel";
+import { CampaignUseCaseContext, CampaignProductContext, CampaignMetaContext } from "@/components/workflow/ConfigPanel";
 import { BuilderTopBar } from "@/components/workflow/BuilderTopBar";
-import type { CampaignStatus, UseCase } from "@/lib/campaign-types";
+import type { CampaignStatus, UseCase, Product } from "@/lib/campaign-types";
 import { EXAMPLE_CAMPAIGNS } from "@/lib/campaign-examples";
 import { VERSION_HISTORY, makeVersion, type CampaignVersion } from "@/lib/campaign-versions";
 import {
@@ -20,11 +20,13 @@ import {
 
 export const Route = createFileRoute("/campaigns/$id")({
   component: CampaignBuilder,
-  validateSearch: (search: Record<string, unknown>): { name?: string; description?: string; objective?: string; useCase?: string } => ({
+  validateSearch: (search: Record<string, unknown>): { name?: string; description?: string; objective?: string; useCase?: string; product?: string; template?: string } => ({
     name: typeof search.name === "string" ? search.name : undefined,
     description: typeof search.description === "string" ? search.description : undefined,
     objective: typeof search.objective === "string" ? search.objective : undefined,
     useCase: typeof search.useCase === "string" ? search.useCase : undefined,
+    product: typeof search.product === "string" ? search.product : undefined,
+    template: typeof search.template === "string" ? search.template : undefined,
   }),
   head: ({ params }) => ({
     meta: [
@@ -36,10 +38,14 @@ export const Route = createFileRoute("/campaigns/$id")({
 
 function CampaignBuilder() {
   const { id } = Route.useParams();
-  const { name: seedName, description: seedDescription, objective: seedObjective, useCase: seedUseCase } = Route.useSearch();
+  const { name: seedName, description: seedDescription, objective: seedObjective, useCase: seedUseCase, product: seedProduct, template: seedTemplate } = Route.useSearch();
   const navigate = useNavigate();
   const isNew = id === "new";
   const example = EXAMPLE_CAMPAIGNS[id];
+  // When the user creates a new campaign FROM a template, the template's
+  // seeded useCase + product become the defaults (unless the create dialog
+  // sent overrides).
+  const templateExample = seedTemplate ? EXAMPLE_CAMPAIGNS[seedTemplate] : undefined;
 
   const [name, setName] = useState(
     isNew
@@ -173,12 +179,44 @@ function CampaignBuilder() {
   const handleValidity = useCallback((v: number, t: number) => { setValidCount(v); setTotal(t); }, []);
   const handleDirty = useCallback(() => setDirty(true), []);
 
-  // Resolve the campaign's useCase — from the loaded example (existing campaign)
-  // OR from the search param the create dialog forwarded (new campaign).
-  const campaignUseCase: UseCase | undefined = example?.useCase ?? (seedUseCase as UseCase | undefined);
+  // Resolve the campaign's useCase + product. Priority order:
+  //   1. Existing campaign → the loaded example.
+  //   2. Create-dialog override → seedUseCase / seedProduct.
+  //   3. Template default → the seeded template's own useCase / product.
+  const initialUseCase: UseCase | undefined =
+    example?.useCase ?? (seedUseCase as UseCase | undefined) ?? templateExample?.useCase;
+  const initialProduct: Product | undefined =
+    example?.product ?? (seedProduct as Product | undefined) ?? templateExample?.product;
+
+  // Product + Objective + Description are editable from the Start node config.
+  // They live here so both the top bar (Name) and Start node see the same state.
+  const [campaignUseCase, setCampaignUseCase] = useState<UseCase | undefined>(initialUseCase);
+  const [campaignProduct, setCampaignProduct] = useState<Product | undefined>(initialProduct);
+  const [objectiveDescription, setObjectiveDescription] = useState<string>(seedDescription ?? "");
+  // Objective (lifecycle stage) — derive an initial from the search param
+  // seedObjective when possible; otherwise leave blank.
+  const [objectiveStage, setObjectiveStage] = useState<string>(seedObjective ?? "");
+
+  // When the user picks a new lifecycle stage from the Start node dropdown,
+  // keep useCase in lockstep with the (Recovery → collections, Retention → retention) mapping.
+  const handleObjectiveChange = (v: string) => {
+    setObjectiveStage(v);
+    if (v === "Recovery") setCampaignUseCase("collections");
+    else if (v === "Retention") setCampaignUseCase("retention");
+    else setCampaignUseCase(undefined);
+  };
+
+  const campaignMeta = {
+    name, setName: (v: string) => { setName(v); setDirty(true); },
+    objectiveDescription, setObjectiveDescription: (v: string) => { setObjectiveDescription(v); setDirty(true); },
+    product: campaignProduct, setProduct: (v: Product | undefined) => { setCampaignProduct(v); setDirty(true); },
+    objective: objectiveStage, setObjective: (v: string) => { handleObjectiveChange(v); setDirty(true); },
+  };
 
   return (
     <CampaignUseCaseContext.Provider value={campaignUseCase}>
+    <CampaignProductContext.Provider value={campaignProduct}>
+    <CampaignMetaContext.Provider value={campaignMeta}>
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground">
       <BuilderTopBar
         campaignId={id}
@@ -200,6 +238,7 @@ function CampaignBuilder() {
         <WorkflowCanvas
           status={status}
           campaignId={id}
+          templateId={isNew ? seedTemplate : undefined}
           onValidityChange={handleValidity}
           onDirty={handleDirty}
           isNew={isNew}
@@ -240,6 +279,8 @@ function CampaignBuilder() {
         </AlertDialogContent>
       </AlertDialog>
     </div>
+    </CampaignMetaContext.Provider>
+    </CampaignProductContext.Provider>
     </CampaignUseCaseContext.Provider>
   );
 }

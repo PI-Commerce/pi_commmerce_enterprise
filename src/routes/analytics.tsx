@@ -127,6 +127,7 @@ const NODE_COLOR: Record<SankeyNodeKind, string> = {
   conditional: "#64748b",
   delay: "#94a3b8",
   end: "#f59e0b",
+  needsReview: "#f59e0b",  // amber — visually distinct as the escalation exit lane.
 };
 const NODE_TYPE_LABEL: Record<SankeyNodeKind, string> = {
   start: "Start",
@@ -141,6 +142,7 @@ const NODE_TYPE_LABEL: Record<SankeyNodeKind, string> = {
   conditional: "Conditional Branch",
   delay: "Delay",
   end: "End",
+  needsReview: "Human Escalation",
 };
 const STATUS_TONE: Record<string, string> = {
   sent: "text-sky-600 bg-sky-500/10",
@@ -483,7 +485,7 @@ function CampaignAnalytics({
 
       {/* Business Analytics — per-useCase pack, above Campaign Analytics.
           Empty campaigns (no useCase) render a small hint instead of the pack. */}
-      <BusinessAnalyticsPanel useCase={campaign.useCase} />
+      <BusinessAnalyticsPanel useCase={campaign.useCase} product={campaign.product} />
 
       {/* Campaign Analytics header, so the switch from Business → Campaign is obvious. */}
       <h2 className="mb-3 mt-2 text-[13px] font-semibold uppercase tracking-wider text-muted-foreground">Campaign Analytics</h2>

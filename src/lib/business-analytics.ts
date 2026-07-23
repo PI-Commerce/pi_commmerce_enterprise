@@ -1,7 +1,7 @@
 /**
  * Per-use-case Business Analytics packs.
  *
- * FinServ v1 scope: ONLY Personal Loan Collections is populated. Other BFSI
+ * FinServ v1 scope: ONLY the `collections` pack is populated. Other BFSI
  * packs (Insurance Renewal, Credit Card Dues, KYC Onboarding, Cross-sell) are
  * intentionally out of scope for v1 — the platform can render them, but there
  * is no seeded data. When a campaign carries an out-of-scope useCase, the
@@ -46,7 +46,7 @@ export type BusinessAnalyticsPack = {
   channelEffectiveness?: { title: string; rows: ChannelEffectivenessRow[]; info: string };
 };
 
-/* ------------------------ Personal Loan Collections ------------------------ */
+/* ------------------------ Collections (Loan) ------------------------ */
 
 /**
  * RPC (Right-Party Contact) — analytics-only, computed by the tech team's
@@ -88,6 +88,12 @@ const PL_COLLECTIONS: BusinessAnalyticsPack = {
       unit: "",
       info: "Open promises where the borrower is due to pay in the next 3 days.",
     },
+    {
+      label: "Human Escalation",
+      value: 127,
+      unit: "leads",
+      info: "Leads flagged by a Human Escalation node in this campaign run. Ops teams pick these up from the queue for manual review.",
+    },
   ],
   ptpFunnel: {
     title: "PTP Funnel",
@@ -127,8 +133,8 @@ const PL_COLLECTIONS: BusinessAnalyticsPack = {
 /* ------------------------ Registry ------------------------ */
 
 export const USE_CASE_ANALYTICS: Partial<Record<UseCase, BusinessAnalyticsPack>> = {
-  personal_loan_collections: PL_COLLECTIONS,
-  // insurance_renewal / credit_card_dues / kyc_onboarding / cross_sell — OOS for v1.
+  collections: PL_COLLECTIONS,
+  // retention / onboarding / cross_sell — OOS for v1.
 };
 
 export function analyticsFor(useCase?: UseCase): BusinessAnalyticsPack | undefined {

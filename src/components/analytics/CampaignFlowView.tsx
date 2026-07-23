@@ -29,6 +29,7 @@ const KIND_MAP: Record<SankeyNodeKind, NodeKind> = {
   conditional: "conditional",
   delay: "delay",
   end: "end",
+  needsReview: "needsReview",
 };
 
 export function CampaignFlowView({

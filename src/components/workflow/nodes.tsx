@@ -3,6 +3,7 @@ import {
   Play, Square, Users, GitBranch, Split,
   Phone, MessageCircle, MessageSquare,
   Clock, Megaphone, AlertCircle, CheckCircle2, Loader2, Sparkles, FlaskConical, Webhook,
+  Flag,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -24,6 +25,7 @@ const ICONS: Record<NodeKind, LucideIcon> = {
   sms: MessageSquare,
   aiTransform: Sparkles,
   adsCampaign: Megaphone,
+  needsReview: Flag,
 };
 
 const GROUP_TONE: Record<string, string> = {

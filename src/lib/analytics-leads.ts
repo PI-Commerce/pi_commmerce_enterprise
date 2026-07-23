@@ -113,6 +113,7 @@ const STATUS_BY_KIND: Record<SankeyNodeKind, LeadStatus[]> = {
   sms: ["delivered", "failed"],
   ads: ["clicked", "delivered"],
   end: [],
+  needsReview: [],
 };
 
 const CHANNEL_BY_KIND: Partial<Record<SankeyNodeKind, ChannelKind>> = {

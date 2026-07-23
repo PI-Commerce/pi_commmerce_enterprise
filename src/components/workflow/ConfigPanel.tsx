@@ -21,22 +21,46 @@ import {
   AlertDialogFooter, AlertDialogTitle, AlertDialogDescription, AlertDialogAction, AlertDialogCancel,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
-import type { WorkflowNodeData, NodeKind, PresetConfig, PresetBranch, PresetCondition, PresetVarMap, PresetValueRemap, NodeOutput, UseCase } from "@/lib/campaign-types";
-import { NODE_LABELS, SAMPLE_WORKFLOW_VARIABLES, branchConditions } from "@/lib/campaign-types";
+import type { WorkflowNodeData, NodeKind, PresetConfig, PresetBranch, PresetCondition, PresetVarMap, PresetValueRemap, NodeOutput, UseCase, Product, LoanBusinessRules, DpdBucket, Signal, SignalKind } from "@/lib/campaign-types";
+import { NODE_LABELS, SAMPLE_WORKFLOW_VARIABLES, branchConditions, DEFAULT_LOAN_RULES, SIGNAL_LABEL } from "@/lib/campaign-types";
 import { LEAD_MEMORY_KEYS } from "@/lib/leads-data";
 import { SEED_TEMPLATES } from "@/lib/waba-templates";
 import { whatsappOutputs, resolveWaTemplate, completedOutput, isBranchableButton } from "@/lib/wa-outputs";
 import { getTool, TOOLS } from "@/lib/tool-registry";
 import { resolveAgent, voiceAgents } from "@/lib/agent-data";
-import { skillsForUseCase } from "@/lib/skills-registry";
 
 /**
- * The campaign's useCase — set by the builder route so downstream Fields
- * (currently just AudienceFields) can look up the attached Skill pack.
- * Unset for legacy campaigns that don't carry one; Skill Inputs simply
- * doesn't render in that case.
+ * The campaign's useCase — set by the builder route so downstream Fields can
+ * look up the pack it belongs to. Unset for legacy campaigns.
  */
 export const CampaignUseCaseContext = createContext<UseCase | undefined>(undefined);
+
+/**
+ * The campaign's product — set by the builder route. Drives Business Rules
+ * visibility on the Start node (Loan gets DPD + PTP rules; Insurance doesn't
+ * in v1). Independent of useCase so retention can apply to either product.
+ */
+export const CampaignProductContext = createContext<Product | undefined>(undefined);
+
+/**
+ * Campaign meta editable from the Start node config panel. In v1 the four
+ * fields (name, objective description, product, objective/lifecycle) live on
+ * the campaign root — this context exposes them + setters so StartFields can
+ * mount an editable Campaign Details section without duplicating state.
+ * Unset when a route hasn't wired the provider (e.g. version snapshots).
+ */
+export type CampaignMeta = {
+  name: string;
+  setName: (v: string) => void;
+  objectiveDescription: string;
+  setObjectiveDescription: (v: string) => void;
+  product: Product | undefined;
+  setProduct: (v: Product | undefined) => void;
+  /** Lifecycle stage: Awareness | Acquisition | Onboarding | Activation | Retention | Support | Recovery */
+  objective: string;
+  setObjective: (v: string) => void;
+};
+export const CampaignMetaContext = createContext<CampaignMeta | undefined>(undefined);
 
 const VOICE_AGENTS = voiceAgents();
 
@@ -231,14 +255,10 @@ export function ConfigPanel({ node, readOnly, onClose, onChange, onDelete, onDup
         <div className="scrollbar-thin flex-1 overflow-y-auto px-5 py-5 space-y-5">
           <NameField data={data} readOnly={ro} onChange={safeChange} />
           {!isSystem && <DescriptionField data={data} readOnly={ro} onChange={safeChange} />}
-          {isSystem ? (
+          {data.kind === "end" ? (
             <div className="flex items-start gap-2.5 rounded-lg bg-muted px-3.5 py-3 text-[13px] text-muted-foreground">
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-              <p>
-                {data.kind === "start"
-                  ? "Entry point of the workflow. The name above is how this node is referenced in Analytics."
-                  : "Terminal node of the workflow. The name above is how this node is referenced in Analytics."}
-              </p>
+              <p>Terminal node of the workflow. The name above is how this node is referenced in Analytics.</p>
             </div>
           ) : (
             <NodeFields data={data} readOnly={ro} onChange={safeChange} />
@@ -363,6 +383,8 @@ function KindFields({
 
   switch (kind) {
     case "start":
+      return <StartFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
+
     case "end":
       return null;
 
@@ -395,7 +417,477 @@ function KindFields({
 
     case "aiTransform":
       return <AiTransformFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
+
+    case "needsReview":
+      return <NeedsReviewFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
   }
+}
+
+/**
+ * Start node config — the home for two campaign-level constructs:
+ *
+ *   1. Business Rules — per-campaign engine computations that populate
+ *      `lead.memory.*`. Only rendered when the campaign's Product is `loan`
+ *      (Insurance retention doesn't have DPD/PTP semantics in v1).
+ *
+ *   2. Signals — global webhook listeners (like "payment_received") that let
+ *      external events yank leads out of any in-flight run of this campaign.
+ *      Rendered for every product.
+ *
+ * The Start node is always valid — a no-op is a legal configuration. Both
+ * sections default to sensible pre-filled values so a user who never opens
+ * the Start node still gets working rules.
+ */
+function StartFields({
+  config, readOnly, mark, onChange,
+}: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
+  const product = useContext(CampaignProductContext);
+  const meta = useContext(CampaignMetaContext);
+  const rules = config?.businessRules ?? DEFAULT_LOAN_RULES;
+  const signals = config?.signals ?? [];
+  const setRules = (next: LoanBusinessRules) => {
+    if (readOnly) return;
+    onChange({ config: { ...(config ?? {}), businessRules: next } });
+  };
+  const setSignals = (next: Signal[]) => {
+    if (readOnly) return;
+    onChange({ config: { ...(config ?? {}), signals: next } });
+  };
+  useEffect(() => { mark(true); }, []);
+  return (
+    <>
+      {meta && (
+        <Section title="Campaign Details">
+          <div className="rounded-xl border border-border bg-card/50 p-4 space-y-3">
+            <CampaignDetailsEditor meta={meta} readOnly={readOnly} />
+          </div>
+        </Section>
+      )}
+      {product === "loan" && (
+        <Section title="Business Rules">
+          <div className="rounded-xl border border-border bg-card/50 p-4 space-y-4">
+            <BusinessRulesEditor rules={rules} readOnly={readOnly} onChange={setRules} />
+          </div>
+        </Section>
+      )}
+      <Section title="Signals">
+        <div className="rounded-xl border border-border bg-card/50 p-4 space-y-3">
+          <SignalsEditor signals={signals} readOnly={readOnly} onChange={setSignals} />
+        </div>
+      </Section>
+    </>
+  );
+}
+
+/* ----- Campaign Details editor ----- */
+
+function CampaignDetailsEditor({
+  meta, readOnly,
+}: { meta: CampaignMeta; readOnly?: boolean }) {
+  return (
+    <div className="space-y-3">
+      <Field label="Name" required>
+        <Input
+          value={meta.name}
+          disabled={readOnly}
+          onChange={(e) => meta.setName(e.target.value)}
+          className="h-9 text-sm"
+        />
+      </Field>
+      <Field label="Objective Description">
+        <Textarea
+          value={meta.objectiveDescription}
+          disabled={readOnly}
+          onChange={(e) => meta.setObjectiveDescription(e.target.value)}
+          rows={2}
+          className="resize-none text-sm"
+        />
+      </Field>
+      {/* Product + Objective are locked once inside the canvas — both drive
+          Business Rules, useCase mapping, and template semantics. Changing
+          them mid-build would silently invalidate rules and node bindings, so
+          they're pick-once fields set in the create dialog. */}
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Product" required>
+          <Select value={meta.product ?? ""} disabled>
+            <SelectTrigger className="h-9 text-sm" disabled>
+              <SelectValue placeholder="—" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="loan">Loan</SelectItem>
+              <SelectItem value="insurance">Insurance</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+        <Field label="Objective" required>
+          <Select value={meta.objective ?? ""} disabled>
+            <SelectTrigger className="h-9 text-sm" disabled>
+              <SelectValue placeholder="—" />
+            </SelectTrigger>
+            <SelectContent>
+              {["Awareness","Acquisition","Onboarding","Activation","Retention","Support","Recovery"].map((s) => (
+                <SelectItem key={s} value={s}>{s}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+      </div>
+      <p className="text-[11px] text-muted-foreground">Product and Objective are locked after the campaign is created.</p>
+    </div>
+  );
+}
+
+/* ----- Business Rules editor ----- */
+
+function BusinessRulesEditor({
+  rules, readOnly, onChange,
+}: { rules: LoanBusinessRules; readOnly?: boolean; onChange: (r: LoanBusinessRules) => void }) {
+  return (
+    <div className="space-y-4">
+      {/* DPD Status */}
+      <div className="space-y-1.5">
+        <Label className="text-[12px] font-medium text-foreground">DPD Status</Label>
+        <p className="text-[11px] text-muted-foreground">
+          A borrower is still <span className="font-mono">pre_due</span> if payment lands within the grace period after due date.
+        </p>
+        <div className="flex items-center gap-2">
+          <Input
+            type="number"
+            min={0}
+            value={rules.dpdStatusGraceHours}
+            disabled={readOnly}
+            onChange={(e) => onChange({ ...rules, dpdStatusGraceHours: Number(e.target.value) || 0 })}
+            className="h-8 w-20 text-sm"
+          />
+          <span className="text-[12px] text-muted-foreground">hours grace period</span>
+        </div>
+      </div>
+
+      <div className="border-t border-border/60" />
+
+      {/* DPD Bucket */}
+      <div className="space-y-1.5">
+        <Label className="text-[12px] font-medium text-foreground">DPD Bucket</Label>
+        <p className="text-[11px] text-muted-foreground">
+          Applied when DPD status is <span className="font-mono">post_due</span>. Ranges are inclusive; the last bucket needs no upper bound.
+        </p>
+        <DpdBucketTable buckets={rules.dpdBuckets} readOnly={readOnly} onChange={(b) => onChange({ ...rules, dpdBuckets: b })} />
+      </div>
+
+      <div className="border-t border-border/60" />
+
+      {/* PTP Rate */}
+      <div className="space-y-1.5">
+        <Label className="text-[12px] font-medium text-foreground">PTP Rate</Label>
+        <p className="text-[11px] text-muted-foreground">
+          Historical kept-rate is computed only when the lead has enough recent PTPs.
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <p className="text-[10.5px] uppercase tracking-wider text-muted-foreground">Lookback window</p>
+            <div className="flex items-center gap-2">
+              <Input
+                type="number" min={1}
+                value={rules.ptpLookbackDays}
+                disabled={readOnly}
+                onChange={(e) => onChange({ ...rules, ptpLookbackDays: Number(e.target.value) || 0 })}
+                className="h-8 w-20 text-sm"
+              />
+              <span className="text-[12px] text-muted-foreground">days</span>
+            </div>
+          </div>
+          <div className="space-y-1">
+            <p className="text-[10.5px] uppercase tracking-wider text-muted-foreground">Minimum sample</p>
+            <div className="flex items-center gap-2">
+              <Input
+                type="number" min={0}
+                value={rules.ptpMinSample}
+                disabled={readOnly}
+                onChange={(e) => onChange({ ...rules, ptpMinSample: Number(e.target.value) || 0 })}
+                className="h-8 w-20 text-sm"
+              />
+              <span className="text-[12px] text-muted-foreground">PTPs</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="border-t border-border/60" />
+
+      {/* PTP Status */}
+      <div className="space-y-1.5">
+        <Label className="text-[12px] font-medium text-foreground">PTP Status</Label>
+        <p className="text-[11px] text-muted-foreground">
+          A promise is <span className="font-mono">kept</span> if payment lands within the grace period after the promised date, else <span className="font-mono">broken</span>.
+        </p>
+        <div className="flex items-center gap-2">
+          <Input
+            type="number" min={0}
+            value={rules.ptpStatusGraceDays}
+            disabled={readOnly}
+            onChange={(e) => onChange({ ...rules, ptpStatusGraceDays: Number(e.target.value) || 0 })}
+            className="h-8 w-20 text-sm"
+          />
+          <span className="text-[12px] text-muted-foreground">days grace period</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DpdBucketTable({
+  buckets, readOnly, onChange,
+}: { buckets: DpdBucket[]; readOnly?: boolean; onChange: (b: DpdBucket[]) => void }) {
+  const setBucket = (i: number, patch: Partial<DpdBucket>) => {
+    const next = buckets.map((b, idx) => idx === i ? { ...b, ...patch } : b);
+    onChange(next);
+  };
+  const add = () => onChange([...buckets, { name: "", from: 0, to: 0 }]);
+  const remove = (i: number) => onChange(buckets.filter((_, idx) => idx !== i));
+  return (
+    <div className="space-y-2">
+      <div className="grid grid-cols-[1fr_90px_16px_90px_28px] gap-1.5 px-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+        <span>Bucket name</span>
+        <span>From</span>
+        <span></span>
+        <span>To</span>
+        <span></span>
+      </div>
+      {buckets.map((b, i) => (
+        <div key={i} className="grid grid-cols-[1fr_90px_16px_90px_28px] items-center gap-1.5">
+          <Input
+            value={b.name}
+            disabled={readOnly}
+            onChange={(e) => setBucket(i, { name: e.target.value })}
+            placeholder="e.g. Early"
+            className="h-8 text-sm"
+          />
+          <Input
+            type="number" min={0}
+            value={b.from}
+            disabled={readOnly}
+            onChange={(e) => setBucket(i, { from: Number(e.target.value) || 0 })}
+            className="h-8 text-sm"
+          />
+          <span className="text-center text-[11px] text-muted-foreground">to</span>
+          <Input
+            type="number" min={0}
+            value={b.to ?? ""}
+            disabled={readOnly}
+            placeholder={i === buckets.length - 1 ? "∞" : ""}
+            onChange={(e) => setBucket(i, { to: e.target.value === "" ? undefined : (Number(e.target.value) || 0) })}
+            className="h-8 text-sm"
+          />
+          <button
+            type="button"
+            disabled={readOnly || buckets.length <= 1}
+            onClick={() => remove(i)}
+            className="text-muted-foreground hover:text-destructive disabled:opacity-30"
+            title="Remove bucket"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      ))}
+      <Button size="sm" variant="outline" disabled={readOnly} onClick={add} className="h-8 w-full text-xs">
+        <Plus className="mr-1 h-3 w-3" /> Add bucket
+      </Button>
+    </div>
+  );
+}
+
+/* ----- Signals editor ----- */
+
+function SignalsEditor({
+  signals, readOnly, onChange,
+}: { signals: Signal[]; readOnly?: boolean; onChange: (s: Signal[]) => void }) {
+  const setSignal = (id: string, patch: Partial<Signal>) => {
+    onChange(signals.map((s) => s.id === id ? { ...s, ...patch } : s));
+  };
+  const add = (kind: SignalKind) => {
+    const id = uid("sig");
+    onChange([...signals, { id, kind, enabled: true, endpointUrl: `https://api.piagents.com/signals/${id}` }]);
+  };
+  const remove = (id: string) => onChange(signals.filter((s) => s.id !== id));
+  return (
+    <div className="space-y-3">
+      {signals.length === 0 ? (
+        <p className="text-[11.5px] text-muted-foreground">
+          No signals configured. Add one to let external events (like payment webhooks) exit leads from this campaign automatically.
+        </p>
+      ) : (
+        signals.map((sig) => {
+          const meta = SIGNAL_LABEL[sig.kind];
+          return (
+            <div key={sig.id} className="space-y-2 rounded-lg border border-border bg-background/40 p-3">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <p className="text-[12.5px] font-medium">{meta.title}</p>
+                  <p className="text-[11px] text-muted-foreground leading-snug">{meta.description}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Switch
+                    checked={sig.enabled}
+                    disabled={readOnly}
+                    onCheckedChange={(v) => setSignal(sig.id, { enabled: v })}
+                  />
+                  <button
+                    type="button"
+                    disabled={readOnly}
+                    onClick={() => remove(sig.id)}
+                    className="text-muted-foreground hover:text-destructive"
+                    title="Remove signal"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+              {sig.enabled && (
+                <div className="space-y-1">
+                  <p className="text-[10.5px] uppercase tracking-wider text-muted-foreground">Endpoint (POST)</p>
+                  <Input
+                    value={sig.endpointUrl ?? ""}
+                    disabled={readOnly}
+                    onChange={(e) => setSignal(sig.id, { endpointUrl: e.target.value })}
+                    className="h-8 font-mono text-[11.5px]"
+                  />
+                </div>
+              )}
+            </div>
+          );
+        })
+      )}
+      <Button size="sm" variant="outline" disabled={readOnly} onClick={() => add("payment_received")} className="h-8 w-full text-xs">
+        <Plus className="mr-1 h-3 w-3" /> Add signal
+      </Button>
+    </div>
+  );
+}
+
+/**
+ * Human Escalation (needsReview) node config.
+ *
+ * The node is TERMINAL — WorkflowCanvas auto-wires an edge from it to End at
+ * drop time. Semantically, reaching this node flags the lead as "Human
+ * Escalation" (visible in Leads + Dashboard + Analytics — Phase 6/7).
+ *
+ * Optional client-notify: enable to POST a JSON payload to a configured
+ * endpoint every time a lead reaches the node. Standard fields are always
+ * included; the user can add custom workflow variables to the payload.
+ */
+function NeedsReviewFields({
+  config, readOnly, mark, onChange,
+}: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
+  const enabled = config?.notifyEnabled ?? false;
+  const endpoint = config?.notifyEndpointUrl ?? "";
+  const customFields = config?.customPayloadFields ?? [];
+  const patch = (next: Partial<PresetConfig>) => {
+    if (readOnly) return;
+    onChange({ config: { ...(config ?? {}), ...next } });
+  };
+  useEffect(() => { mark(true); }, []);
+  return (
+    <>
+      <Section title="Flag Lead">
+        <div className="rounded-xl border border-border bg-card/50 p-4">
+          <div className="flex items-start gap-2 text-[12px]">
+            <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-success" />
+            <p className="leading-snug text-foreground">
+              Every lead reaching this node is marked <span className="font-medium">Human Escalation</span> — visible in Leads,
+              Dashboard, and Analytics. This node is terminal; the lead exits the flow to End after being flagged.
+            </p>
+          </div>
+        </div>
+      </Section>
+
+      <Section title="Notify Client System">
+        <div className="rounded-xl border border-border bg-card/50 p-4 space-y-3">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              <p className="text-[12.5px] font-medium">Send a webhook when a lead is flagged</p>
+              <p className="text-[11px] text-muted-foreground leading-snug">
+                POSTs a JSON payload to your endpoint every time a lead reaches this node.
+              </p>
+            </div>
+            <Switch
+              checked={enabled}
+              disabled={readOnly}
+              onCheckedChange={(v) => patch({ notifyEnabled: v })}
+            />
+          </div>
+
+          {enabled && (
+            <>
+              <div className="space-y-1">
+                <p className="text-[10.5px] uppercase tracking-wider text-muted-foreground">Endpoint (POST)</p>
+                <Input
+                  value={endpoint}
+                  disabled={readOnly}
+                  onChange={(e) => patch({ notifyEndpointUrl: e.target.value })}
+                  placeholder="https://client.example.com/hooks/needs_review"
+                  className="h-8 font-mono text-[11.5px]"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <p className="text-[10.5px] uppercase tracking-wider text-muted-foreground">Payload</p>
+                <div className="rounded-md border border-border bg-background/40 p-2 text-[11.5px]">
+                  <p className="mb-1 font-medium text-muted-foreground">Auto-included</p>
+                  <div className="flex flex-wrap gap-1">
+                    {["lead_id","phone","campaign_id","run_id","timestamp"].map((f) => (
+                      <span key={f} className="inline-flex items-center rounded-md border border-border bg-secondary px-1.5 py-0.5 font-mono text-[10.5px] text-muted-foreground">{f}</span>
+                    ))}
+                  </div>
+                </div>
+                <CustomPayloadFields
+                  fields={customFields}
+                  readOnly={readOnly}
+                  onChange={(f) => patch({ customPayloadFields: f })}
+                />
+              </div>
+            </>
+          )}
+        </div>
+      </Section>
+    </>
+  );
+}
+
+function CustomPayloadFields({
+  fields, readOnly, onChange,
+}: { fields: string[]; readOnly?: boolean; onChange: (f: string[]) => void }) {
+  const add = (v: string) => {
+    if (!v || fields.includes(v)) return;
+    onChange([...fields, v]);
+  };
+  const remove = (v: string) => onChange(fields.filter((f) => f !== v));
+  return (
+    <div className="space-y-1.5">
+      <p className="text-[11px] text-muted-foreground">Custom fields — add workflow variables to include in the payload.</p>
+      {fields.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {fields.map((f) => (
+            <span key={f} className="inline-flex items-center gap-1 rounded-md border border-ai/25 bg-ai/10 px-1.5 py-0.5 font-mono text-[10.5px] text-ai">
+              {f}
+              <button
+                type="button"
+                disabled={readOnly}
+                onClick={() => remove(f)}
+                className="text-ai/70 hover:text-destructive"
+              >
+                <X className="h-2.5 w-2.5" />
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+      <VariablePicker
+        defaultValue=""
+        disabled={readOnly}
+        onChange={(v) => add(v)}
+      />
+    </div>
+  );
 }
 
 /** Standalone AI Transformation node config — the previously-inline
@@ -626,67 +1118,7 @@ function AudienceFields({ config, readOnly, mark }: { config?: PresetConfig; rea
         )}
         <p className="text-[11px] text-muted-foreground">Required when the workflow contains Voice or WhatsApp nodes. Must be a String field.</p>
       </Section>
-
-      {/* Section: Skill inputs — auto-attached from the campaign's useCase pack.
-          Every skill's declared input becomes a mapping row here (like phone).
-          Skills evaluate once per lead at ingestion; their outputs land in
-          lead.memory.<skill_output> and become available in downstream pickers. */}
-      <SkillInputsSection csvKeys={keys} readOnly={readOnly} />
     </>
-  );
-}
-
-/** "Skill inputs" mapping section on the Audience node. Renders one row per
- *  unique input across every skill attached to the campaign's useCase. */
-function SkillInputsSection({ csvKeys, readOnly }: { csvKeys: string[]; readOnly?: boolean }) {
-  const useCase = useContext(CampaignUseCaseContext);
-  const skills = skillsForUseCase(useCase);
-  if (!useCase || skills.length === 0) return null;
-  // De-dupe inputs across skills — DPD status and DPD bucket both take `due_date`;
-  // the user maps it once here.
-  const seen = new Set<string>();
-  const rows: { key: string; dataType: string }[] = [];
-  for (const s of skills) {
-    for (const inp of s.inputs) {
-      if (inp.source === "agent") continue;
-      if (seen.has(inp.key)) continue;
-      seen.add(inp.key);
-      rows.push({ key: inp.key, dataType: inp.dataType });
-    }
-  }
-  return (
-    <Section title="Skill inputs">
-      <div className="overflow-hidden rounded-md border border-border">
-        <table className="w-full text-[11.5px]">
-          <thead>
-            <tr className="border-b border-border bg-secondary/40 text-[10px] uppercase tracking-wider text-muted-foreground">
-              <th className="px-3 py-1.5 text-left font-medium">Skill input</th>
-              <th className="px-3 py-1.5 text-left font-medium">Type</th>
-              <th className="px-3 py-1.5 text-left font-medium">Key</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {rows.map((r) => (
-              <tr key={r.key}>
-                <td className="px-3 py-1.5 font-mono text-foreground">{r.key}</td>
-                <td className="px-3 py-1.5">
-                  <span className="rounded-sm border border-border bg-secondary/40 px-1 py-0.5 text-[10px]">{r.dataType}</span>
-                </td>
-                <td className="px-3 py-1.5">
-                  <SelectLike
-                    disabled={readOnly}
-                    options={csvKeys}
-                    placeholder={csvKeys.length ? "Select a key…" : "Add a schema field first"}
-                    defaultValue={csvKeys.includes(r.key) ? r.key : undefined}
-                    onPick={() => { /* readonly demo — mapping isn't persisted in v1 */ }}
-                  />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </Section>
   );
 }
 
@@ -959,10 +1391,7 @@ function ApiToolCallFields({
     next.push({ v: key, def: existing?.def ?? "", mode: existing?.mode, remap: remap.length ? remap : undefined });
     onChange({ config: { ...config, apiTool: handle, apiInputMap: next } });
   };
-  // Filter out any registry entries flagged as Skills — Skills are not invoked
-  // via a Tool node. They auto-attach to a campaign by useCase and run at
-  // audience ingestion (see AudienceFields → Skill inputs).
-  const toolOptions = TOOLS.filter((t) => !t.isSkill).map((t) => t.handle);
+  const toolOptions = TOOLS.map((t) => t.handle);
   const outputsVisible = selected && !!tool && tool.outputs.length > 0;
   return (
     <Section title="Tool">

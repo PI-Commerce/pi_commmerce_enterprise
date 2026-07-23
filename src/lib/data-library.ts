@@ -48,7 +48,7 @@ export function makeCsvAsset(
 }
 
 // Seed library — FinServ branch keeps only BFSI-relevant cohorts.
-// - collections_personal_loan_jul26.csv is the primary Collections cohort,
+// - collections_loan_jul26.csv is the primary Collections cohort,
 //   consumed by pl_predue / pl_dueday / pl_dpd_early via CSV-audience mapping.
 // - kyc_dropoffs and dormant_traders are legacy BFSI carry-overs.
 // - The retail CSVs (high_value_traders, winback_lapsed_premium) are removed
@@ -56,7 +56,7 @@ export function makeCsvAsset(
 export const CSV_LIBRARY: CsvAsset[] = [
   makeCsvAsset({
     id: "csv_collections_pl_jul26",
-    name: "collections_personal_loan_jul26.csv",
+    name: "collections_loan_jul26.csv",
     uploadedTs: NOW - 0 * DAY,
     columns: [
       "customer_id", "phone", "first_name", "loan_id", "product",

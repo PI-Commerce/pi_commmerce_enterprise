@@ -15,21 +15,41 @@ export type NodeGroup = "system" | "data" | "logic" | "action" | "ai" | "ads";
  *
  * Extend this list to add a new BFSI pack — Onboarding, Claims, Cross-sell, etc.
  */
+/**
+ * Product = the domain object the campaign operates on. Independent of
+ * useCase (lifecycle stage) so that e.g. `retention` can apply to both
+ * loans and insurance. Product drives:
+ *   - which Business Rules render on the Start node (DPD + PTP for loan; none for insurance in v1)
+ *   - the Business Analytics badge label
+ *   - the template chip surfaced in the campaign creation dialog
+ */
+export type Product = "loan" | "insurance";
+
+export const PRODUCT_LABEL: Record<Product, string> = {
+  loan:      "Loan",
+  insurance: "Insurance",
+};
+
+/**
+ * useCase = the campaign's *lifecycle-stage pack* — decoupled from any
+ * specific product. `collections` covers Loan-collections in v1 (and can
+ * be reused for CC or utility dues later). `retention` covers Insurance
+ * renewal + premium reminders (and can also apply to Loan retention).
+ * The product axis is captured separately (see `Product` above).
+ */
 export type UseCase =
-  | "personal_loan_collections"
-  | "insurance_renewal"
-  | "credit_card_dues"
-  | "kyc_onboarding"
+  | "collections"
+  | "retention"
+  | "onboarding"
   | "cross_sell"
   | "generic";
 
 export const USE_CASE_LABEL: Record<UseCase, string> = {
-  personal_loan_collections: "Personal Loan",
-  insurance_renewal:         "Insurance Renewal",
-  credit_card_dues:          "Credit Card Dues",
-  kyc_onboarding:            "KYC / Onboarding",
-  cross_sell:                "Cross-sell",
-  generic:                   "Generic BFSI",
+  collections: "Loan",
+  retention:   "Insurance",
+  onboarding:  "Onboarding",
+  cross_sell:  "Cross-sell",
+  generic:     "Generic BFSI",
 };
 
 /**
@@ -38,28 +58,26 @@ export const USE_CASE_LABEL: Record<UseCase, string> = {
  * input, ring, ai, success, warning. No `chart-N` tokens — so we deliberately
  * do NOT use them here.
  *
- * v1 only has one useCase in scope (personal_loan_collections). Every entry
- * below uses the `ai` token — it's the brand's "smart" color and it renders
- * reliably. When more BFSI packs come online, differentiate them by icon or
- * label; do not introduce chart-N tokens without defining them in styles.css.
+ * v1 has 2 useCases in scope (collections, retention). Both use the `ai`
+ * token — it's the brand's "smart" color and it renders reliably. When more
+ * useCases go live, differentiate them by icon or label; do not introduce
+ * chart-N tokens without defining them in styles.css.
  */
 export const USE_CASE_TINT: Record<UseCase, string> = {
-  personal_loan_collections: "text-ai bg-ai/10 border-ai/30",
-  insurance_renewal:         "text-ai bg-ai/10 border-ai/30",
-  credit_card_dues:          "text-ai bg-ai/10 border-ai/30",
-  kyc_onboarding:            "text-ai bg-ai/10 border-ai/30",
-  cross_sell:                "text-ai bg-ai/10 border-ai/30",
-  generic:                   "text-muted-foreground bg-secondary border-border",
+  collections: "text-ai bg-ai/10 border-ai/30",
+  retention:   "text-ai bg-ai/10 border-ai/30",
+  onboarding:  "text-ai bg-ai/10 border-ai/30",
+  cross_sell:  "text-ai bg-ai/10 border-ai/30",
+  generic:     "text-muted-foreground bg-secondary border-border",
 };
 
 /** Solid variant — for higher-emphasis badges (e.g. Business Analytics header). */
 export const USE_CASE_TINT_SOLID: Record<UseCase, string> = {
-  personal_loan_collections: "bg-ai text-ai-foreground border-transparent",
-  insurance_renewal:         "bg-ai text-ai-foreground border-transparent",
-  credit_card_dues:          "bg-ai text-ai-foreground border-transparent",
-  kyc_onboarding:            "bg-ai text-ai-foreground border-transparent",
-  cross_sell:                "bg-ai text-ai-foreground border-transparent",
-  generic:                   "bg-foreground text-background border-transparent",
+  collections: "bg-ai text-ai-foreground border-transparent",
+  retention:   "bg-ai text-ai-foreground border-transparent",
+  onboarding:  "bg-ai text-ai-foreground border-transparent",
+  cross_sell:  "bg-ai text-ai-foreground border-transparent",
+  generic:     "bg-foreground text-background border-transparent",
 };
 
 export type NodeKind =
@@ -80,7 +98,9 @@ export type NodeKind =
   // ai
   | "aiTransform"
   // ads
-  | "adsCampaign";
+  | "adsCampaign"
+  // human handoff (verticalized label: "Human Escalation" for BFSI)
+  | "needsReview";
 
 export type NodeRunState = "idle" | "running" | "success" | "failed";
 
@@ -216,6 +236,89 @@ export type PresetConfig = {
    * out-of-box "context tools" (calculate_dpd, lookup_ptp_history, etc.).
    */
   saveToLeadMemory?: string[];
+
+  // ---- Start node: Business Rules ----
+  /**
+   * Loan-only. Configuration of the per-campaign engine computations that
+   * populate `lead.memory.*` fields. When present, edits made on the Start
+   * node's Business Rules section persist here. Version-scoped: each campaign
+   * version pins its own rule set (per the "rules travel with the version"
+   * decision).
+   */
+  businessRules?: LoanBusinessRules;
+
+  // ---- Start node: Signals ----
+  /**
+   * Global webhook listeners at campaign level. When a matching signal fires,
+   * the engine takes bulk action across all in-flight leads of this campaign
+   * (e.g. "payment_received" → mark those leads as paid and exit their runs).
+   */
+  signals?: Signal[];
+
+  // ---- Human Escalation (needsReview) ----
+  /**
+   * Optional client-notify config. When enabled, the engine POSTs a payload
+   * to `endpointUrl` every time a lead reaches this node. Auto-included
+   * fields (lead_id, phone, campaign_id, run_id, timestamp) are always in the
+   * payload; `customPayloadFields` lists additional workflow vars the user
+   * wants to include.
+   */
+  notifyEnabled?: boolean;
+  notifyEndpointUrl?: string;
+  /** Names of upstream variables to include in the notify payload (in
+   *  addition to the auto-included fields). */
+  customPayloadFields?: string[];
+};
+
+/* ---------------- Business Rules (Loan) ---------------- */
+
+export type DpdBucket = { name: string; from: number; to?: number };
+
+export type LoanBusinessRules = {
+  /** DPD Status grace period in hours. Pre-due if paid within this window
+   *  of the due date. Default 24. */
+  dpdStatusGraceHours: number;
+  /** DPD Bucket definitions. Applied only when DPD Status = post_due.
+   *  Buckets are inclusive ranges in days-past-due. */
+  dpdBuckets: DpdBucket[];
+  /** PTP Rate — lookback window in days for historical PTPs. */
+  ptpLookbackDays: number;
+  /** PTP Rate — minimum sample size before ratePct is meaningful. */
+  ptpMinSample: number;
+  /** PTP Status — grace period in days for "kept" vs "broken" classification. */
+  ptpStatusGraceDays: number;
+};
+
+export const DEFAULT_LOAN_RULES: LoanBusinessRules = {
+  dpdStatusGraceHours: 24,
+  dpdBuckets: [
+    { name: "Early", from: 1,  to: 7  },
+    { name: "Mid",   from: 8,  to: 30 },
+    { name: "Late",  from: 31            }, // no upper bound
+  ],
+  ptpLookbackDays: 90,
+  ptpMinSample:    2,
+  ptpStatusGraceDays: 3,
+};
+
+/* ---------------- Signals (all products) --------------- */
+
+export type SignalKind = "payment_received";
+
+export type Signal = {
+  id: string;
+  kind: SignalKind;
+  enabled: boolean;
+  /** Endpoint URL clients POST to when the event occurs. Auto-generated in
+   *  production; shown as a copy-able URL here in the mock. */
+  endpointUrl?: string;
+};
+
+export const SIGNAL_LABEL: Record<SignalKind, { title: string; description: string }> = {
+  payment_received: {
+    title: "Payment received",
+    description: "When the client posts a payment event to the endpoint, matching leads exit any in-flight run of this campaign cleanly.",
+  },
 };
 
 export type WorkflowNodeData = {
@@ -266,6 +369,7 @@ export const NODE_GROUPS: Record<NodeKind, NodeGroup> = {
   sms: "action",
   aiTransform: "ai",
   adsCampaign: "ads",
+  needsReview: "action",
 };
 
 export const NODE_LABELS: Record<NodeKind, string> = {
@@ -281,6 +385,8 @@ export const NODE_LABELS: Record<NodeKind, string> = {
   sms: "SMS",
   aiTransform: "AI Transformation",
   adsCampaign: "Ads Campaign Setup",
+  // FinServ vertical relabel. Generic platform name is "Needs Review".
+  needsReview: "Human Escalation",
 };
 
 export const STATUS_TONE: Record<CampaignStatus, string> = {
@@ -302,6 +408,7 @@ export const SERIAL_PREFIX: Record<NodeKind, string> = {
   sms: "sms",
   aiTransform: "ait",
   adsCampaign: "ads",
+  needsReview: "review",
 };
 
 /**

@@ -244,10 +244,20 @@ function CampaignList() {
 
   // Duplicate & Archive campaign are OOS for v1 (scope D1/D2) — handlers removed.
 
-  const handleCreate = (name: string, description?: string, objective?: string, useCase?: string) => {
+  const handleCreate = (
+    name: string,
+    objective?: string,
+    template?: string,
+    useCase?: string,
+    product?: string,
+  ) => {
     setCreateOpen(false);
     toast.success("Campaign created", { description: `${name} · opening builder in Draft` });
-    navigate({ to: "/campaigns/$id", params: { id: "new" }, search: { name, description, objective, useCase } as never });
+    navigate({
+      to: "/campaigns/$id",
+      params: { id: "new" },
+      search: { name, objective, template, useCase, product } as never,
+    });
   };
 
   // After an API-sourced run is created, surface its unique trigger endpoint in a
@@ -865,7 +875,13 @@ function CreateCampaignDialog({
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
-  onCreate: (name: string, description?: string, objective?: string, useCase?: string) => void;
+  onCreate: (
+    name: string,
+    objective?: string,
+    template?: string,
+    useCase?: string,
+    product?: string,
+  ) => void;
 }) {
   const [name, setName] = useState("");
   const [objective, setObjective] = useState("");
@@ -876,15 +892,15 @@ function CreateCampaignDialog({
   const reset = () => { setName(""); setObjective(""); setStage(""); setProduct(""); setTemplate(""); };
   const submit = () => {
     if (!name.trim()) return;
-    // Legacy handler shape: (name, description, objective, useCase). Map the
-    // new dropdowns → the useCase key the rest of the app understands.
-    const useCase = stage === "Recovery" && product === "personal_loan"
-      ? "personal_loan_collections"
+    // Recovery → collections pack; Retention → retention pack; others undef.
+    const useCase = stage === "Recovery" ? "collections"
+      : stage === "Retention" ? "retention"
       : undefined;
-    // Description slot now carries the campaign objective (renamed to
-    // "Campaign objective" in the UI). Template selection is passed via a
-    // convention on `name` — the builder can pre-select it in a later cut.
-    onCreate(name.trim(), objective.trim() || undefined, template || undefined, useCase);
+    // "blank" template = start from scratch (no seed graph). Otherwise the
+    // template id is a key into EXAMPLE_CAMPAIGNS — the builder route resolves
+    // that to a seed nodes/edges set.
+    const templateArg = template && template !== "blank" ? template : undefined;
+    onCreate(name.trim(), objective.trim() || undefined, templateArg, useCase, product || undefined);
     reset();
   };
 
@@ -903,21 +919,23 @@ function CreateCampaignDialog({
         </DialogHeader>
 
         <div className="space-y-4 py-2">
+          {/* Name */}
           <div className="space-y-1.5">
-            <Label htmlFor="cname" className="text-xs">Campaign name <span className="text-destructive">*</span></Label>
+            <Label htmlFor="cname" className="text-xs">Name <span className="text-destructive">*</span></Label>
             <Input
               id="cname"
               autoFocus
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Q3 Personal Loan Collections"
+              placeholder="e.g. Q3 Loan Collections"
               className="h-9 text-sm"
               onKeyDown={(e) => { if (e.key === "Enter" && name.trim()) submit(); }}
             />
           </div>
 
+          {/* Objective Description */}
           <div className="space-y-1.5">
-            <Label htmlFor="cobj" className="text-xs">Campaign objective</Label>
+            <Label htmlFor="cobj" className="text-xs">Objective Description</Label>
             <Textarea
               id="cobj"
               value={objective}
@@ -928,29 +946,15 @@ function CreateCampaignDialog({
             />
           </div>
 
+          {/* Product (moved above Objective per the requested ordering) */}
           <div className="space-y-1.5">
-            <Label className="text-xs">Lifecycle stage</Label>
-            <Select value={stage} onValueChange={setStageAndReset}>
-              <SelectTrigger className="h-9 text-sm">
-                <SelectValue placeholder="Select a stage" />
-              </SelectTrigger>
-              <SelectContent>
-                {LIFECYCLE_STAGES.map((s) => (
-                  <SelectItem key={s} value={s}>{s}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-1.5">
-            <Label className="text-xs">Industry &amp; product</Label>
+            <Label className="text-xs">Product <span className="text-destructive">*</span></Label>
             <Select value={product} onValueChange={setProductAndReset}>
               <SelectTrigger className="h-9 text-sm">
                 <SelectValue placeholder="Select a product" />
               </SelectTrigger>
               <SelectContent>
-                <div className="px-2 py-1 text-[10.5px] uppercase tracking-wider text-muted-foreground">Financial Services</div>
-                {FS_PRODUCTS.map((p) => (
+                {PRODUCTS.map((p) => (
                   <SelectItem key={p.value} value={p.value} disabled={p.disabled}>
                     <span className="flex items-center gap-2">
                       {p.label}
@@ -962,54 +966,72 @@ function CreateCampaignDialog({
             </Select>
           </div>
 
-          {/* Inline template picker — appears when both stage + product resolve to a matching set */}
+          {/* Objective (formerly "Lifecycle stage") */}
+          <div className="space-y-1.5">
+            <Label className="text-xs">Objective <span className="text-destructive">*</span></Label>
+            <Select value={stage} onValueChange={setStageAndReset}>
+              <SelectTrigger className="h-9 text-sm">
+                <SelectValue placeholder="Select an objective" />
+              </SelectTrigger>
+              <SelectContent>
+                {LIFECYCLE_STAGES.map((s) => (
+                  <SelectItem key={s} value={s}>{s}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Inline template picker — appears once BOTH product + objective are picked.
+              Always shows "Start blank" as a first-class option; matching templates (if
+              any) are listed above it. */}
           {stage && product && (
             <div className="space-y-1.5">
               <Label className="text-xs">Template</Label>
-              {templates.length ? (
-                <div className="space-y-1.5">
-                  {templates.map((t) => (
-                    <button
-                      key={t.id}
-                      type="button"
-                      onClick={() => setTemplate(t.id)}
-                      className={cn(
-                        "flex w-full items-center gap-2 rounded-md border px-2.5 py-2 text-left text-[12.5px] transition-colors",
-                        template === t.id
-                          ? "border-foreground bg-accent/40"
-                          : "border-border bg-card hover:bg-accent/20",
-                      )}
-                    >
-                      <span className="flex-1">{t.label}</span>
-                      {template === t.id && <span className="text-[10.5px] text-muted-foreground">Selected</span>}
-                    </button>
-                  ))}
+              <div className="space-y-1.5">
+                {templates.map((t) => (
                   <button
+                    key={t.id}
                     type="button"
-                    onClick={() => setTemplate("blank")}
+                    onClick={() => setTemplate(t.id)}
                     className={cn(
                       "flex w-full items-center gap-2 rounded-md border px-2.5 py-2 text-left text-[12.5px] transition-colors",
-                      template === "blank"
+                      template === t.id
                         ? "border-foreground bg-accent/40"
-                        : "border-dashed border-border bg-card hover:bg-accent/20",
+                        : "border-border bg-card hover:bg-accent/20",
                     )}
                   >
-                    <span className="flex-1 text-muted-foreground">Start blank</span>
-                    {template === "blank" && <span className="text-[10.5px] text-muted-foreground">Selected</span>}
+                    <span className="flex-1">{t.label}</span>
+                    {template === t.id && <span className="text-[10.5px] text-muted-foreground">Selected</span>}
                   </button>
-                </div>
-              ) : (
-                <p className="rounded-md border border-dashed border-border bg-muted/30 px-3 py-2 text-[11.5px] text-muted-foreground">
-                  No templates for this combination yet. Pick a different stage + product, or start blank.
-                </p>
-              )}
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setTemplate("blank")}
+                  className={cn(
+                    "flex w-full items-center gap-2 rounded-md border px-2.5 py-2 text-left text-[12.5px] transition-colors",
+                    template === "blank"
+                      ? "border-foreground bg-accent/40"
+                      : "border-dashed border-border bg-card hover:bg-accent/20",
+                  )}
+                >
+                  <span className="flex-1 text-muted-foreground">Start blank</span>
+                  {template === "blank" && <span className="text-[10.5px] text-muted-foreground">Selected</span>}
+                </button>
+              </div>
             </div>
           )}
         </div>
 
         <DialogFooter>
           <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button size="sm" className="h-8 text-xs" disabled={!name.trim()} onClick={submit}>Create</Button>
+          <Button
+            size="sm"
+            className="h-8 text-xs"
+            disabled={!name.trim() || !product || !stage}
+            onClick={submit}
+          >
+            Create
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -1030,23 +1052,26 @@ const LIFECYCLE_STAGES = [
   "Recovery",
 ] as const;
 
-const FS_PRODUCTS: { value: string; label: string; disabled?: boolean }[] = [
-  { value: "personal_loan",       label: "Personal Loan" },
-  { value: "credit_card",         label: "Credit Card",         disabled: true },
-  { value: "personal_insurance",  label: "Personal Insurance",  disabled: true },
-  { value: "business_insurance",  label: "Business Insurance",  disabled: true },
-  { value: "business_loan",       label: "Business Loan",       disabled: true },
+const PRODUCTS: { value: string; label: string; disabled?: boolean }[] = [
+  { value: "loan",       label: "Loan" },
+  { value: "insurance",  label: "Insurance" },
+  { value: "credit_card", label: "Credit Card", disabled: true },
 ];
 
 /** Templates surfaced inline when the (stage · product) combo resolves. Keys
- *  are `${stage}|${product}` for direct lookup. Only Recovery × Personal Loan
- *  has real templates in v1; every other combo will show "no templates yet". */
+ *  are `${stage}|${product}` for direct lookup. Recovery × Loan is the
+ *  original 5; Retention × Insurance is the premium-renewal pack. Every
+ *  other combo shows "no templates yet". */
 const TEMPLATES_FOR: Record<string, { id: string; label: string }[]> = {
-  "Recovery|personal_loan": [
+  "Recovery|loan": [
     { id: "pl_predue",             label: "Pre-due EMI Reminder" },
     { id: "pl_dueday",             label: "Due-day EMI Reminder" },
     { id: "pl_predue_collections", label: "Pre-due EMI Reminder & Collections" },
     { id: "pl_dueday_collections", label: "Due-day EMI Reminder & Collections" },
     { id: "pl_dpd_early",          label: "Early DPD Reminder + Recovery" },
+  ],
+  "Retention|insurance": [
+    { id: "ins_predue",             label: "Pre-due Premium Reminder" },
+    { id: "ins_predue_collections", label: "Pre-due Premium Reminder & Collections" },
   ],
 };

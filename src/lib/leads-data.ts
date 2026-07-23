@@ -150,6 +150,39 @@ export type LeadPtpRate = {
  *  Lead record
  * ------------------------------------------------------------------ */
 
+/**
+ * A lead's association with a campaign run. One lead can be in many runs
+ * across many campaigns (customer 360). Each entry tracks whether the run
+ * flagged the lead as needing Human Escalation.
+ */
+export type CampaignRunStatus = "running" | "completed" | "paused" | "failed" | "terminated";
+export type LeadCampaignEntry = {
+  campaignId: string;                   // matches EXAMPLE_CAMPAIGNS key
+  campaignName: string;
+  runId: string;
+  runName: string;
+  status: CampaignRunStatus;
+  humanEscalated: boolean;              // did any Human Escalation node fire for this lead in this run?
+  enteredAt: string;                    // ISO
+  exitedAt?: string;                    // ISO — undefined while running
+};
+
+/**
+ * A single WhatsApp message on the lead's cross-campaign thread. Direction
+ * `outbound` = sent from the platform; `inbound` = reply from the lead. The
+ * `campaignId` tags each message with the campaign it belonged to so the
+ * conversation view can render a chip per bubble.
+ */
+export type LeadWhatsappMessage = {
+  timestamp: string;                    // ISO
+  direction: "outbound" | "inbound";
+  body: string;
+  campaignId?: string;
+  campaignName?: string;
+  /** Optional tag when the message included a payment link. Renders a link pill. */
+  linkLabel?: string;
+};
+
 export type LeadRecord = {
   id: string;
   customerId: string;
@@ -170,6 +203,14 @@ export type LeadRecord = {
   interactions: InteractionEntry[];
   ptpRegister: PtpRegisterEntry[];
   ptpRate: LeadPtpRate;                 // aggregated across products
+  /** Campaigns / runs this lead has been in. Drives the "Active in" column
+   *  on Leads list + the Campaign History section on Lead detail. */
+  campaigns: LeadCampaignEntry[];
+  /** Rolled up from campaigns[].humanEscalated — true if ANY run has flagged
+   *  the lead for Human Escalation. Drives the Leads-list column + KPI cards. */
+  humanEscalated: boolean;
+  /** Cross-campaign WhatsApp conversation. Sorted oldest → newest. */
+  whatsappThread: LeadWhatsappMessage[];
 };
 
 /* ------------------------------------------------------------------ *
@@ -197,10 +238,10 @@ export type { UseCase };
 export const LEAD_MEMORY_KEYS: { key: string; source: string; description: string; useCase?: UseCase }[] = [
   // All entries share the same `source` label so the variable picker collapses
   // them under ONE "Lead Memory" group — not one group per producing skill.
-  { key: "lead.memory.dpd_status",      source: "Lead Memory", description: "pre_due / due_today / post_due",          useCase: "personal_loan_collections" },
-  { key: "lead.memory.dpd_bucket",      source: "Lead Memory", description: "early_bucket / mid_bucket / late_bucket", useCase: "personal_loan_collections" },
-  { key: "lead.memory.ptp_rate_pct",    source: "Lead Memory", description: "Historical PTP kept rate (%)",            useCase: "personal_loan_collections" },
-  { key: "lead.memory.ptp_status",      source: "Lead Memory", description: "no_ptp / kept / broken",                  useCase: "personal_loan_collections" },
+  { key: "lead.memory.dpd_status",      source: "Lead Memory", description: "pre_due / due_today / post_due",          useCase: "collections" },
+  { key: "lead.memory.dpd_bucket",      source: "Lead Memory", description: "early_bucket / mid_bucket / late_bucket", useCase: "collections" },
+  { key: "lead.memory.ptp_rate_pct",    source: "Lead Memory", description: "Historical PTP kept rate (%)",            useCase: "collections" },
+  { key: "lead.memory.ptp_status",      source: "Lead Memory", description: "no_ptp / kept / broken",                  useCase: "collections" },
 ];
 
 /* ------------------------------------------------------------------ *
@@ -433,6 +474,119 @@ function buildPtpRegister(products: LeadProduct[]): { register: PtpRegisterEntry
   return { register, rate: { made, kept, ratePct } };
 }
 
+/* -------- Campaign associations + WhatsApp thread (deterministic seed) -------- */
+
+/**
+ * Seed campaign associations for a lead. Every lead is enrolled in 1..3 of
+ * the loan-collections templates; a deterministic subset (~18%) get flagged
+ * for Human Escalation. Insurance leads (product mix contains InsurancePolicy)
+ * also get one of the two insurance-retention templates.
+ */
+type _SeedCampaign = { id: string; name: string; product: "loan" | "insurance" };
+const _SEED_CAMPAIGN_CATALOG: _SeedCampaign[] = [
+  { id: "pl_predue",              name: "Loan · Pre-due EMI Reminder",                            product: "loan" },
+  { id: "pl_dueday",              name: "Loan · Due-day EMI Reminder",                            product: "loan" },
+  { id: "pl_predue_collections",  name: "Loan · Pre-due EMI Reminder & Collections",              product: "loan" },
+  { id: "pl_dueday_collections",  name: "Loan · Due-day EMI Reminder & Collections",              product: "loan" },
+  { id: "pl_dpd_early",           name: "Loan · Early DPD Reminder + Recovery",                   product: "loan" },
+  { id: "ins_predue",             name: "Insurance · Pre-due Premium Reminder",                    product: "insurance" },
+  { id: "ins_predue_collections", name: "Insurance · Pre-due Premium Reminder & Collections",      product: "insurance" },
+];
+
+function buildCampaignAssociations(products: LeadProduct[], seed: number): { entries: LeadCampaignEntry[]; anyEscalated: boolean } {
+  const hasLoan = products.some((p) => p.kind === "PersonalLoan");
+  const hasIns  = products.some((p) => p.kind === "InsurancePolicy");
+  const pool = _SEED_CAMPAIGN_CATALOG.filter((c) => (c.product === "loan" && hasLoan) || (c.product === "insurance" && hasIns));
+  if (pool.length === 0) return { entries: [], anyEscalated: false };
+
+  // 1..3 associations per lead, drawn from the pool.
+  const count = 1 + (Math.abs(jitter(0, seed * 1.7, 2)));
+  const entries: LeadCampaignEntry[] = [];
+  const seen = new Set<string>();
+  for (let i = 0; i < count; i++) {
+    const camp = pool[Math.abs(jitter(0, seed + i * 3.1, pool.length)) % pool.length];
+    if (seen.has(camp.id)) continue;
+    seen.add(camp.id);
+    const runIdx = 4200 + Math.abs(jitter(0, seed * 2.3 + i, 40));
+    const daysAgoEntered = 2 + Math.abs(jitter(0, seed + i * 5, 90));
+    const isRunning = i === 0 && (seed % 3 === 0);
+    // Escalation probability: ~18% overall, biased toward DPD templates.
+    const escalationBase = camp.id === "pl_dpd_early" ? 0.35 : camp.id.includes("collections") ? 0.22 : 0.10;
+    const escalated = ((Math.abs(seed * 13 + i * 7) % 100) / 100) < escalationBase;
+    entries.push({
+      campaignId: camp.id,
+      campaignName: camp.name,
+      runId: `RUN-${runIdx}`,
+      runName: `Run ${1 + (i % 3)}`,
+      status: isRunning ? "running" : "completed",
+      humanEscalated: escalated,
+      enteredAt: offsetDate(-daysAgoEntered),
+      exitedAt: isRunning ? undefined : offsetDate(-Math.max(1, daysAgoEntered - 5)),
+    });
+  }
+  return { entries, anyEscalated: entries.some((e) => e.humanEscalated) };
+}
+
+/**
+ * Build a synthetic WhatsApp thread for a lead. Mixes outbound campaign
+ * touches (drawn from the same templates seeded above) and occasional inbound
+ * replies. Each message carries its campaign tag so the conversation view
+ * can chip-tag every bubble.
+ */
+function buildWhatsappThread(entries: LeadCampaignEntry[], firstName: string, seed: number): LeadWhatsappMessage[] {
+  if (entries.length === 0) return [];
+  const messages: LeadWhatsappMessage[] = [];
+  const outboundBodies: Record<string, (name: string) => { body: string; linkLabel?: string }> = {
+    pl_predue:              (n) => ({ body: `Hi ${n}, friendly reminder — your EMI of ₹8,500 is due on the 15th. Pay ahead to avoid late fees.`, linkLabel: "Pay now" }),
+    pl_dueday:              (n) => ({ body: `Hi ${n}, your EMI of ₹8,500 is due today. Please clear it before end of day.`, linkLabel: "Pay now" }),
+    pl_predue_collections:  (n) => ({ body: `Hi ${n}, your EMI is coming up. If you've already paid, please ignore this message.`, linkLabel: "Pay now" }),
+    pl_dueday_collections:  (n) => ({ body: `Hi ${n}, EMI of ₹8,500 due today. Voice team will follow up if unpaid.`, linkLabel: "Pay now" }),
+    pl_dpd_early:           (n) => ({ body: `Hi ${n}, your EMI is 3 days overdue. Clear it today to avoid credit-bureau impact.`, linkLabel: "Pay now" }),
+    ins_predue:             (n) => ({ body: `Hi ${n}, your health policy renews in 7 days. Premium ₹12,400.`, linkLabel: "Renew now" }),
+    ins_predue_collections: (n) => ({ body: `Hi ${n}, gentle reminder to renew your health policy — we'd love to keep you covered.`, linkLabel: "Renew now" }),
+  };
+  const inboundReplies = [
+    "Already paid, thanks",
+    "Will pay by tomorrow",
+    "Please share the details",
+    "Can I get 3 more days?",
+    "Not sure I can afford this month",
+    "Ok",
+  ];
+
+  // For each association, emit 1 outbound msg (and sometimes 1 inbound reply)
+  // dated near the association's entry time. Sort chronological at the end.
+  entries.forEach((entry, ei) => {
+    const enteredIso = entry.enteredAt;
+    const bodyFn = outboundBodies[entry.campaignId];
+    if (!bodyFn) return;
+    const out = bodyFn(firstName);
+    messages.push({
+      timestamp: enteredIso,
+      direction: "outbound",
+      body: out.body,
+      linkLabel: out.linkLabel,
+      campaignId: entry.campaignId,
+      campaignName: entry.campaignName,
+    });
+    // Inbound reply ~55% of the time.
+    if (((Math.abs(seed * 3.1 + ei * 5) % 100) / 100) < 0.55) {
+      const reply = inboundReplies[Math.abs(seed + ei * 7) % inboundReplies.length];
+      const t = Date.parse(enteredIso) + (3 + (Math.abs(seed + ei) % 20)) * 3_600_000;
+      messages.push({
+        timestamp: new Date(t).toISOString(),
+        direction: "inbound",
+        body: reply,
+        campaignId: entry.campaignId,
+        campaignName: entry.campaignName,
+      });
+    }
+  });
+
+  messages.sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp));
+  return messages;
+}
+
 function makeLead(i: number): LeadRecord {
   const firstName = FIRST_NAMES[i % FIRST_NAMES.length];
   const lastName = LAST_NAMES[(i * 3 + 1) % LAST_NAMES.length];
@@ -450,6 +604,9 @@ function makeLead(i: number): LeadRecord {
   const createdDays  = 30 + Math.abs(jitter(0, i * 3.7, 690));
   const updatedDays  = 1  + Math.abs(jitter(0, i * 5.1, 89));
   const interactedDays = Math.abs(jitter(0, i * 7.3, 30));
+  const { entries: campaignEntries, anyEscalated } = buildCampaignAssociations(products, i);
+  const waThread = buildWhatsappThread(campaignEntries, firstName, i);
+
   return {
     id: `L_${String(300_000 + i * 97).padStart(6, "0")}`,
     customerId, customerName, phone,
@@ -473,6 +630,9 @@ function makeLead(i: number): LeadRecord {
     interactions: makeInteractions(products, i),
     ptpRegister: register,
     ptpRate: rate,
+    campaigns: campaignEntries,
+    humanEscalated: anyEscalated,
+    whatsappThread: waThread,
   };
 }
 

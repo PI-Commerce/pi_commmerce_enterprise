@@ -7,7 +7,7 @@
  *   - Recovery Analytics: 3 SEPARATE cards (Rate · Cycle · Channel Effectiveness)
  *
  * The pack is chosen by the selected campaign's useCase. Only
- * personal_loan_collections is seeded in v1; every other useCase renders a
+ * `collections` is seeded in v1; every other useCase renders a
  * "scope: TBD" hint so the platform-level extension point is visible.
  *
  * Explanations use ONLY the small "i" info button next to each figure — no
@@ -22,9 +22,9 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Info } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { analyticsFor, type BusinessAnalyticsPack, type FunnelStage, type ChannelEffectivenessRow } from "@/lib/business-analytics";
-import { USE_CASE_LABEL, USE_CASE_TINT, USE_CASE_TINT_SOLID, type UseCase } from "@/lib/campaign-types";
+import { PRODUCT_LABEL, USE_CASE_TINT_SOLID, type UseCase, type Product } from "@/lib/campaign-types";
 
-export function BusinessAnalyticsPanel({ useCase }: { useCase?: UseCase }) {
+export function BusinessAnalyticsPanel({ useCase, product }: { useCase?: UseCase; product?: Product }) {
   const pack = analyticsFor(useCase);
 
   if (!useCase) {
@@ -38,9 +38,11 @@ export function BusinessAnalyticsPanel({ useCase }: { useCase?: UseCase }) {
     return (
       <div className="mb-5 rounded-xl border border-dashed border-border bg-card/40 px-4 py-4 text-[12px] text-muted-foreground">
         <div className="flex items-center gap-2">
-          <span className={cn("inline-flex items-center rounded-full border px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-wide", USE_CASE_TINT[useCase])}>
-            {USE_CASE_LABEL[useCase]}
-          </span>
+          {product && (
+            <span className={cn("inline-flex items-center rounded-full border px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-wide", USE_CASE_TINT_SOLID[useCase])}>
+              {PRODUCT_LABEL[product]}
+            </span>
+          )}
           <span>· Business Analytics pack is scope: TBD for v1.</span>
         </div>
       </div>
@@ -49,7 +51,7 @@ export function BusinessAnalyticsPanel({ useCase }: { useCase?: UseCase }) {
   return (
     <TooltipProvider>
       <div className="mb-6">
-        <PackHeader useCase={useCase} />
+        <PackHeader useCase={useCase} product={product} />
         <KpiGrid kpis={pack.kpis} />
         <ChartGrid pack={pack} />
       </div>
@@ -57,13 +59,15 @@ export function BusinessAnalyticsPanel({ useCase }: { useCase?: UseCase }) {
   );
 }
 
-function PackHeader({ useCase }: { useCase: UseCase }) {
+function PackHeader({ useCase, product }: { useCase: UseCase; product?: Product }) {
   return (
     <div className="mb-2 flex items-center gap-2">
       <h2 className="text-[13px] font-semibold uppercase tracking-wider text-muted-foreground">Business Analytics</h2>
-      <span className={cn("inline-flex items-center rounded-full border px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-wide", USE_CASE_TINT_SOLID[useCase])}>
-        {USE_CASE_LABEL[useCase]}
-      </span>
+      {product && (
+        <span className={cn("inline-flex items-center rounded-full border px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-wide", USE_CASE_TINT_SOLID[useCase])}>
+          {PRODUCT_LABEL[product]}
+        </span>
+      )}
     </div>
   );
 }
@@ -72,19 +76,28 @@ function PackHeader({ useCase }: { useCase: UseCase }) {
 
 function KpiGrid({ kpis }: { kpis: BusinessAnalyticsPack["kpis"] }) {
   return (
-    <div className="mb-5 grid grid-cols-4 gap-3">
-      {kpis.map((k, i) => (
-        <div key={i} className="rounded-xl border border-border bg-card px-4 py-3.5">
-          <div className="flex items-start justify-between gap-2">
-            <p className="text-[11px] uppercase tracking-wider text-muted-foreground">{k.label}</p>
-            <InfoDot label={k.label} text={k.info} />
+    <div className="mb-5 grid grid-cols-5 gap-3">
+      {kpis.map((k, i) => {
+        const isEscalation = k.label === "Human Escalation";
+        return (
+          <div key={i} className={cn(
+            "rounded-xl border bg-card px-4 py-3.5",
+            isEscalation ? "border-warning/40" : "border-border",
+          )}>
+            <div className="flex items-start justify-between gap-2">
+              <p className={cn(
+                "text-[11px] uppercase tracking-wider",
+                isEscalation ? "text-warning" : "text-muted-foreground",
+              )}>{k.label}</p>
+              <InfoDot label={k.label} text={k.info} />
+            </div>
+            <div className="mt-1.5 flex items-baseline gap-1.5">
+              <p className="text-2xl font-semibold tracking-tight tabular-nums">{k.value}</p>
+              {k.unit && <p className="text-[12px] text-muted-foreground">{k.unit}</p>}
+            </div>
           </div>
-          <div className="mt-1.5 flex items-baseline gap-1.5">
-            <p className="text-2xl font-semibold tracking-tight tabular-nums">{k.value}</p>
-            {k.unit && <p className="text-[12px] text-muted-foreground">{k.unit}</p>}
-          </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

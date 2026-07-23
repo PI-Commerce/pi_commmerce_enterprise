@@ -3,6 +3,8 @@ import { AppShell, PageHeader } from "@/components/app/AppShell";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { ArrowUpRight, Megaphone, Bot, Activity, Plus, Info } from "lucide-react";
+import { LEAD_RECORDS } from "@/lib/leads-data";
+import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 export const Route = createFileRoute("/")({
@@ -17,6 +19,14 @@ export const Route = createFileRoute("/")({
 
 function Dashboard() {
   const runs = [...LIVE_RUNS].sort((a, b) => b.startedAtTs - a.startedAtTs).slice(0, 5);
+  // Human Escalation KPI — count of leads flagged for review within the
+  // dashboard's default 7-day window. Uses `lastUpdatedAt` as a proxy for
+  // "recently flagged" (a flag would bump this timestamp in production).
+  const sevenDaysAgo = Date.now() - 7 * 86_400_000;
+  const escalationCount7d = LEAD_RECORDS.reduce(
+    (n, l) => n + (l.humanEscalated && Date.parse(l.lastUpdatedAt) >= sevenDaysAgo ? 1 : 0),
+    0,
+  );
   return (
     <AppShell>
       <PageHeader
@@ -30,7 +40,7 @@ function Dashboard() {
       />
 
       <TooltipProvider delayDuration={150}>
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid grid-cols-5 gap-3">
         <Kpi
           label="Active campaigns"
           value="8"
@@ -58,6 +68,14 @@ function Dashboard() {
           unit="minutes"
           timeframe="Last 7 days"
           info="Total minutes spoken across all voice agents and campaigns in the last 7 days."
+        />
+        <Kpi
+          label="Human Escalation"
+          value={escalationCount7d.toLocaleString()}
+          unit="leads"
+          timeframe="Last 7 days"
+          info="Leads flagged by a Human Escalation node in the last 7 days. Drill into any lead from /leads to see which run flagged them."
+          accent="warning"
         />
       </div>
       </TooltipProvider>
@@ -126,17 +144,26 @@ function Kpi({
   unit,
   timeframe,
   info,
+  accent,
 }: {
   label: string;
   value: string;
   unit: string;
   timeframe: string;
   info: string;
+  /** Optional tint for cards that should visually pop (e.g. Human Escalation). */
+  accent?: "warning";
 }) {
   return (
-    <div className="rounded-xl border border-border bg-card px-4 py-3.5">
+    <div className={cn(
+      "rounded-xl border bg-card px-4 py-3.5",
+      accent === "warning" ? "border-warning/40" : "border-border",
+    )}>
       <div className="flex items-start justify-between gap-2">
-        <p className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</p>
+        <p className={cn(
+          "text-[11px] uppercase tracking-wider",
+          accent === "warning" ? "text-warning" : "text-muted-foreground",
+        )}>{label}</p>
         <Tooltip delayDuration={100}>
           <TooltipTrigger asChild>
             <button

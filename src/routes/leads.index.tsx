@@ -10,7 +10,7 @@ import {
 } from "@/lib/leads-data";
 import {
   ArrowUpDown, Search, ShieldCheck, Eye, EyeOff, Landmark, Shield,
-  CreditCard as CreditCardIcon, FileEdit, TrendingUp, Calendar, X, ChevronDown,
+  CreditCard as CreditCardIcon, FileEdit, TrendingUp, Calendar, X, ChevronDown, Flag, Megaphone,
 } from "lucide-react";
 
 export const Route = createFileRoute("/leads/")({
@@ -45,10 +45,20 @@ function withinWindow(iso: string | undefined, win: DateWindow): boolean {
 
 type SortKey = "lastUpdated" | "created" | "lastInteraction" | "name";
 
+/** Distinct campaign ids surfaced across the seeded lead pool — feeds the
+ *  Campaign filter chip's options. Alphabetized by campaign name. */
+const ALL_CAMPAIGNS = (() => {
+  const map = new Map<string, string>();
+  for (const l of LEAD_RECORDS) for (const c of l.campaigns) if (!map.has(c.campaignId)) map.set(c.campaignId, c.campaignName);
+  return Array.from(map.entries()).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+})();
+
 function LeadsManagement() {
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const [kinds, setKinds] = useState<Set<ProductKind>>(new Set());
+  const [campaigns, setCampaigns] = useState<Set<string>>(new Set());
+  const [escalatedOnly, setEscalatedOnly] = useState(false);
   const [createdWin, setCreatedWin] = useState<DateWindow>("all");
   const [updatedWin, setUpdatedWin] = useState<DateWindow>("all");
   const [interactedWin, setInteractedWin] = useState<DateWindow>("all");
@@ -59,6 +69,8 @@ function LeadsManagement() {
   const rows = useMemo(() => {
     let list = LEAD_RECORDS.slice();
     if (kinds.size) list = list.filter((l) => l.products.some((p) => kinds.has(p.kind)));
+    if (campaigns.size) list = list.filter((l) => l.campaigns.some((c) => campaigns.has(c.campaignId)));
+    if (escalatedOnly) list = list.filter((l) => l.humanEscalated);
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       list = list.filter((l) =>
@@ -90,10 +102,19 @@ function LeadsManagement() {
       return next;
     });
   };
-  const clearFilters = () => {
-    setKinds(new Set()); setCreatedWin("all"); setUpdatedWin("all"); setInteractedWin("all"); setSearch("");
+  const toggleCampaign = (id: string) => {
+    setCampaigns((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
   };
-  const filtersActive = kinds.size > 0 || createdWin !== "all" || updatedWin !== "all" || interactedWin !== "all" || !!search.trim();
+  const clearFilters = () => {
+    setKinds(new Set()); setCampaigns(new Set()); setEscalatedOnly(false);
+    setCreatedWin("all"); setUpdatedWin("all"); setInteractedWin("all"); setSearch("");
+  };
+  const filtersActive = kinds.size > 0 || campaigns.size > 0 || escalatedOnly
+    || createdWin !== "all" || updatedWin !== "all" || interactedWin !== "all" || !!search.trim();
 
   const toggleSort = (k: SortKey) => {
     if (sortKey === k) setSortAsc((s) => !s);
@@ -135,6 +156,17 @@ function LeadsManagement() {
           />
         </div>
         <ProductFilter kinds={kinds} onToggle={toggleKind} />
+        <CampaignFilter selected={campaigns} onToggle={toggleCampaign} />
+        <button
+          onClick={() => setEscalatedOnly((v) => !v)}
+          className={cn(
+            "inline-flex h-9 items-center gap-1.5 rounded-lg border px-2.5 text-[12px] transition-colors",
+            escalatedOnly ? "border-warning/40 bg-warning/10 text-warning" : "border-border bg-card hover:bg-accent/40",
+          )}
+        >
+          <Flag className="h-3.5 w-3.5" />
+          Human Escalation
+        </button>
         <DateFilter icon={Calendar} label="Created"          value={createdWin}    onChange={setCreatedWin} />
         <DateFilter icon={Calendar} label="Last updated"     value={updatedWin}    onChange={setUpdatedWin} />
         <DateFilter icon={Calendar} label="Last interaction" value={interactedWin} onChange={setInteractedWin} />
@@ -157,8 +189,9 @@ function LeadsManagement() {
               <Th onClick={() => toggleSort("name")} sorted={sortKey === "name" ? sortAsc : undefined}>Name</Th>
               <Th>Phone</Th>
               <Th onClick={() => toggleSort("lastUpdated")} sorted={sortKey === "lastUpdated" ? sortAsc : undefined}>Last Updated</Th>
-              <Th onClick={() => toggleSort("created")} sorted={sortKey === "created" ? sortAsc : undefined}>Lead Creation</Th>
               <Th onClick={() => toggleSort("lastInteraction")} sorted={sortKey === "lastInteraction" ? sortAsc : undefined}>Last Interaction</Th>
+              <Th>Active in</Th>
+              <Th>Human Escalation</Th>
               <Th>Financial Products</Th>
             </tr>
           </thead>
@@ -282,6 +315,9 @@ function DateFilter({ icon: Icon, label, value, onChange }: { icon: React.Compon
 }
 
 function Row({ lead, piiRedacted, onOpen }: { lead: LeadRecord; piiRedacted: boolean; onOpen: () => void }) {
+  const activeCampaigns = lead.campaigns;
+  const primary = activeCampaigns[0];
+  const overflow = activeCampaigns.length - 1;
   return (
     <tr onClick={onOpen} className="cursor-pointer border-t border-border transition-colors hover:bg-accent/40">
       <td className="px-3 py-2.5 font-mono text-[11.5px]">{lead.id}</td>
@@ -290,8 +326,30 @@ function Row({ lead, piiRedacted, onOpen }: { lead: LeadRecord; piiRedacted: boo
         {piiRedacted ? maskPhone(lead.phone) : lead.phone}
       </td>
       <td className="px-3 py-2.5 tabular-nums text-muted-foreground">{lead.lastUpdatedAt}</td>
-      <td className="px-3 py-2.5 tabular-nums text-muted-foreground">{lead.createdAt}</td>
       <td className="px-3 py-2.5 tabular-nums text-muted-foreground">{lead.lastInteractionAt}</td>
+      <td className="px-3 py-2.5">
+        {primary ? (
+          <div className="flex items-center gap-1.5" title={activeCampaigns.map((c) => c.campaignName).join(" · ")}>
+            <Megaphone className="h-3 w-3 text-muted-foreground" />
+            <span className="truncate max-w-[220px] text-[11.5px] text-foreground">{primary.campaignName}</span>
+            {overflow > 0 && (
+              <span className="rounded-full border border-border bg-secondary px-1.5 py-0.5 text-[10px] text-muted-foreground">+{overflow}</span>
+            )}
+          </div>
+        ) : (
+          <span className="text-[11.5px] text-muted-foreground">—</span>
+        )}
+      </td>
+      <td className="px-3 py-2.5">
+        {lead.humanEscalated ? (
+          <span className="inline-flex items-center gap-1 rounded-full border border-warning/40 bg-warning/10 px-1.5 py-0.5 text-[10.5px] font-medium text-warning">
+            <Flag className="h-2.5 w-2.5" />
+            Yes
+          </span>
+        ) : (
+          <span className="text-[11.5px] text-muted-foreground">—</span>
+        )}
+      </td>
       <td className="px-3 py-2.5">
         <div className="flex flex-wrap gap-1">
           {lead.products.map((p, i) => {
@@ -308,5 +366,49 @@ function Row({ lead, piiRedacted, onOpen }: { lead: LeadRecord; piiRedacted: boo
         </div>
       </td>
     </tr>
+  );
+}
+
+/** Campaign multi-select filter (popover of checkboxes). */
+function CampaignFilter({ selected, onToggle }: { selected: Set<string>; onToggle: (id: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const count = selected.size;
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className={cn(
+          "inline-flex h-9 items-center gap-1.5 rounded-lg border px-2.5 text-[12px] transition-colors",
+          count > 0 ? "border-ai/40 bg-ai/5 text-ai" : "border-border bg-card hover:bg-accent/40",
+        )}
+      >
+        <Megaphone className="h-3.5 w-3.5" />
+        Campaign
+        {count > 0 && <span className="rounded-full bg-ai/20 px-1.5 text-[10px] font-semibold">{count}</span>}
+        <ChevronDown className="h-3 w-3 opacity-60" />
+      </button>
+      {open && (
+        <div className="absolute left-0 top-10 z-20 w-72 max-h-80 overflow-y-auto rounded-lg border border-border bg-card p-1.5 shadow-lg" onMouseLeave={() => setOpen(false)}>
+          {ALL_CAMPAIGNS.map((c) => {
+            const on = selected.has(c.id);
+            return (
+              <button
+                key={c.id}
+                onClick={() => onToggle(c.id)}
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[12px] text-left transition-colors",
+                  on ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-accent/50",
+                )}
+              >
+                <span className={cn("flex h-4 w-4 shrink-0 items-center justify-center rounded border", on ? "border-ai bg-ai text-background" : "border-border")}>
+                  {on && <svg viewBox="0 0 12 12" className="h-2.5 w-2.5"><path d="M2 6l3 3 5-6" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                </span>
+                <span className="truncate">{c.name}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
