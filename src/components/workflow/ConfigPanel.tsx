@@ -1205,11 +1205,22 @@ function TransformField({
 }
 
 
-/* --------------------------- Delay (v2) --------------------------- *
- *  v1 = fixed duration only. v2 adds a second mode: wait UNTIL a specific
- *  datetime carried in an upstream variable (Voice-agent callback_time, PTP
- *  date, etc.). Node advances when the current time reaches the resolved value.
- */
+
+/** Preset datetime formats for a Dynamic delay's incoming variable. Values
+ *  are concrete examples that double as their own labels — same pattern as
+ *  the Date Formatting transform on the AI Transformation node. "Custom…"
+ *  opens a free-form input for anything not in the list. */
+const DELAY_VAR_FORMATS: string[] = [
+  "2026-07-24T10:30:00Z",
+  "2026-07-24 10:30",
+  "24/07/2026 10:30",
+  "07/24/2026 10:30",
+  "24 Jul 2026, 10:30",
+  "Custom…",
+];
+const DELAY_VAR_PRESET_VALUES = new Set(DELAY_VAR_FORMATS);
+const DEFAULT_DELAY_VAR_FORMAT = DELAY_VAR_FORMATS[0];
+
 function DelayFields({
   config, readOnly, mark, onChange,
 }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
@@ -1219,23 +1230,28 @@ function DelayFields({
     onChange({ config: { ...(config ?? {}), delayMode: m } });
     mark(true);
   };
+  const currentFormat = config?.delayVariableFormat ?? DEFAULT_DELAY_VAR_FORMAT;
+  // Anything not in the preset set is treated as a Custom pattern — the picker
+  // shows "Custom…" and the free-form input holds the raw value.
+  const isCustomFormat = !DELAY_VAR_PRESET_VALUES.has(currentFormat);
+  const pickerValue = isCustomFormat ? "Custom…" : currentFormat;
   return (
-    <Section title="Delay">
+    <Section title="Wait mode">
       {/* Mode picker — two radio-style tiles so both options are equally discoverable */}
       <div className="mb-3 grid grid-cols-2 gap-2">
         <ModeTile
           selected={mode === "fixed"}
           onClick={() => !readOnly && setDelayMode("fixed")}
           icon={<Clock className="h-3.5 w-3.5" />}
-          title="Fixed duration"
-          subtitle="Wait N minutes/hours/days"
+          title="Static delay"
+          subtitle="Wait a fixed duration"
           disabled={readOnly}
         />
         <ModeTile
           selected={mode === "variable"}
           onClick={() => !readOnly && setDelayMode("variable")}
           icon={<Variable className="h-3.5 w-3.5" />}
-          title="Until datetime"
+          title="Dynamic delay"
           subtitle="Wait until a variable's datetime"
           disabled={readOnly}
         />
@@ -1259,13 +1275,35 @@ function DelayFields({
               }}
             />
           </Field>
+          {config?.delayVariable && (
+            <Field label="Incoming date format" required>
+              <SelectLike
+                disabled={readOnly}
+                options={DELAY_VAR_FORMATS}
+                defaultValue={pickerValue}
+                onPick={(v) => {
+                  // "Custom…" seeds an empty custom value so the free-form
+                  // input activates; presets store the concrete example.
+                  const next = v === "Custom…" ? "" : v;
+                  onChange({ config: { ...(config ?? {}), delayMode: "variable", delayVariableFormat: next } });
+                }}
+              />
+              {pickerValue === "Custom…" && (
+                <Input
+                  disabled={readOnly}
+                  defaultValue={isCustomFormat ? currentFormat : ""}
+                  placeholder="e.g. YYYY-MM-DD HH:mm:ss"
+                  onChange={(e) => onChange({ config: { ...(config ?? {}), delayMode: "variable", delayVariableFormat: e.target.value } })}
+                  className="mt-1.5 h-8 font-mono text-[12px]"
+                />
+              )}
+            </Field>
+          )}
           <div className="mt-2 flex items-start gap-2 rounded-md border border-dashed border-border bg-muted/30 px-2.5 py-2 text-[11px] text-muted-foreground">
             <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <span>
-              Node advances when the current time reaches the value in the picked variable — typically a
-              Voice-agent output like <span className="font-mono text-foreground">voice_1.callback_time</span> or
-              <span className="font-mono text-foreground"> voice_1.ptp_date</span>. If the datetime is in the past when the
-              lead arrives, the node advances immediately.
+              Node advances when the current time reaches the value in the picked variable — typically an upstream node's output like
+              <span className="font-mono text-foreground"> voice_1.callback_time</span> or a scheduled follow-up datetime. If the datetime is in the past when the lead arrives, the node advances immediately.
             </span>
           </div>
         </>
