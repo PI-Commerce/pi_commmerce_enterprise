@@ -499,7 +499,7 @@ export function nodeConfigSnapshot(node: SankeyNode): NodeConfigField[] {
         return [
           { label: "Mode", value: "Dynamic delay" },
           { label: "Variable", value: dash(c.delayVariable) },
-          { label: "Format", value: c.delayVariableFormat?.trim() || "2026-07-24T10:30:00Z" },
+          { label: "Format", value: dash(c.delayVariableFormat) },
         ];
       }
       return [

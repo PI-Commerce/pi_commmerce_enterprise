@@ -2372,35 +2372,46 @@ function TransformField({
  *  Node advances when the current time reaches the resolved value.
  */
 
-/** Preset datetime formats for a Dynamic delay's incoming variable. Values
- *  are concrete examples that double as their own labels — same pattern as
- *  the Date Formatting transform on the AI Transformation node. "Custom…"
- *  opens a free-form input for anything not in the list. */
-const DELAY_VAR_FORMATS: string[] = [
-  "2026-07-24T10:30:00Z",
-  "2026-07-24 10:30",
-  "24/07/2026 10:30",
-  "07/24/2026 10:30",
-  "24 Jul 2026, 10:30",
-  "Custom…",
+/** Preset datetime formats for a Dynamic delay's incoming variable. `value`
+ *  is the parseable format token persisted on the node; `label` is the shape
+ *  shown to the user (token + concrete example in brackets). "Custom…" opens
+ *  a free-form input for anything not in the list. */
+const DELAY_VAR_FORMATS: Array<{ value: string; label: string }> = [
+  { value: "ISO 8601",           label: "ISO 8601 (2026-07-24T10:30:00Z)" },
+  { value: "YYYY-MM-DD HH:mm",   label: "YYYY-MM-DD HH:mm (2026-07-24 10:30)" },
+  { value: "DD/MM/YYYY HH:mm",   label: "DD/MM/YYYY HH:mm (24/07/2026 10:30)" },
+  { value: "MM/DD/YYYY HH:mm",   label: "MM/DD/YYYY HH:mm (07/24/2026 10:30)" },
+  { value: "DD MMM YYYY, HH:mm", label: "DD MMM YYYY, HH:mm (24 Jul 2026, 10:30)" },
+  { value: "Custom…",            label: "Custom…" },
 ];
-const DELAY_VAR_PRESET_VALUES = new Set(DELAY_VAR_FORMATS);
-const DEFAULT_DELAY_VAR_FORMAT = DELAY_VAR_FORMATS[0];
+const DELAY_VAR_PRESET_VALUES = new Set(DELAY_VAR_FORMATS.map((f) => f.value));
 
 function DelayFields({
   config, readOnly, mark, onChange,
 }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
   const [mode, setMode] = useState<"fixed" | "variable">(config?.delayMode ?? "fixed");
+  // Consolidated validation — required fields depend on the current mode.
+  const validate = (c: PresetConfig) => {
+    if (c.delayMode !== "variable") return mark(true);
+    if (!c.delayVariable) return mark(false, "Pick a datetime variable");
+    if (!c.delayVariableFormat?.trim()) return mark(false, "Pick a datetime format");
+    return mark(true);
+  };
+  const patch = (p: Partial<PresetConfig>) => {
+    const next = { ...(config ?? {}), ...p };
+    onChange({ config: next });
+    validate(next);
+  };
   const setDelayMode = (m: "fixed" | "variable") => {
     setMode(m);
-    onChange({ config: { ...(config ?? {}), delayMode: m } });
-    mark(true);
+    patch({ delayMode: m });
   };
-  const currentFormat = config?.delayVariableFormat ?? DEFAULT_DELAY_VAR_FORMAT;
-  // Anything not in the preset set is treated as a Custom pattern — the picker
-  // shows "Custom…" and the free-form input holds the raw value.
-  const isCustomFormat = !DELAY_VAR_PRESET_VALUES.has(currentFormat);
-  const pickerValue = isCustomFormat ? "Custom…" : currentFormat;
+  const currentFormat = config?.delayVariableFormat ?? "";
+  const isCustomFormat = currentFormat !== "" && !DELAY_VAR_PRESET_VALUES.has(currentFormat);
+  // "" → placeholder shown; matched preset → its label; anything else → Custom.
+  const pickerLabel = isCustomFormat
+    ? "Custom…"
+    : DELAY_VAR_FORMATS.find((f) => f.value === currentFormat)?.label ?? "";
   return (
     <Section title="Wait mode">
       {/* Mode picker — two radio-style tiles so both options are equally discoverable */}
@@ -2435,31 +2446,31 @@ function DelayFields({
             <VariablePicker
               defaultValue={config?.delayVariable ?? ""}
               disabled={readOnly}
-              onChange={(v) => {
-                onChange({ config: { ...(config ?? {}), delayMode: "variable", delayVariable: v } });
-                mark(!!v, v ? undefined : "Pick a datetime variable");
-              }}
+              onChange={(v) => patch({ delayMode: "variable", delayVariable: v })}
             />
           </Field>
           {config?.delayVariable && (
             <Field label="Incoming date format" required>
               <SelectLike
                 disabled={readOnly}
-                options={DELAY_VAR_FORMATS}
-                defaultValue={pickerValue}
-                onPick={(v) => {
+                options={DELAY_VAR_FORMATS.map((f) => f.label)}
+                defaultValue={pickerLabel}
+                placeholder="Select format"
+                onPick={(label) => {
+                  const match = DELAY_VAR_FORMATS.find((f) => f.label === label);
+                  if (!match) return;
                   // "Custom…" seeds an empty custom value so the free-form
-                  // input activates; presets store the concrete example.
-                  const next = v === "Custom…" ? "" : v;
-                  onChange({ config: { ...(config ?? {}), delayMode: "variable", delayVariableFormat: next } });
+                  // input activates; presets store the format token itself.
+                  const next = match.value === "Custom…" ? "" : match.value;
+                  patch({ delayMode: "variable", delayVariableFormat: next });
                 }}
               />
-              {pickerValue === "Custom…" && (
+              {pickerLabel === "Custom…" && (
                 <Input
                   disabled={readOnly}
                   defaultValue={isCustomFormat ? currentFormat : ""}
                   placeholder="e.g. YYYY-MM-DD HH:mm:ss"
-                  onChange={(e) => onChange({ config: { ...(config ?? {}), delayMode: "variable", delayVariableFormat: e.target.value } })}
+                  onChange={(e) => patch({ delayMode: "variable", delayVariableFormat: e.target.value })}
                   className="mt-1.5 h-8 font-mono text-[12px]"
                 />
               )}
