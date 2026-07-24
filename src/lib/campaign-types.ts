@@ -191,13 +191,18 @@ export type PresetConfig = {
   smsFormat?: string;
   smsBody?: string;
   // ---- Delay ----
-  /** Delay v2: `fixed` = classic value+unit; `variable` = wait UNTIL the datetime
-   *  in `delayVariable` (e.g. a callback time or a scheduled follow-up). */
+  /** Delay v2. Two modes, surfaced as "Static delay" / "Dynamic delay" in the UI:
+   *  - `fixed`    → wait a fixed value+unit (Static delay).
+   *  - `variable` → wait UNTIL the datetime in `delayVariable` (Dynamic delay). */
   delayMode?: "fixed" | "variable";
   delayValue?: number;
   delayUnit?: "Minutes" | "Hours" | "Days";
   /** For `delayMode: "variable"` — the upstream variable holding the target datetime. */
   delayVariable?: string;
+  /** For `delayMode: "variable"` — how to parse the incoming datetime string.
+   *  A preset label from `DELAY_VAR_FORMATS` (defined in ConfigPanel) or a
+   *  user-entered custom pattern. Defaults to ISO 8601 when unset. */
+  delayVariableFormat?: string;
   // ---- Tool (API Tool Call) ----
   /** Handle of the registry tool this node calls (see {@link file://./tool-registry.ts}). */
   apiTool?: string;

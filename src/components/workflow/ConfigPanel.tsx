@@ -2544,36 +2544,65 @@ function TransformField({
 }
 
 /* --------------------------- Delay (v2) --------------------------- *
- *  v1 = fixed duration only. v2 adds a second mode: wait UNTIL a specific
- *  datetime carried in an upstream variable (Voice-agent callback_time, PTP
- *  date, etc.). Node advances when the current time reaches the resolved value.
+ *  Two modes, surfaced in the UI as "Static delay" (fixed value + unit) and
+ *  "Dynamic delay" (wait UNTIL a datetime carried in an upstream variable).
+ *  Node advances when the current time reaches the resolved value.
  */
+
+/** Preset datetime formats for a Dynamic delay's incoming variable. `value`
+ *  is the parseable format token persisted on the node; `label` is the shape
+ *  shown to the user (token + concrete example in brackets). Fixed list —
+ *  the engine only parses these five shapes, so exposing a free-form pattern
+ *  would be misleading. */
+const DELAY_VAR_FORMATS: Array<{ value: string; label: string }> = [
+  { value: "ISO 8601",           label: "ISO 8601 (2026-07-24T10:30:00Z)" },
+  { value: "YYYY-MM-DD HH:mm",   label: "YYYY-MM-DD HH:mm (2026-07-24 10:30)" },
+  { value: "DD/MM/YYYY HH:mm",   label: "DD/MM/YYYY HH:mm (24/07/2026 10:30)" },
+  { value: "MM/DD/YYYY HH:mm",   label: "MM/DD/YYYY HH:mm (07/24/2026 10:30)" },
+  { value: "DD MMM YYYY, HH:mm", label: "DD MMM YYYY, HH:mm (24 Jul 2026, 10:30)" },
+];
+
 function DelayFields({
   config, readOnly, mark, onChange,
 }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
   const [mode, setMode] = useState<"fixed" | "variable">(config?.delayMode ?? "fixed");
+  // Consolidated validation — required fields depend on the current mode.
+  const validate = (c: PresetConfig) => {
+    if (c.delayMode !== "variable") return mark(true);
+    if (!c.delayVariable) return mark(false, "Pick a datetime variable");
+    if (!c.delayVariableFormat?.trim()) return mark(false, "Pick a datetime format");
+    return mark(true);
+  };
+  const patch = (p: Partial<PresetConfig>) => {
+    const next = { ...(config ?? {}), ...p };
+    onChange({ config: next });
+    validate(next);
+  };
   const setDelayMode = (m: "fixed" | "variable") => {
     setMode(m);
-    onChange({ config: { ...(config ?? {}), delayMode: m } });
-    mark(true);
+    patch({ delayMode: m });
   };
+  // Empty → placeholder shown; matched preset → its label. No custom pattern
+  // support — the engine only parses the fixed preset list.
+  const currentFormat = config?.delayVariableFormat ?? "";
+  const pickerLabel = DELAY_VAR_FORMATS.find((f) => f.value === currentFormat)?.label ?? "";
   return (
-    <Section title="Delay">
+    <Section title="Wait mode">
       {/* Mode picker — two radio-style tiles so both options are equally discoverable */}
       <div className="mb-3 grid grid-cols-2 gap-2">
         <ModeTile
           selected={mode === "fixed"}
           onClick={() => !readOnly && setDelayMode("fixed")}
           icon={<Clock className="h-3.5 w-3.5" />}
-          title="Fixed duration"
-          subtitle="Wait N minutes/hours/days"
+          title="Static delay"
+          subtitle="Wait a fixed duration"
           disabled={readOnly}
         />
         <ModeTile
           selected={mode === "variable"}
           onClick={() => !readOnly && setDelayMode("variable")}
           icon={<Variable className="h-3.5 w-3.5" />}
-          title="Until datetime"
+          title="Dynamic delay"
           subtitle="Wait until a variable's datetime"
           disabled={readOnly}
         />
@@ -2591,12 +2620,24 @@ function DelayFields({
             <VariablePicker
               defaultValue={config?.delayVariable ?? ""}
               disabled={readOnly}
-              onChange={(v) => {
-                onChange({ config: { ...(config ?? {}), delayMode: "variable", delayVariable: v } });
-                mark(!!v, v ? undefined : "Pick a datetime variable");
-              }}
+              onChange={(v) => patch({ delayMode: "variable", delayVariable: v })}
             />
           </Field>
+          {config?.delayVariable && (
+            <Field label="Incoming date format" required>
+              <SelectLike
+                disabled={readOnly}
+                options={DELAY_VAR_FORMATS.map((f) => f.label)}
+                defaultValue={pickerLabel}
+                placeholder="Select format"
+                onPick={(label) => {
+                  const match = DELAY_VAR_FORMATS.find((f) => f.label === label);
+                  if (!match) return;
+                  patch({ delayMode: "variable", delayVariableFormat: match.value });
+                }}
+              />
+            </Field>
+          )}
           <div className="mt-2 flex items-start gap-2 rounded-md border border-dashed border-border bg-muted/30 px-2.5 py-2 text-[11px] text-muted-foreground">
             <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <span>

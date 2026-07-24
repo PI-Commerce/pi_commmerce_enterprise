@@ -505,6 +505,18 @@ const sDelay = (id: string, value: number, unit: "Minutes" | "Hours" | "Days"): 
   config: { delayValue: value, delayUnit: unit },
 });
 
+// AI Transformation node — chains 1+ transforms; each writes a downstream var.
+// Kept minimal so it composes into existing campaigns like every other action node.
+const sAiTransform = (
+  id: string,
+  title: string,
+  subtitle: string,
+  transforms: Array<import("./campaign-types").PresetTransform>,
+): Spec => ({
+  id, kind: "aiTransform", title, subtitle,
+  config: { transforms },
+});
+
 const ed = (from: string, to: string, port?: string): SpecEdge => ({ from, to, port });
 
 /* ---- assembly: tag edges as routed; layout runs at render-time (ELK) ----- */
@@ -1071,6 +1083,23 @@ const C_OUTBOUND = buildCampaign("D2C · Outbound Sales", [
 const C_CART = buildCampaign("D2C · Cart Abandonment", [
   sStart(),
   sAud("CSV · cart abandoners", ["cart_value", "cart_items"]),
+  sAiTransform("aitEnrich", "Enrich cart context", "3 derived variables", [
+    {
+      id: "t1", type: "Phone Number Normalization",
+      label: "Normalize phone", input: "contact.phone", output: "phone_e164",
+      phoneFormat: "E164",
+    },
+    {
+      id: "t2", type: "Currency Formatting",
+      label: "Format cart value", input: "contact.cart_value", output: "cart_value_fmt",
+      outputCurrency: "INR",
+    },
+    {
+      id: "t3", type: "Translate",
+      label: "Greeting → Hindi", input: "contact.first_name", output: "first_name_hi",
+      inputLang: "English", outputLang: "Hindi",
+    },
+  ]),
   sCond("cart", "Cart value branch", "cart_value", [
     { id: "high", label: "> ₹5,000", op: "greater than", value: "5000" },
     { id: "low", label: "≤ ₹5,000", op: "less than or equal to", value: "5000" },
@@ -1097,7 +1126,7 @@ const C_CART = buildCampaign("D2C · Cart Abandonment", [
   sVoice("vRemLow", "Voice AI reminder", "Reattempt · 1 retry", { maxAttempts: 1 }),
   sEnd(),
 ], [
-  ed("start", "aud"), ed("aud", "cart"),
+  ed("start", "aud"), ed("aud", "aitEnrich"), ed("aitEnrich", "cart"),
   ed("cart", "vRec", "high"), ed("vRec", "cartHigh"), ed("cartHigh", "purHigh"),
   ed("purHigh", "end", "yes"), ed("purHigh", "vRemHigh", "no"), ed("vRemHigh", "end"),
   ed("cart", "ab", "low"),

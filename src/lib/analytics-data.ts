@@ -535,17 +535,18 @@ export function nodeConfigSnapshot(node: SankeyNode): NodeConfigField[] {
       return out;
     }
     case "delay": {
-      // Delay v2 has two modes — a variable-based Wait Until keeps its target
-      // variable visible in the drawer so the reader sees exactly which
-      // upstream field drives the wait.
+      // Delay v2 has two modes. Dynamic delay keeps the target variable +
+      // parsing format visible in the drawer so the reader sees exactly which
+      // upstream field drives the wait and how it will be parsed.
       if (c.delayMode === "variable") {
         return [
-          { label: "Mode", value: "Until datetime" },
+          { label: "Mode", value: "Dynamic delay" },
           { label: "Variable", value: dash(c.delayVariable) },
+          { label: "Format", value: dash(c.delayVariableFormat) },
         ];
       }
       return [
-        { label: "Mode", value: "Fixed duration" },
+        { label: "Mode", value: "Static delay" },
         {
           label: "Duration",
           value: c.delayValue != null
