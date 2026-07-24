@@ -473,24 +473,44 @@ export function nodeConfigSnapshot(node: SankeyNode): NodeConfigField[] {
     }
     case "apiToolCall":
       return [
-        { label: "API Tool", value: dash(c.apiTool) },
+        { label: "Tool", value: dash(c.apiTool) },
         { label: "Inputs Mapped", value: String(c.apiInputMap?.length ?? 0) },
       ];
+    case "aiTransform": {
+      // Every transform gets its own row so the reader sees exactly what this
+      // node emits (and in what order). Ordered `#N type · in → out`.
+      const list = c.transforms ?? [];
+      if (list.length === 0) return [{ label: "Transformations", value: "—" }];
+      return list.map((t, i) => ({
+        label: `#${i + 1} ${t.type}${t.label ? ` · ${t.label}` : ""}`,
+        value: `${t.input || "?"} → ${t.output || "?"}`,
+      }));
+    }
     case "sms":
       return [
         { label: "Sender ID", value: dash(c.senderId) },
         { label: "Message Type", value: dash(c.smsType) },
       ];
-    case "delay":
+    case "delay": {
+      // Delay v2 has two modes — a variable-based Wait Until keeps its target
+      // variable visible in the drawer so the reader sees exactly which
+      // upstream field drives the wait.
+      if (c.delayMode === "variable") {
+        return [
+          { label: "Mode", value: "Until datetime" },
+          { label: "Variable", value: dash(c.delayVariable) },
+        ];
+      }
       return [
+        { label: "Mode", value: "Fixed duration" },
         {
           label: "Duration",
-          value:
-            c.delayValue != null
-              ? `${c.delayValue} ${c.delayUnit ?? ""}`.trim()
-              : "—",
+          value: c.delayValue != null
+            ? `${c.delayValue} ${c.delayUnit ?? ""}`.trim()
+            : "—",
         },
       ];
+    }
     case "abSplit": {
       const variants = c.splitVariants ?? c.abVariants ?? [];
       return [
