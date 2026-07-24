@@ -2374,17 +2374,16 @@ function TransformField({
 
 /** Preset datetime formats for a Dynamic delay's incoming variable. `value`
  *  is the parseable format token persisted on the node; `label` is the shape
- *  shown to the user (token + concrete example in brackets). "Custom…" opens
- *  a free-form input for anything not in the list. */
+ *  shown to the user (token + concrete example in brackets). Fixed list —
+ *  the engine only parses these five shapes, so exposing a free-form pattern
+ *  would be misleading. */
 const DELAY_VAR_FORMATS: Array<{ value: string; label: string }> = [
   { value: "ISO 8601",           label: "ISO 8601 (2026-07-24T10:30:00Z)" },
   { value: "YYYY-MM-DD HH:mm",   label: "YYYY-MM-DD HH:mm (2026-07-24 10:30)" },
   { value: "DD/MM/YYYY HH:mm",   label: "DD/MM/YYYY HH:mm (24/07/2026 10:30)" },
   { value: "MM/DD/YYYY HH:mm",   label: "MM/DD/YYYY HH:mm (07/24/2026 10:30)" },
   { value: "DD MMM YYYY, HH:mm", label: "DD MMM YYYY, HH:mm (24 Jul 2026, 10:30)" },
-  { value: "Custom…",            label: "Custom…" },
 ];
-const DELAY_VAR_PRESET_VALUES = new Set(DELAY_VAR_FORMATS.map((f) => f.value));
 
 function DelayFields({
   config, readOnly, mark, onChange,
@@ -2406,12 +2405,10 @@ function DelayFields({
     setMode(m);
     patch({ delayMode: m });
   };
+  // Empty → placeholder shown; matched preset → its label. No custom pattern
+  // support — the engine only parses the fixed preset list.
   const currentFormat = config?.delayVariableFormat ?? "";
-  const isCustomFormat = currentFormat !== "" && !DELAY_VAR_PRESET_VALUES.has(currentFormat);
-  // "" → placeholder shown; matched preset → its label; anything else → Custom.
-  const pickerLabel = isCustomFormat
-    ? "Custom…"
-    : DELAY_VAR_FORMATS.find((f) => f.value === currentFormat)?.label ?? "";
+  const pickerLabel = DELAY_VAR_FORMATS.find((f) => f.value === currentFormat)?.label ?? "";
   return (
     <Section title="Wait mode">
       {/* Mode picker — two radio-style tiles so both options are equally discoverable */}
@@ -2459,21 +2456,9 @@ function DelayFields({
                 onPick={(label) => {
                   const match = DELAY_VAR_FORMATS.find((f) => f.label === label);
                   if (!match) return;
-                  // "Custom…" seeds an empty custom value so the free-form
-                  // input activates; presets store the format token itself.
-                  const next = match.value === "Custom…" ? "" : match.value;
-                  patch({ delayMode: "variable", delayVariableFormat: next });
+                  patch({ delayMode: "variable", delayVariableFormat: match.value });
                 }}
               />
-              {pickerLabel === "Custom…" && (
-                <Input
-                  disabled={readOnly}
-                  defaultValue={isCustomFormat ? currentFormat : ""}
-                  placeholder="e.g. YYYY-MM-DD HH:mm:ss"
-                  onChange={(e) => patch({ delayMode: "variable", delayVariableFormat: e.target.value })}
-                  className="mt-1.5 h-8 font-mono text-[12px]"
-                />
-              )}
             </Field>
           )}
           <div className="mt-2 flex items-start gap-2 rounded-md border border-dashed border-border bg-muted/30 px-2.5 py-2 text-[11px] text-muted-foreground">
