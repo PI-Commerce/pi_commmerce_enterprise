@@ -1,8 +1,8 @@
-import { useState, useEffect, useRef, createContext, useContext } from "react";
+import { useState, useEffect, useRef, useMemo, createContext, useContext } from "react";
 import {
   X, Copy, Trash2, AlertCircle, CheckCircle2, Plus, GripVertical, ChevronDown, Variable,
   Sparkles, GitBranch, FlaskConical, ArrowUp, ArrowDown, ArrowRight, ArrowLeftRight,
-  FileSpreadsheet, Loader2, Clock, Hash,
+  FileSpreadsheet, Loader2, Clock, Hash, Info, Pencil,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useRegion, localizeCurrency } from "@/lib/region";
@@ -27,6 +27,14 @@ import { SEED_TEMPLATES } from "@/lib/waba-templates";
 import { whatsappOutputs, resolveWaTemplate, completedOutput, isBranchableButton } from "@/lib/wa-outputs";
 import { getTool, TOOLS } from "@/lib/tool-registry";
 import { resolveAgent, voiceAgents } from "@/lib/agent-data";
+import {
+  TRANSFORMATIONS, TRANSFORMATION_TYPES, metaFor,
+  LANGUAGES, CURRENCIES, PHONE_FORMATS, DATE_FORMATS, OUTPUT_TYPES,
+  transformError, transformsError, promptReferences,
+  type TransformFieldKind,
+} from "@/lib/ai-transformations";
+import { PromptEditor } from "@/components/workflow/PromptEditor";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 const VOICE_AGENTS = voiceAgents();
 
@@ -1723,13 +1731,27 @@ function PlatformChip({ active, disabled, children }: { active?: boolean; disabl
 
 type ActionKind = "voiceCall" | "whatsapp" | "sms";
 
-const AI_TRANSFORMATION_TYPES = [
-  "Custom AI Action", "Translate", "Transliterate", "Numerical Parsing",
-  "Numerical Transcription", "Currency Formatting", "Currency Transcription",
-  "Phone Number Normalization", "Date Formatting",
-];
-
-type AiTransform = { id: string; type: string; input: string; output: string; open: boolean };
+/**
+ * In-memory shape used by the config panel. Superset of {@link PresetTransform}
+ * — adds `open` for collapsible UI state. Persisted subset (strip `open`) is
+ * written back to node config as {@link PresetTransform}.
+ */
+type AiTransform = {
+  id: string;
+  type: string;
+  input: string;
+  output: string;
+  open: boolean;
+  label?: string;
+  inputLang?: string;
+  outputLang?: string;
+  outputCurrency?: string;
+  phoneFormat?: "E164" | "domestic";
+  dateFormat?: string;
+  prompt?: string;
+  outputType?: "Boolean" | "String" | "Multi-select" | "Date & Time";
+  multiSelectOptions?: string;
+};
 type Variant = { id: string; label: string; pct: number; open: boolean };
 
 function ActionNodeShell({
@@ -1969,6 +1991,8 @@ function AiTransformationsSection({
   const add = () => setTransforms((xs) => [...xs, {
     id: uid("t"), type: "Translate", input: "", output: "", open: true,
   }]);
+  const patch = (id: string, p: Partial<AiTransform>) =>
+    setTransforms((xs) => xs.map((x) => x.id === id ? { ...x, ...p } : x));
 
   const body = (
     <>
@@ -1979,48 +2003,18 @@ function AiTransformationsSection({
       ) : (
         <div className="space-y-2">
           {transforms.map((a, i) => (
-            <Collapsible key={a.id} open={a.open} onOpenChange={(o) => setTransforms((xs) => xs.map((x) => x.id === a.id ? { ...x, open: o } : x))}>
-              <div className="rounded-lg border border-border bg-background">
-                <div className="flex items-center gap-1.5 px-2.5 py-2">
-                  <div className="flex flex-col">
-                    <button disabled={readOnly || i === 0} onClick={() => move(a.id, -1)} className="text-muted-foreground hover:text-foreground disabled:opacity-30"><ArrowUp className="h-3 w-3" /></button>
-                    <button disabled={readOnly || i === transforms.length - 1} onClick={() => move(a.id, 1)} className="text-muted-foreground hover:text-foreground disabled:opacity-30"><ArrowDown className="h-3 w-3" /></button>
-                  </div>
-                  <CollapsibleTrigger asChild>
-                    <button disabled={readOnly} className="flex flex-1 items-center gap-2 text-left">
-                      <GripVertical className="h-3.5 w-3.5 text-muted-foreground" />
-                      <span className="text-[11px] font-medium text-muted-foreground">#{i + 1}</span>
-                      <span className="text-[12.5px] font-medium">{a.type}</span>
-                      <span className="ml-auto flex items-center gap-1 font-mono text-[11px] text-ai">
-                        <Variable className="h-3 w-3" />{a.output || "output"}
-                      </span>
-                      <ChevronDown className={cn("h-3.5 w-3.5 text-muted-foreground transition-transform", a.open && "rotate-180")} />
-                    </button>
-                  </CollapsibleTrigger>
-                </div>
-                <CollapsibleContent className="space-y-2 border-t border-border p-2.5">
-                  <Field label="Transformation type">
-                    <SelectLike disabled={readOnly} options={AI_TRANSFORMATION_TYPES} defaultValue={a.type} onPick={(v) => setTransforms((xs) => xs.map((x) => x.id === a.id ? { ...x, type: v } : x))} />
-                  </Field>
-                  <Field label="Input variable">
-                    <VariablePicker defaultValue={a.input} disabled={readOnly} onChange={(v) => setTransforms((xs) => xs.map((x) => x.id === a.id ? { ...x, input: v } : x))} />
-                  </Field>
-                  {a.type === "Custom AI Action" && (
-                    <Field label="Prompt">
-                      <Textarea disabled={readOnly} placeholder="Describe what this AI step should do…" className="min-h-20 resize-none text-sm" />
-                    </Field>
-                  )}
-                  <Field label="Output variable name" required>
-                    <Input disabled={readOnly} value={a.output} onChange={(e) => setTransforms((xs) => xs.map((x) => x.id === a.id ? { ...x, output: e.target.value } : x))} placeholder="e.g. intent_hi" className="h-9 font-mono text-[12px]" />
-                  </Field>
-                  <div className="flex justify-end">
-                    <Button size="sm" variant="ghost" disabled={readOnly} onClick={() => setTransforms((xs) => xs.filter((x) => x.id !== a.id))} className="h-7 gap-1 text-[11px] text-destructive hover:text-destructive">
-                      <Trash2 className="h-3 w-3" /> Remove
-                    </Button>
-                  </div>
-                </CollapsibleContent>
-              </div>
-            </Collapsible>
+            <TransformRow
+              key={a.id}
+              transform={a}
+              index={i}
+              total={transforms.length}
+              readOnly={readOnly}
+              onOpenChange={(o) => patch(a.id, { open: o })}
+              onPatch={(p) => patch(a.id, p)}
+              onMoveUp={() => move(a.id, -1)}
+              onMoveDown={() => move(a.id, 1)}
+              onRemove={() => setTransforms((xs) => xs.filter((x) => x.id !== a.id))}
+            />
           ))}
         </div>
       )}
@@ -2068,26 +2062,308 @@ function AiTransformationsSection({
 
 /** Standalone AI Transformation node config — the previously-inline
  *  AiTransformationsSection lifted out of Action nodes into its own node kind.
- *  Manages the transform list locally and persists it on every change. */
+ *  Manages the transform list locally, persists on every change, and revalidates
+ *  the node on every mutation (Custom AI Action needs input + prompt; every
+ *  other transform needs at least an input + output name). */
 function AiTransformFields({
   config, readOnly, mark, onChange,
 }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
-  const [transforms, setTransformsState] = useState<AiTransform[]>(
+  const [transforms, setTransforms] = useState<AiTransform[]>(
     () => (config?.transforms ?? []).map((t) => ({ ...t, open: false })),
   );
-  const setTransforms: React.Dispatch<React.SetStateAction<AiTransform[]>> = (updater) => {
-    setTransformsState((prev) => {
-      const next = typeof updater === "function"
-        ? (updater as (p: AiTransform[]) => AiTransform[])(prev)
-        : updater;
-      onChange({ config: { ...(config ?? {}), transforms: next.map(({ open: _o, ...rest }) => rest) } });
-      return next;
+  // Ref so the effect below can read the latest config/onChange without
+  // re-firing every time the parent re-renders and hands us new closures.
+  const parentRef = useRef({ config, onChange, mark });
+  parentRef.current = { config, onChange, mark };
+  const first = useRef(true);
+  useEffect(() => {
+    const persisted = transforms.map(({ open: _o, ...rest }) => rest);
+    const err = transformsError(persisted);
+    parentRef.current.mark(!err, err);
+    // Skip the initial run — nothing has changed vs what's already on config.
+    if (first.current) { first.current = false; return; }
+    parentRef.current.onChange({
+      config: { ...(parentRef.current.config ?? {}), transforms: persisted },
     });
-  };
-  // Always valid — 0 or more transforms is a legal configuration. The node
-  // simply becomes a pass-through when empty. Marked once on mount.
-  useEffect(() => { mark(true); }, []);
+  }, [transforms]);
   return <AiTransformationsSection readOnly={readOnly} transforms={transforms} setTransforms={setTransforms} standalone />;
+}
+
+/* ------------------------------------------------------------------------ *
+ *  TransformRow — one row inside AiTransformationsSection. Renders the
+ *  collapsed header (with rename + drag arrows) and the expanded body with
+ *  the type-specific sub-form pulled from the TRANSFORMATIONS registry.
+ * ------------------------------------------------------------------------ */
+
+function TransformRow({
+  transform: a, index: i, total, readOnly, onOpenChange, onPatch, onMoveUp, onMoveDown, onRemove,
+}: {
+  transform: AiTransform;
+  index: number;
+  total: number;
+  readOnly?: boolean;
+  onOpenChange: (o: boolean) => void;
+  onPatch: (p: Partial<AiTransform>) => void;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+  onRemove: () => void;
+}) {
+  const meta = metaFor(a.type);
+  const err = transformError({ ...a });
+  const rename = a.label?.trim() || a.type;
+  const [editingName, setEditingName] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => { if (editingName) inputRef.current?.focus(); }, [editingName]);
+
+  return (
+    <Collapsible open={a.open} onOpenChange={onOpenChange}>
+      <div className={cn(
+        "rounded-lg border bg-background",
+        err ? "border-destructive/40" : "border-border",
+      )}>
+        <div className="flex items-center gap-1.5 px-2.5 py-2">
+          <div className="flex flex-col">
+            <button disabled={readOnly || i === 0} onClick={onMoveUp} className="text-muted-foreground hover:text-foreground disabled:opacity-30"><ArrowUp className="h-3 w-3" /></button>
+            <button disabled={readOnly || i === total - 1} onClick={onMoveDown} className="text-muted-foreground hover:text-foreground disabled:opacity-30"><ArrowDown className="h-3 w-3" /></button>
+          </div>
+          <GripVertical className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="text-[11px] font-medium text-muted-foreground">#{i + 1}</span>
+          {editingName ? (
+            <Input
+              ref={inputRef}
+              defaultValue={a.label ?? ""}
+              placeholder={a.type}
+              onBlur={(e) => { onPatch({ label: e.target.value.trim() || undefined }); setEditingName(false); }}
+              onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); if (e.key === "Escape") setEditingName(false); }}
+              className="h-6 flex-1 text-[12.5px]"
+              disabled={readOnly}
+            />
+          ) : (
+            <button
+              type="button"
+              disabled={readOnly}
+              onClick={(e) => { e.stopPropagation(); setEditingName(true); }}
+              className="group flex items-center gap-1 text-left text-[12.5px] font-medium hover:text-foreground"
+              title="Click to rename"
+            >
+              <span>{rename}</span>
+              {a.label && <span className="text-[10.5px] font-normal text-muted-foreground">· {a.type}</span>}
+              <Pencil className="h-3 w-3 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+            </button>
+          )}
+          <CollapsibleTrigger asChild>
+            <button disabled={readOnly} className="ml-auto flex items-center gap-2 text-left">
+              <span className="flex items-center gap-1 font-mono text-[11px] text-ai">
+                <Variable className="h-3 w-3" />{a.output || "output"}
+              </span>
+              {err && !a.open && (
+                <span title={err} className="rounded-full border border-destructive/40 bg-destructive/10 px-1.5 py-0.5 text-[10px] text-destructive">Incomplete</span>
+              )}
+              <ChevronDown className={cn("h-3.5 w-3.5 text-muted-foreground transition-transform", a.open && "rotate-180")} />
+            </button>
+          </CollapsibleTrigger>
+        </div>
+        <CollapsibleContent className="space-y-2.5 border-t border-border p-2.5">
+          {/* Type + i-button */}
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-1.5">
+              <Label className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Transformation type</Label>
+              {meta && <TransformInfoButton meta={meta} />}
+            </div>
+            <SelectLike
+              disabled={readOnly}
+              options={TRANSFORMATION_TYPES}
+              defaultValue={a.type}
+              onPick={(v) => {
+                // Swap type → drop stale type-specific fields for a clean slate.
+                onPatch({
+                  type: v,
+                  inputLang: undefined, outputLang: undefined, outputCurrency: undefined,
+                  phoneFormat: undefined, dateFormat: undefined,
+                  prompt: v === "Custom AI Action" ? (a.prompt ?? "") : undefined,
+                  outputType: v === "Custom AI Action" ? (a.outputType ?? "String") : undefined,
+                  multiSelectOptions: undefined,
+                });
+              }}
+            />
+          </div>
+
+          {/* Input variable — required for every type */}
+          <Field label="Input variable" required>
+            <VariablePicker defaultValue={a.input} disabled={readOnly} onChange={(v) => onPatch({ input: v })} />
+          </Field>
+
+          {/* Per-type fields */}
+          {meta?.fields.map((f) => (
+            <TransformField key={f} kind={f} transform={a} readOnly={readOnly} onPatch={onPatch} />
+          ))}
+
+          {/* Output variable name — required for every type */}
+          <Field label="Output variable name" required>
+            <Input
+              disabled={readOnly}
+              value={a.output}
+              onChange={(e) => onPatch({ output: e.target.value })}
+              placeholder="e.g. intent_hi"
+              className="h-9 font-mono text-[12px]"
+            />
+          </Field>
+
+          {err && (
+            <div className="flex items-start gap-1.5 rounded-md border border-destructive/30 bg-destructive/5 px-2 py-1.5 text-[11px] text-destructive">
+              <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />
+              <span>{err}</span>
+            </div>
+          )}
+
+          <div className="flex justify-end">
+            <Button size="sm" variant="ghost" disabled={readOnly} onClick={onRemove} className="h-7 gap-1 text-[11px] text-destructive hover:text-destructive">
+              <Trash2 className="h-3 w-3" /> Remove
+            </Button>
+          </div>
+        </CollapsibleContent>
+      </div>
+    </Collapsible>
+  );
+}
+
+/** Popover trigger next to the type picker — reveals the transformation's
+ *  1-line description + a mono example line. Icon-only, no label. */
+function TransformInfoButton({ meta }: { meta: { description: string; example: string; type: string } }) {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label={`About ${meta.type}`}
+          className="flex h-4 w-4 items-center justify-center rounded text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
+        >
+          <Info className="h-3 w-3" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent side="top" align="start" className="w-[280px] p-3 text-[11.5px] leading-snug">
+        <p className="mb-1.5 text-[12px] font-semibold">{meta.type}</p>
+        <p className="text-muted-foreground">{meta.description}</p>
+        <div className="mt-2 rounded-md border border-border bg-muted/40 px-2 py-1.5 font-mono text-[11px] text-foreground">
+          {meta.example}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/** One field inside a transform's expanded body. Which control renders depends
+ *  purely on the field kind (from TRANSFORMATIONS registry) — no per-type
+ *  branching here, everything is data-driven. */
+function TransformField({
+  kind, transform: a, readOnly, onPatch,
+}: {
+  kind: TransformFieldKind;
+  transform: AiTransform;
+  readOnly?: boolean;
+  onPatch: (p: Partial<AiTransform>) => void;
+}) {
+  const variables = useContext(ExtraVariablesContext);
+  const merged = useMemo(() => mergeVariables(variables), [variables]);
+  switch (kind) {
+    case "inputLang":
+      return (
+        <Field label="Input language" required>
+          <SelectLike disabled={readOnly} options={LANGUAGES} defaultValue={a.inputLang ?? ""} placeholder="Select language" onPick={(v) => onPatch({ inputLang: v })} />
+        </Field>
+      );
+    case "outputLang":
+      return (
+        <Field label="Output language" required>
+          <SelectLike disabled={readOnly} options={LANGUAGES} defaultValue={a.outputLang ?? ""} placeholder="Select language" onPick={(v) => onPatch({ outputLang: v })} />
+        </Field>
+      );
+    case "outputCurrency":
+      return (
+        <Field label="Output currency" required>
+          <SelectLike disabled={readOnly} options={CURRENCIES} defaultValue={a.outputCurrency ?? ""} placeholder="Select currency" onPick={(v) => onPatch({ outputCurrency: v })} />
+        </Field>
+      );
+    case "phoneFormat":
+      return (
+        <Field label="Output format" required>
+          <SelectLike
+            disabled={readOnly}
+            options={PHONE_FORMATS.map((p) => p.label)}
+            defaultValue={PHONE_FORMATS.find((p) => p.value === a.phoneFormat)?.label ?? ""}
+            placeholder="Select format"
+            onPick={(v) => {
+              const match = PHONE_FORMATS.find((p) => p.label === v);
+              if (match) onPatch({ phoneFormat: match.value });
+            }}
+          />
+        </Field>
+      );
+    case "dateFormat":
+      return (
+        <Field label="Output format" required>
+          <SelectLike disabled={readOnly} options={DATE_FORMATS} defaultValue={a.dateFormat ?? ""} placeholder="Select format" onPick={(v) => onPatch({ dateFormat: v })} />
+          {a.dateFormat === "Custom…" && (
+            <Input
+              disabled={readOnly}
+              defaultValue=""
+              placeholder="e.g. DD MMM YYYY"
+              onChange={(e) => onPatch({ dateFormat: e.target.value || "Custom…" })}
+              className="mt-1.5 h-8 font-mono text-[12px]"
+            />
+          )}
+        </Field>
+      );
+    case "outputType":
+      return (
+        <Field label="Output type" required>
+          <SelectLike disabled={readOnly} options={OUTPUT_TYPES as unknown as string[]} defaultValue={a.outputType ?? "String"} onPick={(v) => onPatch({ outputType: v as AiTransform["outputType"] })} />
+          {a.outputType === "Multi-select" && (
+            <Input
+              disabled={readOnly}
+              value={a.multiSelectOptions ?? ""}
+              placeholder="Comma-separated: red, green, blue"
+              onChange={(e) => onPatch({ multiSelectOptions: e.target.value })}
+              className="mt-1.5 h-8 text-[12px]"
+            />
+          )}
+        </Field>
+      );
+    case "prompt": {
+      const inputInPrompt = a.input ? promptReferences(a.prompt ?? "", a.input) : false;
+      return (
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between">
+            <Label className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+              Prompt <span className="text-destructive">*</span>
+            </Label>
+            {a.input && (
+              <span
+                title={inputInPrompt ? `Prompt references {{${a.input}}}` : `Prompt does not reference {{${a.input}}}`}
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px]",
+                  inputInPrompt
+                    ? "border-success/30 bg-success/10 text-success"
+                    : "border-warning/30 bg-warning/10 text-warning",
+                )}
+              >
+                <Variable className="h-2.5 w-2.5" />
+                {inputInPrompt ? "input used" : "input unused"}
+              </span>
+            )}
+          </div>
+          <PromptEditor
+            value={a.prompt ?? ""}
+            disabled={readOnly}
+            placeholder="Describe what this AI step should do. Type {{ to insert a variable."
+            variables={merged}
+            onChange={(next) => onPatch({ prompt: next })}
+          />
+          <p className="text-[10.5px] text-muted-foreground">Type <span className="font-mono">{"{{"}</span> to reference upstream variables.</p>
+        </div>
+      );
+    }
+  }
 }
 
 /* --------------------------- Delay (v2) --------------------------- *

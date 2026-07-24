@@ -80,7 +80,49 @@ export function branchConditions(b: PresetBranch): PresetCondition[] {
   return [];
 }
 export type PresetSplitVariant = { id: string; label: string; pct: number };
-export type PresetTransform = { id: string; type: string; input: string; output: string };
+/**
+ * A single AI Transformation on an AI Transformation node.
+ *
+ * The type field decides which subset of the optional keys is meaningful:
+ *  - `Custom AI Action`          → `prompt` + `outputType` (input + prompt required)
+ *  - `Translate` / `Transliterate` → `inputLang` + `outputLang`
+ *  - `Numerical Parsing`         → `inputLang`
+ *  - `Numerical Transcription`   → `outputLang`
+ *  - `Currency Formatting`       → `outputCurrency`
+ *  - `Currency Transcription`    → `outputCurrency` + `outputLang`
+ *  - `Phone Number Normalization` → `phoneFormat`
+ *  - `Date Formatting`           → `dateFormat` + `outputLang`
+ *
+ * `label` is a per-instance display name (rename in the collapsed header).
+ * `input` + `output` are always meaningful; every type reads one variable and
+ * writes one downstream variable.
+ */
+export type PresetTransform = {
+  id: string;
+  type: string;
+  input: string;
+  output: string;
+  /** Per-instance rename shown in the collapsed row header. Optional. */
+  label?: string;
+
+  // Language-aware types
+  inputLang?: string;
+  outputLang?: string;
+
+  // Currency
+  outputCurrency?: string;
+
+  // Format enums
+  phoneFormat?: "E164" | "domestic";
+  /** Preset date-format token or user-entered custom pattern. */
+  dateFormat?: string;
+
+  // Custom AI Action
+  prompt?: string;
+  outputType?: "Boolean" | "String" | "Multi-select" | "Date & Time";
+  /** For `Multi-select` outputType — comma-separated candidate values. */
+  multiSelectOptions?: string;
+};
 /** A value-remap row: rewrite an incoming label (`from`) to an outgoing code (`to`)
  *  at the consuming node — e.g. a WhatsApp button label `Delhi` → API code `ind_delhi`. */
 export type PresetValueRemap = { from: string; to: string };
