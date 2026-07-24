@@ -33,7 +33,7 @@ const SECTIONS: Array<{ label: string; nodes: NodeKind[] }> = [
 
 // Out of scope for v1: cannot be added to new campaigns (disabled in palette),
 // but retained in existing example campaigns (render + read-only config).
-const DISABLED_KINDS = new Set<NodeKind>(["sms", "adsCampaign"]);
+const DISABLED_KINDS = new Set<NodeKind>(["adsCampaign"]);
 
 export function NodePalette({
   onAdd, disabled,

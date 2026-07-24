@@ -8,6 +8,8 @@ import type { NodeKind, PresetConfig } from "./campaign-types";
 import { resolveWaTemplate } from "./wa-outputs";
 import { languageLabel } from "./waba-templates";
 import { resolveAgent } from "./agent-data";
+import { resolveSmsTemplate } from "./sms-store";
+import { templateSegments } from "./sms-templates";
 
 export type ChannelKind = "whatsapp" | "voice" | "sms" | "ads";
 
@@ -164,6 +166,28 @@ function waHandleBaseWeight(handle: string): number {
   return 1;
 }
 
+/**
+ * Delivery-outcome rates for SMS — the single source of truth for how SMS
+ * traffic splits. Consumed by the Sankey weighting below, by the node drawer's
+ * metric tiles and by the SMS channel view (via `smsOutcomeTotals`), so those
+ * three surfaces cannot drift apart. Lives here, in the lowest layer, so the
+ * dependency only ever points upward.
+ */
+export const SMS_DELIVERY_RATES = { delivered: 0.94, failed: 0.04 } as const;
+
+/**
+ * Semantic base weight for an SMS delivery handle. SMS delivery is overwhelmingly
+ * successful, so the generic triangular fallback (which would hand `delivered`
+ * only ~50% of traffic) reads as broken.
+ */
+function smsHandleBaseWeight(handle: string): number {
+  if (handle === "delivered") return SMS_DELIVERY_RATES.delivered * 100;
+  if (handle === "failed") return SMS_DELIVERY_RATES.failed * 100;
+  if (handle === "no_dlr")
+    return (1 - SMS_DELIVERY_RATES.delivered - SMS_DELIVERY_RATES.failed) * 100;
+  return 1;
+}
+
 /** Propagate `base` leads through an example graph into a consistent run. */
 function deriveRun(
   ex: ExampleCampaign,
@@ -240,11 +264,13 @@ function deriveRun(
     // WhatsApp outcomes split by semantic weight (session/reply/button) with a
     // deterministic per-(run,node,handle) wobble; conditional branches keep the
     // top-to-bottom triangular weighting; A/B and single-output split evenly.
+    const baseWeight =
+      kind === "whatsapp" ? waHandleBaseWeight : kind === "sms" ? smsHandleBaseWeight : null;
     const waWeights =
-      kind === "whatsapp" && !equal
+      baseWeight && !equal
         ? handleIds.map(
             (h) =>
-              waHandleBaseWeight(h) *
+              baseWeight(h) *
               (1 + ((hashStr(runId + ":" + id + ":" + h) % 17) - 8) / 100),
           )
         : null;
@@ -486,11 +512,28 @@ export function nodeConfigSnapshot(node: SankeyNode): NodeConfigField[] {
         value: `${t.input || "?"} → ${t.output || "?"}`,
       }));
     }
-    case "sms":
-      return [
-        { label: "Sender ID", value: dash(c.senderId) },
-        { label: "Message Type", value: dash(c.smsType) },
+    case "sms": {
+      // The DLT template is the node's real identity — sender and campaign type
+      // are properties of it, so lead with the template and show the billed
+      // segment count, which is what drives cost.
+      const t = resolveSmsTemplate(c.smsTemplateId);
+      const out = [
+        { label: "Template", value: t?.name ?? dash(c.smsTemplateId) },
+        { label: "Template ID", value: dash(c.smsTemplateId) },
+        { label: "Sender ID", value: dash(t?.senderId ?? c.senderId) },
+        { label: "Campaign Type", value: dash(t?.campaignType ?? c.smsType) },
       ];
+      if (t) {
+        const seg = templateSegments(t);
+        out.push({
+          label: "Segments",
+          value: `${seg.segments} · ${seg.encoding}`,
+        });
+      }
+      out.push({ label: "Variables Mapped", value: String(c.smsVarMap?.length ?? 0) });
+      if (c.smsDlrWindow) out.push({ label: "DLR Wait Window", value: c.smsDlrWindow });
+      return out;
+    }
     case "delay": {
       // Delay v2 has two modes. Dynamic delay keeps the target variable +
       // parsing format visible in the drawer so the reader sees exactly which

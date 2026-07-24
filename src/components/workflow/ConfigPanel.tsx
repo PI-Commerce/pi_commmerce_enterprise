@@ -24,7 +24,15 @@ import { toast } from "sonner";
 import type { WorkflowNodeData, NodeKind, PresetConfig, PresetBranch, PresetCondition, PresetVarMap, PresetValueRemap, NodeOutput } from "@/lib/campaign-types";
 import { NODE_LABELS, SAMPLE_WORKFLOW_VARIABLES, branchConditions } from "@/lib/campaign-types";
 import { SEED_TEMPLATES } from "@/lib/waba-templates";
-import { whatsappOutputs, resolveWaTemplate, completedOutput, isBranchableButton } from "@/lib/wa-outputs";
+import {
+  whatsappOutputs, resolveWaTemplate, completedOutput, isBranchableButton,
+  smsOutputs, SMS_DLR_WINDOWS, DEFAULT_SMS_DLR_WINDOW,
+} from "@/lib/wa-outputs";
+import { useSmsConfig, useSmsTemplates, resolveSmsTemplate } from "@/lib/sms-store";
+import { sendersForCampaignType } from "@/lib/sms-config";
+import {
+  SMS_CAMPAIGN_TYPES, smsPlaceholders, templateSegments, type SmsCampaignType,
+} from "@/lib/sms-templates";
 import { getTool, TOOLS } from "@/lib/tool-registry";
 import { resolveAgent, voiceAgents } from "@/lib/agent-data";
 import {
@@ -1441,33 +1449,201 @@ function WhatsAppCore({
 function SmsFields({ config, readOnly, mark, onChange }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
   return (
     <ActionNodeShell kind="sms" config={config} readOnly={readOnly} mark={mark} onChange={onChange}
-      renderCore={(coreMark) => <SmsCore config={config} readOnly={readOnly} mark={coreMark} />} />
+      renderCore={(coreMark) => <SmsCore config={config} readOnly={readOnly} mark={coreMark} onChange={onChange} />} />
   );
 }
 
-function SmsCore({ config, readOnly, mark }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void }) {
+/**
+ * SMS node core — template-driven, mirroring the WhatsApp cascade.
+ *
+ * Under DLT the message body is fixed by the approved template, so nothing here
+ * edits copy: the client picks Campaign type → Sender ID → Template from the
+ * registry (Channels → SMS), and the only editable part is what gets substituted
+ * into each `{{var}}` and how long to wait for a DLR. Body text is shown
+ * read-only — a single altered character makes the operator reject the message.
+ */
+function SmsCore({ config, readOnly, mark, onChange }: {
+  config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void;
+  onChange: (patch: Partial<WorkflowNodeData>) => void;
+}) {
+  const smsConfig = useSmsConfig();
+  const templates = useSmsTemplates();
+  const [campaignType, setCampaignType] = useState<SmsCampaignType | "">(
+    (config?.smsType as SmsCampaignType) ?? "",
+  );
+  const [senderId, setSenderId] = useState(config?.senderId ?? "");
+  const [templateId, setTemplateId] = useState(config?.smsTemplateId ?? "");
+  const [dlrWindow, setDlrWindow] = useState(config?.smsDlrWindow ?? DEFAULT_SMS_DLR_WINDOW);
+
+  const template = resolveSmsTemplate(templateId);
+
+  // Cascade: campaign type narrows senders (DLT approves a header per use case),
+  // and the two together narrow the templates. A selection that falls outside the
+  // narrowed set is cleared rather than left dangling.
+  const senders = campaignType ? sendersForCampaignType(smsConfig, campaignType) : smsConfig.senderIds;
+  const matching = templates.filter(
+    (t) => (!campaignType || t.campaignType === campaignType) && (!senderId || t.senderId === senderId),
+  );
+  useEffect(() => {
+    if (senderId && !senders.some((s) => s.id === senderId)) setSenderId("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [campaignType]);
+  useEffect(() => {
+    if (templateId && !matching.some((t) => t.id === templateId)) setTemplateId("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [campaignType, senderId]);
+
+  // Mapping rows are derived from the template's own placeholders, hydrated from
+  // any saved mapping so edits survive reopening the node.
+  const placeholders = smsPlaceholders(template?.content);
+  const varMap: PresetVarMap[] = placeholders.map(
+    (v) => config?.smsVarMap?.find((m) => m.v === v) ?? { v, def: "" },
+  );
+  const unmapped = varMap.filter((m) => !m.def?.trim()).length;
+
+  const setMapping = (key: string, def: string, mode?: "variable" | "constant") => {
+    const next = varMap.filter((m) => m.v !== key);
+    next.push({ v: key, def, mode });
+    onChange({ config: { ...config, smsVarMap: next } });
+  };
+
+  // Publish handles + persist the selection so the node restores when reopened.
+  // Handles are fixed for SMS (delivered / failed / no_dlr) — unlike WhatsApp they
+  // don't vary with the template, but they still need publishing on first config.
+  useEffect(() => {
+    onChange({
+      outputs: smsOutputs(),
+      config: {
+        ...config,
+        smsTemplateId: templateId,
+        smsDlrWindow: dlrWindow,
+        smsType: campaignType || undefined,
+        senderId: senderId || undefined,
+        peId: template?.peId ?? smsConfig.principalEntity.id,
+      },
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [templateId, dlrWindow, campaignType, senderId]);
+
+  useEffect(() => {
+    if (!template) mark(false, "Select a DLT template");
+    else if (unmapped > 0) mark(false, `Map ${unmapped} template variable${unmapped === 1 ? "" : "s"}`);
+    else mark(true);
+  }, [templateId, unmapped]);
+
   return (
     <>
-      <Section title="SMS Configuration">
-        <div className="grid grid-cols-2 gap-2">
-          <Field label="Message type" required>
-            <SelectLike disabled={readOnly} options={["Promotional", "Transactional", "OTP"]} defaultValue={config?.smsType} onPick={() => mark(true)} />
-          </Field>
-          <Field label="Format">
-            <SelectLike disabled={readOnly} options={["Text", "Unicode", "Flash SMS"]} onPick={() => undefined} defaultValue={config?.smsFormat ?? "Text"} />
-          </Field>
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <Field label="PE ID" required><Input disabled={readOnly} defaultValue={config?.peId} placeholder="1101xxxxxxxxxxxxxx" className="h-9 font-mono text-[12px]" onChange={(e) => mark(!!e.target.value)} /></Field>
-          <Field label="Sender ID" required><Input disabled={readOnly} defaultValue={config?.senderId} placeholder="PICOMM" maxLength={6} className="h-9 font-mono text-[12px]" onChange={(e) => mark(!!e.target.value)} /></Field>
+      <Section title="DLT template">
+        <div className="rounded-xl border border-border bg-card/50 p-4 space-y-4">
+          {/* Step 1: narrow by campaign type + sender, then pick the template */}
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <StepChip n={1} done={!!template} />
+              <Label className="flex items-center gap-1 text-[12px] font-medium text-foreground">
+                Approved template <span className="text-destructive">*</span>
+              </Label>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="Campaign type" required>
+                <Select value={campaignType || undefined} disabled={readOnly} onValueChange={(v) => setCampaignType(v as SmsCampaignType)}>
+                  <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select…" /></SelectTrigger>
+                  <SelectContent>
+                    {SMS_CAMPAIGN_TYPES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field label="Sender ID" required>
+                <Select value={senderId || undefined} disabled={readOnly || !campaignType} onValueChange={setSenderId}>
+                  <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select…" /></SelectTrigger>
+                  <SelectContent>
+                    {senders.map((s) => <SelectItem key={s.id} value={s.id}>{s.id}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </Field>
+            </div>
+            <Select value={templateId || undefined} disabled={readOnly || !senderId} onValueChange={setTemplateId}>
+              <SelectTrigger className="h-9 text-sm">
+                <SelectValue placeholder={senderId ? "Choose template…" : "Pick a campaign type and sender first"} />
+              </SelectTrigger>
+              <SelectContent>
+                {/* Legacy preset configs may name a template that predates the
+                    registry — surface it so the node still reads as configured. */}
+                {templateId && !template && (
+                  <SelectItem value={templateId}>{templateId} · legacy</SelectItem>
+                )}
+                {matching.map((t) => (
+                  <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {senderId && matching.length === 0 && (
+              <p className="text-[11px] text-muted-foreground">
+                No templates registered for {campaignType} · {senderId}. Add one under Channels → SMS → Templates.
+              </p>
+            )}
+            {template && (
+              <div className="rounded-lg border border-border bg-muted/30 p-3 text-[12px]">
+                <div className="mb-1.5 flex items-center justify-between gap-2">
+                  <p className="text-[10.5px] uppercase tracking-wider text-muted-foreground">Registered content</p>
+                  <span className="font-mono text-[10.5px] text-muted-foreground">{templateSegments(template).segments} SMS</span>
+                </div>
+                <p className="whitespace-pre-wrap text-foreground">{template.content}</p>
+                <p className="mt-2 font-mono text-[10.5px] text-muted-foreground">
+                  ID {template.id} · PE {template.peId}
+                </p>
+              </div>
+            )}
+          </div>
+
+          <div className="border-t border-border/60" />
+
+          {/* Step 2: variable mapping */}
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <StepChip n={2} muted={!template} done={!!template && unmapped === 0} />
+              <Label className="text-[12px] font-medium text-foreground">Variable mapping</Label>
+            </div>
+            {!template ? (
+              <p className="text-[11px] text-muted-foreground">Select a template to map its variables.</p>
+            ) : varMap.length === 0 ? (
+              <p className="text-[11px] text-muted-foreground">This template has no variables — nothing to map.</p>
+            ) : (
+              <div className="space-y-2 pt-1">
+                <p className="text-[11px] text-muted-foreground">
+                  Fill each placeholder with an upstream variable, or switch to a constant for a fixed value.
+                </p>
+                {varMap.map((row) => (
+                  <div key={row.v} className="space-y-1">
+                    <span className="font-mono text-[11px] text-muted-foreground">{`{{${row.v}}}`}</span>
+                    <VariablePicker
+                      defaultValue={row.def}
+                      disabled={readOnly}
+                      allowConstant
+                      mode={row.mode}
+                      onChange={(v, mode) => setMapping(row.v, v, mode)}
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </Section>
-      <Section title="Message">
-        <Field label="Body" required>
-          <Textarea disabled={readOnly} defaultValue={config?.smsBody} placeholder="Hi {{user.name}}, your OTP is {{otp}}. Valid for 5 minutes. — PICOMM" maxLength={320} className="min-h-24 resize-none text-sm" onChange={(e) => mark(!!e.target.value.trim())} />
-          <p className="mt-1 text-[10.5px] text-muted-foreground">Use @ to insert a variable. Media not supported.</p>
+
+      <Section title="Delivery">
+        <Field label="Wait for DLR" required>
+          <Select value={dlrWindow} disabled={readOnly} onValueChange={setDlrWindow}>
+            <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {SMS_DLR_WINDOWS.map((w) => <SelectItem key={w} value={w}>{w}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <p className="mt-1 text-[10.5px] text-muted-foreground">
+            How long the lead waits here for a delivery receipt before taking the “No DLR in window” path.
+          </p>
         </Field>
       </Section>
+
       <ActionAdvanceBanner kind="sms" />
     </>
   );
@@ -1784,10 +1960,11 @@ function ActionNodeShell({
     if (abEnabled) mark(abOk, abOk ? undefined : `Variant traffic must total 100% (currently ${total}%)`);
   }, [abEnabled, abOk, total]);
 
-  // Voice / SMS advance through a single "Completed" output; WhatsApp outputs are
-  // derived from the selected template's buttons (published by WhatsAppCore).
+  // Voice advances through a single "Completed" output. WhatsApp outputs derive
+  // from the selected template's buttons (published by WhatsAppCore) and SMS
+  // publishes its three delivery outcomes from SmsCore, so neither is set here.
   useEffect(() => {
-    if (kind === "voiceCall" || kind === "sms") onChange({ outputs: completedOutput() });
+    if (kind === "voiceCall") onChange({ outputs: completedOutput() });
   }, [kind]);
 
   // Surface the A/B experiment on the canvas node as a badge.
@@ -1917,7 +2094,7 @@ function ActionAdvanceBanner({ kind, type1 }: { kind: ActionKind; type1?: boolea
     kind === "voiceCall"
       ? "Leads advance when the call concludes or retries are exhausted. Branch on the outcome with a Conditional node downstream."
       : kind === "sms"
-        ? "Leads advance once the message is sent. Branch on the outcome with a Conditional node downstream."
+        ? "Leads wait here for a delivery receipt, then take “Delivered” or “Failed”. If no DLR arrives within the wait window they take “No DLR in window”. Wire all three."
         : type1
           ? "Always two outputs: “Replied (no button)” and “No response / continue” (24h session expiry + any untrackable tap). Wire both."
           : "Each trackable button is its own output, plus “Replied (no button)” and “No response / continue”. Phone numbers and untracked URLs aren’t trackable — those taps route through “No response / continue”. Wire every output.";
