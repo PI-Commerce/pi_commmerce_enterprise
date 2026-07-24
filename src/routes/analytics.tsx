@@ -31,6 +31,7 @@ import {
   Download,
   Search,
   MessageCircle,
+  MessageSquare,
   Phone,
   ExternalLink,
 } from "lucide-react";
@@ -44,6 +45,7 @@ import {
 import type { DateRange } from "react-day-picker";
 import { CampaignFlowView } from "@/components/analytics/CampaignFlowView";
 import { VoiceChannelView } from "@/components/analytics/VoiceChannelView";
+import { SmsChannelView } from "@/components/analytics/SmsChannelView";
 import {
   CAMPAIGNS,
   NODE_METRICS,
@@ -64,6 +66,8 @@ import {
   type Lead,
 } from "@/lib/analytics-leads";
 import { resolveWaTemplate, isBranchableButton } from "@/lib/wa-outputs";
+import { resolveSmsTemplate } from "@/lib/sms-store";
+import { smsOutcomeTotals } from "@/lib/analytics-sms";
 import { resolveAgent } from "@/lib/agent-data";
 import type { WaTemplate } from "@/lib/waba-templates";
 import { cn } from "@/lib/utils";
@@ -155,8 +159,9 @@ const STATUS_TONE: Record<string, string> = {
   pending: "text-muted-foreground bg-secondary",
 };
 
-// SMS and Ads channels are out of scope for v1 — only the live channels
-// (WhatsApp / Voice) are exposed in Channel analytics.
+// Ads remains out of scope for v1. WhatsApp, Voice and SMS are live; each
+// declares the asset that identifies it (the thing an "asset-mode" scope is
+// built around) — a WhatsApp/DLT template, or a voice agent.
 const CHANNEL_TABS: {
   kind: ChannelKind;
   label: string;
@@ -170,6 +175,7 @@ const CHANNEL_TABS: {
     assetLabel: "Template",
   },
   { kind: "voice", label: "Voice", icon: Phone, assetLabel: "Voice Agent" },
+  { kind: "sms", label: "SMS", icon: MessageSquare, assetLabel: "Template" },
 ];
 
 /* ───────────── Channel selection state (lifted, supports deep-link) ─────────────
@@ -219,13 +225,20 @@ function pickDefaultAsset(kind: ChannelKind): string | undefined {
     }
     return undefined;
   }
-  if (kind === "whatsapp") {
+  // WhatsApp and SMS both land on their highest-volume template in the first
+  // run that uses one; only the registry they resolve against differs.
+  if (kind === "whatsapp" || kind === "sms") {
     for (const c of CAMPAIGNS) {
       for (const r of c.runs) {
         const byTpl = new Map<string, number>();
         for (const n of r.sankey.nodes) {
-          if (n.kind !== "whatsapp" || n.config?.waMode === "freeform") continue;
-          const tpl = resolveWaTemplate(n.config?.waTemplate);
+          if (n.kind !== kind) continue;
+          const tpl =
+            kind === "sms"
+              ? resolveSmsTemplate(n.config?.smsTemplateId)
+              : n.config?.waMode === "freeform"
+                ? undefined
+                : resolveWaTemplate(n.config?.waTemplate);
           if (!tpl) continue;
           byTpl.set(tpl.id, (byTpl.get(tpl.id) ?? 0) + n.entered);
         }
@@ -899,11 +912,24 @@ function buildNodeMetrics(
       { label: "Failed", value: failed.toLocaleString() },
     ];
   }
-  if (k === "whatsapp" || k === "sms" || k === "ads") {
+  if (k === "sms") {
+    // Derived from THIS node's volume (like Voice above), not the workspace-wide
+    // NODE_METRICS totals — otherwise every SMS node in every run would report
+    // the same numbers. Uses the shared delivery rates so these tiles, the
+    // channel view and the Sankey never disagree.
+    const sent = node.entered;
+    const { delivered, failed, noDlr } = smsOutcomeTotals(sent);
+    return [
+      { label: "Sent", value: sent.toLocaleString() },
+      { label: "Delivered", value: delivered.toLocaleString() },
+      { label: "Failed", value: failed.toLocaleString() },
+      { label: "No DLR", value: noDlr.toLocaleString() },
+    ];
+  }
+  if (k === "whatsapp" || k === "ads") {
     const m = NODE_METRICS[k as ChannelKind] ?? [];
     const keep: Record<string, string[]> = {
       whatsapp: ["Sent", "Delivered", "Read", "Clicked", "Replied"],
-      sms: ["Sent", "Delivered", "Failed"],
       ads: ["Impressions", "Clicks", "Leads"],
     };
     return m
@@ -1188,14 +1214,26 @@ function MiniFunnel({
   //    only in the KPI tiles, never in the funnel (it's a terminal failure
   //    state, not a stage on the success path). Pending is derived as
   //    base − (running + completed + failed).
+  //  • sms: funnel = Sent→Delivered only. Failed and No DLR are mutually
+  //    exclusive TERMINAL states, not stages below Delivered — funnelling them
+  //    would imply a failed message had first been delivered.
   let linear: { label: string; value: number }[] = metrics;
   let outcomes: { label: string; value: number }[] = [];
   let readBase = 0;
+  let outcomeTitle = "Conversions from Read messages";
+  let outcomeBase = "Read";
   if (kind === "whatsapp") {
     const OUTCOME_LABELS = ["Clicked", "Replied"];
     linear = metrics.filter((m) => !OUTCOME_LABELS.includes(m.label));
     outcomes = metrics.filter((m) => OUTCOME_LABELS.includes(m.label));
     readBase = linear.find((m) => m.label === "Read")?.value ?? 0;
+  } else if (kind === "sms") {
+    const OUTCOME_LABELS = ["Failed", "No DLR"];
+    linear = metrics.filter((m) => !OUTCOME_LABELS.includes(m.label));
+    outcomes = metrics.filter((m) => OUTCOME_LABELS.includes(m.label));
+    readBase = linear.find((m) => m.label === "Sent")?.value ?? 0;
+    outcomeTitle = "Non-delivery outcomes";
+    outcomeBase = "Sent";
   } else if (kind === "voice") {
     const get = (l: string) => metrics.find((m) => m.label === l)?.value ?? 0;
     const totalBase = get("Total Base");
@@ -1255,7 +1293,7 @@ function MiniFunnel({
       {outcomes.length > 0 && (
         <div className="mt-2 border-t border-border/60 pt-2">
           <p className="mb-1.5 px-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-            Conversions from Read messages
+            {outcomeTitle}
           </p>
           <div className="grid grid-cols-2 gap-2 px-1" data-mini-conversions>
             {outcomes.map((m) => {
@@ -1267,7 +1305,7 @@ function MiniFunnel({
                       {m.label}
                     </span>
                     <span className="text-[9px] text-muted-foreground">
-                      {pct}% of Read
+                      {pct}% of {outcomeBase}
                     </span>
                   </div>
                   <p className="mt-0.5 text-sm font-semibold tabular-nums">
@@ -1423,19 +1461,23 @@ function ChannelAnalytics({
     return refs;
   }, [kind]);
 
-  // refKey → the template the node sends (WhatsApp only; freeform → none).
+  // refKey → the template the node sends. WhatsApp resolves against the Meta
+  // template registry (freeform sends have none); SMS against the DLT registry.
+  // Both reduce to `{id, name}` so the asset picker treats them identically.
   const templateByRefKey = useMemo(() => {
-    const map = new Map<string, WaTemplate>();
-    if (kind !== "whatsapp") return map;
+    const map = new Map<string, { id: string; name: string }>();
+    if (kind !== "whatsapp" && kind !== "sms") return map;
     for (const c of CAMPAIGNS) {
       for (const r of c.runs) {
         for (const n of r.sankey.nodes) {
-          if (n.kind !== "whatsapp") continue;
+          if (n.kind !== kind) continue;
           const tpl =
-            n.config?.waMode === "freeform"
-              ? undefined
-              : resolveWaTemplate(n.config?.waTemplate);
-          if (tpl) map.set(`${c.id}|${r.id}|${n.id}`, tpl);
+            kind === "sms"
+              ? resolveSmsTemplate(n.config?.smsTemplateId)
+              : n.config?.waMode === "freeform"
+                ? undefined
+                : resolveWaTemplate(n.config?.waTemplate);
+          if (tpl) map.set(`${c.id}|${r.id}|${n.id}`, { id: tpl.id, name: tpl.name });
         }
       }
     }
@@ -1469,7 +1511,7 @@ function ChannelAnalytics({
       }
       return [...m.values()];
     }
-    if (kind === "whatsapp") {
+    if (kind === "whatsapp" || kind === "sms") {
       const m = new Map<string, { id: string; label: string }>();
       for (const r of allRefs) {
         const t = templateByRefKey.get(`${r.campaignId}|${r.runId}|${r.nodeId}`);
@@ -1484,7 +1526,7 @@ function ChannelAnalytics({
   const refAssetId = (r: Ref): string | undefined => {
     const k = `${r.campaignId}|${r.runId}|${r.nodeId}`;
     if (kind === "voice") return agentByRefKey.get(k)?.id;
-    if (kind === "whatsapp") return templateByRefKey.get(k)?.id;
+    if (kind === "whatsapp" || kind === "sms") return templateByRefKey.get(k)?.id;
     return undefined;
   };
 
@@ -1815,6 +1857,17 @@ function ChannelAnalytics({
               agentExplicitlyOne={mode === "asset" && !!selection.assetId}
             />
           );
+        })()
+      ) : kind === "sms" ? (
+        (() => {
+          const srefs = selectedRefs.map((ref) => {
+            const run = CAMPAIGNS.find(
+              (c) => c.id === ref.campaignId,
+            )!.runs.find((r) => r.id === ref.runId)!;
+            const node = run.sankey.nodes.find((n) => n.id === ref.nodeId)!;
+            return { run, node };
+          });
+          return <SmsChannelView refs={srefs} />;
         })()
       ) : (
         <ChannelDetail kind={kind} refs={selectedRefs} dateRange={dateRange} />

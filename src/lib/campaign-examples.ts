@@ -18,7 +18,8 @@ import type {
   PresetConfig, PresetVarMap,
 } from "./campaign-types";
 import { SERIAL_PREFIX } from "./campaign-types";
-import { whatsappOutputs, resolveWaTemplate } from "./wa-outputs";
+import { whatsappOutputs, resolveWaTemplate, smsOutputs, DEFAULT_SMS_DLR_WINDOW } from "./wa-outputs";
+import { SEED_SMS_TEMPLATES } from "./sms-templates";
 
 export type ExampleCampaign = {
   name: string;
@@ -459,6 +460,46 @@ const sWa = (
   },
 });
 
+/**
+ * A DLT-template SMS send. Unlike WhatsApp, an SMS node always exposes the same
+ * three delivery outcomes (Delivered / Failed / No DLR in window) regardless of
+ * template — `buildCampaign` fans a port-less onward edge to all three, so a
+ * "linear" library send still wires every handle. Campaigns that want to react
+ * differently to a failure wire the ports explicitly.
+ *
+ * Sender / campaign type / PE are denormalised off the registry template so the
+ * canvas and analytics can label the node without re-resolving it. Reads from
+ * SEED_SMS_TEMPLATES rather than the live store — this is build-time seed data
+ * and must not depend on module init order.
+ */
+const sSms = (
+  id: string, title: string, subtitle: string, templateId: string,
+  opts?: { vars?: PresetVarMap[]; dlrWindow?: string },
+): Spec => {
+  const t = SEED_SMS_TEMPLATES.find((x) => x.id === templateId);
+  return {
+    id, kind: "sms", title, subtitle,
+    outputs: smsOutputs(),
+    config: {
+      smsTemplateId: templateId,
+      smsVarMap: opts?.vars ?? [],
+      smsDlrWindow: opts?.dlrWindow ?? DEFAULT_SMS_DLR_WINDOW,
+      smsType: t?.campaignType,
+      senderId: t?.senderId,
+      peId: t?.peId,
+    },
+  };
+};
+
+/** Registry template ids used by the library journeys. */
+const SMS_ORDER_CONFIRM = "1107168420993847112";
+const SMS_DELIVERY_OTP = "1107168421004829376";
+const SMS_RENEWAL_PROMO = "1107168421118290043";
+const SMS_PAYMENT_FAILED = "1107168421220847665";
+const SMS_CART_RECOVERY = "1107168421339104782";
+const SMS_FESTIVE_HINDI = "1107168421447290318";
+const SMS_KYC_PENDING = "1107168421556731209";
+
 const sDelay = (id: string, value: number, unit: "Minutes" | "Hours" | "Days"): Spec => ({
   id, kind: "delay", title: `Delay · ${value} ${unit.toLowerCase()}`, subtitle: `Wait ${value} ${unit.toLowerCase()}`,
   config: { delayValue: value, delayUnit: unit },
@@ -584,6 +625,15 @@ const C_RENEWAL = buildCampaign("BFSI · Insurance Renewal", [
   sWa("waSavings", "WhatsApp renewal reminder · Savings", "Variant · Savings angle", "renewal_savings_v1"),
   sDelay("d1", 23, "Hours"),
   sWa("wfu", "WhatsApp follow-up", "WhatsApp · nudge", "renewal_followup_v1"),
+  sSms("smsRen", "SMS renewal reminder", "SMS · renew now", SMS_RENEWAL_PROMO, {
+    vars: [
+      { v: "name", def: "contact.first_name" },
+      { v: "plan", def: "contact.policy_no" },
+      { v: "expiry_date", def: "contact.expiry_date" },
+      { v: "discount", def: "10", mode: "constant" },
+      { v: "link", def: "picomm.in/renew", mode: "constant" },
+    ],
+  }),
   sCond("rcLow", "Renewed?", "renewal_status", [
     { id: "yes", label: "Yes", value: "renewed" },
     { id: "no", label: "No", value: "pending" },
@@ -600,7 +650,7 @@ const C_RENEWAL = buildCampaign("BFSI · Insurance Renewal", [
   ed("prem", "abLow", "low"),
   ed("abLow", "waBenefits", "vA"), ed("abLow", "waSavings", "vB"),
   ed("waBenefits", "d1"), ed("waSavings", "d1"),
-  ed("d1", "wfu"), ed("wfu", "rcLow"),
+  ed("d1", "wfu"), ed("wfu", "smsRen"), ed("smsRen", "rcLow"),
   ed("rcLow", "end", "yes"),
   ed("rcLow", "vFinal", "no"), ed("vFinal", "rlFinal"), ed("rlFinal", "end"),
 ]);
@@ -659,6 +709,14 @@ const C_COLLECT = buildCampaign("BFSI · Collections", [
     { id: "mid",   label: "31–90 DPD", op: "between", value: "31", value2: "90" },
     { id: "late",  label: "90+ DPD",  op: "greater than", value: "90" },
   ]),
+  sSms("smsDue", "SMS payment reminder", "SMS · amount due", SMS_PAYMENT_FAILED, {
+    vars: [
+      { v: "amount", def: "contact.amount_due" },
+      { v: "order_id", def: "contact.loan_id" },
+      { v: "link", def: "picomm.in/pay", mode: "constant" },
+      { v: "hours", def: "24", mode: "constant" },
+    ],
+  }),
   sWa("waRem", "WhatsApp reminder", "WhatsApp · payment reminder", "collections_reminder_v1"),
   sWa("plEarly", "Payment link", "WhatsApp · pay now", "payment_link_v1"),
   sVoice("vColl", "Voice AI collections call", "Collections call"),
@@ -675,7 +733,7 @@ const C_COLLECT = buildCampaign("BFSI · Collections", [
   sEnd(),
 ], [
   ed("start", "aud"), ed("aud", "dpd"),
-  ed("dpd", "waRem", "early"), ed("waRem", "plEarly"), ed("plEarly", "d1"),
+  ed("dpd", "smsDue", "early"), ed("smsDue", "waRem"), ed("waRem", "plEarly"), ed("plEarly", "d1"),
   ed("dpd", "vColl", "mid"), ed("vColl", "plMid"), ed("plMid", "d1"),
   ed("dpd", "vEsc", "late"), ed("vEsc", "plLate"), ed("plLate", "d1"),
   ed("d1", "paid"), ed("paid", "end", "yes"),
@@ -706,6 +764,15 @@ const C_ACTIVATION = buildCampaign("Retail · Activation", [
   sWa("cartLow", "Cart link", "WhatsApp · complete order", "cart_link_v1"),
   sDelay("d1", 23, "Hours"),
   sWa("waRem", "WhatsApp reminder + cart link", "WhatsApp · complete order", "cart_link_v1"),
+  sSms("smsCart", "SMS order confirmation", "SMS · order confirmed", SMS_ORDER_CONFIRM, {
+    vars: [
+      { v: "name", def: "contact.first_name" },
+      { v: "order_id", def: "contact.customer_id" },
+      { v: "amount", def: "contact.order_value" },
+      { v: "eta", def: "contact.delivery_eta" },
+      { v: "link", def: "picomm.in/track", mode: "constant" },
+    ],
+  }),
   sCond("orderLow", "Conversion check", "order_status", [
     { id: "conv", label: "Converted", value: "placed" },
     { id: "no", label: "Not converted", value: "pending" },
@@ -720,7 +787,7 @@ const C_ACTIVATION = buildCampaign("Retail · Activation", [
   ed("intent", "ab", "low"),
   ed("ab", "abA", "vA"), ed("ab", "abB", "vB"),
   ed("abA", "cartLow"), ed("abB", "cartLow"),
-  ed("cartLow", "d1"), ed("d1", "waRem"), ed("waRem", "orderLow"),
+  ed("cartLow", "d1"), ed("d1", "waRem"), ed("waRem", "smsCart"), ed("smsCart", "orderLow"),
   ed("orderLow", "end", "conv"), ed("orderLow", "vfuLow", "no"), ed("vfuLow", "appLow"), ed("appLow", "end"),
 ]);
 
@@ -748,6 +815,17 @@ const C_REWARD = buildCampaign("Retail · Reward Expiry", [
   sWa("redLow", "Redemption link", "WhatsApp · redeem now", "redemption_link_v1"),
   sDelay("d1", 23, "Hours"),
   sWa("waRem2", "WhatsApp reminder", "WhatsApp · redeem now", "redemption_link_v1"),
+  // Unicode template — bills at 2 segments per recipient, so the SMS channel's
+  // "Segments consumed" tile diverges from its "Sent" count in this journey.
+  sSms("smsFest", "SMS festive offer", "SMS · festive reminder (Hindi)", SMS_FESTIVE_HINDI, {
+    vars: [
+      { v: "name", def: "contact.first_name" },
+      { v: "festival", def: "Diwali", mode: "constant" },
+      { v: "discount", def: "20", mode: "constant" },
+      { v: "expiry_date", def: "contact.expiry_date" },
+      { v: "link", def: "picomm.in/offer", mode: "constant" },
+    ],
+  }),
   sCond("redCheck2", "Redemption check", "redemption_status", [
     { id: "yes", label: "Redeemed", value: "redeemed" },
     { id: "no", label: "Not redeemed", value: "pending" },
@@ -761,7 +839,7 @@ const C_REWARD = buildCampaign("Retail · Reward Expiry", [
   ed("points", "ab", "low"),
   ed("ab", "abA", "vA"), ed("ab", "abB", "vB"),
   ed("abA", "redLow"), ed("abB", "redLow"),
-  ed("redLow", "d1"), ed("d1", "waRem2"), ed("waRem2", "redCheck2"),
+  ed("redLow", "d1"), ed("d1", "waRem2"), ed("waRem2", "smsFest"), ed("smsFest", "redCheck2"),
   ed("redCheck2", "end", "yes"), ed("redCheck2", "finalLow", "no"), ed("finalLow", "end"),
 ]);
 
@@ -792,6 +870,14 @@ const C_WINBACK = buildCampaign("Retail · Winback", [
     { id: "yes", label: "Yes", value: "placed" },
     { id: "no", label: "No", value: "pending" },
   ]),
+  sSms("smsWin", "SMS winback offer", "SMS · cart recovery", SMS_CART_RECOVERY, {
+    vars: [
+      { v: "name", def: "contact.first_name" },
+      { v: "item", def: "contact.last_item" },
+      { v: "discount", def: "15", mode: "constant" },
+      { v: "link", def: "picomm.in/shop", mode: "constant" },
+    ],
+  }),
   sVoice("vfuLow", "Voice AI follow-up", "Reattempt · 1 retry", { maxAttempts: 1 }),
   sEnd(),
 ], [
@@ -802,7 +888,13 @@ const C_WINBACK = buildCampaign("Retail · Winback", [
   ed("ab", "abA", "vA"), ed("ab", "abB", "vB"),
   ed("abA", "purLow"), ed("abB", "purLow"),
   ed("purLow", "d1"), ed("d1", "purchased"),
-  ed("purchased", "end", "yes"), ed("purchased", "vfuLow", "no"), ed("vfuLow", "end"),
+  ed("purchased", "end", "yes"), ed("purchased", "smsWin", "no"),
+  // The one journey that reacts to delivery: a delivered offer is left to land,
+  // while a hard failure or a silent DLR window escalates to a voice follow-up.
+  ed("smsWin", "end", "delivered"),
+  ed("smsWin", "vfuLow", "failed"),
+  ed("smsWin", "vfuLow", "no_dlr"),
+  ed("vfuLow", "end"),
 ]);
 
 /* ---- 8. Retail · Subscription Conversion ------------------------------- */
@@ -1190,6 +1282,81 @@ const C_ALTAYER = buildCampaign("Retail · ACME Corp FCC Loyalty", [
   ...FCC_GOLD.edges, ...FCC_PLATINUM.edges, ...FCC_BLACK.edges,
 ]);
 
+/* ---- 18. D2C · Order Lifecycle (SMS-led) -------------------------------
+ * The one SMS-first journey in the library. Every other campaign uses SMS as a
+ * single supporting step, which makes the channel's template comparison a
+ * one-bar chart in Campaign-run mode. This one runs FIVE different DLT
+ * templates across all three pipelines (Transactional / OTP / Promotional),
+ * three sender IDs and both encodings — so the SMS analytics have something
+ * real to compare, and the billed-segment divergence shows up inside a single
+ * run rather than only when switching templates in Asset-mode.
+ */
+const C_SMS_LIFECYCLE = buildCampaign("D2C · Order Lifecycle (SMS-led)", [
+  sStart(),
+  sAud("CSV · new orders", ["order_value", "order_id", "delivery_eta", "due_date"]),
+  sSms("smsConfirm", "SMS order confirmation", "SMS · order confirmed", SMS_ORDER_CONFIRM, {
+    vars: [
+      { v: "name", def: "contact.first_name" },
+      { v: "order_id", def: "contact.order_id" },
+      { v: "amount", def: "contact.order_value" },
+      { v: "eta", def: "contact.delivery_eta" },
+      { v: "link", def: "picomm.in/track", mode: "constant" },
+    ],
+  }),
+  sDelay("d1", 1, "Days"),
+  sCond("state", "Order state branch", "order_state", [
+    { id: "dispatched", label: "Dispatched", value: "dispatched" },
+    { id: "payment_due", label: "Payment pending", value: "payment_due" },
+    { id: "kyc", label: "KYC pending", value: "kyc_pending" },
+  ]),
+  // Dispatched → OTP at handover, then a promotional cross-sell a couple of days later.
+  sSms("smsOtp", "SMS delivery OTP", "SMS · handover code", SMS_DELIVERY_OTP, {
+    vars: [{ v: "otp", def: "delivery.otp" }],
+    dlrWindow: "5 minutes",
+  }),
+  sDelay("d2", 2, "Days"),
+  sSms("smsPromo", "SMS festive cross-sell", "SMS · festive offer (Hindi)", SMS_FESTIVE_HINDI, {
+    vars: [
+      { v: "name", def: "contact.first_name" },
+      { v: "festival", def: "Diwali", mode: "constant" },
+      { v: "discount", def: "20", mode: "constant" },
+      { v: "expiry_date", def: "contact.due_date" },
+      { v: "link", def: "picomm.in/offer", mode: "constant" },
+    ],
+  }),
+  // Payment pending → reminder; a non-delivered reminder escalates to WhatsApp.
+  sSms("smsPay", "SMS payment reminder", "SMS · amount due", SMS_PAYMENT_FAILED, {
+    vars: [
+      { v: "amount", def: "contact.order_value" },
+      { v: "order_id", def: "contact.order_id" },
+      { v: "link", def: "picomm.in/pay", mode: "constant" },
+      { v: "hours", def: "24", mode: "constant" },
+    ],
+  }),
+  sWa("waPay", "WhatsApp payment link", "WhatsApp · pay now", "payment_link_v1"),
+  // KYC pending → transactional nudge.
+  sSms("smsKyc", "SMS KYC reminder", "SMS · complete KYC", SMS_KYC_PENDING, {
+    vars: [
+      { v: "name", def: "contact.first_name" },
+      { v: "due_date", def: "contact.due_date" },
+      { v: "link", def: "picomm.in/kyc", mode: "constant" },
+    ],
+  }),
+  sEnd(),
+], [
+  ed("start", "aud"), ed("aud", "smsConfirm"),
+  ed("smsConfirm", "d1"), ed("d1", "state"),
+  ed("state", "smsOtp", "dispatched"), ed("smsOtp", "d2"), ed("d2", "smsPromo"), ed("smsPromo", "end"),
+  ed("state", "smsPay", "payment_due"),
+  // Delivery-aware escalation: a delivered reminder is left to work, while a
+  // failure or a silent DLR window falls back to WhatsApp.
+  ed("smsPay", "end", "delivered"),
+  ed("smsPay", "waPay", "failed"),
+  ed("smsPay", "waPay", "no_dlr"),
+  ed("waPay", "end"),
+  ed("state", "smsKyc", "kyc"), ed("smsKyc", "end"),
+]);
+
 const EX1_LAID = assemble(EX1_NODES, EX1_EDGES);
 const EX2_LAID = assemble(EX2_NODES, EX2_EDGES);
 
@@ -1210,6 +1377,7 @@ const RAW_EXAMPLE_CAMPAIGNS: Record<string, ExampleCampaign> = {
   c_ex4: C_RENEWAL,
   c_ex5: C_UPSELL,
   c_ex6: C_COLLECT,
+  c_ex18: C_SMS_LIFECYCLE,
   c_ex12: C_ORDERCONF,
   c_ex13: C_OUTBOUND,
   c_ex14: C_CART,

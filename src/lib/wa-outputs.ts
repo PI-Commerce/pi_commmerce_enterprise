@@ -4,13 +4,17 @@
  *
  * Action nodes no longer carry user-defined "exit conditions". Their outputs are
  * derived from real signals: WhatsApp nodes expose one branch per *branchable*
- * template button plus `reply_received` / `session_expired`; Voice and SMS expose
- * a single `completed` output. Downstream branching is done with a Conditional node.
+ * template button plus `reply_received` / `session_expired`; Voice exposes a
+ * single `completed` output. Downstream branching is done with a Conditional node.
+ *
+ * SMS is the deliberate exception — see {@link smsOutputs}.
  */
 import type { NodeKind, NodeOutput, WorkflowNodeData } from "./campaign-types";
 import { SEED_TEMPLATES, type TemplateButton, type WaTemplate } from "./waba-templates";
 import { resolveAgent } from "./agent-data";
 import { getTool } from "./tool-registry";
+import { resolveSmsTemplate } from "./sms-store";
+import { smsPlaceholders } from "./sms-templates";
 
 /**
  * Whether a template button produces a usable inbound signal we can branch on.
@@ -59,10 +63,42 @@ export function whatsappOutputs(template?: WaTemplate): NodeOutput[] {
   return [...buttonHandles, REPLY_OUTPUT, NO_RESPONSE_OUTPUT];
 }
 
-/** The single completion output shared by Voice and SMS nodes. */
+/** The single completion output used by Voice nodes. */
 export function completedOutput(): NodeOutput[] {
   return [{ id: "completed", label: "Completed", kind: "outcome" }];
 }
+
+/**
+ * Outputs for an SMS node — the one action node that branches on *delivery*
+ * rather than advancing on send (PICOM-4726 §4).
+ *
+ * Three mutually exclusive terminal outcomes, resolved from the vendor's DLR:
+ *   - `delivered`  — a positive DLR arrived
+ *   - `failed`     — the vendor rejected the submission, or a negative DLR arrived
+ *   - `no_dlr`     — nothing arrived before the node's wait window expired
+ *
+ * "Sent" is deliberately NOT a branch. Every message that leaves the platform is
+ * sent, so a Sent handle would fire alongside Delivered and put the same lead on
+ * two paths; submission acceptance is a precondition here, and a rejected
+ * submission routes to `failed`. Sent remains a *metric* in Analytics.
+ *
+ * This makes SMS the only action node that holds a lead until an external event
+ * lands or a timer expires — WhatsApp exposes its delivery receipt as the
+ * `delivery_state` variable instead and leaves the branching to a Conditional.
+ * The divergence is intentional: DLR is the whole point of an SMS step, and the
+ * "not delivered within N minutes" path has no equivalent on WhatsApp.
+ */
+export function smsOutputs(): NodeOutput[] {
+  return [
+    { id: "delivered", label: "Delivered", kind: "outcome" },
+    { id: "failed", label: "Failed", kind: "outcome" },
+    { id: "no_dlr", label: "No DLR in window", kind: "default" },
+  ];
+}
+
+/** Wait-window options for the `no_dlr` path, longest-plausible DLR latency last. */
+export const SMS_DLR_WINDOWS = ["5 minutes", "15 minutes", "30 minutes", "1 hour", "6 hours", "24 hours"] as const;
+export const DEFAULT_SMS_DLR_WINDOW = "30 minutes";
 
 /**
  * Outcome handles for an API Tool Call node. Unlike Voice/SMS (single "completed"),
@@ -84,7 +120,8 @@ export function actionNodeOutputs(kind: NodeKind, config?: WorkflowNodeData["con
     return whatsappOutputs(resolveWaTemplate(config?.waTemplate));
   }
   if (kind === "apiToolCall") return apiOutcomeOutputs();
-  if (kind === "voiceCall" || kind === "sms") return completedOutput();
+  if (kind === "sms") return smsOutputs();
+  if (kind === "voiceCall") return completedOutput();
   return undefined;
 }
 
@@ -126,7 +163,19 @@ export function deriveNodeOutcomeVariables(
       const agent = resolveAgent(config?.agent);
       if (agent) for (const pc of agent.postCall) vars.push({ key: `${ns}.${pc.name}`, source });
     } else if (kind === "sms") {
-      vars.push({ key: `${ns}.completed`, source });
+      // Delivery facts this message produced. `delivery_state` mirrors the three
+      // output handles (delivered | failed | no_dlr) for Conditionals that would
+      // rather test a value than wire three edges; `sms_count` is the billed
+      // segment count and `failure_reason` the vendor's rejection text.
+      vars.push({ key: `${ns}.delivery_state`, source });
+      vars.push({ key: `${ns}.sms_count`, source });
+      vars.push({ key: `${ns}.failure_reason`, source });
+      // The DLT placeholders of the selected template, so a downstream node can
+      // read back exactly what was substituted into this message.
+      const template = resolveSmsTemplate(config?.smsTemplateId);
+      if (template) {
+        for (const p of smsPlaceholders(template.content)) vars.push({ key: `${ns}.var.${p}`, source });
+      }
     } else if (kind === "audience") {
       // Contact fields the audience's *actual edited schema* exposes downstream as
       // `contact.<key>` — CSV column keys, or API payload field names.

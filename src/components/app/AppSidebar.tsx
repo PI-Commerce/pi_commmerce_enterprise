@@ -20,7 +20,7 @@ type ChannelChild = { label: string; icon: React.ComponentType<{ className?: str
 const channelChildren: ChannelChild[] = [
   { to: "/channels/whatsapp", label: "WhatsApp", icon: MessageCircle },
   { label: "Meta Ads", icon: Megaphone },
-  { label: "SMS", icon: MessageSquare },
+  { to: "/channels/sms", label: "SMS", icon: MessageSquare },
   { label: "RCS", icon: MessageSquareText },
 ];
 

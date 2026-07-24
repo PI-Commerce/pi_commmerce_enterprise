@@ -176,10 +176,19 @@ export type PresetConfig = {
   waHeaderVarMap?: PresetVarMap[];
   waBody?: string;
   // ---- SMS core ----
+  /** DLT Template ID from the SMS registry — the node's primary selection. */
+  smsTemplateId?: string;
+  /** Maps each named `{{var}}` in the template body to a variable or constant. */
+  smsVarMap?: PresetVarMap[];
+  /** How long the node waits for a DLR before taking the "No DLR in window" path. */
+  smsDlrWindow?: string;
+  /** Campaign type + sender, derived from the selected template. Persisted so the
+   *  canvas/analytics can label the node without re-resolving the registry. */
   smsType?: string;
-  smsFormat?: string;
-  peId?: string;
   senderId?: string;
+  peId?: string;
+  /** Legacy free-text config, kept so pre-registry preset data still renders. */
+  smsFormat?: string;
   smsBody?: string;
   // ---- Delay ----
   /** Delay v2: `fixed` = classic value+unit; `variable` = wait UNTIL the datetime

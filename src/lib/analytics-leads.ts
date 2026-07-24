@@ -19,7 +19,9 @@ export type LeadStatus =
   | "completed"
   | "failed"
   | "dropped"
-  | "pending";
+  | "pending"
+  /** SMS: the wait window closed without a delivery receipt from the operator. */
+  | "no_dlr";
 
 export type Lead = {
   id: string;
@@ -109,7 +111,9 @@ const STATUS_BY_KIND: Record<SankeyNodeKind, LeadStatus[]> = {
   whatsapp: ["sent", "delivered", "read", "failed"],
   // Dev team's current voice-call lifecycle statuses.
   voice: ["pending", "running", "completed", "failed"],
-  sms: ["delivered", "failed"],
+  // Aligned to the SMS node's three delivery outcomes, plus the transient
+  // `sent` state a lead occupies while the DLR window is still open.
+  sms: ["sent", "delivered", "failed", "no_dlr"],
   ads: ["clicked", "delivered"],
   aiTransform: [],
   end: [],
