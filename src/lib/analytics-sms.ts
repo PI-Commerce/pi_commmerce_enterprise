@@ -3,7 +3,7 @@
  *
  * PICOM-4726 §5 requires a per-recipient report carrying recipient number,
  * template name + id, status, sent/delivered/failed timestamps, failure reason
- * and the billed segment count. Those nine fields are SMS-only, so this ships a
+ * and the segment count. Those fields are SMS-only, so this ships a
  * dedicated {@link SmsMessage} record rather than widening the shared
  * {@link file://./analytics-leads.ts} `Lead` type that every channel uses —
  * the same split `VoiceChannelView` already makes with its `Call` type.
@@ -66,13 +66,6 @@ export function smsOutcomeTotals(sent: number) {
   return { delivered, failed, noDlr };
 }
 
-/**
- * Per-segment price in INR. A flat rate is a simplification — real DLT pricing
- * varies by operator and campaign type — but it keeps the cost column
- * proportional to the billed segment count, which is the point being shown.
- */
-export const SMS_RATE_PER_SEGMENT = 0.18;
-
 export type SmsMessage = {
   id: string;
   /** Recipient MSISDN. */
@@ -86,10 +79,8 @@ export type SmsMessage = {
   deliveredAt: string | null;
   failedAt: string | null;
   failureReason: string | null;
-  /** Billed segments for this message — the "SMS count" in §5. */
+  /** Segments consumed by this message — the "SMS count" in §5. */
   smsCount: number;
-  /** Cost in INR = segments x rate. */
-  cost: number;
   /** Seconds from submission to delivery receipt; null unless delivered. */
   deliveryLatency: number | null;
   /** ISO date (YYYY-MM-DD) for date-range filtering. */
@@ -179,11 +170,9 @@ export function buildSmsMessages({ run, node }: SmsRef, limit = 120): SmsMessage
         ? `${fmtDate(l.updatedDate)}, ${fmtClock(sentMinutes + failLatency / 60)}`
         : null,
       failureReason: failed ? pickFailureReason(r()) : null,
-      // A failed submission is still billed by most operators only when it
-      // reached them; rejects before submission are not. Keep it simple: only
-      // messages that left the platform consume segments.
+      // A hard failure never reached the handset, so it consumes no segments;
+      // everything that left the platform consumes its template's segment count.
       smsCount: status === "Failed" ? 0 : segments,
-      cost: +((status === "Failed" ? 0 : segments) * SMS_RATE_PER_SEGMENT).toFixed(2),
       deliveryLatency: delivered ? latency : null,
       date: l.updatedDate,
     };
@@ -207,7 +196,6 @@ export function smsMessagesToCsv(rows: SmsMessage[]): string {
     "failed_at",
     "failure_reason",
     "sms_count",
-    "cost_inr",
     "delivery_latency_sec",
   ];
   const body = rows.map((m) => [
@@ -221,7 +209,6 @@ export function smsMessagesToCsv(rows: SmsMessage[]): string {
     m.failedAt ?? "",
     m.failureReason ?? "",
     m.smsCount,
-    m.cost,
     m.deliveryLatency ?? "",
   ]);
   return [head, ...body]
