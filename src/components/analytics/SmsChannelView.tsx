@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import type { EChartsOption } from "echarts";
 import {
-  Send, CheckCircle2, XCircle, Clock, Layers,
+  Send, CheckCircle2, XCircle, Clock,
   Search, Download, type LucideIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -16,7 +16,6 @@ import { downloadCsv } from "@/lib/analytics-leads";
 import {
   buildSmsMessages, smsMessagesToCsv, templateForNode,
   failureBreakdown, smsOutcomeTotals,
-  SMS_DELIVERY_RATES,
   type SmsRef, type SmsStatus,
 } from "@/lib/analytics-sms";
 import { templateSegments } from "@/lib/sms-templates";
@@ -47,24 +46,10 @@ export function SmsChannelView({ refs }: { refs: SmsRef[] }) {
   const { delivered, failed, noDlr } = smsOutcomeTotals(totalSent);
   const deliveryRate = totalSent > 0 ? (delivered / totalSent) * 100 : 0;
 
-  // Segments per template: a 2-segment Unicode template consumes double per
-  // recipient, which is exactly the divergence this tile exists to show. Hard
-  // failures never reach the handset, so they consume nothing.
-  const segments = useMemo(
-    () =>
-      refs.reduce((sum, { node }) => {
-        const t = templateForNode(node);
-        const segs = t ? templateSegments(t).segments : 1;
-        const reached = Math.round(node.entered * (1 - SMS_DELIVERY_RATES.failed));
-        return sum + reached * segs;
-      }, 0),
-    [refs],
-  );
-
   return (
     <div className="space-y-6">
       <Section title="Delivery performance" sub="Every SMS node in the selected scope.">
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <Kpi icon={Send} label="Sent" value={totalSent.toLocaleString()} sub="Messages submitted to the operator" />
           <Kpi
             icon={CheckCircle2}
@@ -85,16 +70,6 @@ export function SmsChannelView({ refs }: { refs: SmsRef[] }) {
             label="Timeout"
             value={noDlr.toLocaleString()}
             sub="No receipt within the wait window"
-          />
-          <Kpi
-            icon={Layers}
-            label="Segments"
-            value={segments.toLocaleString()}
-            sub={
-              totalSent > 0
-                ? `${(segments / totalSent).toFixed(2)} SMS parts per message`
-                : "Total SMS parts sent"
-            }
           />
         </div>
       </Section>
@@ -556,13 +531,12 @@ function MessagesTable({ refs }: { refs: SmsRef[] }) {
                 <th className="px-4 py-2 font-medium">Delivered</th>
                 <th className="px-4 py-2 font-medium">Failed</th>
                 <th className="px-4 py-2 font-medium">Failure reason</th>
-                <th className="px-4 py-2 text-right font-medium">SMS</th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-12 text-center text-muted-foreground">
+                  <td colSpan={7} className="px-4 py-12 text-center text-muted-foreground">
                     No messages match your filters.
                   </td>
                 </tr>
@@ -587,7 +561,6 @@ function MessagesTable({ refs }: { refs: SmsRef[] }) {
                     </td>
                     <td className="whitespace-nowrap px-4 py-2.5 text-[11.5px] text-muted-foreground">{m.failedAt ?? "—"}</td>
                     <td className="px-4 py-2.5 text-[11.5px] text-muted-foreground">{m.failureReason ?? "—"}</td>
-                    <td className="px-4 py-2.5 text-right font-mono text-[12px]">{m.smsCount}</td>
                   </tr>
                 ))
               )}
