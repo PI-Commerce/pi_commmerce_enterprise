@@ -88,12 +88,29 @@ export function completedOutput(): NodeOutput[] {
  * The divergence is intentional: DLR is the whole point of an SMS step, and the
  * "not delivered within N minutes" path has no equivalent on WhatsApp.
  */
-export function smsOutputs(): NodeOutput[] {
-  return [
-    { id: "delivered", label: "Delivered", kind: "outcome" },
-    { id: "failed", label: "Failed", kind: "outcome" },
-    { id: "no_dlr", label: "No DLR in window", kind: "default" },
-  ];
+/** The full set of SMS delivery outcomes, in canvas order. */
+export const SMS_OUTCOMES: NodeOutput[] = [
+  { id: "delivered", label: "Delivered", kind: "outcome" },
+  { id: "failed", label: "Failed", kind: "outcome" },
+  { id: "no_dlr", label: "No DLR in window", kind: "default" },
+];
+
+/** Every outcome id, for defaulting a node to "all branches on". */
+export const SMS_OUTCOME_IDS = SMS_OUTCOMES.map((o) => o.id);
+
+/**
+ * The handles an SMS node exposes. Composers can disable individual delivery
+ * branches at the node level (PICOM change request), so `enabled` filters the
+ * full set to the outcomes the node actually wires. `undefined` means "all
+ * three" — the default, and what pre-existing preset/example data resolves to.
+ * An empty or fully-unknown `enabled` also falls back to all three, since a
+ * node with no exits is a dead end (the editor additionally forbids turning off
+ * the last branch).
+ */
+export function smsOutputs(enabled?: string[]): NodeOutput[] {
+  if (!enabled) return SMS_OUTCOMES.map((o) => ({ ...o }));
+  const kept = SMS_OUTCOMES.filter((o) => enabled.includes(o.id));
+  return (kept.length ? kept : SMS_OUTCOMES).map((o) => ({ ...o }));
 }
 
 /** Wait-window options for the `no_dlr` path, longest-plausible DLR latency last. */

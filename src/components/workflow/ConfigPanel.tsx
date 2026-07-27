@@ -26,7 +26,7 @@ import { NODE_LABELS, SAMPLE_WORKFLOW_VARIABLES, branchConditions } from "@/lib/
 import { SEED_TEMPLATES } from "@/lib/waba-templates";
 import {
   whatsappOutputs, resolveWaTemplate, completedOutput, isBranchableButton,
-  smsOutputs, SMS_DLR_WINDOWS, DEFAULT_SMS_DLR_WINDOW,
+  smsOutputs, SMS_OUTCOMES, SMS_OUTCOME_IDS, SMS_DLR_WINDOWS, DEFAULT_SMS_DLR_WINDOW,
 } from "@/lib/wa-outputs";
 import { useSmsConfig, useSmsTemplates, resolveSmsTemplate } from "@/lib/sms-store";
 import { sendersForCampaignType } from "@/lib/sms-config";
@@ -1474,6 +1474,18 @@ function SmsCore({ config, readOnly, mark, onChange }: {
   const [senderId, setSenderId] = useState(config?.senderId ?? "");
   const [templateId, setTemplateId] = useState(config?.smsTemplateId ?? "");
   const [dlrWindow, setDlrWindow] = useState(config?.smsDlrWindow ?? DEFAULT_SMS_DLR_WINDOW);
+  // Which delivery branches this node exposes. Absent config = all three on.
+  const [outcomes, setOutcomes] = useState<string[]>(config?.smsOutcomes ?? SMS_OUTCOME_IDS);
+
+  // Toggle an outcome branch on/off — but never let the last one go: a node with
+  // no exit is a dead end, so the final enabled switch is also disabled in the UI.
+  const toggleOutcome = (id: string, on: boolean) => {
+    setOutcomes((prev) => {
+      if (on) return SMS_OUTCOME_IDS.filter((o) => prev.includes(o) || o === id);
+      const next = prev.filter((o) => o !== id);
+      return next.length ? next : prev;
+    });
+  };
 
   const template = resolveSmsTemplate(templateId);
 
@@ -1508,22 +1520,24 @@ function SmsCore({ config, readOnly, mark, onChange }: {
   };
 
   // Publish handles + persist the selection so the node restores when reopened.
-  // Handles are fixed for SMS (delivered / failed / no_dlr) — unlike WhatsApp they
-  // don't vary with the template, but they still need publishing on first config.
+  // Unlike WhatsApp, SMS handles don't vary with the template — but the composer
+  // can now enable/disable individual delivery branches, so the published handles
+  // (and the canvas edges that can attach to them) track the `outcomes` toggles.
   useEffect(() => {
     onChange({
-      outputs: smsOutputs(),
+      outputs: smsOutputs(outcomes),
       config: {
         ...config,
         smsTemplateId: templateId,
         smsDlrWindow: dlrWindow,
+        smsOutcomes: outcomes,
         smsType: campaignType || undefined,
         senderId: senderId || undefined,
         peId: template?.peId ?? smsConfig.principalEntity.id,
       },
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [templateId, dlrWindow, campaignType, senderId]);
+  }, [templateId, dlrWindow, campaignType, senderId, outcomes]);
 
   useEffect(() => {
     if (!template) mark(false, "Select a DLT template");
@@ -1630,19 +1644,64 @@ function SmsCore({ config, readOnly, mark, onChange }: {
         </div>
       </Section>
 
-      <Section title="Delivery">
-        <Field label="Wait for DLR" required>
-          <Select value={dlrWindow} disabled={readOnly} onValueChange={setDlrWindow}>
-            <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {SMS_DLR_WINDOWS.map((w) => <SelectItem key={w} value={w}>{w}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          <p className="mt-1 text-[10.5px] text-muted-foreground">
-            How long the lead waits here for a delivery receipt before taking the “No DLR in window” path.
+      <Section title="Outcome branches">
+        <p className="text-[11px] text-muted-foreground">
+          Choose which delivery outcomes this node branches on. Each enabled outcome
+          becomes a wireable output on the canvas; disable the ones you don’t need to route.
+        </p>
+        <div className="mt-2 space-y-1.5">
+          {SMS_OUTCOMES.map((o) => {
+            const on = outcomes.includes(o.id);
+            const isLastOn = on && outcomes.length === 1;
+            return (
+              <div
+                key={o.id}
+                className="flex items-center justify-between rounded-lg border border-border bg-card/40 px-3 py-2"
+              >
+                <div className="min-w-0">
+                  <p className="text-[12.5px] font-medium text-foreground">{o.label}</p>
+                  <p className="text-[10.5px] text-muted-foreground">
+                    {o.id === "delivered"
+                      ? "A positive delivery receipt arrived."
+                      : o.id === "failed"
+                        ? "The vendor rejected the send, or a negative receipt arrived."
+                        : "No receipt arrived before the wait window closed."}
+                  </p>
+                </div>
+                <Switch
+                  checked={on}
+                  disabled={readOnly || isLastOn}
+                  onCheckedChange={(v) => toggleOutcome(o.id, v)}
+                  aria-label={`${o.label} branch`}
+                />
+              </div>
+            );
+          })}
+        </div>
+        {outcomes.length === 1 && (
+          <p className="mt-1.5 text-[10.5px] text-muted-foreground">
+            At least one outcome must stay enabled — a node needs somewhere to send leads.
           </p>
-        </Field>
+        )}
       </Section>
+
+      {/* The wait window only governs the "No DLR in window" path, so it's only
+          meaningful — and only shown — when that branch is enabled above. */}
+      {outcomes.includes("no_dlr") && (
+        <Section title="Delivery">
+          <Field label="Wait for DLR" required>
+            <Select value={dlrWindow} disabled={readOnly} onValueChange={setDlrWindow}>
+              <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {SMS_DLR_WINDOWS.map((w) => <SelectItem key={w} value={w}>{w}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <p className="mt-1 text-[10.5px] text-muted-foreground">
+              How long the lead waits here for a delivery receipt before taking the “No DLR in window” path.
+            </p>
+          </Field>
+        </Section>
+      )}
 
       <ActionAdvanceBanner kind="sms" />
     </>
@@ -2094,7 +2153,7 @@ function ActionAdvanceBanner({ kind, type1 }: { kind: ActionKind; type1?: boolea
     kind === "voiceCall"
       ? "Leads advance when the call concludes or retries are exhausted. Branch on the outcome with a Conditional node downstream."
       : kind === "sms"
-        ? "Leads wait here for a delivery receipt, then take “Delivered” or “Failed”. If no DLR arrives within the wait window they take “No DLR in window”. Wire all three."
+        ? "Leads wait here for a delivery receipt, then take the matching outcome branch (or “No DLR in window” if none arrives in time). Wire every enabled outcome."
         : type1
           ? "Always two outputs: “Replied (no button)” and “No response / continue” (24h session expiry + any untrackable tap). Wire both."
           : "Each trackable button is its own output, plus “Replied (no button)” and “No response / continue”. Phone numbers and untracked URLs aren’t trackable — those taps route through “No response / continue”. Wire every output.";

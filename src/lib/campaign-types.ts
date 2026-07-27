@@ -182,6 +182,9 @@ export type PresetConfig = {
   smsVarMap?: PresetVarMap[];
   /** How long the node waits for a DLR before taking the "No DLR in window" path. */
   smsDlrWindow?: string;
+  /** Which delivery-outcome branches the node exposes as wireable handles
+   *  (subset of `delivered` / `failed` / `no_dlr`). Absent = all three. */
+  smsOutcomes?: string[];
   /** Campaign type + sender, derived from the selected template. Persisted so the
    *  canvas/analytics can label the node without re-resolving the registry. */
   smsType?: string;

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import type { EChartsOption } from "echarts";
 import {
-  Send, CheckCircle2, XCircle, Clock, Layers, IndianRupee, Timer,
+  Send, CheckCircle2, XCircle, Clock, Layers, Timer,
   Search, Download, type LucideIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -16,7 +16,7 @@ import { downloadCsv } from "@/lib/analytics-leads";
 import {
   buildSmsMessages, smsMessagesToCsv, templateForNode,
   failureBreakdown, smsOutcomeTotals,
-  SMS_RATE_PER_SEGMENT, SMS_DELIVERY_RATES,
+  SMS_DELIVERY_RATES,
   type SmsRef, type SmsStatus,
 } from "@/lib/analytics-sms";
 import { templateSegments } from "@/lib/sms-templates";
@@ -28,12 +28,12 @@ import { templateSegments } from "@/lib/sms-templates";
  *  - **the outcomes don't nest.** Delivered / Failed / DLR-not-received are the
  *    node's three mutually exclusive terminal states, so they render as a split,
  *    not as a funnel where each stage is a subset of the one above it.
- *  - **the report is per-recipient**, with nine required columns the shared
- *    leads table doesn't carry (template name + id, three timestamps, failure
- *    reason, segment count).
- *  - **SMS bills by segment.** A Unicode template consumes two segments per
- *    recipient, so message count and billed volume genuinely diverge and both
- *    need surfacing.
+ *  - **the report is per-recipient**, with columns the shared leads table
+ *    doesn't carry (template name + id, three timestamps, failure reason,
+ *    segment count).
+ *  - **SMS is measured in segments.** A Unicode template consumes two segments
+ *    per recipient, so message count and segment volume genuinely diverge and
+ *    both need surfacing.
  */
 export function SmsChannelView({ refs }: { refs: SmsRef[] }) {
   const messages = useMemo(() => refs.flatMap((ref) => buildSmsMessages(ref)), [refs]);
@@ -47,7 +47,7 @@ export function SmsChannelView({ refs }: { refs: SmsRef[] }) {
   const { delivered, failed, noDlr } = smsOutcomeTotals(totalSent);
   const deliveryRate = totalSent > 0 ? (delivered / totalSent) * 100 : 0;
 
-  // Segments bill per template: a 2-segment Unicode template consumes double per
+  // Segments per template: a 2-segment Unicode template consumes double per
   // recipient, which is exactly the divergence this tile exists to show. Hard
   // failures never reach the handset, so they consume nothing.
   const segments = useMemo(
@@ -55,12 +55,11 @@ export function SmsChannelView({ refs }: { refs: SmsRef[] }) {
       refs.reduce((sum, { node }) => {
         const t = templateForNode(node);
         const segs = t ? templateSegments(t).segments : 1;
-        const billable = Math.round(node.entered * (1 - SMS_DELIVERY_RATES.failed));
-        return sum + billable * segs;
+        const reached = Math.round(node.entered * (1 - SMS_DELIVERY_RATES.failed));
+        return sum + reached * segs;
       }, 0),
     [refs],
   );
-  const cost = segments * SMS_RATE_PER_SEGMENT;
 
   const deliveredMsgs = messages.filter((m) => m.deliveryLatency != null);
   const avgLatency = deliveredMsgs.length
@@ -72,7 +71,7 @@ export function SmsChannelView({ refs }: { refs: SmsRef[] }) {
   return (
     <div className="space-y-6">
       <Section title="Delivery performance" sub="Every SMS node in the selected scope.">
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
           <Kpi icon={Send} label="Sent" value={totalSent.toLocaleString()} sub="Messages submitted to the operator" />
           <Kpi
             icon={CheckCircle2}
@@ -94,23 +93,15 @@ export function SmsChannelView({ refs }: { refs: SmsRef[] }) {
             value={noDlr.toLocaleString()}
             sub="Wait window closed with no receipt"
           />
-        </div>
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
           <Kpi
             icon={Layers}
-            label="Segments consumed"
+            label="Segments"
             value={segments.toLocaleString()}
             sub={
               totalSent > 0
-                ? `${(segments / totalSent).toFixed(2)} per message billed`
-                : "Billable SMS parts"
+                ? `${(segments / totalSent).toFixed(2)} SMS parts per message`
+                : "Total SMS parts sent"
             }
-          />
-          <Kpi
-            icon={IndianRupee}
-            label="Cost"
-            value={`₹${cost.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
-            sub={`₹${SMS_RATE_PER_SEGMENT.toFixed(2)} per segment`}
           />
           <Kpi
             icon={Timer}
@@ -408,7 +399,7 @@ function DayWise({ sent, delivered, failed }: { sent: number; delivered: number;
 }
 
 /** Delivery rate per DLT template in scope — the SMS analogue of the WhatsApp
- *  template comparison. Also surfaces each template's billed segment count. */
+ *  template comparison. Also surfaces each template's segment count. */
 function TemplateComparison({ refs }: { refs: SmsRef[] }) {
   const rows = useMemo(() => {
     const byId = new Map<string, { name: string; sent: number; segments: number }>();
@@ -437,7 +428,7 @@ function TemplateComparison({ refs }: { refs: SmsRef[] }) {
           const arr = p as { name: string; value: number; dataIndex: number }[];
           const row = rows[arr[0]?.dataIndex ?? 0];
           if (!row) return "";
-          return `${row.name}<br/>Sent <b>${row.sent.toLocaleString()}</b><br/>Segments each <b>${row.segments}</b><br/>Billed <b>${(row.sent * row.segments).toLocaleString()}</b>`;
+          return `${row.name}<br/>Sent <b>${row.sent.toLocaleString()}</b><br/>Segments each <b>${row.segments}</b><br/>Total segments <b>${(row.sent * row.segments).toLocaleString()}</b>`;
         },
       },
       xAxis: { type: "value", axisLabel: { fontSize: 10 } },
@@ -472,7 +463,7 @@ function TemplateComparison({ refs }: { refs: SmsRef[] }) {
   );
 
   return (
-    <Card title="Templates in scope" sub="Volume per DLT template, annotated where a template bills more than one segment.">
+    <Card title="Templates in scope" sub="Volume per DLT template, annotated where a template spans more than one segment.">
       <div className="h-[300px]">
         {rows.length === 0 ? <Empty hint="No resolvable templates in scope." /> : <EChart option={option} />}
       </div>
@@ -579,13 +570,12 @@ function MessagesTable({ refs }: { refs: SmsRef[] }) {
                 <th className="px-4 py-2 font-medium">Failed</th>
                 <th className="px-4 py-2 font-medium">Failure reason</th>
                 <th className="px-4 py-2 text-right font-medium">SMS</th>
-                <th className="px-4 py-2 text-right font-medium">Cost</th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-12 text-center text-muted-foreground">
+                  <td colSpan={8} className="px-4 py-12 text-center text-muted-foreground">
                     No messages match your filters.
                   </td>
                 </tr>
@@ -615,9 +605,6 @@ function MessagesTable({ refs }: { refs: SmsRef[] }) {
                     <td className="whitespace-nowrap px-4 py-2.5 text-[11.5px] text-muted-foreground">{m.failedAt ?? "—"}</td>
                     <td className="px-4 py-2.5 text-[11.5px] text-muted-foreground">{m.failureReason ?? "—"}</td>
                     <td className="px-4 py-2.5 text-right font-mono text-[12px]">{m.smsCount}</td>
-                    <td className="px-4 py-2.5 text-right font-mono text-[12px] text-muted-foreground">
-                      {m.cost > 0 ? `₹${m.cost.toFixed(2)}` : "—"}
-                    </td>
                   </tr>
                 ))
               )}
