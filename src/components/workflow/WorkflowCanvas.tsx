@@ -122,7 +122,6 @@ export function WorkflowCanvas({
   // state without re-triggering on every change.
   const nodesRef = useRef(nodes); nodesRef.current = nodes;
   const edgesRef = useRef(edges); edgesRef.current = edges;
-  const didLayoutRef = useRef(false);
 
   // Localize region-sensitive node text — timezone abbreviations (e.g. the Voice
   // "Call window … IST" subtitle) and currency symbols in conditional labels
@@ -143,11 +142,19 @@ export function WorkflowCanvas({
     );
   }, [tzAbbrev, symbol, setNodes]);
 
-  // Initial ELK layout for the example/seed graph (runs once on mount). Blank new
-  // campaigns ship pre-laid-out (see BLANK_NODES) so skip them here.
+  // Initial ELK layout for the example/seed graph. Blank new campaigns ship
+  // pre-laid-out (see BLANK_NODES) so skip them here.
+  //
+  // Deliberately NO run-once ref guard: React can mount → clean up → remount the
+  // same instance (client-side route navigation, StrictMode, Fast Refresh). A
+  // ref guard survives that cycle and strands the reveal — the first run is
+  // cancelled by the cleanup while the guard blocks the second from ever calling
+  // setLayingOut(false), so the canvas stays blank until a full page reload. The
+  // effect's deps are stable, so it only fires on a real (re)mount anyway, and
+  // re-laying an example graph is idempotent. The `cancelled` flag alone is the
+  // correct guard: on a double-invoke the second run reveals with a fresh flag.
   useEffect(() => {
-    if (didLayoutRef.current || isNew) return;
-    didLayoutRef.current = true;
+    if (isNew) return;
     let cancelled = false;
     (async () => {
       const laid = await elkLayout(nodesRef.current, edgesRef.current);
