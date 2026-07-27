@@ -15,13 +15,13 @@ import {
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import type { SmsChannelConfig } from "@/lib/sms-config";
-import { sendersForCampaignType } from "@/lib/sms-config";
+import { sendersForEntityCategory } from "@/lib/sms-config";
 import {
-  SMS_TYPES, SMS_CAMPAIGN_TYPES, SMS_BULK_HEADERS,
+  SMS_TYPES, SMS_CATEGORIES, SMS_BULK_HEADERS,
   smsPlaceholders, smsSegments, templateSegments, isFlashType, isUnicodeType,
   validateSmsTemplate, parseSmsBulkCsv, sampleBulkCsv, downloadCsvFile,
   todayLabel, parseSmsCreated,
-  type SmsTemplate, type SmsType, type SmsCampaignType, type SmsBulkResult,
+  type SmsTemplate, type SmsType, type SmsCategory, type SmsBulkResult,
 } from "@/lib/sms-templates";
 import { useSmsTemplates, upsertSmsTemplate, addSmsTemplates, removeSmsTemplate } from "@/lib/sms-store";
 
@@ -104,7 +104,7 @@ function SmsTemplateList({ templates, onCreate, onEdit, onDelete, onBulk }: {
   onBulk: () => void;
 }) {
   const [q, setQ] = useState("");
-  const [type, setType] = useState<SmsCampaignType | "all">("all");
+  const [type, setType] = useState<SmsCategory | "all">("all");
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
   const [page, setPage] = useState(1);
@@ -115,7 +115,7 @@ function SmsTemplateList({ templates, onCreate, onEdit, onDelete, onBulk }: {
     const endD = end ? new Date(end) : null;
     return templates.filter((t) => {
       if (needle && !`${t.name} ${t.id} ${t.senderId}`.toLowerCase().includes(needle)) return false;
-      if (type !== "all" && t.campaignType !== type) return false;
+      if (type !== "all" && t.category !== type) return false;
       const created = parseSmsCreated(t.createdAt);
       if (startD && created < startD) return false;
       if (endD && created > endD) return false;
@@ -146,12 +146,12 @@ function SmsTemplateList({ templates, onCreate, onEdit, onDelete, onBulk }: {
               className="h-9 pl-9"
             />
           </div>
-          <Field label="Campaign type">
-            <Select value={type} onValueChange={(v) => setType(v as SmsCampaignType | "all")}>
+          <Field label="Category">
+            <Select value={type} onValueChange={(v) => setType(v as SmsCategory | "all")}>
               <SelectTrigger className="h-9 w-40 text-sm"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All types</SelectItem>
-                {SMS_CAMPAIGN_TYPES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                <SelectItem value="all">All categories</SelectItem>
+                {SMS_CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
               </SelectContent>
             </Select>
           </Field>
@@ -174,7 +174,7 @@ function SmsTemplateList({ templates, onCreate, onEdit, onDelete, onBulk }: {
         {/* Table — frozen header row, only the body rows scroll */}
         <div className="mt-4 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border">
           <div className={cn("grid shrink-0 items-center gap-3 border-b border-border bg-secondary/40 px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground", GRID)}>
-            <span>Template ID</span><span>Name</span><span>Campaign type</span>
+            <span>Template ID</span><span>Name</span><span>Category</span>
             <span>Sender ID</span><span>Create date</span><span className="text-right">Segments</span>
             <span className="w-16 text-right">Action</span>
           </div>
@@ -202,7 +202,7 @@ function SmsTemplateList({ templates, onCreate, onEdit, onDelete, onBulk }: {
                       </span>
                       <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">{t.content}</span>
                     </span>
-                    <span><CampaignTag type={t.campaignType} /></span>
+                    <span><CategoryTag type={t.category} /></span>
                     <span className="font-mono text-[12px] text-muted-foreground">{t.senderId}</span>
                     <span className="text-muted-foreground">{t.createdAt}</span>
                     <span className="text-right font-mono text-[12px] text-muted-foreground" title={`${seg.encoding} · up to ${seg.segments} SMS per recipient`}>
@@ -290,10 +290,9 @@ function SmsTypeGlyph({ type }: { type: SmsType }) {
   );
 }
 
-function CampaignTag({ type }: { type: SmsCampaignType }) {
+function CategoryTag({ type }: { type: SmsCategory }) {
   const tone =
     type === "Transactional" ? "border-ai/30 bg-ai/10 text-ai"
-    : type === "OTP" ? "border-warning/30 bg-warning/10 text-warning"
     : "border-border bg-secondary text-muted-foreground";
   return (
     <span className={cn("inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium", tone)}>
@@ -312,24 +311,24 @@ function SmsTemplateForm({ config, initial, existing, onCancel, onSave }: {
   onSave: (t: SmsTemplate) => void;
 }) {
   const [smsType, setSmsType] = useState<SmsType>(initial?.smsType ?? "Text");
-  const [peId, setPeId] = useState(initial?.peId ?? config.principalEntity.id);
-  const [campaignType, setCampaignType] = useState<SmsCampaignType | "">(initial?.campaignType ?? "");
+  const [peId, setPeId] = useState(initial?.peId ?? config.principalEntities[0]?.id ?? "");
+  const [category, setCategory] = useState<SmsCategory | "">(initial?.category ?? "");
   const [senderId, setSenderId] = useState(initial?.senderId ?? "");
   const [name, setName] = useState(initial?.name ?? "");
   const [id, setId] = useState(initial?.id ?? "");
   const [content, setContent] = useState(initial?.content ?? "");
   const [showErrors, setShowErrors] = useState(false);
 
-  // Sender IDs are approved per use case on DLT, so the picker narrows once a
-  // campaign type is chosen. A sender that loses its approval for the newly
-  // selected type is cleared rather than silently kept.
-  const senders = campaignType ? sendersForCampaignType(config, campaignType) : config.senderIds;
+  // Sender IDs are registered under a specific Principal Entity and approved per
+  // category, so the picker narrows once both PE and category are chosen. A
+  // sender that no longer fits the current PE/category is cleared, not kept.
+  const senders = category ? sendersForEntityCategory(config, peId, category) : [];
   useEffect(() => {
     if (senderId && !senders.some((s) => s.id === senderId)) setSenderId("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [campaignType]);
+  }, [peId, category]);
 
-  const draft: Partial<SmsTemplate> = { smsType, peId, campaignType: campaignType || undefined, senderId, name, id, content };
+  const draft: Partial<SmsTemplate> = { smsType, peId, category: category || undefined, senderId, name, id, content };
   const errorList = validateSmsTemplate(draft, existing, initial?.id);
   // Map the shared validator's messages back onto fields so each one renders
   // inline; the validator is the single source of truth for both this form and
@@ -338,7 +337,7 @@ function SmsTemplateForm({ config, initial, existing, onCancel, onSave }: {
   const errors = {
     smsType: errorFor("sms type"),
     peId: errorFor("pe id"),
-    campaignType: errorFor("campaign type"),
+    category: errorFor("category"),
     senderId: errorFor("sender id"),
     name: errorFor("template name"),
     id: errorFor("template id"),
@@ -360,7 +359,7 @@ function SmsTemplateForm({ config, initial, existing, onCancel, onSave }: {
       id: id.trim(),
       name: name.trim(),
       smsType,
-      campaignType: campaignType as SmsCampaignType,
+      category: category as SmsCategory,
       peId: peId.trim(),
       senderId: senderId.trim(),
       content: content.trim(),
@@ -392,9 +391,9 @@ function SmsTemplateForm({ config, initial, existing, onCancel, onSave }: {
             <div className="flex items-start gap-2 rounded-lg border border-dashed border-border bg-muted/30 px-3 py-2.5 text-[11.5px] text-muted-foreground">
               <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
               <span>
-                Enter the template exactly as approved on your DLT panel. This registry stores a copy —
-                it does not submit anything to DLT, and the content must match character for character or
-                the operator will reject the message.
+                The Template ID and content come from your DLT-approved template — the content must match
+                character for character or the operator will reject the message. The Template Name is a
+                Pi Commerce label you choose for identifying it in the dashboard.
               </span>
             </div>
 
@@ -404,27 +403,27 @@ function SmsTemplateForm({ config, initial, existing, onCancel, onSave }: {
                   <Select value={peId} onValueChange={setPeId}>
                     <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select PE ID" /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value={config.principalEntity.id}>
-                        {config.principalEntity.id} · {config.principalEntity.name}
-                      </SelectItem>
+                      {config.principalEntities.map((e) => (
+                        <SelectItem key={e.id} value={e.id}>{e.id} · {e.name}</SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </FormField>
-                <FormField label="Campaign Type" required error={showErrors ? errors.campaignType : undefined}>
-                  <Select value={campaignType} onValueChange={(v) => setCampaignType(v as SmsCampaignType)}>
-                    <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select Campaign Type" /></SelectTrigger>
+                <FormField label="Category" required error={showErrors ? errors.category : undefined}>
+                  <Select value={category} onValueChange={(v) => setCategory(v as SmsCategory)}>
+                    <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select Category" /></SelectTrigger>
                     <SelectContent>
-                      {SMS_CAMPAIGN_TYPES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                      {SMS_CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </FormField>
                 <FormField
                   label="Sender ID"
                   required
-                  hint={campaignType ? `Approved for ${campaignType} messages` : "Select a campaign type first"}
+                  hint={category ? `Approved for ${category} messages under this PE` : "Select a category first"}
                   error={showErrors ? errors.senderId : undefined}
                 >
-                  <Select value={senderId} onValueChange={setSenderId} disabled={!campaignType}>
+                  <Select value={senderId} onValueChange={setSenderId} disabled={!category}>
                     <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select Sender ID" /></SelectTrigger>
                     <SelectContent>
                       {senders.map((s) => <SelectItem key={s.id} value={s.id}>{s.id}</SelectItem>)}
@@ -452,7 +451,7 @@ function SmsTemplateForm({ config, initial, existing, onCancel, onSave }: {
                 <FormField
                   label="Template Name"
                   required
-                  hint="Exactly as issued by your DLT panel"
+                  hint="A label to identify this template in Pi Commerce"
                   error={showErrors ? errors.name : undefined}
                 >
                   <Input

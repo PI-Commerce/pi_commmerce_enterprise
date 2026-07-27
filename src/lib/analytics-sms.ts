@@ -18,7 +18,7 @@ import { generateLeads } from "@/lib/analytics-leads";
 import { resolveSmsTemplate } from "@/lib/sms-store";
 import { templateSegments, type SmsTemplate } from "@/lib/sms-templates";
 
-export type SmsStatus = "Sent" | "Delivered" | "Failed" | "DLR not received";
+export type SmsStatus = "Sent" | "Delivered" | "Failed" | "Timed out";
 
 /**
  * Vendor/operator rejection reasons, weighted by how often they occur in
@@ -73,13 +73,18 @@ export type SmsMessage = {
   customer: string;
   templateName: string;
   templateId: string;
+  /** Registered sender (header) and Principal Entity ID — report-only. */
+  senderId: string;
+  peId: string;
+  /** The message body that was sent (the template's registered content). */
+  body: string;
   status: SmsStatus;
   /** Display timestamps; null when that transition never happened. */
   sentAt: string;
   deliveredAt: string | null;
   failedAt: string | null;
   failureReason: string | null;
-  /** Segments consumed by this message — the "SMS count" in §5. */
+  /** Segments consumed by this message — the "SMS count" in §5. Report-only. */
   smsCount: number;
   /** Seconds from submission to delivery receipt; null unless delivered. */
   deliveryLatency: number | null;
@@ -123,7 +128,7 @@ function seed(s: string) {
 const OUTCOME_MIX: { status: SmsStatus; p: number }[] = [
   { status: "Delivered", p: 0.925 },
   { status: "Failed", p: 0.04 },
-  { status: "DLR not received", p: 0.02 },
+  { status: "Timed out", p: 0.02 },
   { status: "Sent", p: 0.015 },
 ];
 
@@ -161,6 +166,9 @@ export function buildSmsMessages({ run, node }: SmsRef, limit = 120): SmsMessage
       customer: l.name,
       templateName: template?.name ?? "—",
       templateId: template?.id ?? "—",
+      senderId: template?.senderId ?? node.config?.senderId ?? "—",
+      peId: template?.peId ?? node.config?.peId ?? "—",
+      body: template?.content ?? "—",
       status,
       sentAt: `${fmtDate(l.updatedDate)}, ${fmtClock(sentMinutes)}`,
       deliveredAt: delivered
@@ -188,8 +196,11 @@ export function smsMessagesToCsv(rows: SmsMessage[]): string {
   const head = [
     "recipient",
     "customer",
+    "pe_id",
+    "sender_id",
     "template_name",
     "template_id",
+    "message_body",
     "status",
     "sent_at",
     "delivered_at",
@@ -201,8 +212,11 @@ export function smsMessagesToCsv(rows: SmsMessage[]): string {
   const body = rows.map((m) => [
     m.phone,
     m.customer,
+    m.peId,
+    m.senderId,
     m.templateName,
     m.templateId,
+    m.body,
     m.status,
     m.sentAt,
     m.deliveredAt ?? "",

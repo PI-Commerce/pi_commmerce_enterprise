@@ -26,12 +26,12 @@ import { NODE_LABELS, SAMPLE_WORKFLOW_VARIABLES, branchConditions } from "@/lib/
 import { SEED_TEMPLATES } from "@/lib/waba-templates";
 import {
   whatsappOutputs, resolveWaTemplate, completedOutput, isBranchableButton,
-  smsOutputs, SMS_OUTCOMES, SMS_OUTCOME_IDS, SMS_DLR_WINDOWS, DEFAULT_SMS_DLR_WINDOW,
+  smsOutputs, SMS_DLR_WINDOWS, DEFAULT_SMS_DLR_WINDOW,
 } from "@/lib/wa-outputs";
 import { useSmsConfig, useSmsTemplates, resolveSmsTemplate } from "@/lib/sms-store";
-import { sendersForCampaignType } from "@/lib/sms-config";
+import { sendersForCategory } from "@/lib/sms-config";
 import {
-  SMS_CAMPAIGN_TYPES, smsPlaceholders, templateSegments, type SmsCampaignType,
+  SMS_CATEGORIES, smsPlaceholders, templateSegments, type SmsCategory,
 } from "@/lib/sms-templates";
 import { getTool, TOOLS } from "@/lib/tool-registry";
 import { resolveAgent, voiceAgents } from "@/lib/agent-data";
@@ -1468,42 +1468,30 @@ function SmsCore({ config, readOnly, mark, onChange }: {
 }) {
   const smsConfig = useSmsConfig();
   const templates = useSmsTemplates();
-  const [campaignType, setCampaignType] = useState<SmsCampaignType | "">(
-    (config?.smsType as SmsCampaignType) ?? "",
+  const [category, setCategory] = useState<SmsCategory | "">(
+    (config?.smsCategory as SmsCategory) ?? "",
   );
   const [senderId, setSenderId] = useState(config?.senderId ?? "");
   const [templateId, setTemplateId] = useState(config?.smsTemplateId ?? "");
   const [dlrWindow, setDlrWindow] = useState(config?.smsDlrWindow ?? DEFAULT_SMS_DLR_WINDOW);
-  // Which delivery branches this node exposes. Absent config = all three on.
-  const [outcomes, setOutcomes] = useState<string[]>(config?.smsOutcomes ?? SMS_OUTCOME_IDS);
-
-  // Toggle an outcome branch on/off — but never let the last one go: a node with
-  // no exit is a dead end, so the final enabled switch is also disabled in the UI.
-  const toggleOutcome = (id: string, on: boolean) => {
-    setOutcomes((prev) => {
-      if (on) return SMS_OUTCOME_IDS.filter((o) => prev.includes(o) || o === id);
-      const next = prev.filter((o) => o !== id);
-      return next.length ? next : prev;
-    });
-  };
 
   const template = resolveSmsTemplate(templateId);
 
-  // Cascade: campaign type narrows senders (DLT approves a header per use case),
-  // and the two together narrow the templates. A selection that falls outside the
+  // Cascade: category narrows senders (a header is approved per category), and
+  // the two together narrow the templates. A selection that falls outside the
   // narrowed set is cleared rather than left dangling.
-  const senders = campaignType ? sendersForCampaignType(smsConfig, campaignType) : smsConfig.senderIds;
+  const senders = category ? sendersForCategory(smsConfig, category) : [];
   const matching = templates.filter(
-    (t) => (!campaignType || t.campaignType === campaignType) && (!senderId || t.senderId === senderId),
+    (t) => (!category || t.category === category) && (!senderId || t.senderId === senderId),
   );
   useEffect(() => {
     if (senderId && !senders.some((s) => s.id === senderId)) setSenderId("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [campaignType]);
+  }, [category]);
   useEffect(() => {
     if (templateId && !matching.some((t) => t.id === templateId)) setTemplateId("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [campaignType, senderId]);
+  }, [category, senderId]);
 
   // Mapping rows are derived from the template's own placeholders, hydrated from
   // any saved mapping so edits survive reopening the node.
@@ -1520,24 +1508,22 @@ function SmsCore({ config, readOnly, mark, onChange }: {
   };
 
   // Publish handles + persist the selection so the node restores when reopened.
-  // Unlike WhatsApp, SMS handles don't vary with the template — but the composer
-  // can now enable/disable individual delivery branches, so the published handles
-  // (and the canvas edges that can attach to them) track the `outcomes` toggles.
+  // SMS always exposes the same three delivery outcomes (Delivered / Failed /
+  // Timeout), so the handles are fixed; they still need publishing on first config.
   useEffect(() => {
     onChange({
-      outputs: smsOutputs(outcomes),
+      outputs: smsOutputs(),
       config: {
         ...config,
         smsTemplateId: templateId,
         smsDlrWindow: dlrWindow,
-        smsOutcomes: outcomes,
-        smsType: campaignType || undefined,
+        smsCategory: category || undefined,
         senderId: senderId || undefined,
-        peId: template?.peId ?? smsConfig.principalEntity.id,
+        peId: template?.peId ?? smsConfig.principalEntities[0]?.id,
       },
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [templateId, dlrWindow, campaignType, senderId, outcomes]);
+  }, [templateId, dlrWindow, category, senderId]);
 
   useEffect(() => {
     if (!template) mark(false, "Select a DLT template");
@@ -1549,7 +1535,7 @@ function SmsCore({ config, readOnly, mark, onChange }: {
     <>
       <Section title="DLT template">
         <div className="rounded-xl border border-border bg-card/50 p-4 space-y-4">
-          {/* Step 1: narrow by campaign type + sender, then pick the template */}
+          {/* Step 1: narrow by category + sender, then pick the template */}
           <div className="space-y-2">
             <div className="flex items-center gap-2">
               <StepChip n={1} done={!!template} />
@@ -1558,16 +1544,16 @@ function SmsCore({ config, readOnly, mark, onChange }: {
               </Label>
             </div>
             <div className="grid grid-cols-2 gap-2">
-              <Field label="Campaign type" required>
-                <Select value={campaignType || undefined} disabled={readOnly} onValueChange={(v) => setCampaignType(v as SmsCampaignType)}>
+              <Field label="Category" required>
+                <Select value={category || undefined} disabled={readOnly} onValueChange={(v) => setCategory(v as SmsCategory)}>
                   <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select…" /></SelectTrigger>
                   <SelectContent>
-                    {SMS_CAMPAIGN_TYPES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                    {SMS_CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </Field>
               <Field label="Sender ID" required>
-                <Select value={senderId || undefined} disabled={readOnly || !campaignType} onValueChange={setSenderId}>
+                <Select value={senderId || undefined} disabled={readOnly || !category} onValueChange={setSenderId}>
                   <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select…" /></SelectTrigger>
                   <SelectContent>
                     {senders.map((s) => <SelectItem key={s.id} value={s.id}>{s.id}</SelectItem>)}
@@ -1577,7 +1563,7 @@ function SmsCore({ config, readOnly, mark, onChange }: {
             </div>
             <Select value={templateId || undefined} disabled={readOnly || !senderId} onValueChange={setTemplateId}>
               <SelectTrigger className="h-9 text-sm">
-                <SelectValue placeholder={senderId ? "Choose template…" : "Pick a campaign type and sender first"} />
+                <SelectValue placeholder={senderId ? "Choose template…" : "Pick a category and sender first"} />
               </SelectTrigger>
               <SelectContent>
                 {/* Legacy preset configs may name a template that predates the
@@ -1592,7 +1578,7 @@ function SmsCore({ config, readOnly, mark, onChange }: {
             </Select>
             {senderId && matching.length === 0 && (
               <p className="text-[11px] text-muted-foreground">
-                No templates registered for {campaignType} · {senderId}. Add one under Channels → SMS → Templates.
+                No templates registered for {category} · {senderId}. Add one under Channels → SMS → Templates.
               </p>
             )}
             {template && (
@@ -1644,64 +1630,19 @@ function SmsCore({ config, readOnly, mark, onChange }: {
         </div>
       </Section>
 
-      <Section title="Outcome branches">
-        <p className="text-[11px] text-muted-foreground">
-          Choose which delivery outcomes this node branches on. Each enabled outcome
-          becomes a wireable output on the canvas; disable the ones you don’t need to route.
-        </p>
-        <div className="mt-2 space-y-1.5">
-          {SMS_OUTCOMES.map((o) => {
-            const on = outcomes.includes(o.id);
-            const isLastOn = on && outcomes.length === 1;
-            return (
-              <div
-                key={o.id}
-                className="flex items-center justify-between rounded-lg border border-border bg-card/40 px-3 py-2"
-              >
-                <div className="min-w-0">
-                  <p className="text-[12.5px] font-medium text-foreground">{o.label}</p>
-                  <p className="text-[10.5px] text-muted-foreground">
-                    {o.id === "delivered"
-                      ? "A positive delivery receipt arrived."
-                      : o.id === "failed"
-                        ? "The vendor rejected the send, or a negative receipt arrived."
-                        : "No receipt arrived before the wait window closed."}
-                  </p>
-                </div>
-                <Switch
-                  checked={on}
-                  disabled={readOnly || isLastOn}
-                  onCheckedChange={(v) => toggleOutcome(o.id, v)}
-                  aria-label={`${o.label} branch`}
-                />
-              </div>
-            );
-          })}
-        </div>
-        {outcomes.length === 1 && (
-          <p className="mt-1.5 text-[10.5px] text-muted-foreground">
-            At least one outcome must stay enabled — a node needs somewhere to send leads.
+      <Section title="Delivery">
+        <Field label="Wait for DLR" required>
+          <Select value={dlrWindow} disabled={readOnly} onValueChange={setDlrWindow}>
+            <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {SMS_DLR_WINDOWS.map((w) => <SelectItem key={w} value={w}>{w}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <p className="mt-1 text-[10.5px] text-muted-foreground">
+            How long the lead waits here for a delivery receipt before taking the “Timeout” path.
           </p>
-        )}
+        </Field>
       </Section>
-
-      {/* The wait window only governs the "No DLR in window" path, so it's only
-          meaningful — and only shown — when that branch is enabled above. */}
-      {outcomes.includes("no_dlr") && (
-        <Section title="Delivery">
-          <Field label="Wait for DLR" required>
-            <Select value={dlrWindow} disabled={readOnly} onValueChange={setDlrWindow}>
-              <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {SMS_DLR_WINDOWS.map((w) => <SelectItem key={w} value={w}>{w}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            <p className="mt-1 text-[10.5px] text-muted-foreground">
-              How long the lead waits here for a delivery receipt before taking the “No DLR in window” path.
-            </p>
-          </Field>
-        </Section>
-      )}
 
       <ActionAdvanceBanner kind="sms" />
     </>
@@ -2153,7 +2094,7 @@ function ActionAdvanceBanner({ kind, type1 }: { kind: ActionKind; type1?: boolea
     kind === "voiceCall"
       ? "Leads advance when the call concludes or retries are exhausted. Branch on the outcome with a Conditional node downstream."
       : kind === "sms"
-        ? "Leads wait here for a delivery receipt, then take the matching outcome branch (or “No DLR in window” if none arrives in time). Wire every enabled outcome."
+        ? "Always three outputs: “Delivered”, “Failed” and “Timeout” (no receipt within the wait window). Wire all three."
         : type1
           ? "Always two outputs: “Replied (no button)” and “No response / continue” (24h session expiry + any untrackable tap). Wire both."
           : "Each trackable button is its own output, plus “Replied (no button)” and “No response / continue”. Phone numbers and untracked URLs aren’t trackable — those taps route through “No response / continue”. Wire every output.";

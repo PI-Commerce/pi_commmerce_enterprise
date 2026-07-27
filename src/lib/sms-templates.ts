@@ -2,12 +2,14 @@
  * SMS templates — demo data + types for the SMS Template Registry
  * (Channels → SMS → Templates tab).
  *
- * Under India's TRAI/DLT regime a template is approved on the *client's* DLT
- * panel, which issues the Template Name and Template ID. What lives here is a
- * **copy** of that approved record, not a new registration — Pi Commerce never
- * submits anything to DLT. Because there is no API to re-check approval against
- * the DLT panel, every mirrored entry is treated as active and pre-verified;
- * that is why {@link SmsTemplate} carries no approval status (unlike
+ * Under India's TRAI/DLT regime the message content + Template ID are approved
+ * on the *client's* DLT panel. What lives here is a **copy** of that approved
+ * record, not a new registration — Pi Commerce never submits anything to DLT.
+ * The Template *Name* is a Pi Commerce label for identifying the template in the
+ * dashboard (it is not extracted from DLT); the Template ID and content are the
+ * DLT-issued facts. Because there is no API to re-check approval against the DLT
+ * panel, every entry is treated as active and pre-verified; that is why
+ * {@link SmsTemplate} carries no approval status (unlike
  * {@link file://./waba-templates.ts}, whose templates track Meta's review).
  *
  * Message content uses **named** `{{var}}` placeholders, which is the DLT
@@ -18,16 +20,16 @@
 /** Encoding + delivery class, as registered on DLT. "Class 0" = flash SMS. */
 export type SmsType = "Text" | "Unicode" | "Text-class 0" | "Unicode-class 0";
 
-/** Which vendor pipeline the message routes through. */
-export type SmsCampaignType = "Promotional" | "Transactional" | "OTP";
+/** Template category — the kind of message it carries. */
+export type SmsCategory = "Promotional" | "Transactional";
 
 export type SmsTemplate = {
   /** DLT-issued Template ID, mirrored verbatim from the client's DLT panel. */
   id: string;
-  /** DLT-issued Template Name. */
+  /** Pi Commerce label for this template — NOT extracted from DLT. */
   name: string;
   smsType: SmsType;
-  campaignType: SmsCampaignType;
+  category: SmsCategory;
   /** Principal Entity ID the template is registered under. */
   peId: string;
   /** Registered sender (header), e.g. "PICOMM". */
@@ -39,7 +41,7 @@ export type SmsTemplate = {
 };
 
 export const SMS_TYPES: SmsType[] = ["Text", "Unicode", "Text-class 0", "Unicode-class 0"];
-export const SMS_CAMPAIGN_TYPES: SmsCampaignType[] = ["Promotional", "Transactional", "OTP"];
+export const SMS_CATEGORIES: SmsCategory[] = ["Promotional", "Transactional"];
 
 /** Whether a type is one of the Unicode (UCS-2) encodings. */
 export function isUnicodeType(t: SmsType): boolean {
@@ -172,7 +174,7 @@ export const SEED_SMS_TEMPLATES: SmsTemplate[] = [
     id: "1107168420993847112",
     name: "order_confirm_txn",
     smsType: "Text",
-    campaignType: "Transactional",
+    category: "Transactional",
     peId: "1101473820000034521",
     senderId: "PICOMM",
     content:
@@ -183,7 +185,7 @@ export const SEED_SMS_TEMPLATES: SmsTemplate[] = [
     id: "1107168421004829376",
     name: "delivery_otp",
     smsType: "Text",
-    campaignType: "OTP",
+    category: "Transactional",
     peId: "1101473820000034521",
     senderId: "PICOTP",
     content: "{{otp}} is your verification code for PICOMM. Valid for 5 minutes. Do not share this code with anyone.",
@@ -193,7 +195,7 @@ export const SEED_SMS_TEMPLATES: SmsTemplate[] = [
     id: "1107168421118290043",
     name: "renewal_reminder_promo",
     smsType: "Text",
-    campaignType: "Promotional",
+    category: "Promotional",
     peId: "1101473820000034521",
     senderId: "PICOMM",
     content:
@@ -204,7 +206,7 @@ export const SEED_SMS_TEMPLATES: SmsTemplate[] = [
     id: "1107168421220847665",
     name: "payment_failed_txn",
     smsType: "Text",
-    campaignType: "Transactional",
+    category: "Transactional",
     peId: "1101473820000034521",
     senderId: "PICOMM",
     content:
@@ -215,7 +217,7 @@ export const SEED_SMS_TEMPLATES: SmsTemplate[] = [
     id: "1107168421339104782",
     name: "cart_recovery_promo",
     smsType: "Text",
-    campaignType: "Promotional",
+    category: "Promotional",
     peId: "1101473820000034521",
     senderId: "PIOFFR",
     content: "{{name}}, you left {{item}} in your cart. Complete your order today and get {{discount}}% off. {{link}} - PICOMM",
@@ -225,7 +227,7 @@ export const SEED_SMS_TEMPLATES: SmsTemplate[] = [
     id: "1107168421447290318",
     name: "festive_offer_hindi",
     smsType: "Unicode",
-    campaignType: "Promotional",
+    category: "Promotional",
     peId: "1101473820000034521",
     senderId: "PIOFFR",
     content: "{{name}} जी, {{festival}} पर पाएं {{discount}}% की छूट। ऑफर {{expiry_date}} तक मान्य है। {{link}} - PICOMM",
@@ -235,7 +237,7 @@ export const SEED_SMS_TEMPLATES: SmsTemplate[] = [
     id: "1107168421556731209",
     name: "kyc_pending_txn",
     smsType: "Text",
-    campaignType: "Transactional",
+    category: "Transactional",
     peId: "1101473820000034521",
     senderId: "PICOMM",
     content: "Dear {{name}}, your KYC is pending verification. Complete it by {{due_date}} to keep your account active. {{link}} - PICOMM",
@@ -245,7 +247,7 @@ export const SEED_SMS_TEMPLATES: SmsTemplate[] = [
     id: "1107168421663902554",
     name: "login_otp",
     smsType: "Text-class 0",
-    campaignType: "OTP",
+    category: "Transactional",
     peId: "1101473820000034521",
     senderId: "PICOTP",
     content: "{{otp}} is your PICOMM login OTP. Valid for {{minutes}} minutes. Never share it with anyone.",
@@ -263,7 +265,7 @@ export const SEED_SMS_TEMPLATES: SmsTemplate[] = [
 export const SMS_BULK_HEADERS = [
   "SMS Type",
   "PE ID",
-  "Campaign Type",
+  "Category",
   "Sender ID",
   "Template Name",
   "Template ID",
@@ -328,9 +330,9 @@ export function validateSmsTemplate(
   if (!t.peId?.trim()) errors.push("PE ID is required.");
   else if (!/^\d{8,25}$/.test(t.peId.trim())) errors.push("PE ID must be 8-25 digits.");
 
-  if (!t.campaignType) errors.push("Campaign Type is required.");
-  else if (!SMS_CAMPAIGN_TYPES.includes(t.campaignType)) {
-    errors.push(`Campaign Type must be one of: ${SMS_CAMPAIGN_TYPES.join(", ")}.`);
+  if (!t.category) errors.push("Category is required.");
+  else if (!SMS_CATEGORIES.includes(t.category)) {
+    errors.push(`Category must be one of: ${SMS_CATEGORIES.join(", ")}.`);
   }
 
   if (!t.senderId?.trim()) errors.push("Sender ID is required.");
@@ -376,7 +378,7 @@ export function parseSmsBulkCsv(text: string, existing: SmsTemplate[]): SmsBulkR
   const idx = {
     smsType: col("SMS Type"),
     peId: col("PE ID"),
-    campaignType: col("Campaign Type"),
+    category: col("Category"),
     senderId: col("Sender ID"),
     name: col("Template Name"),
     id: col("Template ID"),
@@ -392,7 +394,7 @@ export function parseSmsBulkCsv(text: string, existing: SmsTemplate[]): SmsBulkR
     const candidate: Partial<SmsTemplate> = {
       smsType: at(idx.smsType) as SmsType,
       peId: at(idx.peId),
-      campaignType: at(idx.campaignType) as SmsCampaignType,
+      category: at(idx.category) as SmsCategory,
       senderId: at(idx.senderId),
       name: at(idx.name),
       id: at(idx.id),

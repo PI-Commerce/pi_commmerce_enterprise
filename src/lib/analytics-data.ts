@@ -513,15 +513,14 @@ export function nodeConfigSnapshot(node: SankeyNode): NodeConfigField[] {
       }));
     }
     case "sms": {
-      // The DLT template is the node's real identity — sender and campaign type
-      // are properties of it, so lead with the template and show the billed
-      // segment count, which is what drives cost.
+      // The DLT template is the node's real identity — sender and category are
+      // properties of it, so lead with the template and show the segment count.
       const t = resolveSmsTemplate(c.smsTemplateId);
       const out = [
         { label: "Template", value: t?.name ?? dash(c.smsTemplateId) },
         { label: "Template ID", value: dash(c.smsTemplateId) },
         { label: "Sender ID", value: dash(t?.senderId ?? c.senderId) },
-        { label: "Campaign Type", value: dash(t?.campaignType ?? c.smsType) },
+        { label: "Category", value: dash(t?.category ?? c.smsCategory) },
       ];
       if (t) {
         const seg = templateSegments(t);

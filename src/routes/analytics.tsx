@@ -923,7 +923,7 @@ function buildNodeMetrics(
       { label: "Sent", value: sent.toLocaleString() },
       { label: "Delivered", value: delivered.toLocaleString() },
       { label: "Failed", value: failed.toLocaleString() },
-      { label: "No DLR", value: noDlr.toLocaleString() },
+      { label: "Timeout", value: noDlr.toLocaleString() },
     ];
   }
   if (k === "whatsapp" || k === "ads") {
@@ -1214,7 +1214,7 @@ function MiniFunnel({
   //    only in the KPI tiles, never in the funnel (it's a terminal failure
   //    state, not a stage on the success path). Pending is derived as
   //    base − (running + completed + failed).
-  //  • sms: funnel = Sent→Delivered only. Failed and No DLR are mutually
+  //  • sms: funnel = Sent→Delivered only. Failed and Timeout are mutually
   //    exclusive TERMINAL states, not stages below Delivered — funnelling them
   //    would imply a failed message had first been delivered.
   let linear: { label: string; value: number }[] = metrics;
@@ -1228,7 +1228,7 @@ function MiniFunnel({
     outcomes = metrics.filter((m) => OUTCOME_LABELS.includes(m.label));
     readBase = linear.find((m) => m.label === "Read")?.value ?? 0;
   } else if (kind === "sms") {
-    const OUTCOME_LABELS = ["Failed", "No DLR"];
+    const OUTCOME_LABELS = ["Failed", "Timeout"];
     linear = metrics.filter((m) => !OUTCOME_LABELS.includes(m.label));
     outcomes = metrics.filter((m) => OUTCOME_LABELS.includes(m.label));
     readBase = linear.find((m) => m.label === "Sent")?.value ?? 0;

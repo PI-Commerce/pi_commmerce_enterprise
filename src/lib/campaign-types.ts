@@ -180,17 +180,15 @@ export type PresetConfig = {
   smsTemplateId?: string;
   /** Maps each named `{{var}}` in the template body to a variable or constant. */
   smsVarMap?: PresetVarMap[];
-  /** How long the node waits for a DLR before taking the "No DLR in window" path. */
+  /** How long the node waits for a DLR before taking the "Timeout" path. */
   smsDlrWindow?: string;
-  /** Which delivery-outcome branches the node exposes as wireable handles
-   *  (subset of `delivered` / `failed` / `no_dlr`). Absent = all three. */
-  smsOutcomes?: string[];
-  /** Campaign type + sender, derived from the selected template. Persisted so the
-   *  canvas/analytics can label the node without re-resolving the registry. */
-  smsType?: string;
+  /** Template category + sender, derived from the selected template. Persisted so
+   *  the canvas/analytics can label the node without re-resolving the registry. */
+  smsCategory?: string;
   senderId?: string;
   peId?: string;
   /** Legacy free-text config, kept so pre-registry preset data still renders. */
+  smsType?: string;
   smsFormat?: string;
   smsBody?: string;
   // ---- Delay ----
