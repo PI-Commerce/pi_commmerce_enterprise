@@ -18,7 +18,7 @@ import { generateLeads } from "@/lib/analytics-leads";
 import { resolveSmsTemplate } from "@/lib/sms-store";
 import { templateSegments, type SmsTemplate } from "@/lib/sms-templates";
 
-export type SmsStatus = "Sent" | "Delivered" | "Failed" | "DLR not received";
+export type SmsStatus = "Sent" | "Delivered" | "Failed" | "Timed out";
 
 /**
  * Vendor/operator rejection reasons, weighted by how often they occur in
@@ -123,7 +123,7 @@ function seed(s: string) {
 const OUTCOME_MIX: { status: SmsStatus; p: number }[] = [
   { status: "Delivered", p: 0.925 },
   { status: "Failed", p: 0.04 },
-  { status: "DLR not received", p: 0.02 },
+  { status: "Timed out", p: 0.02 },
   { status: "Sent", p: 0.015 },
 ];
 

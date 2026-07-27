@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import type { EChartsOption } from "echarts";
 import {
-  Send, CheckCircle2, XCircle, Clock, Layers, Timer,
+  Send, CheckCircle2, XCircle, Clock, Layers,
   Search, Download, type LucideIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -61,13 +61,6 @@ export function SmsChannelView({ refs }: { refs: SmsRef[] }) {
     [refs],
   );
 
-  const deliveredMsgs = messages.filter((m) => m.deliveryLatency != null);
-  const avgLatency = deliveredMsgs.length
-    ? Math.round(
-        deliveredMsgs.reduce((s, m) => s + (m.deliveryLatency ?? 0), 0) / deliveredMsgs.length,
-      )
-    : 0;
-
   return (
     <div className="space-y-6">
       <Section title="Delivery performance" sub="Every SMS node in the selected scope.">
@@ -89,9 +82,9 @@ export function SmsChannelView({ refs }: { refs: SmsRef[] }) {
           />
           <Kpi
             icon={Clock}
-            label="No DLR in window"
+            label="Timeout"
             value={noDlr.toLocaleString()}
-            sub="Wait window closed with no receipt"
+            sub="No receipt within the wait window"
           />
           <Kpi
             icon={Layers}
@@ -102,12 +95,6 @@ export function SmsChannelView({ refs }: { refs: SmsRef[] }) {
                 ? `${(segments / totalSent).toFixed(2)} SMS parts per message`
                 : "Total SMS parts sent"
             }
-          />
-          <Kpi
-            icon={Timer}
-            label="Avg time to delivery"
-            value={avgLatency > 0 ? `${avgLatency}s` : "—"}
-            sub="Submission to delivery receipt"
           />
         </div>
       </Section>
@@ -206,7 +193,7 @@ function OutcomeSplit({ delivered, failed, noDlr }: {
   const data = [
     { name: "Delivered", value: delivered, color: OUTCOME_COLOR.delivered },
     { name: "Failed", value: failed, color: OUTCOME_COLOR.failed },
-    { name: "No DLR in window", value: noDlr, color: OUTCOME_COLOR.noDlr },
+    { name: "Timeout", value: noDlr, color: OUTCOME_COLOR.noDlr },
   ].filter((d) => d.value > 0);
 
   const option = useMemo<EChartsOption>(
@@ -484,11 +471,11 @@ function Empty({ hint }: { hint: string }) {
 const STATUS_TONE: Record<SmsStatus, string> = {
   Delivered: "bg-success/10 text-success",
   Failed: "bg-destructive/10 text-destructive",
-  "DLR not received": "bg-warning/10 text-warning",
+  "Timed out": "bg-warning/10 text-warning",
   Sent: "bg-secondary text-muted-foreground",
 };
 
-const STATUS_FILTERS: SmsStatus[] = ["Delivered", "Failed", "DLR not received", "Sent"];
+const STATUS_FILTERS: SmsStatus[] = ["Delivered", "Failed", "Timed out", "Sent"];
 
 function MessagesTable({ refs }: { refs: SmsRef[] }) {
   const [q, setQ] = useState("");
@@ -507,7 +494,7 @@ function MessagesTable({ refs }: { refs: SmsRef[] }) {
   const filtered = useMemo(
     () =>
       messages.filter((m) => {
-        if (q && !`${m.phone} ${m.customer} ${m.templateName}`.toLowerCase().includes(q.toLowerCase()))
+        if (q && !`${m.phone} ${m.templateName}`.toLowerCase().includes(q.toLowerCase()))
           return false;
         if (status !== "any" && m.status !== status) return false;
         return true;
@@ -533,7 +520,7 @@ function MessagesTable({ refs }: { refs: SmsRef[] }) {
             <Input
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Search number, name or template…"
+              placeholder="Search number or template…"
               className="h-8 w-[260px] pl-7 text-xs"
             />
           </div>
@@ -584,7 +571,6 @@ function MessagesTable({ refs }: { refs: SmsRef[] }) {
                   <tr key={m.id} className="border-b border-border last:border-0 hover:bg-secondary/40">
                     <td className="whitespace-nowrap px-4 py-2.5">
                       <span className="block font-mono text-[12px]">{m.phone}</span>
-                      <span className="block text-[11px] text-muted-foreground">{m.customer}</span>
                     </td>
                     <td className="px-4 py-2.5">
                       <span className="block">{m.templateName}</span>
@@ -598,9 +584,6 @@ function MessagesTable({ refs }: { refs: SmsRef[] }) {
                     <td className="whitespace-nowrap px-4 py-2.5 text-[11.5px] text-muted-foreground">{m.sentAt}</td>
                     <td className="whitespace-nowrap px-4 py-2.5 text-[11.5px] text-muted-foreground">
                       {m.deliveredAt ?? "—"}
-                      {m.deliveryLatency != null && (
-                        <span className="ml-1 text-[10.5px] text-muted-foreground/70">+{m.deliveryLatency}s</span>
-                      )}
                     </td>
                     <td className="whitespace-nowrap px-4 py-2.5 text-[11.5px] text-muted-foreground">{m.failedAt ?? "—"}</td>
                     <td className="px-4 py-2.5 text-[11.5px] text-muted-foreground">{m.failureReason ?? "—"}</td>

@@ -462,7 +462,7 @@ const sWa = (
 
 /**
  * A DLT-template SMS send. Unlike WhatsApp, an SMS node always exposes the same
- * three delivery outcomes (Delivered / Failed / No DLR in window) regardless of
+ * three delivery outcomes (Delivered / Failed / Timeout) regardless of
  * template — `buildCampaign` fans a port-less onward edge to all three, so a
  * "linear" library send still wires every handle. Campaigns that want to react
  * differently to a failure wire the ports explicitly.
@@ -484,7 +484,7 @@ const sSms = (
       smsTemplateId: templateId,
       smsVarMap: opts?.vars ?? [],
       smsDlrWindow: opts?.dlrWindow ?? DEFAULT_SMS_DLR_WINDOW,
-      smsType: t?.campaignType,
+      smsCategory: t?.category,
       senderId: t?.senderId,
       peId: t?.peId,
     },
@@ -1315,10 +1315,10 @@ const C_ALTAYER = buildCampaign("Retail · ACME Corp FCC Loyalty", [
  * The one SMS-first journey in the library. Every other campaign uses SMS as a
  * single supporting step, which makes the channel's template comparison a
  * one-bar chart in Campaign-run mode. This one runs FIVE different DLT
- * templates across all three pipelines (Transactional / OTP / Promotional),
- * three sender IDs and both encodings — so the SMS analytics have something
- * real to compare, and the billed-segment divergence shows up inside a single
- * run rather than only when switching templates in Asset-mode.
+ * templates across both categories (Transactional / Promotional), three sender
+ * IDs and both encodings — so the SMS analytics have something real to compare,
+ * and the segment divergence shows up inside a single run rather than only when
+ * switching templates in Asset-mode.
  */
 const C_SMS_LIFECYCLE = buildCampaign("D2C · Order Lifecycle (SMS-led)", [
   sStart(),
@@ -1338,8 +1338,8 @@ const C_SMS_LIFECYCLE = buildCampaign("D2C · Order Lifecycle (SMS-led)", [
     { id: "payment_due", label: "Payment pending", value: "payment_due" },
     { id: "kyc", label: "KYC pending", value: "kyc_pending" },
   ]),
-  // Dispatched → OTP at handover, then a promotional cross-sell a couple of days later.
-  sSms("smsOtp", "SMS delivery OTP", "SMS · handover code", SMS_DELIVERY_OTP, {
+  // Dispatched → verification code at handover, then a promotional cross-sell a couple of days later.
+  sSms("smsOtp", "SMS delivery code", "SMS · handover code", SMS_DELIVERY_OTP, {
     vars: [{ v: "otp", def: "delivery.otp" }],
     dlrWindow: "5 minutes",
   }),
