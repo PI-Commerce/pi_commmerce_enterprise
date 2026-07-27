@@ -1644,20 +1644,6 @@ function SmsCore({ config, readOnly, mark, onChange }: {
         </div>
       </Section>
 
-      <Section title="Delivery">
-        <Field label="Wait for DLR" required>
-          <Select value={dlrWindow} disabled={readOnly} onValueChange={setDlrWindow}>
-            <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {SMS_DLR_WINDOWS.map((w) => <SelectItem key={w} value={w}>{w}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          <p className="mt-1 text-[10.5px] text-muted-foreground">
-            How long the lead waits here for a delivery receipt before taking the “No DLR in window” path.
-          </p>
-        </Field>
-      </Section>
-
       <Section title="Outcome branches">
         <p className="text-[11px] text-muted-foreground">
           Choose which delivery outcomes this node branches on. Each enabled outcome
@@ -1698,6 +1684,24 @@ function SmsCore({ config, readOnly, mark, onChange }: {
           </p>
         )}
       </Section>
+
+      {/* The wait window only governs the "No DLR in window" path, so it's only
+          meaningful — and only shown — when that branch is enabled above. */}
+      {outcomes.includes("no_dlr") && (
+        <Section title="Delivery">
+          <Field label="Wait for DLR" required>
+            <Select value={dlrWindow} disabled={readOnly} onValueChange={setDlrWindow}>
+              <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {SMS_DLR_WINDOWS.map((w) => <SelectItem key={w} value={w}>{w}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <p className="mt-1 text-[10.5px] text-muted-foreground">
+              How long the lead waits here for a delivery receipt before taking the “No DLR in window” path.
+            </p>
+          </Field>
+        </Section>
+      )}
 
       <ActionAdvanceBanner kind="sms" />
     </>
