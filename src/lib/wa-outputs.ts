@@ -57,15 +57,36 @@ const NO_RESPONSE_OUTPUT: NodeOutput = { id: "no_response", label: "No response 
  * Non-trackable buttons (phone numbers, untracked URLs) deliberately get no
  * handle of their own — those taps route through `no_response`.
  */
+/** Every WhatsApp node also carries a fixed `Failure` branch. Fires when the
+ *  Meta send API rejects the message outright OR the delivery webhook returns
+ *  a `failed` state before the reply / session paths get a chance. Authors
+ *  wire it to a fallback (retry via SMS, escalate to Voice, etc.) or leave
+ *  it dangling — nothing forces a target. */
+const FAILURE_OUTPUT: NodeOutput = { id: "failure", label: "Failure", kind: "outcome" };
+
 export function whatsappOutputs(template?: WaTemplate): NodeOutput[] {
   const branchable = (template?.buttons ?? []).filter(isBranchableButton);
   const buttonHandles = branchable.map((b, i) => ({ id: `btn_${i}`, label: b.text, kind: "outcome" as const }));
-  return [...buttonHandles, REPLY_OUTPUT, NO_RESPONSE_OUTPUT];
+  return [...buttonHandles, REPLY_OUTPUT, NO_RESPONSE_OUTPUT, FAILURE_OUTPUT];
 }
 
-/** The single completion output used by Voice nodes. */
+/**
+ * Voice node outputs — two fixed default branches, always present:
+ *   - `success` — the call completed (any completed call, regardless of the
+ *                 semantic outcome the agent captured — that's for a
+ *                 downstream Conditional on `voice_N.call_status` etc.)
+ *   - `failure` — the call failed to complete (unreachable, busy, no answer
+ *                 after all retries, telephony error)
+ *
+ * Legacy handle id `completed` is preserved on this shape (kept out of the
+ * exported list) so existing runs / analytics that reference it don't break;
+ * new campaigns always wire from `success` or `failure`.
+ */
 export function completedOutput(): NodeOutput[] {
-  return [{ id: "completed", label: "Completed", kind: "outcome" }];
+  return [
+    { id: "success", label: "Success", kind: "outcome" },
+    { id: "failure", label: "Failure", kind: "outcome" },
+  ];
 }
 
 /**
