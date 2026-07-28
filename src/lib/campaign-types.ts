@@ -271,6 +271,13 @@ export type PresetConfig = {
    *  A preset label from `DELAY_VAR_FORMATS` (defined in ConfigPanel) or a
    *  user-entered custom pattern. Defaults to ISO 8601 when unset. */
   delayVariableFormat?: string;
+  /** For `delayMode: "variable"` — fallback wait duration used when the
+   *  datetime variable is missing, empty, or unparseable at runtime. Required
+   *  in Dynamic mode; the pair {@link delayFallbackValue} + {@link delayFallbackUnit}
+   *  mirrors the shape of the Static-mode duration so the fallback behaves
+   *  exactly like a Static delay when it fires. */
+  delayFallbackValue?: number;
+  delayFallbackUnit?: "Minutes" | "Hours" | "Days";
   // ---- API Tool Call ----
   /** Handle of the registry tool this node calls (see {@link file://./tool-registry.ts}). */
   apiTool?: string;

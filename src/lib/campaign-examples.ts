@@ -295,7 +295,13 @@ const EX2_NODES: Node<WorkflowNodeData>[] = [
     id: "callbackDelay", type: "workflow", position: { x: 420, y: 760 },
     data: {
       kind: "delay", title: "Delay · to callback", subtitle: "Wait until callback_at", valid: true, preset: true,
-      config: { delayValue: 1, delayUnit: "Hours" },
+      config: {
+        delayMode: "variable",
+        delayVariable: "voice_1.callback_time",
+        delayVariableFormat: "ISO 8601",
+        delayFallbackValue: 24,
+        delayFallbackUnit: "Hours",
+      },
     },
   },
   {
