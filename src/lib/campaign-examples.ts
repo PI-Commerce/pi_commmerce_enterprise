@@ -18,7 +18,7 @@ import type {
   PresetConfig, PresetVarMap, PresetTransform, UseCase, Product,
 } from "./campaign-types";
 import { SERIAL_PREFIX } from "./campaign-types";
-import { whatsappOutputs, resolveWaTemplate } from "./wa-outputs";
+import { whatsappOutputs, resolveWaTemplate, completedOutput } from "./wa-outputs";
 
 export type ExampleCampaign = {
   name: string;
@@ -1252,6 +1252,23 @@ const C_OUTBOUND = buildCampaign("D2C · Outbound Sales", [
 const C_CART = buildCampaign("D2C · Cart Abandonment", [
   sStart(),
   sAud("CSV · cart abandoners", ["cart_value", "cart_items"]),
+  sAiT("aitEnrich", "Enrich cart context", "3 AI-derived variables", [
+    {
+      id: "t1", type: "Custom AI Action",
+      label: "Normalize phone", input: "", output: "phone_e164",
+      prompt: "Normalize contact.phone to E.164 international format (e.g. +91XXXXXXXXXX).",
+    },
+    {
+      id: "t2", type: "Custom AI Action",
+      label: "Format cart value", input: "", output: "cart_value_fmt",
+      prompt: "Format contact.cart_value as an INR currency string with correct separators (e.g. ₹5,499).",
+    },
+    {
+      id: "t3", type: "Custom AI Action",
+      label: "Greeting", input: "", output: "first_name_hi",
+      prompt: "Transliterate contact.first_name into the Devanagari script for use in a Hindi WhatsApp greeting.",
+    },
+  ]),
   sCond("cart", "Cart value branch", "cart_value", [
     { id: "high", label: "> ₹5,000", op: "greater than", value: "5000" },
     { id: "low", label: "≤ ₹5,000", op: "less than or equal to", value: "5000" },
@@ -1278,7 +1295,7 @@ const C_CART = buildCampaign("D2C · Cart Abandonment", [
   sVoice("vRemLow", "Voice AI reminder", "Reattempt · 1 retry", { maxAttempts: 1 }),
   sEnd(),
 ], [
-  ed("start", "aud"), ed("aud", "cart"),
+  ed("start", "aud"), ed("aud", "aitEnrich"), ed("aitEnrich", "cart"),
   ed("cart", "vRec", "high"), ed("vRec", "cartHigh"), ed("cartHigh", "purHigh"),
   ed("purHigh", "end", "yes"), ed("purHigh", "vRemHigh", "no"), ed("vRemHigh", "end"),
   ed("cart", "ab", "low"),
@@ -1502,9 +1519,15 @@ function shortDesc(title: string): string {
 function normalizeCampaign(c: ExampleCampaign): ExampleCampaign {
   const counters: Partial<Record<NodeKind, number>> = {};
   // WhatsApp nodes authored without explicit outputs get the standard handle set
-  // here (reply_received + no_response + any trackable button); their port-less
-  // onward edge must then fan to every handle so each one is wired.
+  // here (reply_received + no_response + any trackable button + failure); their
+  // port-less onward edge fans to every non-failure handle so each engagement
+  // path is wired. Failure stays a dangling handle by default — authors opt
+  // into wiring it (fallback SMS, escalate, etc.).
   const waFanned = new Map<string, NodeOutput[]>();
+  // Voice nodes carry two fixed handles (Success, Failure). Unhandled
+  // port-less onward edges are rewritten to `success` so existing single-edge
+  // Voice → next flows continue to work; Failure stays dangling by default.
+  const voiceIds = new Set<string>();
   // Conditional nodes that have an always-on `default` handle — used below to
   // guarantee that handle is wired (no lead ever stuck on a dangling default).
   const conditionalIds = new Set<string>();
@@ -1525,6 +1548,9 @@ function normalizeCampaign(c: ExampleCampaign): ExampleCampaign {
       const tmpl = n.data.config?.waMode === "freeform" ? undefined : resolveWaTemplate(n.data.config?.waTemplate);
       outputs = whatsappOutputs(tmpl);
       waFanned.set(n.id, outputs);
+    } else if (kind === "voiceCall" && (!outputs || outputs.length === 0)) {
+      outputs = completedOutput();
+      voiceIds.add(n.id);
     }
     return { ...n, data: { ...n.data, serial, description, outputs } };
   });
@@ -1535,12 +1561,27 @@ function normalizeCampaign(c: ExampleCampaign): ExampleCampaign {
     c.edges.forEach((e) => {
       const handles = waFanned.get(e.source);
       if (handles && !e.sourceHandle) {
-        handles.forEach((h) => fanned.push({ ...e, id: `${e.id}_${h.id}_${fi++}`, sourceHandle: h.id }));
+        // Fan onto every handle EXCEPT `failure` — failure paths need an
+        // explicit target so we don't silently wire the success flow into a
+        // fallback branch.
+        handles.filter((h) => h.id !== "failure").forEach((h) =>
+          fanned.push({ ...e, id: `${e.id}_${h.id}_${fi++}`, sourceHandle: h.id }),
+        );
       } else {
         fanned.push(e);
       }
     });
     edges = fanned;
+  }
+  if (voiceIds.size) {
+    // Rewrite unhandled port-less edges from Voice nodes to `success`. This
+    // preserves the historical semantics (Voice → next means "on completion")
+    // while the Failure handle stays dangling for authors to wire.
+    edges = edges.map((e) =>
+      voiceIds.has(e.source) && !e.sourceHandle
+        ? { ...e, sourceHandle: "success" }
+        : e,
+    );
   }
   // Wire every conditional's always-on `default` handle to the End node when no
   // edge already sources from it — otherwise the default branch dangles.

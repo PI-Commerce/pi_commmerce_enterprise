@@ -29,10 +29,9 @@ import { whatsappOutputs, resolveWaTemplate, completedOutput, isBranchableButton
 import { getTool, TOOLS } from "@/lib/tool-registry";
 import { resolveAgent, voiceAgents } from "@/lib/agent-data";
 import {
-  TRANSFORMATIONS, TRANSFORMATION_TYPES, metaFor,
-  LANGUAGES, CURRENCIES, PHONE_FORMATS, DATE_FORMATS, OUTPUT_TYPES,
-  transformError, transformsError, promptReferences,
-  type TransformFieldKind,
+  CUSTOM_AI_ACTION,
+  transformError, transformsError,
+  sanitizeOutputName, conversationContextVariables,
 } from "@/lib/ai-transformations";
 import { PromptEditor } from "@/components/workflow/PromptEditor";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -928,9 +927,12 @@ function AiTransformFields({
 }
 
 /* ------------------------------------------------------------------------ *
- *  TransformRow — one row inside AiTransformationsSection. Renders the
- *  collapsed header (with rename + drag arrows) and the expanded body with
- *  the type-specific sub-form pulled from the TRANSFORMATIONS registry.
+ *  TransformRow — one row inside AiTransformationsSection.
+ *
+ *  v1 shape: no type picker (Custom AI Action is the only type), no input
+ *  variable field (the prompt's `{{voice_N}}` / `{{whatsapp_N}}` chips imply
+ *  which upstream node's conversation context to feed in), no output-type
+ *  dropdown. Just prompt + output name.
  * ------------------------------------------------------------------------ */
 
 function TransformRow({
@@ -946,12 +948,17 @@ function TransformRow({
   onMoveDown: () => void;
   onRemove: () => void;
 }) {
-  const meta = metaFor(a.type);
   const err = transformError({ ...a });
-  const rename = a.label?.trim() || a.type;
+  const rename = a.label?.trim() || "AI Action";
   const [editingName, setEditingName] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => { if (editingName) inputRef.current?.focus(); }, [editingName]);
+
+  // Prompt picker only surfaces upstream Voice / WhatsApp node handles — no
+  // contact fields, no per-field variables. Chip inserts as `{{voice_1}}`
+  // meaning "this node's full conversation context + eval outputs."
+  const allVars = useContext(ExtraVariablesContext);
+  const promptVars = useMemo(() => conversationContextVariables(allVars), [allVars]);
 
   return (
     <Collapsible open={a.open} onOpenChange={onOpenChange}>
@@ -970,7 +977,7 @@ function TransformRow({
             <Input
               ref={inputRef}
               defaultValue={a.label ?? ""}
-              placeholder={a.type}
+              placeholder="AI Action"
               onBlur={(e) => { onPatch({ label: e.target.value.trim() || undefined }); setEditingName(false); }}
               onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); if (e.key === "Escape") setEditingName(false); }}
               className="h-6 flex-1 text-[12.5px]"
@@ -985,7 +992,6 @@ function TransformRow({
               title="Click to rename"
             >
               <span>{rename}</span>
-              {a.label && <span className="text-[10.5px] font-normal text-muted-foreground">· {a.type}</span>}
               <Pencil className="h-3 w-3 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
             </button>
           )}
@@ -1002,49 +1008,33 @@ function TransformRow({
           </CollapsibleTrigger>
         </div>
         <CollapsibleContent className="space-y-2.5 border-t border-border p-2.5">
-          {/* Type + i-button */}
+          {/* Prompt */}
           <div className="space-y-1.5">
-            <div className="flex items-center gap-1.5">
-              <Label className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Transformation type</Label>
-              {meta && <TransformInfoButton meta={meta} />}
-            </div>
-            <SelectLike
+            <Label className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+              Prompt <span className="text-destructive">*</span>
+            </Label>
+            <PromptEditor
+              value={a.prompt ?? ""}
               disabled={readOnly}
-              options={TRANSFORMATION_TYPES}
-              defaultValue={a.type}
-              onPick={(v) => {
-                // Swap type → drop stale type-specific fields for a clean slate.
-                onPatch({
-                  type: v,
-                  inputLang: undefined, outputLang: undefined, outputCurrency: undefined,
-                  phoneFormat: undefined, dateFormat: undefined,
-                  prompt: v === "Custom AI Action" ? (a.prompt ?? "") : undefined,
-                  outputType: v === "Custom AI Action" ? (a.outputType ?? "String") : undefined,
-                  multiSelectOptions: undefined,
-                });
-              }}
+              placeholder="e.g. Summarize the customer's stated interest in savings products based on {{voice_1}} and {{whatsapp_2}}."
+              variables={promptVars}
+              onChange={(next) => onPatch({ prompt: next })}
             />
+            <p className="text-[10.5px] text-muted-foreground">
+              Type <span className="font-mono">{"{{"}</span> to reference an upstream Voice or WhatsApp node — its transcript / chat history + eval outputs will be sent as context.
+            </p>
           </div>
 
-          {/* Input variable — required for every type */}
-          <Field label="Input variable" required>
-            <VariablePicker defaultValue={a.input} disabled={readOnly} onChange={(v) => onPatch({ input: v })} />
-          </Field>
-
-          {/* Per-type fields */}
-          {meta?.fields.map((f) => (
-            <TransformField key={f} kind={f} transform={a} readOnly={readOnly} onPatch={onPatch} />
-          ))}
-
-          {/* Output variable name — required for every type */}
+          {/* Output variable name — sanitized to [a-z0-9_] on every keystroke */}
           <Field label="Output variable name" required>
             <Input
               disabled={readOnly}
               value={a.output}
-              onChange={(e) => onPatch({ output: e.target.value })}
-              placeholder="e.g. intent_hi"
+              onChange={(e) => onPatch({ output: sanitizeOutputName(e.target.value) })}
+              placeholder="e.g. product_interest"
               className="h-9 font-mono text-[12px]"
             />
+            <p className="mt-1 text-[10.5px] text-muted-foreground">Lowercase letters, digits, underscores only. No spaces.</p>
           </Field>
 
           {err && (
@@ -1064,147 +1054,6 @@ function TransformRow({
     </Collapsible>
   );
 }
-
-/** Popover trigger next to the type picker — reveals the transformation's
- *  1-line description + a mono example line. Icon-only, no label. */
-function TransformInfoButton({ meta }: { meta: { description: string; example: string; type: string } }) {
-  return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          aria-label={`About ${meta.type}`}
-          className="flex h-4 w-4 items-center justify-center rounded text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
-        >
-          <Info className="h-3 w-3" />
-        </button>
-      </PopoverTrigger>
-      <PopoverContent side="top" align="start" className="w-[280px] p-3 text-[11.5px] leading-snug">
-        <p className="mb-1.5 text-[12px] font-semibold">{meta.type}</p>
-        <p className="text-muted-foreground">{meta.description}</p>
-        <div className="mt-2 rounded-md border border-border bg-muted/40 px-2 py-1.5 font-mono text-[11px] text-foreground">
-          {meta.example}
-        </div>
-      </PopoverContent>
-    </Popover>
-  );
-}
-
-/** One field inside a transform's expanded body. Which control renders depends
- *  purely on the field kind (from TRANSFORMATIONS registry) — no per-type
- *  branching here, everything is data-driven. */
-function TransformField({
-  kind, transform: a, readOnly, onPatch,
-}: {
-  kind: TransformFieldKind;
-  transform: AiTransform;
-  readOnly?: boolean;
-  onPatch: (p: Partial<AiTransform>) => void;
-}) {
-  const variables = useContext(ExtraVariablesContext);
-  const merged = useMemo(() => mergeVariables(variables), [variables]);
-  switch (kind) {
-    case "inputLang":
-      return (
-        <Field label="Input language" required>
-          <SelectLike disabled={readOnly} options={LANGUAGES} defaultValue={a.inputLang ?? ""} placeholder="Select language" onPick={(v) => onPatch({ inputLang: v })} />
-        </Field>
-      );
-    case "outputLang":
-      return (
-        <Field label="Output language" required>
-          <SelectLike disabled={readOnly} options={LANGUAGES} defaultValue={a.outputLang ?? ""} placeholder="Select language" onPick={(v) => onPatch({ outputLang: v })} />
-        </Field>
-      );
-    case "outputCurrency":
-      return (
-        <Field label="Output currency" required>
-          <SelectLike disabled={readOnly} options={CURRENCIES} defaultValue={a.outputCurrency ?? ""} placeholder="Select currency" onPick={(v) => onPatch({ outputCurrency: v })} />
-        </Field>
-      );
-    case "phoneFormat":
-      return (
-        <Field label="Output format" required>
-          <SelectLike
-            disabled={readOnly}
-            options={PHONE_FORMATS.map((p) => p.label)}
-            defaultValue={PHONE_FORMATS.find((p) => p.value === a.phoneFormat)?.label ?? ""}
-            placeholder="Select format"
-            onPick={(v) => {
-              const match = PHONE_FORMATS.find((p) => p.label === v);
-              if (match) onPatch({ phoneFormat: match.value });
-            }}
-          />
-        </Field>
-      );
-    case "dateFormat":
-      return (
-        <Field label="Output format" required>
-          <SelectLike disabled={readOnly} options={DATE_FORMATS} defaultValue={a.dateFormat ?? ""} placeholder="Select format" onPick={(v) => onPatch({ dateFormat: v })} />
-          {a.dateFormat === "Custom…" && (
-            <Input
-              disabled={readOnly}
-              defaultValue=""
-              placeholder="e.g. DD MMM YYYY"
-              onChange={(e) => onPatch({ dateFormat: e.target.value || "Custom…" })}
-              className="mt-1.5 h-8 font-mono text-[12px]"
-            />
-          )}
-        </Field>
-      );
-    case "outputType":
-      return (
-        <Field label="Output type" required>
-          <SelectLike disabled={readOnly} options={OUTPUT_TYPES as unknown as string[]} defaultValue={a.outputType ?? "String"} onPick={(v) => onPatch({ outputType: v as AiTransform["outputType"] })} />
-          {a.outputType === "Multi-select" && (
-            <Input
-              disabled={readOnly}
-              value={a.multiSelectOptions ?? ""}
-              placeholder="Comma-separated: red, green, blue"
-              onChange={(e) => onPatch({ multiSelectOptions: e.target.value })}
-              className="mt-1.5 h-8 text-[12px]"
-            />
-          )}
-        </Field>
-      );
-    case "prompt": {
-      const inputInPrompt = a.input ? promptReferences(a.prompt ?? "", a.input) : false;
-      return (
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between">
-            <Label className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-              Prompt <span className="text-destructive">*</span>
-            </Label>
-            {a.input && (
-              <span
-                title={inputInPrompt ? `Prompt references {{${a.input}}}` : `Prompt does not reference {{${a.input}}}`}
-                className={cn(
-                  "inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px]",
-                  inputInPrompt
-                    ? "border-success/30 bg-success/10 text-success"
-                    : "border-warning/30 bg-warning/10 text-warning",
-                )}
-              >
-                <Variable className="h-2.5 w-2.5" />
-                {inputInPrompt ? "input used" : "input unused"}
-              </span>
-            )}
-          </div>
-          <PromptEditor
-            value={a.prompt ?? ""}
-            disabled={readOnly}
-            placeholder="Describe what this AI step should do. Type {{ to insert a variable."
-            variables={merged}
-            onChange={(next) => onPatch({ prompt: next })}
-          />
-          <p className="text-[10.5px] text-muted-foreground">Type <span className="font-mono">{"{{"}</span> to reference upstream variables.</p>
-        </div>
-      );
-    }
-  }
-}
-
-
 
 /** Preset datetime formats for a Dynamic delay's incoming variable. `value`
  *  is the parseable format token persisted on the node; `label` is the shape
@@ -3016,7 +2865,9 @@ function AiTransformationsSection({
     });
   };
   const add = () => setTransforms((xs) => [...xs, {
-    id: uid("t"), type: "Translate", input: "", output: "", open: true,
+    // v1 has one transformation type — Custom AI Action. `input` is unused but
+    // kept for shape-compat with PresetTransform / legacy preset data.
+    id: uid("t"), type: CUSTOM_AI_ACTION, input: "", output: "", prompt: "", open: true,
   }]);
   const patch = (id: string, p: Partial<AiTransform>) =>
     setTransforms((xs) => xs.map((x) => x.id === id ? { ...x, ...p } : x));

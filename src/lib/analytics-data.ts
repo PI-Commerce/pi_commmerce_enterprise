@@ -477,13 +477,13 @@ export function nodeConfigSnapshot(node: SankeyNode): NodeConfigField[] {
         { label: "Inputs Mapped", value: String(c.apiInputMap?.length ?? 0) },
       ];
     case "aiTransform": {
-      // Every transform gets its own row so the reader sees exactly what this
-      // node emits (and in what order). Ordered `#N type · in → out`.
+      // v1 AI Transformation is always Custom AI Action, so the drawer surfaces
+      // just the per-transform name → output variable. Type is implicit.
       const list = c.transforms ?? [];
       if (list.length === 0) return [{ label: "Transformations", value: "—" }];
       return list.map((t, i) => ({
-        label: `#${i + 1} ${t.type}${t.label ? ` · ${t.label}` : ""}`,
-        value: `${t.input || "?"} → ${t.output || "?"}`,
+        label: `#${i + 1} ${t.label?.trim() || "AI Action"}`,
+        value: `→ ${t.output || "?"}`,
       }));
     }
     case "sms":
