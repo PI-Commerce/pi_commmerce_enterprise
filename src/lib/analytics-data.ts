@@ -536,12 +536,18 @@ export function nodeConfigSnapshot(node: SankeyNode): NodeConfigField[] {
     case "delay": {
       // Delay v2 has two modes. Dynamic delay keeps the target variable +
       // parsing format visible in the drawer so the reader sees exactly which
-      // upstream field drives the wait and how it will be parsed.
+      // upstream field drives the wait and how it will be parsed; the
+      // fallback duration is surfaced too so it's obvious what happens when
+      // the variable is missing/unparseable at runtime.
       if (c.delayMode === "variable") {
+        const fallback = c.delayFallbackValue != null
+          ? `${c.delayFallbackValue} ${c.delayFallbackUnit ?? ""}`.trim()
+          : "—";
         return [
           { label: "Mode", value: "Dynamic delay" },
           { label: "Variable", value: dash(c.delayVariable) },
           { label: "Format", value: dash(c.delayVariableFormat) },
+          { label: "Fallback", value: fallback },
         ];
       }
       return [

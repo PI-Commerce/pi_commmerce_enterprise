@@ -2567,10 +2567,14 @@ function DelayFields({
 }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
   const [mode, setMode] = useState<"fixed" | "variable">(config?.delayMode ?? "fixed");
   // Consolidated validation — required fields depend on the current mode.
+  // Dynamic mode also requires a fallback duration so the node still advances
+  // when the picked variable is missing/unparseable at runtime.
   const validate = (c: PresetConfig) => {
     if (c.delayMode !== "variable") return mark(true);
     if (!c.delayVariable) return mark(false, "Pick a datetime variable");
     if (!c.delayVariableFormat?.trim()) return mark(false, "Pick a datetime format");
+    if (c.delayFallbackValue == null || c.delayFallbackValue <= 0) return mark(false, "Set a fallback duration");
+    if (!c.delayFallbackUnit) return mark(false, "Set a fallback unit");
     return mark(true);
   };
   const patch = (p: Partial<PresetConfig>) => {
@@ -2580,7 +2584,18 @@ function DelayFields({
   };
   const setDelayMode = (m: "fixed" | "variable") => {
     setMode(m);
-    patch({ delayMode: m });
+    // When switching INTO Dynamic mode, seed a sensible fallback default so
+    // the node isn't immediately invalid — the tech-team spec ships a
+    // 24-hour default so an unparseable datetime never blocks the run.
+    if (m === "variable") {
+      patch({
+        delayMode: m,
+        delayFallbackValue: config?.delayFallbackValue ?? 24,
+        delayFallbackUnit: config?.delayFallbackUnit ?? "Hours",
+      });
+    } else {
+      patch({ delayMode: m });
+    }
   };
   // Empty → placeholder shown; matched preset → its label. No custom pattern
   // support — the engine only parses the fixed preset list.
@@ -2623,26 +2638,64 @@ function DelayFields({
               onChange={(v) => patch({ delayMode: "variable", delayVariable: v })}
             />
           </Field>
-          {config?.delayVariable && (
-            <Field label="Incoming date format" required>
-              <SelectLike
+          {/* Format dropdown is always visible in Dynamic mode — it's part of
+              the node's contract, not a follow-up question. Shown before the
+              user picks a variable so they see the full config surface upfront. */}
+          <Field label="Incoming Date-time Format" required>
+            <SelectLike
+              disabled={readOnly}
+              options={DELAY_VAR_FORMATS.map((f) => f.label)}
+              defaultValue={pickerLabel}
+              placeholder="Select format"
+              onPick={(label) => {
+                const match = DELAY_VAR_FORMATS.find((f) => f.label === label);
+                if (!match) return;
+                patch({ delayMode: "variable", delayVariableFormat: match.value });
+              }}
+            />
+          </Field>
+          {/* Fallback — required in Dynamic mode. Fires as a fixed wait when
+              the picked variable is missing/empty/unparseable at runtime, so
+              the node always advances instead of stranding the lead. */}
+          <Field label="Fallback duration" required>
+            <div className="grid grid-cols-2 gap-2">
+              <Input
                 disabled={readOnly}
-                options={DELAY_VAR_FORMATS.map((f) => f.label)}
-                defaultValue={pickerLabel}
-                placeholder="Select format"
-                onPick={(label) => {
-                  const match = DELAY_VAR_FORMATS.find((f) => f.label === label);
-                  if (!match) return;
-                  patch({ delayMode: "variable", delayVariableFormat: match.value });
+                type="number"
+                min={1}
+                value={config?.delayFallbackValue ?? ""}
+                placeholder="24"
+                className="h-9"
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  const n = raw === "" ? undefined : Number(raw);
+                  patch({
+                    delayMode: "variable",
+                    delayFallbackValue: n,
+                    delayFallbackUnit: config?.delayFallbackUnit ?? "Hours",
+                  });
                 }}
               />
-            </Field>
-          )}
+              <SelectLike
+                disabled={readOnly}
+                options={["Minutes", "Hours", "Days"]}
+                defaultValue={config?.delayFallbackUnit ?? "Hours"}
+                onPick={(u) => patch({
+                  delayMode: "variable",
+                  delayFallbackUnit: u as "Minutes" | "Hours" | "Days",
+                  delayFallbackValue: config?.delayFallbackValue ?? 24,
+                })}
+              />
+            </div>
+            <p className="mt-1 text-[10.5px] text-muted-foreground">
+              Used when the datetime variable is missing, empty, or doesn't match the incoming format.
+            </p>
+          </Field>
           <div className="mt-2 flex items-start gap-2 rounded-md border border-dashed border-border bg-muted/30 px-2.5 py-2 text-[11px] text-muted-foreground">
             <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             <span>
               Node advances when the current time reaches the value in the picked variable — typically an upstream node's output like
-              <span className="font-mono text-foreground"> voice_1.callback_time</span> or a scheduled follow-up datetime. If the datetime is in the past when the lead arrives, the node advances immediately.
+              <span className="font-mono text-foreground"> voice_1.callback_time</span> or a scheduled follow-up datetime. If the datetime is in the past when the lead arrives, the node advances immediately. If the datetime can't be parsed, the fallback duration above kicks in instead.
             </span>
           </div>
         </>
