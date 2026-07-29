@@ -35,9 +35,9 @@ import {
   SMS_CATEGORIES, smsPlaceholders, templateSegments, type SmsCategory,
 } from "@/lib/sms-templates";
 import { useRcsConfig, useRcsTemplates, resolveRcsTemplate } from "@/lib/rcs-store";
-import { botsForCategory, botById } from "@/lib/rcs-config";
+import { agentsForBrand, agentById, brandForAgent } from "@/lib/rcs-config";
 import {
-  RCS_CATEGORIES, templatePlaceholders, replyButtons, type RcsCategory,
+  templatePlaceholders, templateButtons,
 } from "@/lib/rcs-templates";
 import { getTool, TOOLS, type ToolInput } from "@/lib/tool-registry";
 import { flattenBody } from "@/lib/tool-body";
@@ -1700,36 +1700,43 @@ function RcsCore({ config, readOnly, mark, onChange }: {
 }) {
   const rcsConfig = useRcsConfig();
   const templates = useRcsTemplates();
-  const [category, setCategory] = useState<RcsCategory | "">((config?.rcsCategory as RcsCategory) ?? "");
-  const [botId, setBotId] = useState(config?.rcsBotId ?? "");
+  // Prefill the brand when the workspace has only one; otherwise derive it from
+  // a persisted agent, else leave the user to pick.
+  const soleBrandId = rcsConfig.brands.length === 1 ? rcsConfig.brands[0].id : "";
+  const [brandId, setBrandId] = useState(
+    () => config?.rcsAgentId ? brandForAgent(rcsConfig, config.rcsAgentId)?.id ?? soleBrandId : soleBrandId,
+  );
+  const [agentId, setAgentId] = useState(config?.rcsAgentId ?? "");
   const [templateId, setTemplateId] = useState(config?.rcsTemplateId ?? "");
   const [dlrWindow, setDlrWindow] = useState(config?.rcsDlrWindow ?? DEFAULT_RCS_DLR_WINDOW);
 
   const template = resolveRcsTemplate(templateId);
 
-  // Cascade: category narrows bots, and category+bot narrow templates. Only
+  // Cascade: brand narrows agents, and brand+agent narrow templates. Only
   // Approved templates can be sent, so the picker hides Pending/Rejected ones.
-  const bots = category ? botsForCategory(rcsConfig, category) : [];
+  const agents = brandId ? agentsForBrand(rcsConfig, brandId) : [];
+  const agentIdsInBrand = new Set(agents.map((a) => a.id));
   const matching = templates.filter(
     (t) => t.approvalStatus === "Approved"
-      && (!category || t.category === category)
-      && (!botId || t.botId === botId),
+      && (!brandId || agentIdsInBrand.has(t.agentId))
+      && (!agentId || t.agentId === agentId),
   );
   useEffect(() => {
-    if (botId && !bots.some((b) => b.id === botId)) setBotId("");
+    if (agentId && !agentIdsInBrand.has(agentId)) setAgentId("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [category]);
+  }, [brandId]);
   useEffect(() => {
     if (templateId && !matching.some((t) => t.id === templateId)) setTemplateId("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [category, botId]);
+  }, [brandId, agentId]);
 
   const placeholders = template ? templatePlaceholders(template) : [];
   const varMap: PresetVarMap[] = placeholders.map(
     (v) => config?.rcsVarMap?.find((m) => m.v === v) ?? { v, def: "" },
   );
   const unmapped = varMap.filter((m) => !m.def?.trim()).length;
-  const replies = template ? replyButtons(template) : [];
+  const buttons = template ? templateButtons(template) : [];
+  const agent = agentById(rcsConfig, template?.agentId ?? agentId);
 
   const setMapping = (key: string, def: string, mode?: "variable" | "constant") => {
     const next = varMap.filter((m) => m.v !== key);
@@ -1737,7 +1744,7 @@ function RcsCore({ config, readOnly, mark, onChange }: {
     onChange({ config: { ...config, rcsVarMap: next } });
   };
 
-  // Publish handles (reply buttons + delivery defaults) + persist selection.
+  // Publish handles (one per button + delivery defaults) + persist selection.
   useEffect(() => {
     onChange({
       outputs: rcsOutputs(template),
@@ -1745,20 +1752,18 @@ function RcsCore({ config, readOnly, mark, onChange }: {
         ...config,
         rcsTemplateId: templateId,
         rcsDlrWindow: dlrWindow,
-        rcsCategory: category || undefined,
-        rcsBotId: botId || undefined,
+        rcsAgentId: template?.agentId ?? agentId ?? undefined,
+        rcsAgentType: agentById(rcsConfig, template?.agentId ?? agentId)?.type,
       },
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [templateId, dlrWindow, category, botId]);
+  }, [templateId, dlrWindow, brandId, agentId]);
 
   useEffect(() => {
     if (!template) mark(false, "Select a template");
     else if (unmapped > 0) mark(false, `Map ${unmapped} template variable${unmapped === 1 ? "" : "s"}`);
     else mark(true);
   }, [templateId, unmapped]);
-
-  const bot = botById(rcsConfig, botId);
 
   return (
     <>
@@ -1773,26 +1778,30 @@ function RcsCore({ config, readOnly, mark, onChange }: {
               </Label>
             </div>
             <div className="grid grid-cols-2 gap-2">
-              <Field label="Category" required>
-                <Select value={category || undefined} disabled={readOnly} onValueChange={(v) => setCategory(v as RcsCategory)}>
+              <Field label="Brand" required>
+                <Select value={brandId || undefined} disabled={readOnly} onValueChange={setBrandId}>
                   <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select…" /></SelectTrigger>
                   <SelectContent>
-                    {RCS_CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                    {rcsConfig.brands.map((b) => (
+                      <SelectItem key={b.id} value={b.id}>{b.name} · {b.provider}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </Field>
-              <Field label="Bot" required>
-                <Select value={botId || undefined} disabled={readOnly || !category} onValueChange={setBotId}>
+              <Field label="Agent" required>
+                <Select value={agentId || undefined} disabled={readOnly || !brandId} onValueChange={setAgentId}>
                   <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select…" /></SelectTrigger>
                   <SelectContent>
-                    {bots.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                    {agents.map((a) => (
+                      <SelectItem key={a.id} value={a.id}>{a.name} · {a.type}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </Field>
             </div>
-            <Select value={templateId || undefined} disabled={readOnly || !botId} onValueChange={setTemplateId}>
+            <Select value={templateId || undefined} disabled={readOnly || !agentId} onValueChange={setTemplateId}>
               <SelectTrigger className="h-9 text-sm">
-                <SelectValue placeholder={botId ? "Choose template…" : "Pick a category and bot first"} />
+                <SelectValue placeholder={agentId ? "Choose template…" : "Pick a brand and agent first"} />
               </SelectTrigger>
               <SelectContent>
                 {templateId && !template && (
@@ -1803,9 +1812,9 @@ function RcsCore({ config, readOnly, mark, onChange }: {
                 ))}
               </SelectContent>
             </Select>
-            {botId && matching.length === 0 && (
+            {agentId && matching.length === 0 && (
               <p className="text-[11px] text-muted-foreground">
-                No approved templates for {category} · {bot?.name ?? botId}. Add one under Channels → RCS → Templates.
+                No approved templates for {agent?.name ?? agentId}. Add one under Channels → RCS → Templates.
               </p>
             )}
             {template && (
@@ -1816,9 +1825,9 @@ function RcsCore({ config, readOnly, mark, onChange }: {
                 </div>
                 {template.title && <p className="mb-1 font-semibold text-foreground">{template.title}</p>}
                 <p className="whitespace-pre-wrap text-foreground">{template.body}</p>
-                {replies.length > 0 && (
+                {buttons.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-1.5">
-                    {replies.map((b, i) => (
+                    {buttons.map((b, i) => (
                       <span key={i} className="rounded-full border border-border bg-background px-2 py-0.5 text-[11px]">{b.text}</span>
                     ))}
                   </div>
@@ -2328,7 +2337,7 @@ function ActionAdvanceBanner({ kind, type1 }: { kind: ActionKind; type1?: boolea
       : kind === "sms"
         ? "Always three outputs: “Delivered”, “Failed” and “Timeout” (no receipt within the wait window). Wire all three."
         : kind === "rcs"
-          ? "One output per quick-reply button, plus fixed “Delivered”, “Failed”, “Not Reachable” and “Timeout”. Wire an SMS fallback off “Not Reachable”."
+          ? "One output per button (RCS reports clicks for reply, URL and dialer buttons alike), plus fixed “Delivered”, “Failed”, “Not Reachable” and “Timeout”. Wire an SMS fallback off “Not Reachable”."
         : type1
           ? "Always two outputs: “Replied (no button)” and “No response / continue” (24h session expiry + any untrackable tap). Wire both."
           : "Each trackable button is its own output, plus “Replied (no button)” and “No response / continue”. Phone numbers and untracked URLs aren’t trackable — those taps route through “No response / continue”. Wire every output.";

@@ -4,35 +4,37 @@
  *
  * RCS (Rich Communication Services, Google's RBM) templates are richer than SMS:
  * a template is either a plain **Text** message or a **Rich card** (media + title
- * + description + suggestion buttons). Every template belongs to a **bot (agent)**
- * of a given **category** and, unlike the SMS registry, carries an **approval
- * status** — RCS templates are submitted to the vendor for approval (Netcore is
- * async PENDING→APPROVED/REJECTED; Jio auto-approves), so this mirrors the
- * WhatsApp registry's Meta-review model rather than SMS's pre-verified copies.
+ * + description + suggestion buttons). Every template is created under an
+ * **Agent** (see {@link file://./rcs-config.ts}); the agent's **Type**
+ * (Transactional / Promotional) and its brand's **provider** (JIO / Netcore-VI)
+ * are inherited rather than chosen on the template. Templates carry an **approval
+ * status** — RCS templates are submitted to the provider for approval (Netcore is
+ * async PENDING→APPROVED/REJECTED; Jio auto-approves).
  *
- * Shapes follow the TOCOM "RCS Template Internal Design Language" (PICOM-4728 /
- * PICOM-4732): Text = body + buttons; Rich card = cardOrientation + title + body
- * + media{type,height,url} + buttons. Buttons (Google "suggestions") are REPLY
- * (a quick-reply chip — the only branchable one), URL, or DIALER.
+ * Media rules are **provider-specific** (PICOM-4728 §4-5): the aspect ratios,
+ * heights, alignments, formats and size caps differ between JIO and Netcore-VI,
+ * so the accepted shapes live in {@link RCS_MEDIA_SPECS} and the form reads them
+ * off the selected agent's provider.
  *
- * Body content uses named `{{var}}` placeholders. Carousel and the
- * calendar/location action buttons are out of scope for this phase.
+ * Body content uses named `{{var}}` placeholders. Carousel is out of scope.
  */
+import type { RcsProvider } from "@/lib/rcs-config";
 
 export type RcsTemplateType = "TEXT" | "RICH_CARD";
 
-/** Bot/message category (PICOM-4728 §2 brand→bots model). */
-export type RcsCategory = "Promotional" | "Utility" | "OTP";
-
-/** Vendor approval state (Netcore async; Jio auto-approves). */
+/** Provider approval state (Netcore async; Jio auto-approves). */
 export type RcsApprovalStatus = "Approved" | "Pending" | "Rejected";
 
 export type RcsMediaType = "IMAGE" | "VIDEO";
-/** Google RBM card media heights, in density-independent pixels. */
-export type RcsMediaHeight = "SHORT" | "MEDIUM" | "TALL";
 export type RcsCardOrientation = "VERTICAL" | "HORIZONTAL";
+/** Card media heights (largest offered set — a provider/orientation may expose
+ *  only a subset, per {@link RCS_MEDIA_SPECS}). */
+export type RcsMediaHeight = "SHORT" | "MEDIUM" | "LARGE";
+/** Horizontal-card image alignment (Netcore-VI only). */
+export type RcsAlignment = "LEFT" | "RIGHT";
 
-/** A suggestion chip. Only REPLY is branchable (it posts a reply back to us). */
+/** A suggestion chip. All three types post a click callback, so all three are
+ *  branchable in the campaign node. */
 export type RcsButtonType = "REPLY" | "URL" | "DIALER";
 export type RcsButton = {
   type: RcsButtonType;
@@ -45,10 +47,17 @@ export type RcsButton = {
   postback?: string;
 };
 
-/** Rich-card media — a public URL or a (mock) uploaded file. */
+/**
+ * Rich-card media. `orientation` is always set; `height` or `alignment` is set
+ * only when the selected provider + orientation offers that dimension (JIO
+ * horizontal → height; Netcore horizontal → alignment; Netcore vertical →
+ * height; JIO vertical → neither).
+ */
 export type RcsMedia = {
   mediaType: RcsMediaType;
-  mediaHeight: RcsMediaHeight;
+  orientation: RcsCardOrientation;
+  height?: RcsMediaHeight;
+  alignment?: RcsAlignment;
   /** Where the media came from — a pasted URL or an upload. */
   source: "url" | "upload";
   /** Set when source === "url". */
@@ -61,16 +70,14 @@ export type RcsTemplate = {
   id: string;
   /** Pi Commerce label for the template. */
   name: string;
-  /** The bot (agent) this template is registered under. */
-  botId: string;
-  category: RcsCategory;
+  /** The agent this template is registered under (drives Type + provider). */
+  agentId: string;
   type: RcsTemplateType;
   approvalStatus: RcsApprovalStatus;
   /** Message body with named `{{var}}` placeholders. */
   body: string;
   /** Rich card only. */
   title?: string;
-  orientation?: RcsCardOrientation;
   media?: RcsMedia;
   /** Suggestion chips (REPLY / URL / DIALER). */
   buttons: RcsButton[];
@@ -81,7 +88,6 @@ export const RCS_TEMPLATE_TYPES: { value: RcsTemplateType; label: string }[] = [
   { value: "TEXT", label: "Text" },
   { value: "RICH_CARD", label: "Rich card" },
 ];
-export const RCS_CATEGORIES: RcsCategory[] = ["Promotional", "Utility", "OTP"];
 export const RCS_BUTTON_TYPES: RcsButtonType[] = ["REPLY", "URL", "DIALER"];
 
 /** Friendly labels for the button types (Google's suggestion names). */
@@ -91,27 +97,148 @@ export const RCS_BUTTON_LABELS: Record<RcsButtonType, string> = {
   DIALER: "Dial number",
 };
 
-/* --------------------------- Media specs --------------------------- */
-
-/** Accepted image formats (JIO PRD / Google RBM). */
-export const RCS_IMAGE_FORMATS = ["jpeg", "jpg", "gif", "png"] as const;
-/** Accepted video formats. */
-export const RCS_VIDEO_FORMATS = ["mp4", "mpeg", "mpeg4", "webm"] as const;
-
-/** Card media heights with their density-independent pixel size. */
-export const RCS_MEDIA_HEIGHTS: { value: RcsMediaHeight; label: string; dp: number }[] = [
-  { value: "SHORT", label: "Short", dp: 112 },
-  { value: "MEDIUM", label: "Medium", dp: 168 },
-  { value: "TALL", label: "Tall", dp: 264 },
-];
-
 export const RCS_CARD_ORIENTATIONS: { value: RcsCardOrientation; label: string }[] = [
   { value: "VERTICAL", label: "Vertical" },
   { value: "HORIZONTAL", label: "Horizontal" },
 ];
 
-/** Max rich-card payload the vendor accepts. */
+/* --------------------------- Media specs (provider-driven) --------------------------- */
+
+/** Accepted image formats (both providers). */
+export const RCS_IMAGE_FORMATS = ["jpg", "jpeg", "gif", "png"] as const;
+/** Accepted video formats (both providers). */
+export const RCS_VIDEO_FORMATS = ["mp4", "mpeg", "webm"] as const;
+
+/** Max rich-card payload the provider accepts. */
 export const RCS_MAX_CARD_PAYLOAD_KB = 250;
+
+export type RcsHeightOption = { key: RcsMediaHeight; label: string; aspect?: string };
+export type RcsAlignmentOption = { key: RcsAlignment; label: string };
+
+/** What a given provider + orientation offers. */
+export type OrientationSpec = {
+  /** Recommended aspect ratio when fixed for the whole orientation. */
+  aspect?: string;
+  /** Height choices (each may carry its own recommended aspect). */
+  heights?: RcsHeightOption[];
+  /** Alignment choices (Netcore-VI horizontal). */
+  alignments?: RcsAlignmentOption[];
+};
+
+export type MediaKindSpec = {
+  formats: readonly string[];
+  maxSizeMb: number;
+  orientations: Partial<Record<RcsCardOrientation, OrientationSpec>>;
+  /** Video-only thumbnail requirements. */
+  thumbnail?: {
+    maxSizeKb: number;
+    /** Fixed thumbnail aspect (Netcore-VI). */
+    aspect?: string;
+    /** Thumbnail aspect per height (JIO). */
+    perHeightAspect?: Partial<Record<RcsMediaHeight, string>>;
+  };
+};
+
+export type ProviderMediaSpec = { image: MediaKindSpec; video: MediaKindSpec };
+
+/**
+ * The accepted media shapes per provider (PICOM-4728 §4-5).
+ *
+ * JIO — image: Vertical is a plain 2:1 card (no height); Horizontal offers Short
+ * (3:1) / Medium (2:1) / Large (2:1). Video: Horizontal Short/Medium/Large with a
+ * thumbnail whose aspect tracks the height (Short 3:1, Medium/Large 7:3).
+ *
+ * Netcore-VI — image: Vertical offers Short / Medium; Horizontal is a 3:4 card
+ * with Left / Right alignment. Video mirrors the image orientations at 3:4 with a
+ * 25:33 thumbnail. Image ≤ 2 MB, video ≤ 10 MB, thumbnail ≤ 40 KB throughout.
+ */
+export const RCS_MEDIA_SPECS: Record<RcsProvider, ProviderMediaSpec> = {
+  JIO: {
+    image: {
+      formats: RCS_IMAGE_FORMATS,
+      maxSizeMb: 2,
+      orientations: {
+        VERTICAL: { aspect: "2:1" },
+        HORIZONTAL: {
+          heights: [
+            { key: "SHORT", label: "Short", aspect: "3:1" },
+            { key: "MEDIUM", label: "Medium", aspect: "2:1" },
+            { key: "LARGE", label: "Large", aspect: "2:1" },
+          ],
+        },
+      },
+    },
+    video: {
+      formats: RCS_VIDEO_FORMATS,
+      maxSizeMb: 10,
+      orientations: {
+        HORIZONTAL: {
+          heights: [
+            { key: "SHORT", label: "Short", aspect: "3:1" },
+            { key: "MEDIUM", label: "Medium", aspect: "7:3" },
+            { key: "LARGE", label: "Large", aspect: "7:3" },
+          ],
+        },
+      },
+      thumbnail: { maxSizeKb: 40, perHeightAspect: { SHORT: "3:1", MEDIUM: "7:3", LARGE: "7:3" } },
+    },
+  },
+  "Netcore-VI": {
+    image: {
+      formats: RCS_IMAGE_FORMATS,
+      maxSizeMb: 2,
+      orientations: {
+        VERTICAL: {
+          heights: [
+            { key: "SHORT", label: "Short" },
+            { key: "MEDIUM", label: "Medium" },
+          ],
+        },
+        HORIZONTAL: {
+          aspect: "3:4",
+          alignments: [
+            { key: "LEFT", label: "Left" },
+            { key: "RIGHT", label: "Right" },
+          ],
+        },
+      },
+    },
+    video: {
+      formats: RCS_VIDEO_FORMATS,
+      maxSizeMb: 10,
+      orientations: {
+        VERTICAL: {
+          heights: [
+            { key: "SHORT", label: "Short" },
+            { key: "MEDIUM", label: "Medium" },
+          ],
+        },
+        HORIZONTAL: {
+          aspect: "3:4",
+          alignments: [
+            { key: "LEFT", label: "Left" },
+            { key: "RIGHT", label: "Right" },
+          ],
+        },
+      },
+      thumbnail: { maxSizeKb: 40, aspect: "25:33" },
+    },
+  },
+};
+
+/** The media-kind spec for a provider + media type. */
+export function mediaKindSpec(provider: RcsProvider, mediaType: RcsMediaType): MediaKindSpec {
+  return RCS_MEDIA_SPECS[provider][mediaType === "IMAGE" ? "image" : "video"];
+}
+
+/** The orientation spec (heights / alignments / aspect) for a selection. */
+export function orientationSpec(
+  provider: RcsProvider,
+  mediaType: RcsMediaType,
+  orientation: RcsCardOrientation,
+): OrientationSpec | undefined {
+  return mediaKindSpec(provider, mediaType).orientations[orientation];
+}
 
 /** The `accept` attribute for the media upload input, per media type. */
 export function mediaAccept(type: RcsMediaType): string {
@@ -123,6 +250,18 @@ export function mediaAccept(type: RcsMediaType): string {
 export function mediaFormatsHint(type: RcsMediaType): string {
   const exts = type === "IMAGE" ? RCS_IMAGE_FORMATS : RCS_VIDEO_FORMATS;
   return exts.map((e) => e.toUpperCase()).join(", ");
+}
+
+/** Recommended aspect ratio for a fully-specified media selection (if any). */
+export function mediaAspectHint(
+  provider: RcsProvider,
+  media: Pick<RcsMedia, "mediaType" | "orientation" | "height">,
+): string | undefined {
+  const spec = orientationSpec(provider, media.mediaType, media.orientation);
+  if (!spec) return undefined;
+  if (spec.heights && media.height)
+    return spec.heights.find((h) => h.key === media.height)?.aspect ?? spec.aspect;
+  return spec.aspect;
 }
 
 /* --------------------------- Variables --------------------------- */
@@ -156,9 +295,12 @@ export function fillRcsVariables(text: string, values: Record<string, string>): 
   });
 }
 
-/** REPLY buttons are the only branchable ones — each becomes a node output. */
-export function replyButtons(t: Pick<RcsTemplate, "buttons">): RcsButton[] {
-  return (t.buttons ?? []).filter((b) => b.type === "REPLY" && b.text.trim());
+/**
+ * Every button is branchable: RCS posts a click callback for REPLY, URL and
+ * DIALER alike, so each labelled button becomes a campaign-node output branch.
+ */
+export function templateButtons(t: Pick<RcsTemplate, "buttons">): RcsButton[] {
+  return (t.buttons ?? []).filter((b) => b.text.trim());
 }
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -177,6 +319,9 @@ export function parseRcsCreated(s: string): Date {
 
 /* --------------------------- Validation --------------------------- */
 
+/** Google RBM allows up to 11 suggestions on a message; we cap the form lower. */
+export const MAX_BUTTONS = 4;
+
 /** Validation shared by the create form (single source of truth). */
 export function validateRcsTemplate(
   t: Partial<RcsTemplate>,
@@ -185,8 +330,7 @@ export function validateRcsTemplate(
 ): string[] {
   const errors: string[] = [];
   if (!t.name?.trim()) errors.push("Template Name is required.");
-  if (!t.category) errors.push("Category is required.");
-  if (!t.botId?.trim()) errors.push("Bot is required.");
+  if (!t.agentId?.trim()) errors.push("Agent is required.");
   if (!t.type) errors.push("Template type is required.");
   if (!t.body?.trim()) errors.push("Message body is required.");
 
@@ -213,24 +357,20 @@ export function validateRcsTemplate(
   return errors;
 }
 
-/** Google RBM allows up to 11 suggestions on a message; we cap the form lower. */
-export const MAX_BUTTONS = 4;
-
 /* --------------------------- Seed data --------------------------- */
 
-/** Mirrored RCS templates for the demo workspace. Bot ids match rcs-config.ts. */
+/** Mirrored RCS templates for the demo workspace. Agent ids match rcs-config.ts. */
 export const SEED_RCS_TEMPLATES: RcsTemplate[] = [
   {
     id: "rcs_tpl_order_shipped",
     name: "order_shipped_card",
-    botId: "acme_utility_bot",
-    category: "Utility",
+    agentId: "acme_utility_bot",
     type: "RICH_CARD",
     approvalStatus: "Approved",
-    orientation: "VERTICAL",
     title: "Your order is on its way 📦",
     body: "Hi {{name}}, order {{order_id}} has shipped and arrives by {{eta}}. Track it live below.",
-    media: { mediaType: "IMAGE", mediaHeight: "MEDIUM", source: "url", url: "https://cdn.picomm.in/rcs/order-shipped.png" },
+    // JIO image, Vertical → plain 2:1 card, no height.
+    media: { mediaType: "IMAGE", orientation: "VERTICAL", source: "url", url: "https://cdn.picomm.in/rcs/order-shipped.png" },
     buttons: [
       { type: "URL", text: "Track order", url: "https://picomm.in/track/{{order_id}}" },
       { type: "REPLY", text: "Change address", postback: "change_address" },
@@ -240,14 +380,13 @@ export const SEED_RCS_TEMPLATES: RcsTemplate[] = [
   {
     id: "rcs_tpl_welcome_offer",
     name: "welcome_offer_card",
-    botId: "acme_promo_bot",
-    category: "Promotional",
+    agentId: "acme_promo_bot",
     type: "RICH_CARD",
     approvalStatus: "Approved",
-    orientation: "VERTICAL",
     title: "Welcome to ACME, {{name}}! 🎉",
     body: "Here's {{discount}}% off your first order. Tap below to start shopping.",
-    media: { mediaType: "IMAGE", mediaHeight: "TALL", source: "url", url: "https://cdn.picomm.in/rcs/welcome.jpg" },
+    // JIO image, Vertical → plain 2:1 card, no height.
+    media: { mediaType: "IMAGE", orientation: "VERTICAL", source: "url", url: "https://cdn.picomm.in/rcs/welcome.jpg" },
     buttons: [
       { type: "REPLY", text: "Shop now", postback: "shop_now" },
       { type: "REPLY", text: "See offers", postback: "see_offers" },
@@ -258,8 +397,7 @@ export const SEED_RCS_TEMPLATES: RcsTemplate[] = [
   {
     id: "rcs_tpl_delivery_otp",
     name: "delivery_otp_text",
-    botId: "acme_otp_bot",
-    category: "OTP",
+    agentId: "acme_otp_bot",
     type: "TEXT",
     approvalStatus: "Approved",
     body: "{{otp}} is your ACME verification code. Valid for {{minutes}} minutes. Do not share it with anyone.",
@@ -269,8 +407,7 @@ export const SEED_RCS_TEMPLATES: RcsTemplate[] = [
   {
     id: "rcs_tpl_payment_reminder",
     name: "payment_reminder_text",
-    botId: "acme_utility_bot",
-    category: "Utility",
+    agentId: "acme_utility_bot",
     type: "TEXT",
     approvalStatus: "Approved",
     body: "Hi {{name}}, your payment of Rs {{amount}} for order {{order_id}} is pending. Complete it to avoid cancellation.",
@@ -283,14 +420,13 @@ export const SEED_RCS_TEMPLATES: RcsTemplate[] = [
   {
     id: "rcs_tpl_festive_sale",
     name: "festive_sale_card",
-    botId: "acme_promo_bot",
-    category: "Promotional",
+    agentId: "acme_promo_bot",
     type: "RICH_CARD",
     approvalStatus: "Pending",
-    orientation: "HORIZONTAL",
     title: "{{festival}} Sale is live! 🪔",
     body: "{{name}}, up to {{discount}}% off everything. Offer ends {{expiry_date}}.",
-    media: { mediaType: "VIDEO", mediaHeight: "MEDIUM", source: "url", url: "https://cdn.picomm.in/rcs/festive.mp4" },
+    // JIO video, Horizontal → Medium (7:3), with a thumbnail.
+    media: { mediaType: "VIDEO", orientation: "HORIZONTAL", height: "MEDIUM", source: "url", url: "https://cdn.picomm.in/rcs/festive.mp4" },
     buttons: [
       { type: "REPLY", text: "Shop the sale", postback: "shop_sale" },
       { type: "DIALER", text: "Call support", phone: "+911800123456" },
@@ -300,14 +436,14 @@ export const SEED_RCS_TEMPLATES: RcsTemplate[] = [
   {
     id: "rcs_tpl_feedback",
     name: "feedback_request_card",
-    botId: "acme_utility_bot",
-    category: "Utility",
+    // Registered under the Netcore-VI retail brand — exercises Netcore's
+    // Vertical Short/Medium heights.
+    agentId: "retail_utility_bot",
     type: "RICH_CARD",
     approvalStatus: "Rejected",
-    orientation: "VERTICAL",
     title: "How did we do, {{name}}?",
     body: "Your order {{order_id}} was delivered. We'd love your feedback.",
-    media: { mediaType: "IMAGE", mediaHeight: "SHORT", source: "url", url: "https://cdn.picomm.in/rcs/feedback.png" },
+    media: { mediaType: "IMAGE", orientation: "VERTICAL", height: "SHORT", source: "url", url: "https://cdn.picomm.in/rcs/feedback.png" },
     buttons: [
       { type: "REPLY", text: "👍 Great", postback: "rating_good" },
       { type: "REPLY", text: "👎 Not great", postback: "rating_bad" },

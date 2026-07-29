@@ -1,40 +1,60 @@
 /**
  * RCS channel configuration — types + demo data for Channels → RCS → Overview.
  *
- * The RCS brand/bot model (PICOM-4728 §2): a **Brand** owns **bots (agents)**,
- * each registered for a message **category** (Promotional / Utility / OTP) and
- * routed through a **vendor pipeline** — JIO (direct RBM) or Netcore, which
- * carries the VI pipeline. Multiple bots per category are allowed (cap 10).
+ * The RCS brand/agent model (PICOM-4728 §2): a **Brand** is registered under a
+ * single **provider** — JIO (direct RBM) or Netcore-VI — and owns one or more
+ * **Agents**. An Agent is of a **type** (Transactional or Promotional) and is
+ * configured with an Agent Name, Type, Agent ID and Agent Key; the ID and Key
+ * are held in the backend and are never shown to the client, so while the model
+ * carries them, no component renders them.
  *
  * Everything here is provisioned by the Pi Commerce ops team from the backend;
  * the panel only displays it (same read-only stance as {@link file://./sms-config.ts}).
- * Vendor routing internals (bot keys, API endpoints) are not client-visible.
  */
-import type { RcsCategory } from "@/lib/rcs-templates";
 
-/** Which vendor pipeline a bot's traffic routes through. */
-export type RcsVendor = "JIO" | "Netcore-VI";
+/** The provider a brand's traffic routes through. */
+export type RcsProvider = "JIO" | "Netcore-VI";
 
-/** A registered RCS bot (agent) under a brand. */
-export type RcsBot = {
-  /** Stable bot id used by templates + the campaign node. */
+/** Agent classification. RCS has no OTP agent type — OTP-style copy rides on a
+ *  Transactional agent. */
+export type RcsAgentType = "Transactional" | "Promotional";
+
+/** Agent types, in display order. */
+export const RCS_AGENT_TYPES: RcsAgentType[] = ["Transactional", "Promotional"];
+
+/** All supported providers, in display order. */
+export const RCS_PROVIDERS: RcsProvider[] = ["JIO", "Netcore-VI"];
+
+/** Friendly provider label (Netcore carries the VI pipeline). */
+export function providerLabel(p: RcsProvider): string {
+  return p === "JIO" ? "JIO" : "Netcore · VI";
+}
+
+/** A registered RCS agent under a brand. */
+export type RcsAgent = {
+  /** Stable id used by templates + the campaign node. */
   id: string;
-  /** Display name shown to recipients as the agent. */
+  /** Agent Name — shown to recipients and in the console. */
   name: string;
-  category: RcsCategory;
-  vendor: RcsVendor;
-  /** Whether Google has verified the agent (gates live sending). */
+  type: RcsAgentType;
+  /** Agent ID — backend credential, never rendered to the client. */
+  agentId: string;
+  /** Agent Key — backend credential, never rendered to the client. */
+  agentKey: string;
+  /** Whether the provider has verified the agent (gates live sending). */
   verified: boolean;
   registeredOn: string;
 };
 
-/** A brand and the bots registered under it. */
+/** A brand, its provider, and the agents registered under it. */
 export type RcsBrand = {
   id: string;
   name: string;
-  /** Brand logo — 224x224 px, ≤50 KB per the JIO PRD (mock URL here). */
+  /** Brand logo (mock URL here). */
   logoUrl: string;
-  bots: RcsBot[];
+  /** The single provider this brand is registered under. */
+  provider: RcsProvider;
+  agents: RcsAgent[];
 };
 
 /** The provisioned RCS configuration for a workspace. */
@@ -49,20 +69,22 @@ export const SEED_RCS_CONFIG: RcsChannelConfig = {
       id: "brand_acme",
       name: "ACME Corp",
       logoUrl: "https://cdn.picomm.in/rcs/acme-logo.png",
-      bots: [
-        { id: "acme_promo_bot", name: "ACME Offers", category: "Promotional", vendor: "JIO", verified: true, registeredOn: "04 Jun 2026" },
-        { id: "acme_utility_bot", name: "ACME Updates", category: "Utility", vendor: "JIO", verified: true, registeredOn: "04 Jun 2026" },
-        { id: "acme_otp_bot", name: "ACME Verify", category: "OTP", vendor: "Netcore-VI", verified: true, registeredOn: "11 Jun 2026" },
-        { id: "acme_promo_bot_2", name: "ACME Deals", category: "Promotional", vendor: "Netcore-VI", verified: false, registeredOn: "22 Jun 2026" },
+      provider: "JIO",
+      agents: [
+        { id: "acme_promo_bot", name: "ACME Offers", type: "Promotional", agentId: "AG-JIO-10041", agentKey: "•••• stored in backend", verified: true, registeredOn: "04 Jun 2026" },
+        { id: "acme_utility_bot", name: "ACME Updates", type: "Transactional", agentId: "AG-JIO-10042", agentKey: "•••• stored in backend", verified: true, registeredOn: "04 Jun 2026" },
+        { id: "acme_otp_bot", name: "ACME Verify", type: "Transactional", agentId: "AG-JIO-10043", agentKey: "•••• stored in backend", verified: true, registeredOn: "11 Jun 2026" },
+        { id: "acme_promo_bot_2", name: "ACME Deals", type: "Promotional", agentId: "AG-JIO-10044", agentKey: "•••• stored in backend", verified: false, registeredOn: "22 Jun 2026" },
       ],
     },
     {
       id: "brand_acme_retail",
       name: "ACME Retail",
       logoUrl: "https://cdn.picomm.in/rcs/acme-retail-logo.png",
-      bots: [
-        { id: "retail_promo_bot", name: "ACME Retail Offers", category: "Promotional", vendor: "JIO", verified: true, registeredOn: "18 Jun 2026" },
-        { id: "retail_utility_bot", name: "ACME Retail Updates", category: "Utility", vendor: "Netcore-VI", verified: true, registeredOn: "18 Jun 2026" },
+      provider: "Netcore-VI",
+      agents: [
+        { id: "retail_promo_bot", name: "ACME Retail Offers", type: "Promotional", agentId: "AG-NC-20071", agentKey: "•••• stored in backend", verified: true, registeredOn: "18 Jun 2026" },
+        { id: "retail_utility_bot", name: "ACME Retail Updates", type: "Transactional", agentId: "AG-NC-20072", agentKey: "•••• stored in backend", verified: true, registeredOn: "18 Jun 2026" },
       ],
     },
   ],
@@ -74,24 +96,30 @@ export function brandById(config: RcsChannelConfig, brandId?: string): RcsBrand 
   return config.brands.find((b) => b.id === brandId);
 }
 
-/** Every bot across all brands. */
-export function allBots(config: RcsChannelConfig): RcsBot[] {
-  return config.brands.flatMap((b) => b.bots);
+/** Every agent across all brands. */
+export function allAgents(config: RcsChannelConfig): RcsAgent[] {
+  return config.brands.flatMap((b) => b.agents);
 }
 
-/** Resolve a bot by id, searching every brand. */
-export function botById(config: RcsChannelConfig, botId?: string): RcsBot | undefined {
-  if (!botId) return undefined;
-  return allBots(config).find((b) => b.id === botId);
+/** Resolve an agent by id, searching every brand. */
+export function agentById(config: RcsChannelConfig, agentId?: string): RcsAgent | undefined {
+  if (!agentId) return undefined;
+  return allAgents(config).find((a) => a.id === agentId);
 }
 
-/** Bots registered for a given category (drives the node/template cascade). */
-export function botsForCategory(config: RcsChannelConfig, category: RcsCategory): RcsBot[] {
-  return allBots(config).filter((b) => b.category === category);
+/** Agents under a brand, optionally filtered to one type. */
+export function agentsForBrand(config: RcsChannelConfig, brandId?: string, type?: RcsAgentType): RcsAgent[] {
+  const agents = brandById(config, brandId)?.agents ?? [];
+  return type ? agents.filter((a) => a.type === type) : agents;
 }
 
-/** Bots under a brand, optionally filtered to one category. */
-export function botsForBrand(config: RcsChannelConfig, brandId?: string, category?: RcsCategory): RcsBot[] {
-  const bots = brandById(config, brandId)?.bots ?? [];
-  return category ? bots.filter((b) => b.category === category) : bots;
+/** The brand an agent belongs to (its provider drives media rules). */
+export function brandForAgent(config: RcsChannelConfig, agentId?: string): RcsBrand | undefined {
+  if (!agentId) return undefined;
+  return config.brands.find((b) => b.agents.some((a) => a.id === agentId));
+}
+
+/** The provider an agent's traffic routes through (via its brand). */
+export function providerForAgent(config: RcsChannelConfig, agentId?: string): RcsProvider | undefined {
+  return brandForAgent(config, agentId)?.provider;
 }

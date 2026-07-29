@@ -18,7 +18,7 @@ import {
   rcsFailureBreakdown, rcsOutcomeTotals,
   type RcsRef, type RcsStatus,
 } from "@/lib/analytics-rcs";
-import { replyButtons, type RcsTemplate } from "@/lib/rcs-templates";
+import { templateButtons, type RcsTemplate } from "@/lib/rcs-templates";
 
 /**
  * Channel → RCS. A bespoke view rather than the generic `ChannelDetail`, for
@@ -26,14 +26,14 @@ import { replyButtons, type RcsTemplate } from "@/lib/rcs-templates";
  *
  *  - **delivery and engagement are different layers.** Delivered / Failed / Not
  *    reachable / Timed out are mutually exclusive delivery states (a donut that
- *    sums to Sent); Read and Replied are *nested* engagement stages inside
+ *    sums to Sent); Read and Clicked are *nested* engagement stages inside
  *    Delivered, so they render as a funnel, never as peers in the same pie.
  *  - **the report is per-recipient**, with columns the shared leads table doesn't
- *    carry (sending bot + vendor, the full sent→delivered→read→replied lifecycle
- *    timestamps, the quick-reply tapped).
- *  - **RCS is interactive.** Recipients tap quick-reply buttons, so reply
- *    attribution is a first-class chart — but only meaningful at the level of a
- *    single template that actually carries reply buttons.
+ *    carry (sending agent + provider, the full sent→delivered→read→clicked
+ *    lifecycle timestamps, the button clicked).
+ *  - **RCS is interactive.** RCS reports a click callback for every suggestion
+ *    button, so button-click attribution is a first-class chart — but only
+ *    meaningful at the level of a single template that actually carries buttons.
  */
 export function RcsChannelView({ refs }: { refs: RcsRef[] }) {
   // Outcome tiles are derived from each node's real `entered` volume via the
@@ -44,24 +44,24 @@ export function RcsChannelView({ refs }: { refs: RcsRef[] }) {
   const deliveryRate = totalSent > 0 ? (delivered / totalSent) * 100 : 0;
   const readRate = delivered > 0 ? (read / delivered) * 100 : 0;
 
-  // Quick-reply attribution is only meaningful when the scope resolves to a
-  // single template AND that template carries reply buttons — attributing
-  // replies across a mix of templates (some without buttons) is meaningless.
-  const replyTemplate = useMemo(() => {
+  // Button-click attribution is only meaningful when the scope resolves to a
+  // single template AND that template carries buttons — attributing clicks
+  // across a mix of templates (some without buttons) is meaningless.
+  const clickTemplate = useMemo(() => {
     const byId = new Map<string, RcsTemplate>();
     for (const ref of refs) {
       const t = templateForNode(ref.node);
       if (t) byId.set(t.id, t);
     }
     const all = [...byId.values()];
-    return all.length === 1 && replyButtons(all[0]).length > 0 ? all[0] : undefined;
+    return all.length === 1 && templateButtons(all[0]).length > 0 ? all[0] : undefined;
   }, [refs]);
 
   return (
     <div className="space-y-6">
       <Section title="Delivery performance" sub="Every RCS node in the selected scope.">
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-          <Kpi icon={Send} label="Sent" value={totalSent.toLocaleString()} sub="Messages submitted to the RBM vendor" />
+          <Kpi icon={Send} label="Sent" value={totalSent.toLocaleString()} sub="Messages submitted to the provider" />
           <Kpi
             icon={CheckCircle2}
             label="Delivered"
@@ -103,8 +103,8 @@ export function RcsChannelView({ refs }: { refs: RcsRef[] }) {
         <TemplateComparison refs={refs} />
       </div>
 
-      {replyTemplate && (
-        <ReplyEngagement template={replyTemplate} totalSent={totalSent} />
+      {clickTemplate && (
+        <ClickAttribution template={clickTemplate} totalSent={totalSent} />
       )}
 
       <DayWise sent={totalSent} delivered={delivered} read={read} />
@@ -180,7 +180,7 @@ function Card({ title, sub, children, action }: {
 const OUTCOME_COLOR = {
   delivered: "#22c55e",
   read: "#6366f1",
-  replied: "#8b5cf6",
+  clicked: "#8b5cf6",
   failed: "#ef4444",
   notReachable: "#f59e0b",
   timeout: "#94a3b8",
@@ -189,8 +189,8 @@ const OUTCOME_COLOR = {
 /**
  * Delivery-outcome split — the delivery *layer* only. Delivered / Failed / Not
  * reachable / Timed out are mutually exclusive and sum to Sent, so a donut is
- * the right construct. Read and Replied are deliberately absent: they are nested
- * *inside* Delivered (a replied message was also delivered), so putting them in
+ * the right construct. Read and Clicked are deliberately absent: they are nested
+ * *inside* Delivered (a clicked message was also delivered), so putting them in
  * the same pie would double-count. Engagement lives in the funnel beside this.
  */
 function OutcomeSplit({ totalSent }: { totalSent: number }) {
@@ -241,19 +241,19 @@ function OutcomeSplit({ totalSent }: { totalSent: number }) {
 }
 
 /**
- * Engagement funnel. Sent ⊇ Delivered ⊇ Read ⊇ Replied — each stage is a strict
+ * Engagement funnel. Sent ⊇ Delivered ⊇ Read ⊇ Clicked — each stage is a strict
  * subset of the one above it, which is exactly what a funnel expresses (and what
  * the delivery-outcome donut deliberately doesn't). This is where Read and
- * Replied belong, not in a mutually-exclusive pie.
+ * Clicked belong, not in a mutually-exclusive pie.
  */
 function EngagementFunnel({ totalSent }: { totalSent: number }) {
   const option = useMemo<EChartsOption>(() => {
-    const { delivered, read, replied } = rcsOutcomeTotals(totalSent);
+    const { delivered, read, clicked } = rcsOutcomeTotals(totalSent);
     const stages = [
       { name: "Sent", value: totalSent, color: "#0ea5e9" },
       { name: "Delivered", value: delivered, color: OUTCOME_COLOR.delivered },
       { name: "Read", value: read, color: OUTCOME_COLOR.read },
-      { name: "Replied", value: replied, color: OUTCOME_COLOR.replied },
+      { name: "Clicked", value: clicked, color: OUTCOME_COLOR.clicked },
     ];
     return {
       backgroundColor: "transparent",
@@ -311,16 +311,17 @@ function EngagementFunnel({ totalSent }: { totalSent: number }) {
 }
 
 /**
- * Quick-reply attribution — RCS-specific. Only rendered by the parent when the
- * scope is a single template that carries reply buttons, so this is genuine
- * per-template attribution (never a meaningless mix across templates). Splits
- * the template's total replies across its buttons with a deterministic per-
- * button weight, so the shape looks organic rather than perfectly uniform.
+ * Button-click attribution — RCS-specific. Only rendered by the parent when the
+ * scope is a single template that carries buttons, so this is genuine per-
+ * template attribution (never a meaningless mix across templates). RCS reports a
+ * click for every suggestion type, so all buttons appear here. Splits the
+ * template's total clicks across its buttons with a deterministic per-button
+ * weight, so the shape looks organic rather than perfectly uniform.
  */
-function ReplyEngagement({ template, totalSent }: { template: RcsTemplate; totalSent: number }) {
+function ClickAttribution({ template, totalSent }: { template: RcsTemplate; totalSent: number }) {
   const rows = useMemo(() => {
-    const { replied } = rcsOutcomeTotals(totalSent);
-    const buttons = replyButtons(template);
+    const { clicked } = rcsOutcomeTotals(totalSent);
+    const buttons = templateButtons(template);
     if (buttons.length === 0) return [];
     // Deterministic weight per button (1.00–1.49) so the split isn't uniform but
     // is stable across renders — keyed off the button text, no RNG.
@@ -332,7 +333,7 @@ function ReplyEngagement({ template, totalSent }: { template: RcsTemplate; total
     const weights = buttons.map((b) => weightOf(b.text));
     const sum = weights.reduce((a, c) => a + c, 0) || 1;
     return buttons
-      .map((b, i) => ({ text: b.text, count: Math.round((replied * weights[i]) / sum) }))
+      .map((b, i) => ({ text: b.text, count: Math.round((clicked * weights[i]) / sum) }))
       .filter((r) => r.count > 0)
       .sort((a, b) => a.count - b.count);
   }, [template, totalSent]);
@@ -354,7 +355,7 @@ function ReplyEngagement({ template, totalSent }: { template: RcsTemplate; total
           type: "bar",
           data: rows.map((r) => r.count),
           barWidth: 14,
-          itemStyle: { color: OUTCOME_COLOR.replied, borderRadius: [0, 3, 3, 0] },
+          itemStyle: { color: OUTCOME_COLOR.clicked, borderRadius: [0, 3, 3, 0] },
           label: {
             show: true,
             position: "right",
@@ -369,12 +370,12 @@ function ReplyEngagement({ template, totalSent }: { template: RcsTemplate; total
 
   return (
     <Card
-      title="Quick-reply attribution"
-      sub={`Replies to each suggested-reply button on "${template.name}".`}
+      title="Button-click attribution"
+      sub={`Clicks on each suggestion button on "${template.name}".`}
     >
       <div className="h-[240px]">
         {rows.length === 0 ? (
-          <Empty hint="No replies attributed in scope." />
+          <Empty hint="No clicks attributed in scope." />
         ) : (
           <EChart option={option} />
         )}
@@ -614,7 +615,7 @@ function Empty({ hint }: { hint: string }) {
 const STATUS_TONE: Record<RcsStatus, string> = {
   Delivered: "bg-success/10 text-success",
   Read: "bg-success/10 text-success",
-  Replied: "bg-primary/10 text-primary",
+  Clicked: "bg-primary/10 text-primary",
   Failed: "bg-destructive/10 text-destructive",
   "Not reachable": "bg-warning/10 text-warning",
   "Timed out": "bg-secondary text-muted-foreground",
@@ -623,7 +624,7 @@ const STATUS_TONE: Record<RcsStatus, string> = {
 const STATUS_FILTERS: RcsStatus[] = [
   "Delivered",
   "Read",
-  "Replied",
+  "Clicked",
   "Failed",
   "Not reachable",
   "Timed out",
@@ -648,7 +649,7 @@ function MessagesTable({ refs }: { refs: RcsRef[] }) {
       messages.filter((m) => {
         if (
           q &&
-          !`${m.phone} ${m.templateName} ${m.botName}`.toLowerCase().includes(q.toLowerCase())
+          !`${m.phone} ${m.templateName} ${m.agentName}`.toLowerCase().includes(q.toLowerCase())
         )
           return false;
         if (status !== "any" && m.status !== status) return false;
@@ -675,7 +676,7 @@ function MessagesTable({ refs }: { refs: RcsRef[] }) {
             <Input
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Search number, template or bot…"
+              placeholder="Search number, template or agent…"
               className="h-8 w-[280px] pl-7 text-xs"
             />
           </div>
@@ -705,13 +706,13 @@ function MessagesTable({ refs }: { refs: RcsRef[] }) {
             <thead className="sticky top-0 z-10 bg-card text-[11px] uppercase tracking-wider text-muted-foreground">
               <tr className="border-b border-border">
                 <th className="px-4 py-2 font-medium">Recipient</th>
-                <th className="px-4 py-2 font-medium">Template / Bot</th>
+                <th className="px-4 py-2 font-medium">Template / Agent</th>
                 <th className="px-4 py-2 font-medium">Status</th>
-                <th className="px-4 py-2 font-medium">Reply</th>
+                <th className="px-4 py-2 font-medium">Button</th>
                 <th className="px-4 py-2 font-medium">Sent</th>
                 <th className="px-4 py-2 font-medium">Delivered</th>
                 <th className="px-4 py-2 font-medium">Read</th>
-                <th className="px-4 py-2 font-medium">Replied</th>
+                <th className="px-4 py-2 font-medium">Clicked</th>
                 <th className="px-4 py-2 font-medium">Failure reason</th>
               </tr>
             </thead>
@@ -731,7 +732,7 @@ function MessagesTable({ refs }: { refs: RcsRef[] }) {
                     <td className="px-4 py-2.5">
                       <span className="block">{m.templateName}</span>
                       <span className="block text-[10.5px] text-muted-foreground">
-                        {m.botName}{m.vendor !== "—" ? ` · ${m.vendor}` : ""}
+                        {m.agentName}{m.provider !== "—" ? ` · ${m.provider}` : ""}
                       </span>
                     </td>
                     <td className="px-4 py-2.5">
@@ -740,9 +741,9 @@ function MessagesTable({ refs }: { refs: RcsRef[] }) {
                       </span>
                     </td>
                     <td className="px-4 py-2.5 text-[11.5px] text-muted-foreground">
-                      {m.replyButton ? (
+                      {m.clickedButton ? (
                         <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[10.5px] font-medium text-primary">
-                          {m.replyButton}
+                          {m.clickedButton}
                         </span>
                       ) : (
                         "—"
@@ -751,7 +752,7 @@ function MessagesTable({ refs }: { refs: RcsRef[] }) {
                     <td className="whitespace-nowrap px-4 py-2.5 text-[11.5px] text-muted-foreground">{m.sentAt}</td>
                     <td className="whitespace-nowrap px-4 py-2.5 text-[11.5px] text-muted-foreground">{m.deliveredAt ?? "—"}</td>
                     <td className="whitespace-nowrap px-4 py-2.5 text-[11.5px] text-muted-foreground">{m.readAt ?? "—"}</td>
-                    <td className="whitespace-nowrap px-4 py-2.5 text-[11.5px] text-muted-foreground">{m.repliedAt ?? "—"}</td>
+                    <td className="whitespace-nowrap px-4 py-2.5 text-[11.5px] text-muted-foreground">{m.clickedAt ?? "—"}</td>
                     <td className="px-4 py-2.5 text-[11.5px] text-muted-foreground">{m.failureReason ?? "—"}</td>
                   </tr>
                 ))

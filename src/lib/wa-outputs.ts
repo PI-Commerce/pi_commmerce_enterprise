@@ -16,7 +16,7 @@ import { getTool } from "./tool-registry";
 import { resolveSmsTemplate } from "./sms-store";
 import { smsPlaceholders } from "./sms-templates";
 import { resolveRcsTemplate } from "./rcs-store";
-import { replyButtons, templatePlaceholders, type RcsTemplate } from "./rcs-templates";
+import { templateButtons, templatePlaceholders, type RcsTemplate } from "./rcs-templates";
 
 /**
  * Whether a template button produces a usable inbound signal we can branch on.
@@ -133,10 +133,9 @@ export const DEFAULT_SMS_DLR_WINDOW = "30 minutes";
  * (delivery-outcome branching), per PICOM-4728 / PICOM-4873.
  *
  * Handles, in canvas order:
- *   - one branch per REPLY (quick-reply) button in the selected template,
- *     labelled with the button text — the WhatsApp-style rich branches. URL /
- *     dialer buttons are not branchable (no reply comes back), so they get no
- *     handle.
+ *   - one branch per button in the selected template, labelled with the button
+ *     text. RCS posts a click callback for every suggestion type — REPLY, URL
+ *     and DIALER alike — so all of them are branchable, not just quick replies.
  *   - four fixed delivery defaults: `delivered`, `failed`, `not_reachable`
  *     (the recipient's handset isn't RCS-capable — wire an SMS fallback here),
  *     and `timeout` (no receipt before the wait window closed, its default).
@@ -149,8 +148,8 @@ const RCS_DEFAULT_OUTPUTS: NodeOutput[] = [
 ];
 
 export function rcsOutputs(template?: RcsTemplate): NodeOutput[] {
-  const replies = template ? replyButtons(template) : [];
-  const buttonHandles = replies.map((b, i) => ({ id: `reply_${i}`, label: b.text, kind: "outcome" as const }));
+  const buttons = template ? templateButtons(template) : [];
+  const buttonHandles = buttons.map((b, i) => ({ id: `btn_${i}`, label: b.text, kind: "outcome" as const }));
   return [...buttonHandles, ...RCS_DEFAULT_OUTPUTS.map((o) => ({ ...o }))];
 }
 
@@ -237,10 +236,10 @@ export function deriveNodeOutcomeVariables(
       }
     } else if (kind === "rcs") {
       // Delivery facts this message produced, mirroring the node's default
-      // handles (delivered | failed | not_reachable | timeout) plus the tapped
-      // reply as a value a Conditional can read.
+      // handles (delivered | failed | not_reachable | timeout) plus the clicked
+      // button as a value a Conditional can read.
       vars.push({ key: `${ns}.delivery_state`, source });
-      vars.push({ key: `${ns}.reply`, source });
+      vars.push({ key: `${ns}.click`, source });
       vars.push({ key: `${ns}.failure_reason`, source });
       const template = resolveRcsTemplate(config?.rcsTemplateId);
       if (template) {

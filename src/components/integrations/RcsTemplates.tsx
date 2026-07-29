@@ -11,15 +11,16 @@ import {
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import type { RcsChannelConfig } from "@/lib/rcs-config";
-import { botsForCategory, botById } from "@/lib/rcs-config";
+import type { RcsChannelConfig, RcsAgentType, RcsProvider } from "@/lib/rcs-config";
+import { agentById, brandById, agentsForBrand, providerLabel, RCS_AGENT_TYPES } from "@/lib/rcs-config";
 import {
-  RCS_CATEGORIES, RCS_TEMPLATE_TYPES, RCS_MEDIA_HEIGHTS, RCS_CARD_ORIENTATIONS,
-  RCS_BUTTON_TYPES, RCS_BUTTON_LABELS, MAX_BUTTONS,
+  RCS_TEMPLATE_TYPES, RCS_CARD_ORIENTATIONS,
+  RCS_BUTTON_TYPES, RCS_BUTTON_LABELS, MAX_BUTTONS, RCS_MAX_CARD_PAYLOAD_KB,
   templatePlaceholders, fillRcsVariables, mediaAccept, mediaFormatsHint,
-  validateRcsTemplate, todayLabel, parseRcsCreated,
-  type RcsTemplate, type RcsTemplateType, type RcsCategory, type RcsApprovalStatus,
-  type RcsButton, type RcsButtonType, type RcsMedia, type RcsMediaType,
+  mediaKindSpec, orientationSpec, mediaAspectHint,
+  validateRcsTemplate, todayLabel,
+  type RcsTemplate, type RcsTemplateType, type RcsApprovalStatus,
+  type RcsButton, type RcsButtonType, type RcsMedia, type RcsMediaType, type RcsCardOrientation,
 } from "@/lib/rcs-templates";
 import { useRcsTemplates, upsertRcsTemplate, removeRcsTemplate } from "@/lib/rcs-store";
 
@@ -27,12 +28,11 @@ import { useRcsTemplates, upsertRcsTemplate, removeRcsTemplate } from "@/lib/rcs
  * RCS → Templates tab. The RCS template registry: a searchable list plus a rich
  * create/edit form for Text and Rich-card templates.
  *
- * A sibling of {@link file://./SmsTemplates.tsx} (registry shell) and
- * {@link file://./WhatsAppTemplates.tsx} (rich form + phone preview). Unlike SMS,
- * RCS templates carry a vendor **approval status** (Netcore reviews; Jio
- * auto-approves), so the list shows a status column and only Approved templates
- * are offered to campaign nodes. No bulk import — RCS content is rich and
- * authored one at a time. Mock only.
+ * A template is created under an Agent (Brand → Agent), so its Type and the
+ * provider that drives the media rules are inherited. Unlike SMS, RCS templates
+ * carry a provider **approval status** (Netcore reviews; Jio auto-approves), so
+ * the list shows a status column and only Approved templates are offered to
+ * campaign nodes. Mock only.
  */
 export function RcsTemplates({ config }: { config: RcsChannelConfig }) {
   const templates = useRcsTemplates();
@@ -85,22 +85,23 @@ function RcsTemplateList({ config, templates, onCreate, onEdit, onDelete }: {
   onDelete: (id: string) => void;
 }) {
   const [q, setQ] = useState("");
-  const [cat, setCat] = useState<RcsCategory | "all">("all");
+  const [typeFilter, setTypeFilter] = useState<RcsAgentType | "all">("all");
   const [status, setStatus] = useState<RcsApprovalStatus | "all">("all");
   const [page, setPage] = useState(1);
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return templates.filter((t) => {
-      const botName = botById(config, t.botId)?.name ?? t.botId;
-      if (needle && !`${t.name} ${t.id} ${botName}`.toLowerCase().includes(needle)) return false;
-      if (cat !== "all" && t.category !== cat) return false;
+      const agent = agentById(config, t.agentId);
+      const agentName = agent?.name ?? t.agentId;
+      if (needle && !`${t.name} ${t.id} ${agentName}`.toLowerCase().includes(needle)) return false;
+      if (typeFilter !== "all" && agent?.type !== typeFilter) return false;
       if (status !== "all" && t.approvalStatus !== status) return false;
       return true;
     });
-  }, [templates, q, cat, status, config]);
+  }, [templates, q, typeFilter, status, config]);
 
-  useEffect(() => { setPage(1); }, [q, cat, status, templates.length]);
+  useEffect(() => { setPage(1); }, [q, typeFilter, status, templates.length]);
 
   const PAGE_SIZE = 8;
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
@@ -119,16 +120,16 @@ function RcsTemplateList({ config, templates, onCreate, onEdit, onDelete }: {
             <Input
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Search template name, ID or bot…"
+              placeholder="Search template name, ID or agent…"
               className="h-9 pl-9"
             />
           </div>
-          <Field label="Category">
-            <Select value={cat} onValueChange={(v) => setCat(v as RcsCategory | "all")}>
+          <Field label="Type">
+            <Select value={typeFilter} onValueChange={(v) => setTypeFilter(v as RcsAgentType | "all")}>
               <SelectTrigger className="h-9 w-40 text-sm"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All categories</SelectItem>
-                {RCS_CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                <SelectItem value="all">All types</SelectItem>
+                {RCS_AGENT_TYPES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
               </SelectContent>
             </Select>
           </Field>
@@ -153,7 +154,7 @@ function RcsTemplateList({ config, templates, onCreate, onEdit, onDelete }: {
         {/* Table */}
         <div className="mt-4 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border">
           <div className={cn("grid shrink-0 items-center gap-3 border-b border-border bg-secondary/40 px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground", GRID)}>
-            <span>Name</span><span>Bot</span><span>Category</span><span>Type</span>
+            <span>Name</span><span>Agent</span><span>Type</span><span>Template</span>
             <span>Approval</span><span>Create date</span><span className="w-16 text-right">Action</span>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto">
@@ -165,7 +166,7 @@ function RcsTemplateList({ config, templates, onCreate, onEdit, onDelete }: {
               </div>
             ) : (
               pageRows.map((t) => {
-                const bot = botById(config, t.botId);
+                const agent = agentById(config, t.agentId);
                 return (
                   <button
                     key={t.id}
@@ -179,8 +180,8 @@ function RcsTemplateList({ config, templates, onCreate, onEdit, onDelete }: {
                       </span>
                       <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">{t.body}</span>
                     </span>
-                    <span className="min-w-0 truncate text-muted-foreground">{bot?.name ?? t.botId}</span>
-                    <span><CategoryTag type={t.category} /></span>
+                    <span className="min-w-0 truncate text-muted-foreground">{agent?.name ?? t.agentId}</span>
+                    <span>{agent ? <AgentTypeTag type={agent.type} /> : <span className="text-[12px] text-muted-foreground">—</span>}</span>
                     <span className="text-[12px] text-muted-foreground">{t.type === "TEXT" ? "Text" : "Rich card"}</span>
                     <span><StatusTag status={t.approvalStatus} /></span>
                     <span className="text-muted-foreground">{t.createdAt}</span>
@@ -216,7 +217,7 @@ function RcsTemplateList({ config, templates, onCreate, onEdit, onDelete }: {
             {filtered.length === 0
               ? "No templates"
               : `Showing ${rangeStart}–${rangeEnd} of ${filtered.length} templates`}
-            {" · submitted to your RCS vendor for approval"}
+            {" · submitted to your RCS provider for approval"}
           </p>
           {totalPages > 1 && (
             <div className="flex items-center gap-1.5">
@@ -261,11 +262,11 @@ function TypeGlyph({ type }: { type: RcsTemplateType }) {
   );
 }
 
-function CategoryTag({ type }: { type: RcsCategory }) {
+function AgentTypeTag({ type }: { type: RcsAgentType }) {
   const tone =
-    type === "Utility" ? "border-ai/30 bg-ai/10 text-ai"
-    : type === "OTP" ? "border-warning/30 bg-warning/10 text-warning"
-    : "border-border bg-secondary text-muted-foreground";
+    type === "Transactional"
+      ? "border-ai/30 bg-ai/10 text-ai"
+      : "border-border bg-secondary text-muted-foreground";
   return (
     <span className={cn("inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium", tone)}>
       {type}
@@ -296,29 +297,60 @@ function RcsTemplateForm({ config, initial, existing, onCancel, onSave }: {
   onCancel: () => void;
   onSave: (t: RcsTemplate) => void;
 }) {
-  const [category, setCategory] = useState<RcsCategory | "">(initial?.category ?? "");
-  const [botId, setBotId] = useState(initial?.botId ?? "");
+  const soleBrandId = config.brands.length === 1 ? config.brands[0].id : "";
+  const initialBrandId = initial?.agentId
+    ? config.brands.find((b) => b.agents.some((a) => a.id === initial.agentId))?.id ?? soleBrandId
+    : soleBrandId;
+  const [brandId, setBrandId] = useState(initialBrandId);
+  const [agentId, setAgentId] = useState(initial?.agentId ?? "");
   const [name, setName] = useState(initial?.name ?? "");
   const [type, setType] = useState<RcsTemplateType>(initial?.type ?? "TEXT");
   const [title, setTitle] = useState(initial?.title ?? "");
   const [body, setBody] = useState(initial?.body ?? "");
-  const [orientation, setOrientation] = useState(initial?.orientation ?? "VERTICAL");
   const [media, setMedia] = useState<RcsMedia>(
-    initial?.media ?? { mediaType: "IMAGE", mediaHeight: "MEDIUM", source: "url", url: "" },
+    initial?.media ?? { mediaType: "IMAGE", orientation: "VERTICAL", source: "url", url: "" },
   );
   const [buttons, setButtons] = useState<RcsButton[]>(initial?.buttons ?? []);
   const [showErrors, setShowErrors] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // Bot picker narrows to the chosen category. Clear a bot that no longer fits.
-  const bots = category ? botsForCategory(config, category) : [];
+  const brand = brandById(config, brandId);
+  const provider = brand?.provider;
+  const agents = brandId ? agentsForBrand(config, brandId) : [];
+
+  // Agent picker narrows to the chosen brand. Clear an agent that no longer fits.
   useEffect(() => {
-    if (botId && !bots.some((b) => b.id === botId)) setBotId("");
+    if (agentId && !agents.some((a) => a.id === agentId)) setAgentId("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [category]);
+  }, [brandId]);
+
+  // Media rules are provider-specific, so whenever the provider / media type /
+  // orientation changes, snap orientation, height and alignment to what that
+  // provider actually offers (and clear the ones it doesn't).
+  useEffect(() => {
+    if (!provider) return;
+    setMedia((m) => {
+      const kind = mediaKindSpec(provider, m.mediaType);
+      const orients = Object.keys(kind.orientations) as RcsCardOrientation[];
+      const orientation = orients.includes(m.orientation) ? m.orientation : orients[0];
+      const spec = kind.orientations[orientation];
+      const height = spec?.heights?.length
+        ? (spec.heights.some((h) => h.key === m.height) ? m.height : spec.heights[0].key)
+        : undefined;
+      const alignment = spec?.alignments?.length
+        ? (spec.alignments.some((a) => a.key === m.alignment) ? m.alignment : spec.alignments[0].key)
+        : undefined;
+      if (orientation === m.orientation && height === m.height && alignment === m.alignment) return m;
+      return { ...m, orientation, height, alignment };
+    });
+  }, [provider, media.mediaType, media.orientation]);
+
+  const kindSpec = provider ? mediaKindSpec(provider, media.mediaType) : undefined;
+  const availOrients = kindSpec ? (Object.keys(kindSpec.orientations) as RcsCardOrientation[]) : [];
+  const oSpec = provider ? orientationSpec(provider, media.mediaType, media.orientation) : undefined;
 
   const draft: Partial<RcsTemplate> = {
-    id: initial?.id, name, category: category || undefined, botId, type, body,
+    id: initial?.id, name, agentId, type, body,
     title: type === "RICH_CARD" ? title : undefined,
     media: type === "RICH_CARD" ? media : undefined,
     buttons,
@@ -327,8 +359,7 @@ function RcsTemplateForm({ config, initial, existing, onCancel, onSave }: {
   const errorFor = (needle: string) => errorList.find((e) => e.toLowerCase().startsWith(needle));
   const errors = {
     name: errorFor("template name"),
-    category: errorFor("category"),
-    botId: errorFor("bot"),
+    agentId: errorFor("agent"),
     body: errorFor("message body"),
     title: errorFor("card title"),
     media: errorList.find((e) => e.toLowerCase().includes("media")),
@@ -348,22 +379,22 @@ function RcsTemplateForm({ config, initial, existing, onCancel, onSave }: {
       toast.error("Please fix the highlighted fields before saving.");
       return;
     }
-    // New templates land as Pending (submitted to vendor); edits keep their status.
+    // New templates land as Pending (submitted to provider); edits keep status.
     onSave({
       id: initial?.id ?? `rcs_tpl_${Date.now().toString(36)}`,
       name: name.trim(),
-      botId,
-      category: category as RcsCategory,
+      agentId,
       type,
       approvalStatus: initial?.approvalStatus ?? "Pending",
       body: body.trim(),
       title: type === "RICH_CARD" ? title.trim() : undefined,
-      orientation: type === "RICH_CARD" ? orientation : undefined,
       media: type === "RICH_CARD" ? media : undefined,
       buttons: buttons.filter((b) => b.text.trim()),
       createdAt: initial?.createdAt ?? todayLabel(),
     });
   };
+
+  const agent = agentById(config, agentId);
 
   return (
     <div className="fixed inset-0 z-40 flex flex-col bg-background">
@@ -386,32 +417,34 @@ function RcsTemplateForm({ config, initial, existing, onCancel, onSave }: {
             <div className="flex items-start gap-2 rounded-lg border border-dashed border-border bg-muted/30 px-3 py-2.5 text-[11.5px] text-muted-foreground">
               <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
               <span>
-                New templates are submitted to your RCS vendor for approval (Netcore reviews; Jio auto-approves).
+                New templates are submitted to your RCS provider for approval (Netcore reviews; Jio auto-approves).
                 Only Approved templates can be used in campaign nodes.
               </span>
             </div>
 
-            <Card title="Bot & identity">
+            <Card title="Brand & agent">
               <div className="grid gap-4 sm:grid-cols-2">
-                <FormField label="Category" required error={showErrors ? errors.category : undefined}>
-                  <Select value={category} onValueChange={(v) => setCategory(v as RcsCategory)}>
-                    <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select Category" /></SelectTrigger>
+                <FormField label="Brand" required hint={provider ? `Provider · ${providerLabel(provider)}` : "Registered under one provider"}>
+                  <Select value={brandId} onValueChange={setBrandId}>
+                    <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select Brand" /></SelectTrigger>
                     <SelectContent>
-                      {RCS_CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                      {config.brands.map((b) => (
+                        <SelectItem key={b.id} value={b.id}>{b.name} · {providerLabel(b.provider)}</SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </FormField>
                 <FormField
-                  label="Bot"
+                  label="Agent"
                   required
-                  hint={category ? "Bots registered for this category" : "Select a category first"}
-                  error={showErrors ? errors.botId : undefined}
+                  hint={brandId ? (agent ? `Type · ${agent.type}` : "Agents registered under this brand") : "Select a brand first"}
+                  error={showErrors ? errors.agentId : undefined}
                 >
-                  <Select value={botId} onValueChange={setBotId} disabled={!category}>
-                    <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select Bot" /></SelectTrigger>
+                  <Select value={agentId} onValueChange={setAgentId} disabled={!brandId}>
+                    <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select Agent" /></SelectTrigger>
                     <SelectContent>
-                      {bots.map((b) => (
-                        <SelectItem key={b.id} value={b.id}>{b.name} · {b.vendor === "JIO" ? "JIO" : "Netcore-VI"}</SelectItem>
+                      {agents.map((a) => (
+                        <SelectItem key={a.id} value={a.id}>{a.name} · {a.type}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -448,99 +481,132 @@ function RcsTemplateForm({ config, initial, existing, onCancel, onSave }: {
             {/* Rich card extras */}
             {type === "RICH_CARD" && (
               <Card title="Card">
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <FormField label="Card title" required error={showErrors ? errors.title : undefined}>
-                    <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Your order is on its way" className="h-9" />
-                  </FormField>
-                  <FormField label="Orientation">
-                    <Select value={orientation} onValueChange={(v) => setOrientation(v as typeof orientation)}>
-                      <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        {RCS_CARD_ORIENTATIONS.map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                  </FormField>
-                </div>
+                <FormField label="Card title" required error={showErrors ? errors.title : undefined}>
+                  <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Your order is on its way" className="h-9" />
+                </FormField>
 
                 {/* Media */}
                 <div className="mt-4">
-                  <p className="mb-1.5 text-[12px] font-medium text-foreground">Media <span className="text-destructive">*</span></p>
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    <FormField label="Type">
-                      <Select value={media.mediaType} onValueChange={(v) => setMedia((m) => ({ ...m, mediaType: v as RcsMediaType }))}>
-                        <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="IMAGE">Image</SelectItem>
-                          <SelectItem value="VIDEO">Video</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </FormField>
-                    <FormField label="Height">
-                      <Select value={media.mediaHeight} onValueChange={(v) => setMedia((m) => ({ ...m, mediaHeight: v as RcsMedia["mediaHeight"] }))}>
-                        <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          {RCS_MEDIA_HEIGHTS.map((h) => <SelectItem key={h.value} value={h.value}>{h.label} · {h.dp} DP</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    </FormField>
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <p className="text-[12px] font-medium text-foreground">Media <span className="text-destructive">*</span></p>
+                    {provider && (
+                      <span className="text-[10.5px] text-muted-foreground">Rules for {providerLabel(provider)}</span>
+                    )}
                   </div>
 
-                  {/* URL or upload */}
-                  <div className="mt-2">
-                    <div className="mb-1.5 inline-flex rounded-md border border-border p-0.5">
-                      <button
-                        type="button"
-                        onClick={() => setMedia((m) => ({ ...m, source: "url" }))}
-                        className={cn("flex items-center gap-1 rounded px-2.5 py-1 text-[11.5px] font-medium transition-colors", media.source === "url" ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground")}
-                      >
-                        <Link2 className="h-3.5 w-3.5" /> URL
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setMedia((m) => ({ ...m, source: "upload" }))}
-                        className={cn("flex items-center gap-1 rounded px-2.5 py-1 text-[11.5px] font-medium transition-colors", media.source === "upload" ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground")}
-                      >
-                        <UploadCloud className="h-3.5 w-3.5" /> Upload
-                      </button>
-                    </div>
-
-                    {media.source === "url" ? (
-                      <Input
-                        value={media.url ?? ""}
-                        onChange={(e) => setMedia((m) => ({ ...m, url: e.target.value }))}
-                        placeholder="https://cdn.example.com/media.jpg"
-                        className="h-9 font-mono text-[12px]"
-                      />
-                    ) : (
-                      <div className="flex items-center gap-2">
-                        <input
-                          ref={fileRef}
-                          type="file"
-                          accept={mediaAccept(media.mediaType)}
-                          className="hidden"
-                          onChange={(e) => {
-                            const f = e.target.files?.[0];
-                            if (f) setMedia((m) => ({ ...m, fileName: f.name }));
-                            e.target.value = "";
-                          }}
-                        />
-                        {media.fileName ? (
-                          <span className="flex items-center gap-2 rounded-md border border-border bg-card px-2.5 py-1.5 text-[12px]">
-                            <ImageIcon className="h-3.5 w-3.5 text-muted-foreground" /> {media.fileName}
-                            <button onClick={() => setMedia((m) => ({ ...m, fileName: undefined }))} className="text-muted-foreground hover:text-foreground"><X className="h-3.5 w-3.5" /></button>
-                          </span>
+                  {!provider ? (
+                    <p className="rounded-lg border border-dashed border-border bg-muted/30 px-3 py-2.5 text-[11.5px] text-muted-foreground">
+                      Select a brand to load its provider's media options.
+                    </p>
+                  ) : (
+                    <>
+                      <div className="grid gap-2 sm:grid-cols-3">
+                        <FormField label="Media type">
+                          <Select value={media.mediaType} onValueChange={(v) => setMedia((m) => ({ ...m, mediaType: v as RcsMediaType }))}>
+                            <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="IMAGE">Image</SelectItem>
+                              <SelectItem value="VIDEO">Video</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </FormField>
+                        <FormField label="Orientation">
+                          <Select value={media.orientation} onValueChange={(v) => setMedia((m) => ({ ...m, orientation: v as RcsCardOrientation }))}>
+                            <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              {RCS_CARD_ORIENTATIONS.filter((o) => availOrients.includes(o.value)).map((o) => (
+                                <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </FormField>
+                        {oSpec?.heights?.length ? (
+                          <FormField label="Height">
+                            <Select value={media.height} onValueChange={(v) => setMedia((m) => ({ ...m, height: v as RcsMedia["height"] }))}>
+                              <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                {oSpec.heights.map((h) => (
+                                  <SelectItem key={h.key} value={h.key}>{h.label}{h.aspect ? ` · ${h.aspect}` : ""}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </FormField>
+                        ) : oSpec?.alignments?.length ? (
+                          <FormField label="Alignment">
+                            <Select value={media.alignment} onValueChange={(v) => setMedia((m) => ({ ...m, alignment: v as RcsMedia["alignment"] }))}>
+                              <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                {oSpec.alignments.map((a) => (
+                                  <SelectItem key={a.key} value={a.key}>{a.label}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </FormField>
                         ) : (
-                          <Button variant="outline" size="sm" className="h-9 gap-1.5 text-xs" onClick={() => fileRef.current?.click()}>
-                            <UploadCloud className="h-3.5 w-3.5" /> Choose file
-                          </Button>
+                          <div className="flex flex-col justify-end pb-1">
+                            <p className="text-[10.5px] text-muted-foreground">No further size options for this orientation.</p>
+                          </div>
                         )}
                       </div>
-                    )}
-                    <p className="mt-1 text-[11px] text-muted-foreground">{mediaFormatsHint(media.mediaType)} · card payload up to 250 KB</p>
-                    {showErrors && errors.media && (
-                      <p className="mt-1 flex items-center gap-1 text-[11px] text-destructive"><AlertCircle className="h-3 w-3 shrink-0" /> {errors.media}</p>
-                    )}
-                  </div>
+
+                      {/* URL or upload */}
+                      <div className="mt-2">
+                        <div className="mb-1.5 inline-flex rounded-md border border-border p-0.5">
+                          <button
+                            type="button"
+                            onClick={() => setMedia((m) => ({ ...m, source: "url" }))}
+                            className={cn("flex items-center gap-1 rounded px-2.5 py-1 text-[11.5px] font-medium transition-colors", media.source === "url" ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground")}
+                          >
+                            <Link2 className="h-3.5 w-3.5" /> URL
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setMedia((m) => ({ ...m, source: "upload" }))}
+                            className={cn("flex items-center gap-1 rounded px-2.5 py-1 text-[11.5px] font-medium transition-colors", media.source === "upload" ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground")}
+                          >
+                            <UploadCloud className="h-3.5 w-3.5" /> Upload
+                          </button>
+                        </div>
+
+                        {media.source === "url" ? (
+                          <Input
+                            value={media.url ?? ""}
+                            onChange={(e) => setMedia((m) => ({ ...m, url: e.target.value }))}
+                            placeholder="https://cdn.example.com/media.jpg"
+                            className="h-9 font-mono text-[12px]"
+                          />
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <input
+                              ref={fileRef}
+                              type="file"
+                              accept={mediaAccept(media.mediaType)}
+                              className="hidden"
+                              onChange={(e) => {
+                                const f = e.target.files?.[0];
+                                if (f) setMedia((m) => ({ ...m, fileName: f.name }));
+                                e.target.value = "";
+                              }}
+                            />
+                            {media.fileName ? (
+                              <span className="flex items-center gap-2 rounded-md border border-border bg-card px-2.5 py-1.5 text-[12px]">
+                                <ImageIcon className="h-3.5 w-3.5 text-muted-foreground" /> {media.fileName}
+                                <button onClick={() => setMedia((m) => ({ ...m, fileName: undefined }))} className="text-muted-foreground hover:text-foreground"><X className="h-3.5 w-3.5" /></button>
+                              </span>
+                            ) : (
+                              <Button variant="outline" size="sm" className="h-9 gap-1.5 text-xs" onClick={() => fileRef.current?.click()}>
+                                <UploadCloud className="h-3.5 w-3.5" /> Choose file
+                              </Button>
+                            )}
+                          </div>
+                        )}
+                        <p className="mt-1 text-[11px] text-muted-foreground">{mediaHint(provider, media)}</p>
+                        {showErrors && errors.media && (
+                          <p className="mt-1 flex items-center gap-1 text-[11px] text-destructive"><AlertCircle className="h-3 w-3 shrink-0" /> {errors.media}</p>
+                        )}
+                      </div>
+                    </>
+                  )}
                 </div>
               </Card>
             )}
@@ -577,7 +643,7 @@ function RcsTemplateForm({ config, initial, existing, onCancel, onSave }: {
             <Card title="Suggestion buttons">
               <div className="space-y-2">
                 {buttons.length === 0 && (
-                  <p className="text-[11px] text-muted-foreground">No buttons. Add up to {MAX_BUTTONS} — quick replies become branches on the RCS node.</p>
+                  <p className="text-[11px] text-muted-foreground">No buttons. Add up to {MAX_BUTTONS} — every button becomes a click branch on the RCS node.</p>
                 )}
                 {buttons.map((b, i) => (
                   <div key={i} className="rounded-lg border border-border bg-card/40 p-3">
@@ -599,9 +665,9 @@ function RcsTemplateForm({ config, initial, existing, onCancel, onSave }: {
                     {b.type === "DIALER" && (
                       <Input value={b.phone ?? ""} onChange={(e) => setButton(i, { phone: e.target.value })} placeholder="+91…" className="mt-2 h-8 font-mono text-[11.5px]" />
                     )}
-                    {b.type === "REPLY" && (
-                      <p className="mt-1.5 flex items-center gap-1 text-[10.5px] text-muted-foreground"><Reply className="h-3 w-3" /> Becomes a branch output on the RCS node.</p>
-                    )}
+                    <p className="mt-1.5 flex items-center gap-1 text-[10.5px] text-muted-foreground">
+                      <Reply className="h-3 w-3" /> Becomes a click branch output on the RCS node.
+                    </p>
                   </div>
                 ))}
                 {buttons.length < MAX_BUTTONS && (
@@ -617,7 +683,7 @@ function RcsTemplateForm({ config, initial, existing, onCancel, onSave }: {
           <div className="lg:sticky lg:top-0 lg:self-start">
             <p className="mb-3 text-center text-[12px] font-medium uppercase tracking-wide text-muted-foreground">Preview</p>
             <RcsPreview
-              agentName={botById(config, botId)?.name ?? "RCS Agent"}
+              agentName={agent?.name ?? "RCS Agent"}
               type={type}
               title={title}
               body={body}
@@ -636,6 +702,23 @@ function RcsTemplateForm({ config, initial, existing, onCancel, onSave }: {
   );
 }
 
+/** Compose the format / size / aspect / thumbnail hint for a media selection. */
+function mediaHint(provider: RcsProvider, media: RcsMedia): string {
+  const kind = mediaKindSpec(provider, media.mediaType);
+  const parts: string[] = [];
+  const aspect = mediaAspectHint(provider, media);
+  if (aspect) parts.push(`Aspect ${aspect}`);
+  parts.push(mediaFormatsHint(media.mediaType));
+  parts.push(`≤ ${kind.maxSizeMb} MB`);
+  if (media.mediaType === "VIDEO" && kind.thumbnail) {
+    const t = kind.thumbnail;
+    const thumbAspect = t.aspect ?? (media.height ? t.perHeightAspect?.[media.height] : undefined);
+    parts.push(`thumbnail${thumbAspect ? ` ${thumbAspect}` : ""} ≤ ${t.maxSizeKb} KB`);
+  }
+  parts.push(`card payload ≤ ${RCS_MAX_CARD_PAYLOAD_KB} KB`);
+  return parts.join(" · ");
+}
+
 /** Handset preview of an RCS message: agent header, card/text bubble, suggestion chips. */
 function RcsPreview({ agentName, type, title, body, media, buttons }: {
   agentName: string; type: RcsTemplateType; title: string; body: string; media: RcsMedia; buttons: RcsButton[];
@@ -644,7 +727,10 @@ function RcsPreview({ agentName, type, title, body, media, buttons }: {
   const filledBody = fillRcsVariables(body, sampleVars);
   const filledTitle = fillRcsVariables(title, sampleVars);
   const mediaLabel = media.source === "url" ? media.url : media.fileName;
-  const heightPx = media.mediaHeight === "SHORT" ? 84 : media.mediaHeight === "TALL" ? 172 : 120;
+  const heightPx =
+    media.orientation === "VERTICAL"
+      ? 150
+      : media.height === "SHORT" ? 84 : media.height === "LARGE" ? 160 : 120;
 
   return (
     <div className="mx-auto w-[300px] overflow-hidden rounded-[2rem] border-[6px] border-foreground/85 bg-background shadow-xl">

@@ -2,8 +2,8 @@
  * Per-recipient RCS delivery records for the Channel → RCS analytics view.
  *
  * RCS (PICOM-4728) carries fields the shared {@link file://./analytics-leads.ts}
- * `Lead` type doesn't — the sending bot + vendor pipeline, the RCS read receipt,
- * and which quick-reply button (if any) the recipient tapped — so this ships a
+ * `Lead` type doesn't — the sending agent + provider, the RCS read receipt, and
+ * which suggestion button (if any) the recipient clicked — so this ships a
  * dedicated {@link RcsMessage} record, the same split `SmsChannelView` /
  * `VoiceChannelView` already make with their own row types.
  *
@@ -15,13 +15,13 @@ import { RCS_DELIVERY_RATES, type RunRow, type SankeyNode } from "@/lib/analytic
 export { RCS_DELIVERY_RATES };
 import { generateLeads } from "@/lib/analytics-leads";
 import { getRcsConfig, resolveRcsTemplate } from "@/lib/rcs-store";
-import { replyButtons, type RcsTemplate } from "@/lib/rcs-templates";
-import { botById } from "@/lib/rcs-config";
+import { templateButtons, type RcsTemplate } from "@/lib/rcs-templates";
+import { agentById, providerForAgent, providerLabel } from "@/lib/rcs-config";
 
 export type RcsStatus =
   | "Delivered"
   | "Read"
-  | "Replied"
+  | "Clicked"
   | "Failed"
   | "Not reachable"
   | "Timed out";
@@ -37,7 +37,7 @@ const FAILURE_REASONS: { reason: string; weight: number }[] = [
   { reason: "Message rejected by carrier RBM", weight: 22 },
   { reason: "Handset unreachable or switched off", weight: 18 },
   { reason: "Payload exceeded 250 KB card limit", weight: 12 },
-  { reason: "Bot not provisioned for recipient carrier", weight: 10 },
+  { reason: "Agent not provisioned for recipient carrier", weight: 10 },
   { reason: "Message expired before delivery", weight: 8 },
 ];
 
@@ -70,16 +70,16 @@ export function rcsFailureBreakdown(
  * Outcome totals for a given sent volume, from the shared {@link RCS_DELIVERY_RATES}.
  * `delivered` / `failed` / `notReachable` / `timeout` are the four mutually
  * exclusive terminal states and sum to Sent (timeout absorbs the remainder);
- * `read` and `replied` are engagement sub-slices of `delivered`.
+ * `read` and `clicked` are engagement sub-slices of `delivered`.
  */
 export function rcsOutcomeTotals(sent: number) {
   const delivered = Math.round(sent * RCS_DELIVERY_RATES.delivered);
   const read = Math.round(sent * RCS_DELIVERY_RATES.read);
-  const replied = Math.round(sent * RCS_DELIVERY_RATES.replied);
+  const clicked = Math.round(sent * RCS_DELIVERY_RATES.clicked);
   const failed = Math.round(sent * RCS_DELIVERY_RATES.failed);
   const notReachable = Math.round(sent * RCS_DELIVERY_RATES.notReachable);
   const timeout = Math.max(0, sent - delivered - failed - notReachable);
-  return { delivered, read, replied, failed, notReachable, timeout };
+  return { delivered, read, clicked, failed, notReachable, timeout };
 }
 
 export type RcsMessage = {
@@ -89,20 +89,20 @@ export type RcsMessage = {
   customer: string;
   templateName: string;
   templateId: string;
-  /** Sending RCS bot + the vendor pipeline it routes through — report-only. */
-  botName: string;
-  vendor: string;
+  /** Sending RCS agent + the provider it routes through — report-only. */
+  agentName: string;
+  provider: string;
   status: RcsStatus;
-  /** For a "Replied" row, the quick-reply button text the recipient tapped
-   *  (null when the reply was free-text or the template has no reply buttons). */
-  replyButton: string | null;
+  /** For a "Clicked" row, the suggestion button text the recipient clicked
+   *  (null when the template has no buttons). */
+  clickedButton: string | null;
   /** Lifecycle timestamps; each is null until that transition happens, and they
-   *  are cumulative — a Replied row carries all four of sent/delivered/read/
-   *  replied, a Read row the first three, and so on. */
+   *  are cumulative — a Clicked row carries all four of sent/delivered/read/
+   *  clicked, a Read row the first three, and so on. */
   sentAt: string;
   deliveredAt: string | null;
   readAt: string | null;
-  repliedAt: string | null;
+  clickedAt: string | null;
   failedAt: string | null;
   failureReason: string | null;
   /** Seconds from submission to delivery receipt; null unless delivered. */
@@ -143,11 +143,12 @@ function seed(s: string) {
  * Per-recipient outcome mix. Matches {@link RCS_DELIVERY_RATES} (and therefore
  * `rcsHandleBaseWeight` in analytics-data.ts) so the campaign Sankey and this
  * table tell the same story: most delivered, of which a share is read and a
- * smaller share replies, with hard failure / not-reachable / timeout tails.
+ * smaller share clicks a button, with hard failure / not-reachable / timeout
+ * tails.
  */
 const OUTCOME_MIX: { status: RcsStatus; p: number }[] = [
-  { status: "Replied", p: RCS_DELIVERY_RATES.replied },
-  { status: "Read", p: RCS_DELIVERY_RATES.read - RCS_DELIVERY_RATES.replied },
+  { status: "Clicked", p: RCS_DELIVERY_RATES.clicked },
+  { status: "Read", p: RCS_DELIVERY_RATES.read - RCS_DELIVERY_RATES.clicked },
   {
     status: "Delivered",
     p:
@@ -176,8 +177,11 @@ export function templateForNode(node: SankeyNode): RcsTemplate | undefined {
 /** Per-recipient records for one RCS node in one run. */
 export function buildRcsMessages({ run, node }: RcsRef, limit = 120): RcsMessage[] {
   const template = resolveRcsTemplate(node.config?.rcsTemplateId);
-  const replies = template ? replyButtons(template) : [];
-  const bot = botById(getRcsConfig(), template?.botId ?? node.config?.rcsBotId);
+  const buttons = template ? templateButtons(template) : [];
+  const config = getRcsConfig();
+  const agentIdRef = template?.agentId ?? node.config?.rcsAgentId;
+  const agent = agentById(config, agentIdRef);
+  const provider = providerForAgent(config, agentIdRef);
   const leads = generateLeads(run).filter((l) => l.stageNodeId === node.id);
   const r = seed(node.id + run.id);
 
@@ -186,24 +190,24 @@ export function buildRcsMessages({ run, node }: RcsRef, limit = 120): RcsMessage
     const reached =
       status === "Delivered" ||
       status === "Read" ||
-      status === "Replied";
-    const read = status === "Read" || status === "Replied";
-    const replied = status === "Replied";
+      status === "Clicked";
+    const read = status === "Read" || status === "Clicked";
+    const clicked = status === "Clicked";
     const failed = status === "Failed";
-    // A "Replied" recipient tapped one of the template's quick-reply buttons
-    // (when the template has any); free-text replies leave the button blank.
-    const replyButton =
-      replied && replies.length
-        ? replies[Math.floor(r() * replies.length)].text
+    // A "Clicked" recipient tapped one of the template's suggestion buttons
+    // (when the template has any).
+    const clickedButton =
+      clicked && buttons.length
+        ? buttons[Math.floor(r() * buttons.length)].text
         : null;
 
     // Cumulative lifecycle offsets, in minutes from midnight. Each transition
-    // stacks a realistic gap on the previous one, so delivered < read < replied.
+    // stacks a realistic gap on the previous one, so delivered < read < clicked.
     const sentMin = 9 * 60 + Math.floor(r() * 10 * 60);
     const deliverySec = Math.round(2 + r() * r() * 140);
     const deliveredMin = sentMin + deliverySec / 60;
     const readMin = deliveredMin + (30 + r() * 90) / 60;
-    const repliedMin = readMin + (20 + r() * 150) / 60;
+    const clickedMin = readMin + (20 + r() * 150) / 60;
     // A rejection usually comes back faster than a real delivery.
     const failedMin = sentMin + Math.round(1 + r() * 22) / 60;
     const stamp = (min: number) => `${fmtDate(l.updatedDate)}, ${fmtClock(min)}`;
@@ -214,14 +218,14 @@ export function buildRcsMessages({ run, node }: RcsRef, limit = 120): RcsMessage
       customer: l.name,
       templateName: template?.name ?? "—",
       templateId: template?.id ?? "—",
-      botName: bot?.name ?? node.config?.rcsBotId ?? "—",
-      vendor: bot?.vendor ?? "—",
+      agentName: agent?.name ?? agentIdRef ?? "—",
+      provider: provider ? providerLabel(provider) : "—",
       status,
-      replyButton,
+      clickedButton,
       sentAt: stamp(sentMin),
       deliveredAt: reached ? stamp(deliveredMin) : null,
       readAt: read ? stamp(readMin) : null,
-      repliedAt: replied ? stamp(repliedMin) : null,
+      clickedAt: clicked ? stamp(clickedMin) : null,
       failedAt: failed ? stamp(failedMin) : null,
       failureReason: failed ? pickFailureReason(r()) : null,
       deliveryLatency: reached ? deliverySec : null,
@@ -234,16 +238,16 @@ export function rcsMessagesToCsv(rows: RcsMessage[]): string {
   const head = [
     "recipient",
     "customer",
-    "bot",
-    "vendor",
+    "agent",
+    "provider",
     "template_name",
     "template_id",
     "status",
-    "reply_button",
+    "clicked_button",
     "sent_at",
     "delivered_at",
     "read_at",
-    "replied_at",
+    "clicked_at",
     "failed_at",
     "failure_reason",
     "delivery_latency_sec",
@@ -251,16 +255,16 @@ export function rcsMessagesToCsv(rows: RcsMessage[]): string {
   const body = rows.map((m) => [
     m.phone,
     m.customer,
-    m.botName,
-    m.vendor,
+    m.agentName,
+    m.provider,
     m.templateName,
     m.templateId,
     m.status,
-    m.replyButton ?? "",
+    m.clickedButton ?? "",
     m.sentAt,
     m.deliveredAt ?? "",
     m.readAt ?? "",
-    m.repliedAt ?? "",
+    m.clickedAt ?? "",
     m.failedAt ?? "",
     m.failureReason ?? "",
     m.deliveryLatency ?? "",

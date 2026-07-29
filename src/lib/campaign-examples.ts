@@ -21,6 +21,7 @@ import { SERIAL_PREFIX } from "./campaign-types";
 import { whatsappOutputs, resolveWaTemplate, smsOutputs, completedOutput, DEFAULT_SMS_DLR_WINDOW, rcsOutputs, DEFAULT_RCS_DLR_WINDOW } from "./wa-outputs";
 import { SEED_SMS_TEMPLATES } from "./sms-templates";
 import { SEED_RCS_TEMPLATES } from "./rcs-templates";
+import { SEED_RCS_CONFIG, agentById } from "./rcs-config";
 
 export type ExampleCampaign = {
   name: string;
@@ -508,14 +509,14 @@ const SMS_FESTIVE_HINDI = "1107168421447290318";
 const SMS_KYC_PENDING = "1107168421556731209";
 
 /**
- * An RCS send. Its outputs are dynamic: one branch per quick-reply (REPLY)
- * button on the template — WhatsApp-style — PLUS the fixed Delivered / Failed /
- * Not Reachable / Timeout outcomes. `buildCampaign` fans a port-less onward edge
- * to every handle, so a "linear" RCS send wires them all; a journey that reacts
- * to a specific reply (or wires an SMS fallback off Not Reachable) ports the
- * edges explicitly. Bot + category are denormalised off the seed template so the
- * canvas and analytics can label the node without re-resolving it. Reads from
- * SEED_RCS_TEMPLATES (build-time seed) rather than the live store.
+ * An RCS send. Its outputs are dynamic: one branch per button on the template
+ * (RCS reports a click for reply, URL and dialer buttons alike) PLUS the fixed
+ * Delivered / Failed / Not Reachable / Timeout outcomes. `buildCampaign` fans a
+ * port-less onward edge to every handle, so a "linear" RCS send wires them all;
+ * a journey that reacts to a specific click (or wires an SMS fallback off Not
+ * Reachable) ports the edges explicitly. Agent + type are denormalised off the
+ * seed template/config so the canvas and analytics can label the node without
+ * re-resolving it. Reads from SEED_RCS_TEMPLATES (build-time seed).
  */
 const sRcs = (
   id: string, title: string, subtitle: string, templateId: string,
@@ -529,8 +530,8 @@ const sRcs = (
       rcsTemplateId: templateId,
       rcsVarMap: opts?.vars ?? [],
       rcsDlrWindow: opts?.dlrWindow ?? DEFAULT_RCS_DLR_WINDOW,
-      rcsCategory: t?.category,
-      rcsBotId: t?.botId,
+      rcsAgentId: t?.agentId,
+      rcsAgentType: agentById(SEED_RCS_CONFIG, t?.agentId)?.type,
     },
   };
 };
@@ -1063,14 +1064,16 @@ const C_RCS = buildCampaign("Retail · RCS Festive Engagement", [
   sEnd(),
 ], [
   ed("start", "aud"), ed("aud", "rcsWelcome"),
-  // Quick-reply branches — one per REPLY button on the template.
-  ed("rcsWelcome", "dShop", "reply_0"), ed("dShop", "waCart"), ed("waCart", "end"),
-  ed("rcsWelcome", "waCatalog", "reply_1"), ed("waCatalog", "end"),
+  // Click branches — one per button on the template (welcome_offer_card has
+  // "Shop now" = btn_0, "See offers" = btn_1, "Visit store" = btn_2).
+  ed("rcsWelcome", "dShop", "btn_0"), ed("dShop", "waCart"), ed("waCart", "end"),
+  ed("rcsWelcome", "waCatalog", "btn_1"),
+  ed("rcsWelcome", "waCatalog", "btn_2"), ed("waCatalog", "end"),
   // Not Reachable → SMS fallback: the recipient's handset isn't RCS-capable, so
   // reach them over SMS instead. This is the RCS→SMS fallback, configured
   // downstream rather than inside the node.
   ed("rcsWelcome", "smsFallback", "not_reachable"), ed("smsFallback", "end"),
-  // Delivered but no reply → a gentle payment nudge over RCS; hard outcomes end.
+  // Delivered but no click → a gentle payment nudge over RCS; hard outcomes end.
   ed("rcsWelcome", "rcsPay", "delivered"), ed("rcsPay", "end"),
   ed("rcsWelcome", "end", "failed"),
   ed("rcsWelcome", "end", "timeout"),

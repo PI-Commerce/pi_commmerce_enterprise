@@ -199,10 +199,10 @@ export type PresetConfig = {
   rcsVarMap?: PresetVarMap[];
   /** How long the node waits for a DLR before taking the "Timeout" path. */
   rcsDlrWindow?: string;
-  /** Bot + category, derived from the selected template. Persisted so the
+  /** Agent id + type, derived from the selected template. Persisted so the
    *  canvas/analytics can label the node without re-resolving the registry. */
-  rcsBotId?: string;
-  rcsCategory?: string;
+  rcsAgentId?: string;
+  rcsAgentType?: string;
   // ---- Delay ----
   /** Delay v2. Two modes, surfaced as "Static delay" / "Dynamic delay" in the UI:
    *  - `fixed`    → wait a fixed value+unit (Static delay).
