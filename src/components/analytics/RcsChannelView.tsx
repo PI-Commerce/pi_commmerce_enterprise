@@ -18,20 +18,22 @@ import {
   rcsFailureBreakdown, rcsOutcomeTotals,
   type RcsRef, type RcsStatus,
 } from "@/lib/analytics-rcs";
-import { replyButtons } from "@/lib/rcs-templates";
+import { replyButtons, type RcsTemplate } from "@/lib/rcs-templates";
 
 /**
- * Channel → RCS. A bespoke view rather than the generic `ChannelDetail`, for the
- * same reasons SMS ships one, plus one that is RCS-only (PICOM-4728):
+ * Channel → RCS. A bespoke view rather than the generic `ChannelDetail`, for
+ * reasons specific to RCS (PICOM-4728):
  *
- *  - **the outcomes don't nest.** Delivered / Failed / Not reachable / Timed out
- *    are mutually exclusive terminal states that sum to Sent, so they render as a
- *    split, not a funnel where each stage is a subset of the one above.
+ *  - **delivery and engagement are different layers.** Delivered / Failed / Not
+ *    reachable / Timed out are mutually exclusive delivery states (a donut that
+ *    sums to Sent); Read and Replied are *nested* engagement stages inside
+ *    Delivered, so they render as a funnel, never as peers in the same pie.
  *  - **the report is per-recipient**, with columns the shared leads table doesn't
- *    carry (sending bot + vendor, read receipt, the quick-reply tapped).
+ *    carry (sending bot + vendor, the full sent→delivered→read→replied lifecycle
+ *    timestamps, the quick-reply tapped).
  *  - **RCS is interactive.** Recipients tap quick-reply buttons, so reply
- *    engagement — which button drove response — is a first-class chart no other
- *    channel needs.
+ *    attribution is a first-class chart — but only meaningful at the level of a
+ *    single template that actually carries reply buttons.
  */
 export function RcsChannelView({ refs }: { refs: RcsRef[] }) {
   // Outcome tiles are derived from each node's real `entered` volume via the
@@ -41,6 +43,19 @@ export function RcsChannelView({ refs }: { refs: RcsRef[] }) {
   const { delivered, read, failed, notReachable } = rcsOutcomeTotals(totalSent);
   const deliveryRate = totalSent > 0 ? (delivered / totalSent) * 100 : 0;
   const readRate = delivered > 0 ? (read / delivered) * 100 : 0;
+
+  // Quick-reply attribution is only meaningful when the scope resolves to a
+  // single template AND that template carries reply buttons — attributing
+  // replies across a mix of templates (some without buttons) is meaningless.
+  const replyTemplate = useMemo(() => {
+    const byId = new Map<string, RcsTemplate>();
+    for (const ref of refs) {
+      const t = templateForNode(ref.node);
+      if (t) byId.set(t.id, t);
+    }
+    const all = [...byId.values()];
+    return all.length === 1 && replyButtons(all[0]).length > 0 ? all[0] : undefined;
+  }, [refs]);
 
   return (
     <div className="space-y-6">
@@ -80,13 +95,17 @@ export function RcsChannelView({ refs }: { refs: RcsRef[] }) {
 
       <div className="grid gap-4 lg:grid-cols-2">
         <OutcomeSplit totalSent={totalSent} />
-        <ReplyEngagement refs={refs} totalSent={totalSent} />
+        <EngagementFunnel totalSent={totalSent} />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
         <FailureReasons totalFailed={failed} />
         <TemplateComparison refs={refs} />
       </div>
+
+      {replyTemplate && (
+        <ReplyEngagement template={replyTemplate} totalSent={totalSent} />
+      )}
 
       <DayWise sent={totalSent} delivered={delivered} read={read} />
 
@@ -160,24 +179,24 @@ function Card({ title, sub, children, action }: {
 
 const OUTCOME_COLOR = {
   delivered: "#22c55e",
-  replied: "#6366f1",
+  read: "#6366f1",
+  replied: "#8b5cf6",
   failed: "#ef4444",
   notReachable: "#f59e0b",
   timeout: "#94a3b8",
 } as const;
 
 /**
- * Terminal-outcome split. Deliberately a donut, not a funnel: these states are
- * mutually exclusive and sum to Sent. "Delivered" here is delivered-without-a-
- * reply; recipients who tapped a quick-reply are split out as "Replied" so the
- * interactive slice of RCS is visible.
+ * Delivery-outcome split — the delivery *layer* only. Delivered / Failed / Not
+ * reachable / Timed out are mutually exclusive and sum to Sent, so a donut is
+ * the right construct. Read and Replied are deliberately absent: they are nested
+ * *inside* Delivered (a replied message was also delivered), so putting them in
+ * the same pie would double-count. Engagement lives in the funnel beside this.
  */
 function OutcomeSplit({ totalSent }: { totalSent: number }) {
-  const { delivered, replied, failed, notReachable, timeout } = rcsOutcomeTotals(totalSent);
-  const deliveredNoReply = Math.max(0, delivered - replied);
+  const { delivered, failed, notReachable, timeout } = rcsOutcomeTotals(totalSent);
   const data = [
-    { name: "Delivered", value: deliveredNoReply, color: OUTCOME_COLOR.delivered },
-    { name: "Replied", value: replied, color: OUTCOME_COLOR.replied },
+    { name: "Delivered", value: delivered, color: OUTCOME_COLOR.delivered },
     { name: "Failed", value: failed, color: OUTCOME_COLOR.failed },
     { name: "Not reachable", value: notReachable, color: OUTCOME_COLOR.notReachable },
     { name: "Timed out", value: timeout, color: OUTCOME_COLOR.timeout },
@@ -213,7 +232,7 @@ function OutcomeSplit({ totalSent }: { totalSent: number }) {
   );
 
   return (
-    <Card title="Delivery outcomes" sub="Mutually exclusive terminal states — they sum to Sent.">
+    <Card title="Delivery outcomes" sub="Mutually exclusive delivery states — they sum to Sent.">
       <div className="h-[280px]">
         {data.length === 0 ? <Empty hint="No messages in scope." /> : <EChart option={option} />}
       </div>
@@ -222,33 +241,101 @@ function OutcomeSplit({ totalSent }: { totalSent: number }) {
 }
 
 /**
- * Quick-reply engagement — RCS-specific. Distributes the scope's total replies
- * across the union of quick-reply buttons on the templates in scope, weighted by
- * how often each was tapped in the sample (even split as a floor). Derived from
- * the total, not raw-counted, so it agrees with the Replied KPI.
+ * Engagement funnel. Sent ⊇ Delivered ⊇ Read ⊇ Replied — each stage is a strict
+ * subset of the one above it, which is exactly what a funnel expresses (and what
+ * the delivery-outcome donut deliberately doesn't). This is where Read and
+ * Replied belong, not in a mutually-exclusive pie.
  */
-function ReplyEngagement({ refs, totalSent }: { refs: RcsRef[]; totalSent: number }) {
+function EngagementFunnel({ totalSent }: { totalSent: number }) {
+  const option = useMemo<EChartsOption>(() => {
+    const { delivered, read, replied } = rcsOutcomeTotals(totalSent);
+    const stages = [
+      { name: "Sent", value: totalSent, color: "#0ea5e9" },
+      { name: "Delivered", value: delivered, color: OUTCOME_COLOR.delivered },
+      { name: "Read", value: read, color: OUTCOME_COLOR.read },
+      { name: "Replied", value: replied, color: OUTCOME_COLOR.replied },
+    ];
+    return {
+      backgroundColor: "transparent",
+      tooltip: {
+        trigger: "item",
+        formatter: (p: unknown) => {
+          const q = p as { name: string; value: number };
+          const pct = totalSent > 0 ? ((q.value / totalSent) * 100).toFixed(1) : "0";
+          return `${q.name}<br/><b>${q.value.toLocaleString()}</b> (${pct}% of Sent)`;
+        },
+      },
+      legend: { bottom: 0, itemWidth: 8, itemHeight: 8, textStyle: { fontSize: 11 } },
+      series: [
+        {
+          type: "funnel",
+          top: 12,
+          bottom: 36,
+          left: "8%",
+          right: "8%",
+          min: 0,
+          max: totalSent || 1,
+          minSize: "24%",
+          maxSize: "100%",
+          sort: "descending",
+          gap: 2,
+          label: {
+            show: true,
+            position: "inside",
+            fontSize: 11,
+            color: "#fff",
+            formatter: (p: unknown) => {
+              const q = p as { name: string; value: number };
+              return `${q.name}  ${q.value.toLocaleString()}`;
+            },
+          },
+          labelLine: { show: false },
+          itemStyle: { borderColor: "transparent", borderWidth: 0 },
+          data: stages.map((s) => ({
+            name: s.name,
+            value: s.value,
+            itemStyle: { color: s.color },
+          })),
+        },
+      ],
+    };
+  }, [totalSent]);
+
+  return (
+    <Card title="Engagement funnel" sub="Nested stages — each is a subset of the one above it.">
+      <div className="h-[280px]">
+        {totalSent === 0 ? <Empty hint="No messages in scope." /> : <EChart option={option} />}
+      </div>
+    </Card>
+  );
+}
+
+/**
+ * Quick-reply attribution — RCS-specific. Only rendered by the parent when the
+ * scope is a single template that carries reply buttons, so this is genuine
+ * per-template attribution (never a meaningless mix across templates). Splits
+ * the template's total replies across its buttons with a deterministic per-
+ * button weight, so the shape looks organic rather than perfectly uniform.
+ */
+function ReplyEngagement({ template, totalSent }: { template: RcsTemplate; totalSent: number }) {
   const rows = useMemo(() => {
     const { replied } = rcsOutcomeTotals(totalSent);
-    // Union of reply-button texts across every template in scope.
-    const buttonSet = new Map<string, number>();
-    for (const ref of refs) {
-      const t = templateForNode(ref.node);
-      if (!t) continue;
-      for (const b of replyButtons(t))
-        buttonSet.set(b.text, (buttonSet.get(b.text) ?? 0) + ref.node.entered);
-    }
-    if (buttonSet.size === 0) return [];
-    // Distribute the replied total by each button's share of exposure.
-    const totalExposure = [...buttonSet.values()].reduce((s, v) => s + v, 0) || 1;
-    return [...buttonSet.entries()]
-      .map(([text, exposure]) => ({
-        text,
-        count: Math.round((replied * exposure) / totalExposure),
-      }))
+    const buttons = replyButtons(template);
+    if (buttons.length === 0) return [];
+    // Deterministic weight per button (1.00–1.49) so the split isn't uniform but
+    // is stable across renders — keyed off the button text, no RNG.
+    const weightOf = (text: string) => {
+      let h = 0;
+      for (let i = 0; i < text.length; i++) h = (h * 31 + text.charCodeAt(i)) >>> 0;
+      return 1 + (h % 50) / 100;
+    };
+    const weights = buttons.map((b) => weightOf(b.text));
+    const sum = weights.reduce((a, c) => a + c, 0) || 1;
+    return buttons
+      .map((b, i) => ({ text: b.text, count: Math.round((replied * weights[i]) / sum) }))
       .filter((r) => r.count > 0)
       .sort((a, b) => a.count - b.count);
-  }, [refs, totalSent]);
+  }, [template, totalSent]);
 
   const option = useMemo<EChartsOption>(
     () => ({
@@ -281,10 +368,13 @@ function ReplyEngagement({ refs, totalSent }: { refs: RcsRef[]; totalSent: numbe
   );
 
   return (
-    <Card title="Quick-reply engagement" sub="Replies attributed to each suggested-reply button in scope.">
-      <div className="h-[280px]">
+    <Card
+      title="Quick-reply attribution"
+      sub={`Replies to each suggested-reply button on "${template.name}".`}
+    >
+      <div className="h-[240px]">
         {rows.length === 0 ? (
-          <Empty hint="No quick-reply buttons on the templates in scope." />
+          <Empty hint="No replies attributed in scope." />
         ) : (
           <EChart option={option} />
         )}
@@ -619,14 +709,16 @@ function MessagesTable({ refs }: { refs: RcsRef[] }) {
                 <th className="px-4 py-2 font-medium">Status</th>
                 <th className="px-4 py-2 font-medium">Reply</th>
                 <th className="px-4 py-2 font-medium">Sent</th>
+                <th className="px-4 py-2 font-medium">Delivered</th>
                 <th className="px-4 py-2 font-medium">Read</th>
+                <th className="px-4 py-2 font-medium">Replied</th>
                 <th className="px-4 py-2 font-medium">Failure reason</th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center text-muted-foreground">
+                  <td colSpan={9} className="px-4 py-12 text-center text-muted-foreground">
                     No messages match your filters.
                   </td>
                 </tr>
@@ -647,9 +739,19 @@ function MessagesTable({ refs }: { refs: RcsRef[] }) {
                         {m.status}
                       </span>
                     </td>
-                    <td className="px-4 py-2.5 text-[11.5px] text-muted-foreground">{m.replyButton ?? "—"}</td>
+                    <td className="px-4 py-2.5 text-[11.5px] text-muted-foreground">
+                      {m.replyButton ? (
+                        <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[10.5px] font-medium text-primary">
+                          {m.replyButton}
+                        </span>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
                     <td className="whitespace-nowrap px-4 py-2.5 text-[11.5px] text-muted-foreground">{m.sentAt}</td>
+                    <td className="whitespace-nowrap px-4 py-2.5 text-[11.5px] text-muted-foreground">{m.deliveredAt ?? "—"}</td>
                     <td className="whitespace-nowrap px-4 py-2.5 text-[11.5px] text-muted-foreground">{m.readAt ?? "—"}</td>
+                    <td className="whitespace-nowrap px-4 py-2.5 text-[11.5px] text-muted-foreground">{m.repliedAt ?? "—"}</td>
                     <td className="px-4 py-2.5 text-[11.5px] text-muted-foreground">{m.failureReason ?? "—"}</td>
                   </tr>
                 ))

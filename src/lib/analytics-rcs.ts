@@ -93,12 +93,16 @@ export type RcsMessage = {
   botName: string;
   vendor: string;
   status: RcsStatus;
-  /** For a "Replied" row, the quick-reply button text the recipient tapped. */
+  /** For a "Replied" row, the quick-reply button text the recipient tapped
+   *  (null when the reply was free-text or the template has no reply buttons). */
   replyButton: string | null;
-  /** Display timestamps; null when that transition never happened. */
+  /** Lifecycle timestamps; each is null until that transition happens, and they
+   *  are cumulative — a Replied row carries all four of sent/delivered/read/
+   *  replied, a Read row the first three, and so on. */
   sentAt: string;
   deliveredAt: string | null;
   readAt: string | null;
+  repliedAt: string | null;
   failedAt: string | null;
   failureReason: string | null;
   /** Seconds from submission to delivery receipt; null unless delivered. */
@@ -179,22 +183,30 @@ export function buildRcsMessages({ run, node }: RcsRef, limit = 120): RcsMessage
 
   return leads.slice(0, limit).map((l) => {
     const status = pickStatus(r());
-    const sentMinutes = 9 * 60 + Math.floor(r() * 10 * 60);
-    // Read receipts land a little after delivery; a long tail stretches out.
-    const latency = Math.round(2 + r() * r() * 140);
     const reached =
       status === "Delivered" ||
       status === "Read" ||
       status === "Replied";
     const read = status === "Read" || status === "Replied";
+    const replied = status === "Replied";
     const failed = status === "Failed";
-    // A rejection usually comes back faster than a real delivery.
-    const failLatency = Math.round(1 + r() * 22);
-    // A "Replied" recipient tapped one of the template's quick-reply buttons.
+    // A "Replied" recipient tapped one of the template's quick-reply buttons
+    // (when the template has any); free-text replies leave the button blank.
     const replyButton =
-      status === "Replied" && replies.length
+      replied && replies.length
         ? replies[Math.floor(r() * replies.length)].text
         : null;
+
+    // Cumulative lifecycle offsets, in minutes from midnight. Each transition
+    // stacks a realistic gap on the previous one, so delivered < read < replied.
+    const sentMin = 9 * 60 + Math.floor(r() * 10 * 60);
+    const deliverySec = Math.round(2 + r() * r() * 140);
+    const deliveredMin = sentMin + deliverySec / 60;
+    const readMin = deliveredMin + (30 + r() * 90) / 60;
+    const repliedMin = readMin + (20 + r() * 150) / 60;
+    // A rejection usually comes back faster than a real delivery.
+    const failedMin = sentMin + Math.round(1 + r() * 22) / 60;
+    const stamp = (min: number) => `${fmtDate(l.updatedDate)}, ${fmtClock(min)}`;
 
     return {
       id: l.id,
@@ -206,18 +218,13 @@ export function buildRcsMessages({ run, node }: RcsRef, limit = 120): RcsMessage
       vendor: bot?.vendor ?? "—",
       status,
       replyButton,
-      sentAt: `${fmtDate(l.updatedDate)}, ${fmtClock(sentMinutes)}`,
-      deliveredAt: reached
-        ? `${fmtDate(l.updatedDate)}, ${fmtClock(sentMinutes + latency / 60)}`
-        : null,
-      readAt: read
-        ? `${fmtDate(l.updatedDate)}, ${fmtClock(sentMinutes + (latency + 30 + r() * 90) / 60)}`
-        : null,
-      failedAt: failed
-        ? `${fmtDate(l.updatedDate)}, ${fmtClock(sentMinutes + failLatency / 60)}`
-        : null,
+      sentAt: stamp(sentMin),
+      deliveredAt: reached ? stamp(deliveredMin) : null,
+      readAt: read ? stamp(readMin) : null,
+      repliedAt: replied ? stamp(repliedMin) : null,
+      failedAt: failed ? stamp(failedMin) : null,
       failureReason: failed ? pickFailureReason(r()) : null,
-      deliveryLatency: reached ? latency : null,
+      deliveryLatency: reached ? deliverySec : null,
       date: l.updatedDate,
     };
   });
@@ -236,6 +243,7 @@ export function rcsMessagesToCsv(rows: RcsMessage[]): string {
     "sent_at",
     "delivered_at",
     "read_at",
+    "replied_at",
     "failed_at",
     "failure_reason",
     "delivery_latency_sec",
@@ -252,6 +260,7 @@ export function rcsMessagesToCsv(rows: RcsMessage[]): string {
     m.sentAt,
     m.deliveredAt ?? "",
     m.readAt ?? "",
+    m.repliedAt ?? "",
     m.failedAt ?? "",
     m.failureReason ?? "",
     m.deliveryLatency ?? "",
