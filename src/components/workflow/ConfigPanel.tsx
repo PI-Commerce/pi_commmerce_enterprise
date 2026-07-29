@@ -26,7 +26,8 @@ import { NODE_LABELS, SAMPLE_WORKFLOW_VARIABLES, branchConditions, DEFAULT_LOAN_
 import { LEAD_MEMORY_KEYS } from "@/lib/leads-data";
 import { SEED_TEMPLATES } from "@/lib/waba-templates";
 import { whatsappOutputs, resolveWaTemplate, completedOutput, isBranchableButton } from "@/lib/wa-outputs";
-import { getTool, TOOLS } from "@/lib/tool-registry";
+import { getTool, TOOLS, type ToolInput } from "@/lib/tool-registry";
+import { flattenBody } from "@/lib/tool-body";
 import { resolveAgent, voiceAgents } from "@/lib/agent-data";
 import {
   CUSTOM_AI_ACTION,
@@ -1594,8 +1595,27 @@ function ApiToolCallFields({
   const tool = getTool(handle);
   const selected = !!tool;
   const inputMap = config?.apiInputMap ?? [];
-  const mappable = (tool?.inputs ?? []).filter((i) => i.source !== "constant");
-  const constants = (tool?.inputs ?? []).filter((i) => i.source === "constant");
+  // Merge flat inputs + body-tree leaves into a single flat list so the mapper
+  // shows one row per campaign-bound field, regardless of whether the tool was
+  // authored with the legacy `inputs[]` shape or the new nested body tree.
+  const allInputs: ToolInput[] = useMemo(() => {
+    if (!tool) return [];
+    const nonBody = tool.inputs.filter((i) => i.in !== "body");
+    const legacyBody = tool.body ? [] : tool.inputs.filter((i) => i.in === "body");
+    const bodyLeaves: ToolInput[] = tool.body
+      ? flattenBody(tool.body).map(({ path, node }) => ({
+          key: path || node.key || "field",
+          dataType: node.dataType,
+          in: "body" as const,
+          source: node.source ?? "constant",
+          value: node.value ?? "",
+          description: node.description ?? "",
+        }))
+      : [];
+    return [...nonBody, ...legacyBody, ...bodyLeaves];
+  }, [tool]);
+  const mappable = allInputs.filter((i) => i.source !== "constant");
+  const constants = allInputs.filter((i) => i.source === "constant");
 
   const pickTool = (h: string) => {
     setHandle(h);

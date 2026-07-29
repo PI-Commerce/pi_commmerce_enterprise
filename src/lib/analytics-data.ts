@@ -8,6 +8,14 @@ import type { NodeKind, PresetConfig } from "./campaign-types";
 import { resolveWaTemplate } from "./wa-outputs";
 import { languageLabel } from "./waba-templates";
 import { resolveAgent } from "./agent-data";
+import { getTool } from "./tool-registry";
+
+/** Compact per-tool summary used by the apiToolCall analytics snapshot. */
+function getToolSummary(handle: string): { method?: string; outputCount: number } | null {
+  const t = getTool(handle);
+  if (!t) return null;
+  return { method: t.method, outputCount: t.outputs.length };
+}
 
 export type ChannelKind = "whatsapp" | "voice" | "sms" | "ads";
 
@@ -471,11 +479,20 @@ export function nodeConfigSnapshot(node: SankeyNode): NodeConfigField[] {
       if (c.timezone) out.push({ label: "Timezone", value: dash(c.timezone) });
       return out;
     }
-    case "apiToolCall":
-      return [
+    case "apiToolCall": {
+      // The v1 API Tool node surfaces the picked tool + how many campaign
+      // slots it exposed. When the tool has a saved test response, the drawer
+      // hints at the response shape so the analytics reader can see what
+      // downstream nodes are consuming.
+      const t = c.apiTool ? getToolSummary(c.apiTool) : null;
+      const rows: { label: string; value: string }[] = [
         { label: "Tool", value: dash(c.apiTool) },
-        { label: "Inputs Mapped", value: String(c.apiInputMap?.length ?? 0) },
       ];
+      if (t?.method) rows.push({ label: "Method", value: t.method });
+      rows.push({ label: "Inputs Mapped", value: String(c.apiInputMap?.length ?? 0) });
+      if (t?.outputCount != null) rows.push({ label: "Outputs", value: String(t.outputCount) });
+      return rows;
+    }
     case "aiTransform": {
       // v1 AI Transformation is always Custom AI Action, so the drawer surfaces
       // just the per-transform name → output variable. Type is implicit.
