@@ -32,6 +32,7 @@ import {
   Search,
   MessageCircle,
   MessageSquare,
+  MessageSquareText,
   Phone,
   ExternalLink,
 } from "lucide-react";
@@ -46,6 +47,7 @@ import type { DateRange } from "react-day-picker";
 import { CampaignFlowView } from "@/components/analytics/CampaignFlowView";
 import { VoiceChannelView } from "@/components/analytics/VoiceChannelView";
 import { SmsChannelView } from "@/components/analytics/SmsChannelView";
+import { RcsChannelView } from "@/components/analytics/RcsChannelView";
 import {
   CAMPAIGNS,
   NODE_METRICS,
@@ -68,6 +70,8 @@ import {
 import { resolveWaTemplate, isBranchableButton } from "@/lib/wa-outputs";
 import { resolveSmsTemplate } from "@/lib/sms-store";
 import { smsOutcomeTotals } from "@/lib/analytics-sms";
+import { resolveRcsTemplate } from "@/lib/rcs-store";
+import { rcsOutcomeTotals } from "@/lib/analytics-rcs";
 import { resolveAgent } from "@/lib/agent-data";
 import type { WaTemplate } from "@/lib/waba-templates";
 import { cn } from "@/lib/utils";
@@ -180,6 +184,7 @@ const CHANNEL_TABS: {
   },
   { kind: "voice", label: "Voice", icon: Phone, assetLabel: "Voice Agent" },
   { kind: "sms", label: "SMS", icon: MessageSquare, assetLabel: "Template" },
+  { kind: "rcs", label: "RCS", icon: MessageSquareText, assetLabel: "Template" },
 ];
 
 /* ───────────── Channel selection state (lifted, supports deep-link) ─────────────
@@ -229,9 +234,9 @@ function pickDefaultAsset(kind: ChannelKind): string | undefined {
     }
     return undefined;
   }
-  // WhatsApp and SMS both land on their highest-volume template in the first
+  // WhatsApp, SMS and RCS all land on their highest-volume template in the first
   // run that uses one; only the registry they resolve against differs.
-  if (kind === "whatsapp" || kind === "sms") {
+  if (kind === "whatsapp" || kind === "sms" || kind === "rcs") {
     for (const c of CAMPAIGNS) {
       for (const r of c.runs) {
         const byTpl = new Map<string, number>();
@@ -240,9 +245,11 @@ function pickDefaultAsset(kind: ChannelKind): string | undefined {
           const tpl =
             kind === "sms"
               ? resolveSmsTemplate(n.config?.smsTemplateId)
-              : n.config?.waMode === "freeform"
-                ? undefined
-                : resolveWaTemplate(n.config?.waTemplate);
+              : kind === "rcs"
+                ? resolveRcsTemplate(n.config?.rcsTemplateId)
+                : n.config?.waMode === "freeform"
+                  ? undefined
+                  : resolveWaTemplate(n.config?.waTemplate);
           if (!tpl) continue;
           byTpl.set(tpl.id, (byTpl.get(tpl.id) ?? 0) + n.entered);
         }
@@ -930,6 +937,19 @@ function buildNodeMetrics(
       { label: "Timeout", value: noDlr.toLocaleString() },
     ];
   }
+  if (k === "rcs") {
+    // Derived from THIS node's volume via the shared RCS delivery rates, so the
+    // tiles, the RCS channel view and the Sankey stay in agreement.
+    const sent = node.entered;
+    const { delivered, read, failed, notReachable } = rcsOutcomeTotals(sent);
+    return [
+      { label: "Sent", value: sent.toLocaleString() },
+      { label: "Delivered", value: delivered.toLocaleString() },
+      { label: "Read", value: read.toLocaleString() },
+      { label: "Failed", value: failed.toLocaleString() },
+      { label: "Not Reachable", value: notReachable.toLocaleString() },
+    ];
+  }
   if (k === "whatsapp" || k === "ads") {
     const m = NODE_METRICS[k as ChannelKind] ?? [];
     const keep: Record<string, string[]> = {
@@ -1238,6 +1258,16 @@ function MiniFunnel({
     readBase = linear.find((m) => m.label === "Sent")?.value ?? 0;
     outcomeTitle = "Non-delivery outcomes";
     outcomeBase = "Sent";
+  } else if (kind === "rcs") {
+    // Funnel = Sent→Delivered→Read; Failed / Not Reachable are mutually
+    // exclusive non-delivery outcomes, so they render beside the funnel, not
+    // stacked under Delivered.
+    const OUTCOME_LABELS = ["Failed", "Not Reachable"];
+    linear = metrics.filter((m) => !OUTCOME_LABELS.includes(m.label));
+    outcomes = metrics.filter((m) => OUTCOME_LABELS.includes(m.label));
+    readBase = linear.find((m) => m.label === "Sent")?.value ?? 0;
+    outcomeTitle = "Non-delivery outcomes";
+    outcomeBase = "Sent";
   } else if (kind === "voice") {
     const get = (l: string) => metrics.find((m) => m.label === l)?.value ?? 0;
     const totalBase = get("Total Base");
@@ -1483,7 +1513,7 @@ function ChannelAnalytics({
   // Both reduce to `{id, name}` so the asset picker treats them identically.
   const templateByRefKey = useMemo(() => {
     const map = new Map<string, { id: string; name: string }>();
-    if (kind !== "whatsapp" && kind !== "sms") return map;
+    if (kind !== "whatsapp" && kind !== "sms" && kind !== "rcs") return map;
     for (const c of CAMPAIGNS) {
       for (const r of c.runs) {
         for (const n of r.sankey.nodes) {
@@ -1491,9 +1521,11 @@ function ChannelAnalytics({
           const tpl =
             kind === "sms"
               ? resolveSmsTemplate(n.config?.smsTemplateId)
-              : n.config?.waMode === "freeform"
-                ? undefined
-                : resolveWaTemplate(n.config?.waTemplate);
+              : kind === "rcs"
+                ? resolveRcsTemplate(n.config?.rcsTemplateId)
+                : n.config?.waMode === "freeform"
+                  ? undefined
+                  : resolveWaTemplate(n.config?.waTemplate);
           if (tpl) map.set(`${c.id}|${r.id}|${n.id}`, { id: tpl.id, name: tpl.name });
         }
       }
@@ -1528,7 +1560,7 @@ function ChannelAnalytics({
       }
       return [...m.values()];
     }
-    if (kind === "whatsapp" || kind === "sms") {
+    if (kind === "whatsapp" || kind === "sms" || kind === "rcs") {
       const m = new Map<string, { id: string; label: string }>();
       for (const r of allRefs) {
         const t = templateByRefKey.get(`${r.campaignId}|${r.runId}|${r.nodeId}`);
@@ -1543,7 +1575,8 @@ function ChannelAnalytics({
   const refAssetId = (r: Ref): string | undefined => {
     const k = `${r.campaignId}|${r.runId}|${r.nodeId}`;
     if (kind === "voice") return agentByRefKey.get(k)?.id;
-    if (kind === "whatsapp" || kind === "sms") return templateByRefKey.get(k)?.id;
+    if (kind === "whatsapp" || kind === "sms" || kind === "rcs")
+      return templateByRefKey.get(k)?.id;
     return undefined;
   };
 
@@ -1885,6 +1918,17 @@ function ChannelAnalytics({
             return { run, node };
           });
           return <SmsChannelView refs={srefs} />;
+        })()
+      ) : kind === "rcs" ? (
+        (() => {
+          const rrefs = selectedRefs.map((ref) => {
+            const run = CAMPAIGNS.find(
+              (c) => c.id === ref.campaignId,
+            )!.runs.find((r) => r.id === ref.runId)!;
+            const node = run.sankey.nodes.find((n) => n.id === ref.nodeId)!;
+            return { run, node };
+          });
+          return <RcsChannelView refs={rrefs} />;
         })()
       ) : (
         <ChannelDetail kind={kind} refs={selectedRefs} dateRange={dateRange} />

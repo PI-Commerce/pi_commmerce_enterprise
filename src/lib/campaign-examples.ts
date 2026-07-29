@@ -18,8 +18,9 @@ import type {
   PresetConfig, PresetVarMap,
 } from "./campaign-types";
 import { SERIAL_PREFIX } from "./campaign-types";
-import { whatsappOutputs, resolveWaTemplate, smsOutputs, completedOutput, DEFAULT_SMS_DLR_WINDOW } from "./wa-outputs";
+import { whatsappOutputs, resolveWaTemplate, smsOutputs, completedOutput, DEFAULT_SMS_DLR_WINDOW, rcsOutputs, DEFAULT_RCS_DLR_WINDOW } from "./wa-outputs";
 import { SEED_SMS_TEMPLATES } from "./sms-templates";
+import { SEED_RCS_TEMPLATES } from "./rcs-templates";
 
 export type ExampleCampaign = {
   name: string;
@@ -505,6 +506,38 @@ const SMS_PAYMENT_FAILED = "1107168421220847665";
 const SMS_CART_RECOVERY = "1107168421339104782";
 const SMS_FESTIVE_HINDI = "1107168421447290318";
 const SMS_KYC_PENDING = "1107168421556731209";
+
+/**
+ * An RCS send. Its outputs are dynamic: one branch per quick-reply (REPLY)
+ * button on the template — WhatsApp-style — PLUS the fixed Delivered / Failed /
+ * Not Reachable / Timeout outcomes. `buildCampaign` fans a port-less onward edge
+ * to every handle, so a "linear" RCS send wires them all; a journey that reacts
+ * to a specific reply (or wires an SMS fallback off Not Reachable) ports the
+ * edges explicitly. Bot + category are denormalised off the seed template so the
+ * canvas and analytics can label the node without re-resolving it. Reads from
+ * SEED_RCS_TEMPLATES (build-time seed) rather than the live store.
+ */
+const sRcs = (
+  id: string, title: string, subtitle: string, templateId: string,
+  opts?: { vars?: PresetVarMap[]; dlrWindow?: string },
+): Spec => {
+  const t = SEED_RCS_TEMPLATES.find((x) => x.id === templateId);
+  return {
+    id, kind: "rcs", title, subtitle,
+    outputs: rcsOutputs(t),
+    config: {
+      rcsTemplateId: templateId,
+      rcsVarMap: opts?.vars ?? [],
+      rcsDlrWindow: opts?.dlrWindow ?? DEFAULT_RCS_DLR_WINDOW,
+      rcsCategory: t?.category,
+      rcsBotId: t?.botId,
+    },
+  };
+};
+
+/** Registry template ids used by the RCS journey. */
+const RCS_WELCOME_OFFER = "rcs_tpl_welcome_offer";
+const RCS_PAYMENT_REMINDER = "rcs_tpl_payment_reminder";
 
 const sDelay = (id: string, value: number, unit: "Minutes" | "Hours" | "Days"): Spec => ({
   id, kind: "delay", title: `Delay · ${value} ${unit.toLowerCase()}`, subtitle: `Wait ${value} ${unit.toLowerCase()}`,
@@ -1002,6 +1035,47 @@ const C_SEASONAL = buildCampaign("Retail · Seasonal Sale", [
   ed("clicked", "waRem", "no"), ed("waRem", "end"),
 ]);
 
+/* ---- RCS · Festive Engagement ------------------------------------------
+ * An RCS-led journey (PICOM-4728) that shows every branch kind an RCS node
+ * exposes: one path per quick-reply button (Shop now / See offers), the fixed
+ * delivery outcomes, and — the headline pattern — an SMS fallback wired off the
+ * "Not Reachable" branch so recipients on non-RCS handsets still get reached. */
+const C_RCS = buildCampaign("Retail · RCS Festive Engagement", [
+  sStart(),
+  sAud("CSV · festive shoppers", ["fav_category", "rcs_capable"]),
+  sRcs("rcsWelcome", "RCS festive offer", "RCS · welcome offer", RCS_WELCOME_OFFER, {
+    vars: [
+      { v: "{{name}}", def: "contact.first_name" },
+      { v: "{{discount}}", def: "promo.discount_pct" },
+    ],
+  }),
+  sDelay("dShop", 1, "Days"),
+  sWa("waCart", "WhatsApp cart nudge", "WhatsApp · complete purchase", "cart_link_v1"),
+  sWa("waCatalog", "WhatsApp catalog", "WhatsApp · browse offers", "sale_link_v1"),
+  sSms("smsFallback", "SMS festive offer", "SMS · festive reminder (Hindi)", SMS_FESTIVE_HINDI),
+  sRcs("rcsPay", "RCS payment reminder", "RCS · complete payment", RCS_PAYMENT_REMINDER, {
+    vars: [
+      { v: "{{name}}", def: "contact.first_name" },
+      { v: "{{amount}}", def: "order.amount_due" },
+      { v: "{{order_id}}", def: "order.id" },
+    ],
+  }),
+  sEnd(),
+], [
+  ed("start", "aud"), ed("aud", "rcsWelcome"),
+  // Quick-reply branches — one per REPLY button on the template.
+  ed("rcsWelcome", "dShop", "reply_0"), ed("dShop", "waCart"), ed("waCart", "end"),
+  ed("rcsWelcome", "waCatalog", "reply_1"), ed("waCatalog", "end"),
+  // Not Reachable → SMS fallback: the recipient's handset isn't RCS-capable, so
+  // reach them over SMS instead. This is the RCS→SMS fallback, configured
+  // downstream rather than inside the node.
+  ed("rcsWelcome", "smsFallback", "not_reachable"), ed("smsFallback", "end"),
+  // Delivered but no reply → a gentle payment nudge over RCS; hard outcomes end.
+  ed("rcsWelcome", "rcsPay", "delivered"), ed("rcsPay", "end"),
+  ed("rcsWelcome", "end", "failed"),
+  ed("rcsWelcome", "end", "timeout"),
+]);
+
 /* ---- 10. D2C · Order Confirmation -------------------------------------- */
 const C_ORDERCONF = buildCampaign("D2C · Order Confirmation", [
   sStart(),
@@ -1413,6 +1487,7 @@ const RAW_EXAMPLE_CAMPAIGNS: Record<string, ExampleCampaign> = {
   c_ex5: C_UPSELL,
   c_ex6: C_COLLECT,
   c_ex18: C_SMS_LIFECYCLE,
+  c_ex19: C_RCS,
   c_ex12: C_ORDERCONF,
   c_ex13: C_OUTBOUND,
   c_ex14: C_CART,
