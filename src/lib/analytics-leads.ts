@@ -20,8 +20,10 @@ export type LeadStatus =
   | "failed"
   | "dropped"
   | "pending"
-  /** SMS: the wait window closed without a delivery receipt from the operator. */
-  | "no_dlr";
+  /** SMS/RCS: the wait window closed without a delivery receipt. */
+  | "no_dlr"
+  /** RCS: the recipient's handset isn't RCS-capable. */
+  | "not_reachable";
 
 export type Lead = {
   id: string;
@@ -114,6 +116,9 @@ const STATUS_BY_KIND: Record<SankeyNodeKind, LeadStatus[]> = {
   // Aligned to the SMS node's three delivery outcomes, plus the transient
   // `sent` state a lead occupies while the DLR window is still open.
   sms: ["sent", "delivered", "failed", "no_dlr"],
+  // RCS: the node's delivery outcomes — delivered / read (RCS read receipt) /
+  // failed / not-reachable (handset not RCS-capable) / timeout.
+  rcs: ["delivered", "read", "failed", "not_reachable", "no_dlr"],
   ads: ["clicked", "delivered"],
   aiTransform: [],
   end: [],
@@ -123,6 +128,7 @@ const CHANNEL_BY_KIND: Partial<Record<SankeyNodeKind, ChannelKind>> = {
   whatsapp: "whatsapp",
   voice: "voice",
   sms: "sms",
+  rcs: "rcs",
   ads: "ads",
 };
 

@@ -10,7 +10,7 @@ import { nodeTypes } from "./nodes";
 import { edgeTypes } from "./edges";
 import type { WorkflowNodeData, NodeKind, CampaignStatus } from "@/lib/campaign-types";
 import { NODE_LABELS, SERIAL_PREFIX } from "@/lib/campaign-types";
-import { whatsappOutputs, completedOutput, smsOutputs, apiOutcomeOutputs, deriveNodeOutcomeVariables } from "@/lib/wa-outputs";
+import { whatsappOutputs, completedOutput, smsOutputs, rcsOutputs, apiOutcomeOutputs, deriveNodeOutcomeVariables } from "@/lib/wa-outputs";
 import { EXAMPLE_CAMPAIGNS } from "@/lib/campaign-examples";
 import { elkLayout, type Point } from "@/lib/flow-layout";
 import { useRegion, localizeTzAbbrev, localizeCurrency } from "@/lib/region";
@@ -60,6 +60,7 @@ const DEFAULT_NODE_DATA: Record<NodeKind, Partial<WorkflowNodeData>> = {
   voiceCall: { subtitle: "AI voice outreach", valid: false, error: "Select agent", outputs: completedOutput() },
   whatsapp: { subtitle: "Send WhatsApp message", valid: false, error: "Pick template", outputs: whatsappOutputs(undefined) },
   sms: { subtitle: "Send SMS", valid: false, error: "Select a DLT template", outputs: smsOutputs() },
+  rcs: { subtitle: "Send RCS message", valid: false, error: "Select a template", outputs: rcsOutputs() },
   aiTransform: { subtitle: "Derive AI variables", valid: true },
   adsCampaign: { subtitle: "WhatsApp CTWA ad", valid: false, error: "Complete setup" },
 };

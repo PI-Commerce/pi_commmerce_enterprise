@@ -15,6 +15,8 @@ import { resolveAgent } from "./agent-data";
 import { getTool } from "./tool-registry";
 import { resolveSmsTemplate } from "./sms-store";
 import { smsPlaceholders } from "./sms-templates";
+import { resolveRcsTemplate } from "./rcs-store";
+import { replyButtons, templatePlaceholders, type RcsTemplate } from "./rcs-templates";
 
 /**
  * Whether a template button produces a usable inbound signal we can branch on.
@@ -127,6 +129,36 @@ export const SMS_DLR_WINDOWS = ["5 minutes", "15 minutes", "30 minutes", "1 hour
 export const DEFAULT_SMS_DLR_WINDOW = "30 minutes";
 
 /**
+ * Outputs for an RCS node — a hybrid of WhatsApp (rich reply buttons) and SMS
+ * (delivery-outcome branching), per PICOM-4728 / PICOM-4873.
+ *
+ * Handles, in canvas order:
+ *   - one branch per REPLY (quick-reply) button in the selected template,
+ *     labelled with the button text — the WhatsApp-style rich branches. URL /
+ *     dialer buttons are not branchable (no reply comes back), so they get no
+ *     handle.
+ *   - four fixed delivery defaults: `delivered`, `failed`, `not_reachable`
+ *     (the recipient's handset isn't RCS-capable — wire an SMS fallback here),
+ *     and `timeout` (no receipt before the wait window closed, its default).
+ */
+const RCS_DEFAULT_OUTPUTS: NodeOutput[] = [
+  { id: "delivered", label: "Delivered", kind: "outcome" },
+  { id: "failed", label: "Failed", kind: "outcome" },
+  { id: "not_reachable", label: "Not Reachable", kind: "outcome" },
+  { id: "timeout", label: "Timeout", kind: "default" },
+];
+
+export function rcsOutputs(template?: RcsTemplate): NodeOutput[] {
+  const replies = template ? replyButtons(template) : [];
+  const buttonHandles = replies.map((b, i) => ({ id: `reply_${i}`, label: b.text, kind: "outcome" as const }));
+  return [...buttonHandles, ...RCS_DEFAULT_OUTPUTS.map((o) => ({ ...o }))];
+}
+
+/** Wait-window options for the RCS `timeout` path. */
+export const RCS_DLR_WINDOWS = ["5 minutes", "15 minutes", "30 minutes", "1 hour", "6 hours", "24 hours"] as const;
+export const DEFAULT_RCS_DLR_WINDOW = "30 minutes";
+
+/**
  * Outcome handles for an API Tool Call node. Unlike Voice/SMS (single "completed"),
  * an API call branches on the request result so downstream nodes can react to a
  * timeout or failure differently from a success.
@@ -147,6 +179,7 @@ export function actionNodeOutputs(kind: NodeKind, config?: WorkflowNodeData["con
   }
   if (kind === "apiToolCall") return apiOutcomeOutputs();
   if (kind === "sms") return smsOutputs();
+  if (kind === "rcs") return rcsOutputs(resolveRcsTemplate(config?.rcsTemplateId));
   if (kind === "voiceCall") return completedOutput();
   return undefined;
 }
@@ -201,6 +234,17 @@ export function deriveNodeOutcomeVariables(
       const template = resolveSmsTemplate(config?.smsTemplateId);
       if (template) {
         for (const p of smsPlaceholders(template.content)) vars.push({ key: `${ns}.var.${p}`, source });
+      }
+    } else if (kind === "rcs") {
+      // Delivery facts this message produced, mirroring the node's default
+      // handles (delivered | failed | not_reachable | timeout) plus the tapped
+      // reply as a value a Conditional can read.
+      vars.push({ key: `${ns}.delivery_state`, source });
+      vars.push({ key: `${ns}.reply`, source });
+      vars.push({ key: `${ns}.failure_reason`, source });
+      const template = resolveRcsTemplate(config?.rcsTemplateId);
+      if (template) {
+        for (const p of templatePlaceholders(template)) vars.push({ key: `${ns}.var.${p}`, source });
       }
     } else if (kind === "audience") {
       // Contact fields the audience's *actual edited schema* exposes downstream as

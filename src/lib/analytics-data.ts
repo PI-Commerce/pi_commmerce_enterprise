@@ -11,7 +11,7 @@ import { resolveAgent } from "./agent-data";
 import { resolveSmsTemplate } from "./sms-store";
 import { templateSegments } from "./sms-templates";
 
-export type ChannelKind = "whatsapp" | "voice" | "sms" | "ads";
+export type ChannelKind = "whatsapp" | "voice" | "sms" | "rcs" | "ads";
 
 export type SankeyNodeKind =
   | "start"
@@ -21,6 +21,7 @@ export type SankeyNodeKind =
   | "whatsapp"
   | "voice"
   | "sms"
+  | "rcs"
   | "ads"
   | "conditional"
   | "delay"
@@ -97,6 +98,7 @@ const KIND_TO_SANKEY: Record<NodeKind, SankeyNodeKind> = {
   voiceCall: "voice",
   whatsapp: "whatsapp",
   sms: "sms",
+  rcs: "rcs",
   adsCampaign: "ads",
   // API Tool Call is its own node in analytics: a data/processing step that every
   // lead flows through. It shows Common Metrics + a Configuration Snapshot, but
@@ -117,6 +119,7 @@ const PASS_RATE: Record<SankeyNodeKind, number> = {
   voice: 0.72,
   whatsapp: 0.82,
   sms: 0.9,
+  rcs: 0.88,
   ads: 0.95,
 };
 
@@ -185,6 +188,45 @@ function smsHandleBaseWeight(handle: string): number {
   if (handle === "failed") return SMS_DELIVERY_RATES.failed * 100;
   if (handle === "no_dlr")
     return (1 - SMS_DELIVERY_RATES.delivered - SMS_DELIVERY_RATES.failed) * 100;
+  return 1;
+}
+
+/**
+ * Delivery-outcome rates for RCS — the single source of truth for how RCS
+ * traffic splits, mirroring {@link SMS_DELIVERY_RATES}. Consumed by the Sankey
+ * weighting below, the node drawer tiles and the RCS channel view (via
+ * `rcsOutcomeTotals`), so those surfaces never drift apart.
+ *
+ * `delivered` counts every message that reached an RCS-capable handset;
+ * `replied` (tapping a quick-reply) is a sub-slice of it, so the four terminal
+ * states delivered / failed / notReachable / timeout are what sum to Sent.
+ * `notReachable` is RCS-specific — the handset isn't RCS-capable, which is the
+ * branch an SMS fallback is wired off downstream.
+ */
+export const RCS_DELIVERY_RATES = {
+  delivered: 0.88,
+  read: 0.62,
+  replied: 0.11,
+  failed: 0.04,
+  notReachable: 0.06,
+  timeout: 0.02,
+} as const;
+
+/**
+ * Semantic base weight for an RCS output handle. The node's sibling handles are
+ * one branch per quick-reply button plus the fixed delivered / failed /
+ * not_reachable / timeout outcomes — a lead leaves via exactly one. A lead that
+ * taps a reply exits through `reply_N`, so the `delivered` handle carries only
+ * the delivered-but-no-reply remainder (delivered − replied). Weights are
+ * relative (normalised by the caller), so they need not sum to 100.
+ */
+function rcsHandleBaseWeight(handle: string): number {
+  if (handle.startsWith("reply_")) return 5.5;
+  if (handle === "delivered")
+    return (RCS_DELIVERY_RATES.delivered - RCS_DELIVERY_RATES.replied) * 100;
+  if (handle === "failed") return RCS_DELIVERY_RATES.failed * 100;
+  if (handle === "not_reachable") return RCS_DELIVERY_RATES.notReachable * 100;
+  if (handle === "timeout") return RCS_DELIVERY_RATES.timeout * 100;
   return 1;
 }
 
@@ -265,7 +307,13 @@ function deriveRun(
     // deterministic per-(run,node,handle) wobble; conditional branches keep the
     // top-to-bottom triangular weighting; A/B and single-output split evenly.
     const baseWeight =
-      kind === "whatsapp" ? waHandleBaseWeight : kind === "sms" ? smsHandleBaseWeight : null;
+      kind === "whatsapp"
+        ? waHandleBaseWeight
+        : kind === "sms"
+          ? smsHandleBaseWeight
+          : kind === "rcs"
+            ? rcsHandleBaseWeight
+            : null;
     const waWeights =
       baseWeight && !equal
         ? handleIds.map(
