@@ -20,7 +20,12 @@
       "Bash(echo \"NONE: $\\(command -v pdftotext || echo no-pdftotext\\)\")",
       "Bash(python3 -c ' *)",
       "Bash(grep -rnoE \"onDismiss[^;]{0,60}|onAutoClose[^;]{0,40}|closeButton[^;]{0,30}|deleteToast[^;]{0,40}\" node_modules/sonner/dist/index.mjs)",
-      "Bash(grep -nE \"</aside>|</div>\\\\s*$|^\\\\s*\\\\\\);\\\\s*$|^}\" src/components/workflow/ConfigPanel.tsx)"
+      "Bash(grep -nE \"</aside>|</div>\\\\s*$|^\\\\s*\\\\\\);\\\\s*$|^}\" src/components/workflow/ConfigPanel.tsx)",
+      "Bash(lsof -ti:5173 -sTCP:LISTEN)",
+      "Bash(lsof -ti:3000 -sTCP:LISTEN)",
+      "Bash(node -e \"const p=require\\('./package.json'\\);console.log\\(JSON.stringify\\(p.scripts,null,2\\)\\)\")",
+      "Bash(npm run *)",
+      "Bash(curl -s -o /dev/null http://localhost:5173)"
     ]
   }
 }
