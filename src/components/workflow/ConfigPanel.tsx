@@ -27,12 +27,18 @@ import { SEED_TEMPLATES } from "@/lib/waba-templates";
 import {
   whatsappOutputs, resolveWaTemplate, completedOutput, isBranchableButton,
   smsOutputs, SMS_DLR_WINDOWS, DEFAULT_SMS_DLR_WINDOW,
+  rcsOutputs, RCS_DLR_WINDOWS, DEFAULT_RCS_DLR_WINDOW,
 } from "@/lib/wa-outputs";
 import { useSmsConfig, useSmsTemplates, resolveSmsTemplate } from "@/lib/sms-store";
 import { sendersForCategory } from "@/lib/sms-config";
 import {
   SMS_CATEGORIES, smsPlaceholders, templateSegments, type SmsCategory,
 } from "@/lib/sms-templates";
+import { useRcsConfig, useRcsTemplates, resolveRcsTemplate } from "@/lib/rcs-store";
+import { botsForCategory, botById } from "@/lib/rcs-config";
+import {
+  RCS_CATEGORIES, templatePlaceholders, replyButtons, type RcsCategory,
+} from "@/lib/rcs-templates";
 import { getTool, TOOLS } from "@/lib/tool-registry";
 import { resolveAgent, voiceAgents } from "@/lib/agent-data";
 import {
@@ -394,6 +400,9 @@ function KindFields({
 
     case "sms":
       return <SmsFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
+
+    case "rcs":
+      return <RcsFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
 
     case "adsCampaign":
       return <AdsCampaignFields readOnly={readOnly} mark={mark} />;
@@ -1648,6 +1657,210 @@ function SmsCore({ config, readOnly, mark, onChange }: {
   );
 }
 
+/* --------------------------- RCS --------------------------- */
+
+function RcsFields({ config, readOnly, mark, onChange }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
+  return (
+    <ActionNodeShell kind="rcs" config={config} readOnly={readOnly} mark={mark} onChange={onChange}
+      renderCore={(coreMark) => <RcsCore config={config} readOnly={readOnly} mark={coreMark} onChange={onChange} />} />
+  );
+}
+
+/**
+ * RCS node core — template-driven like SMS/WhatsApp, but its outputs are a hybrid:
+ * the client picks Category → Bot → an **Approved** template from the registry
+ * (Channels → RCS), maps its `{{var}}`s, and sets a DLR wait window. The node then
+ * exposes one branch per REPLY button in the template PLUS the fixed delivery
+ * outcomes (Delivered / Failed / Not Reachable / Timeout) — published here since
+ * the reply handles vary with the chosen template.
+ */
+function RcsCore({ config, readOnly, mark, onChange }: {
+  config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void;
+  onChange: (patch: Partial<WorkflowNodeData>) => void;
+}) {
+  const rcsConfig = useRcsConfig();
+  const templates = useRcsTemplates();
+  const [category, setCategory] = useState<RcsCategory | "">((config?.rcsCategory as RcsCategory) ?? "");
+  const [botId, setBotId] = useState(config?.rcsBotId ?? "");
+  const [templateId, setTemplateId] = useState(config?.rcsTemplateId ?? "");
+  const [dlrWindow, setDlrWindow] = useState(config?.rcsDlrWindow ?? DEFAULT_RCS_DLR_WINDOW);
+
+  const template = resolveRcsTemplate(templateId);
+
+  // Cascade: category narrows bots, and category+bot narrow templates. Only
+  // Approved templates can be sent, so the picker hides Pending/Rejected ones.
+  const bots = category ? botsForCategory(rcsConfig, category) : [];
+  const matching = templates.filter(
+    (t) => t.approvalStatus === "Approved"
+      && (!category || t.category === category)
+      && (!botId || t.botId === botId),
+  );
+  useEffect(() => {
+    if (botId && !bots.some((b) => b.id === botId)) setBotId("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [category]);
+  useEffect(() => {
+    if (templateId && !matching.some((t) => t.id === templateId)) setTemplateId("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [category, botId]);
+
+  const placeholders = template ? templatePlaceholders(template) : [];
+  const varMap: PresetVarMap[] = placeholders.map(
+    (v) => config?.rcsVarMap?.find((m) => m.v === v) ?? { v, def: "" },
+  );
+  const unmapped = varMap.filter((m) => !m.def?.trim()).length;
+  const replies = template ? replyButtons(template) : [];
+
+  const setMapping = (key: string, def: string, mode?: "variable" | "constant") => {
+    const next = varMap.filter((m) => m.v !== key);
+    next.push({ v: key, def, mode });
+    onChange({ config: { ...config, rcsVarMap: next } });
+  };
+
+  // Publish handles (reply buttons + delivery defaults) + persist selection.
+  useEffect(() => {
+    onChange({
+      outputs: rcsOutputs(template),
+      config: {
+        ...config,
+        rcsTemplateId: templateId,
+        rcsDlrWindow: dlrWindow,
+        rcsCategory: category || undefined,
+        rcsBotId: botId || undefined,
+      },
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [templateId, dlrWindow, category, botId]);
+
+  useEffect(() => {
+    if (!template) mark(false, "Select a template");
+    else if (unmapped > 0) mark(false, `Map ${unmapped} template variable${unmapped === 1 ? "" : "s"}`);
+    else mark(true);
+  }, [templateId, unmapped]);
+
+  const bot = botById(rcsConfig, botId);
+
+  return (
+    <>
+      <Section title="RCS template">
+        <div className="rounded-xl border border-border bg-card/50 p-4 space-y-4">
+          {/* Step 1: narrow by category + bot, then pick the template */}
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <StepChip n={1} done={!!template} />
+              <Label className="flex items-center gap-1 text-[12px] font-medium text-foreground">
+                Approved template <span className="text-destructive">*</span>
+              </Label>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="Category" required>
+                <Select value={category || undefined} disabled={readOnly} onValueChange={(v) => setCategory(v as RcsCategory)}>
+                  <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select…" /></SelectTrigger>
+                  <SelectContent>
+                    {RCS_CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field label="Bot" required>
+                <Select value={botId || undefined} disabled={readOnly || !category} onValueChange={setBotId}>
+                  <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select…" /></SelectTrigger>
+                  <SelectContent>
+                    {bots.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </Field>
+            </div>
+            <Select value={templateId || undefined} disabled={readOnly || !botId} onValueChange={setTemplateId}>
+              <SelectTrigger className="h-9 text-sm">
+                <SelectValue placeholder={botId ? "Choose template…" : "Pick a category and bot first"} />
+              </SelectTrigger>
+              <SelectContent>
+                {templateId && !template && (
+                  <SelectItem value={templateId}>{templateId} · legacy</SelectItem>
+                )}
+                {matching.map((t) => (
+                  <SelectItem key={t.id} value={t.id}>{t.name} · {t.type === "TEXT" ? "Text" : "Rich card"}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {botId && matching.length === 0 && (
+              <p className="text-[11px] text-muted-foreground">
+                No approved templates for {category} · {bot?.name ?? botId}. Add one under Channels → RCS → Templates.
+              </p>
+            )}
+            {template && (
+              <div className="rounded-lg border border-border bg-muted/30 p-3 text-[12px]">
+                <div className="mb-1.5 flex items-center justify-between gap-2">
+                  <p className="text-[10.5px] uppercase tracking-wider text-muted-foreground">Template content</p>
+                  <span className="font-mono text-[10.5px] text-muted-foreground">{template.type === "TEXT" ? "Text" : "Rich card"}</span>
+                </div>
+                {template.title && <p className="mb-1 font-semibold text-foreground">{template.title}</p>}
+                <p className="whitespace-pre-wrap text-foreground">{template.body}</p>
+                {replies.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {replies.map((b, i) => (
+                      <span key={i} className="rounded-full border border-border bg-background px-2 py-0.5 text-[11px]">{b.text}</span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="border-t border-border/60" />
+
+          {/* Step 2: variable mapping */}
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <StepChip n={2} muted={!template} done={!!template && unmapped === 0} />
+              <Label className="text-[12px] font-medium text-foreground">Variable mapping</Label>
+            </div>
+            {!template ? (
+              <p className="text-[11px] text-muted-foreground">Select a template to map its variables.</p>
+            ) : varMap.length === 0 ? (
+              <p className="text-[11px] text-muted-foreground">This template has no variables — nothing to map.</p>
+            ) : (
+              <div className="space-y-2 pt-1">
+                <p className="text-[11px] text-muted-foreground">
+                  Fill each placeholder with an upstream variable, or switch to a constant for a fixed value.
+                </p>
+                {varMap.map((row) => (
+                  <div key={row.v} className="space-y-1">
+                    <span className="font-mono text-[11px] text-muted-foreground">{`{{${row.v}}}`}</span>
+                    <VariablePicker
+                      defaultValue={row.def}
+                      disabled={readOnly}
+                      allowConstant
+                      mode={row.mode}
+                      onChange={(v, mode) => setMapping(row.v, v, mode)}
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </Section>
+
+      <Section title="Delivery">
+        <Field label="Wait for DLR" required>
+          <Select value={dlrWindow} disabled={readOnly} onValueChange={setDlrWindow}>
+            <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {RCS_DLR_WINDOWS.map((w) => <SelectItem key={w} value={w}>{w}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <p className="mt-1 text-[10.5px] text-muted-foreground">
+            How long the lead waits here for a delivery receipt before taking the “Timeout” path.
+          </p>
+        </Field>
+      </Section>
+
+      <ActionAdvanceBanner kind="rcs" />
+    </>
+  );
+}
+
 
 /* --------------------------- Ads Campaign --------------------------- */
 
@@ -1904,7 +2117,7 @@ function PlatformChip({ active, disabled, children }: { active?: boolean; disabl
 /* Action-node shell: Core + A/B Experiments + AI Transformations + Exits */
 /* ====================================================================== */
 
-type ActionKind = "voiceCall" | "whatsapp" | "sms";
+type ActionKind = "voiceCall" | "whatsapp" | "sms" | "rcs";
 
 /**
  * In-memory shape used by the config panel. Superset of {@link PresetTransform}
@@ -2094,6 +2307,8 @@ function ActionAdvanceBanner({ kind, type1 }: { kind: ActionKind; type1?: boolea
       ? "Leads advance when the call concludes or retries are exhausted. Branch on the outcome with a Conditional node downstream."
       : kind === "sms"
         ? "Always three outputs: “Delivered”, “Failed” and “Timeout” (no receipt within the wait window). Wire all three."
+        : kind === "rcs"
+          ? "One output per quick-reply button, plus fixed “Delivered”, “Failed”, “Not Reachable” and “Timeout”. Wire an SMS fallback off “Not Reachable”."
         : type1
           ? "Always two outputs: “Replied (no button)” and “No response / continue” (24h session expiry + any untrackable tap). Wire both."
           : "Each trackable button is its own output, plus “Replied (no button)” and “No response / continue”. Phone numbers and untracked URLs aren’t trackable — those taps route through “No response / continue”. Wire every output.";

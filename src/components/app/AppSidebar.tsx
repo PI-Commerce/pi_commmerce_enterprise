@@ -21,7 +21,7 @@ const channelChildren: ChannelChild[] = [
   { to: "/channels/whatsapp", label: "WhatsApp", icon: MessageCircle },
   { label: "Meta Ads", icon: Megaphone },
   { to: "/channels/sms", label: "SMS", icon: MessageSquare },
-  { label: "RCS", icon: MessageSquareText },
+  { to: "/channels/rcs", label: "RCS", icon: MessageSquareText },
 ];
 
 const secondary = [

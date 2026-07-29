@@ -11,7 +11,7 @@ import { resolveAgent } from "./agent-data";
 import { resolveSmsTemplate } from "./sms-store";
 import { templateSegments } from "./sms-templates";
 
-export type ChannelKind = "whatsapp" | "voice" | "sms" | "ads";
+export type ChannelKind = "whatsapp" | "voice" | "sms" | "rcs" | "ads";
 
 export type SankeyNodeKind =
   | "start"
@@ -21,6 +21,7 @@ export type SankeyNodeKind =
   | "whatsapp"
   | "voice"
   | "sms"
+  | "rcs"
   | "ads"
   | "conditional"
   | "delay"
@@ -97,6 +98,7 @@ const KIND_TO_SANKEY: Record<NodeKind, SankeyNodeKind> = {
   voiceCall: "voice",
   whatsapp: "whatsapp",
   sms: "sms",
+  rcs: "rcs",
   adsCampaign: "ads",
   // API Tool Call is its own node in analytics: a data/processing step that every
   // lead flows through. It shows Common Metrics + a Configuration Snapshot, but
@@ -117,6 +119,7 @@ const PASS_RATE: Record<SankeyNodeKind, number> = {
   voice: 0.72,
   whatsapp: 0.82,
   sms: 0.9,
+  rcs: 0.88,
   ads: 0.95,
 };
 

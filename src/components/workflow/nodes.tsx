@@ -1,7 +1,7 @@
 import { Handle, Position, type NodeProps } from "reactflow";
 import {
   Play, Square, Users, GitBranch, Split,
-  Phone, MessageCircle, MessageSquare,
+  Phone, MessageCircle, MessageSquare, MessageSquareText,
   Clock, Megaphone, AlertCircle, CheckCircle2, Loader2, Sparkles, FlaskConical, Webhook,
   type LucideIcon,
 } from "lucide-react";
@@ -22,6 +22,7 @@ const ICONS: Record<NodeKind, LucideIcon> = {
   voiceCall: Phone,
   whatsapp: MessageCircle,
   sms: MessageSquare,
+  rcs: MessageSquareText,
   aiTransform: Sparkles,
   adsCampaign: Megaphone,
 };

@@ -20,6 +20,7 @@ export type NodeKind =
   | "voiceCall"
   | "whatsapp"
   | "sms"
+  | "rcs"
   // ai
   | "aiTransform"
   // ads
@@ -191,6 +192,17 @@ export type PresetConfig = {
   smsType?: string;
   smsFormat?: string;
   smsBody?: string;
+  // ---- RCS core ----
+  /** RCS Template id from the registry — the node's primary selection. */
+  rcsTemplateId?: string;
+  /** Maps each named `{{var}}` in the template to a variable or constant. */
+  rcsVarMap?: PresetVarMap[];
+  /** How long the node waits for a DLR before taking the "Timeout" path. */
+  rcsDlrWindow?: string;
+  /** Bot + category, derived from the selected template. Persisted so the
+   *  canvas/analytics can label the node without re-resolving the registry. */
+  rcsBotId?: string;
+  rcsCategory?: string;
   // ---- Delay ----
   /** Delay v2. Two modes, surfaced as "Static delay" / "Dynamic delay" in the UI:
    *  - `fixed`    → wait a fixed value+unit (Static delay).
@@ -264,6 +276,7 @@ export const NODE_GROUPS: Record<NodeKind, NodeGroup> = {
   voiceCall: "action",
   whatsapp: "action",
   sms: "action",
+  rcs: "action",
   aiTransform: "ai",
   adsCampaign: "ads",
 };
@@ -279,6 +292,7 @@ export const NODE_LABELS: Record<NodeKind, string> = {
   voiceCall: "Voice Call",
   whatsapp: "WhatsApp",
   sms: "SMS",
+  rcs: "RCS",
   aiTransform: "AI Transformation",
   adsCampaign: "Ads Campaign Setup",
 };
@@ -300,6 +314,7 @@ export const SERIAL_PREFIX: Record<NodeKind, string> = {
   voiceCall: "voice",
   whatsapp: "whatsapp",
   sms: "sms",
+  rcs: "rcs",
   aiTransform: "ait",
   adsCampaign: "ads",
 };

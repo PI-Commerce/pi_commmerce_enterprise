@@ -83,6 +83,7 @@ const CHANNEL_CTA_LABEL: Record<ChannelKind, string> = {
   whatsapp: "View Detailed WhatsApp Analytics",
   voice: "View Detailed Voice Analytics",
   sms: "View Detailed SMS Analytics",
+  rcs: "View Detailed RCS Analytics",
   ads: "View Detailed Ads Analytics",
 };
 
@@ -115,6 +116,7 @@ const CHANNEL_COLORS: Record<ChannelKind, string> = {
   whatsapp: "#22c55e",
   voice: "#a78bfa",
   sms: "#f59e0b",
+  rcs: "#6366f1",
   ads: "#06b6d4",
 };
 const NODE_COLOR: Record<SankeyNodeKind, string> = {
@@ -125,6 +127,7 @@ const NODE_COLOR: Record<SankeyNodeKind, string> = {
   whatsapp: "#22c55e",
   voice: "#a78bfa",
   sms: "#f59e0b",
+  rcs: "#6366f1",
   ads: "#06b6d4",
   conditional: "#64748b",
   delay: "#94a3b8",
@@ -139,6 +142,7 @@ const NODE_TYPE_LABEL: Record<SankeyNodeKind, string> = {
   whatsapp: "WhatsApp",
   voice: "Voice Call",
   sms: "SMS",
+  rcs: "RCS",
   ads: "Ads Campaign",
   conditional: "Conditional Branch",
   delay: "Delay",
@@ -1374,12 +1378,15 @@ const CHANNEL_KPI_LABELS: Record<ChannelKind, string[]> = {
   // Voice renders via VoiceChannelView, not ChannelDetail; kept only for completeness.
   voice: ["Total Base", "Running", "Completed", "Failed"],
   sms: ["Sent", "Delivered", "Failed"],
+  // RCS renders via RcsChannelView; kept for completeness.
+  rcs: ["Sent", "Delivered", "Read", "Failed", "Not Reachable"],
   ads: ["Impressions", "Clicks", "Total Leads"],
 };
 const CHANNEL_TREND_LABELS: Record<ChannelKind, string[]> = {
   whatsapp: ["Sent", "Delivered", "Read"],
   voice: ["Completed", "Failed"],
   sms: ["Sent", "Delivered"],
+  rcs: ["Sent", "Delivered", "Read"],
   ads: ["Impressions", "Clicks", "Total Leads"],
 };
 
@@ -1419,6 +1426,16 @@ function deriveChannelValues(
         Sent: sent,
         Delivered: Math.round(sent * 0.969),
         Failed: Math.round(sent * 0.031),
+      };
+    }
+    case "rcs": {
+      const sent = entered;
+      return {
+        Sent: sent,
+        Delivered: Math.round(sent * 0.9),
+        Read: Math.round(sent * 0.62),
+        Failed: Math.round(sent * 0.04),
+        "Not Reachable": Math.round(sent * 0.06),
       };
     }
     case "ads": {
