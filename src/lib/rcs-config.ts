@@ -41,8 +41,6 @@ export type RcsAgent = {
   agentId: string;
   /** Agent Key — backend credential, never rendered to the client. */
   agentKey: string;
-  /** Whether the provider has verified the agent (gates live sending). */
-  verified: boolean;
   registeredOn: string;
 };
 
@@ -71,10 +69,10 @@ export const SEED_RCS_CONFIG: RcsChannelConfig = {
       logoUrl: "https://cdn.picomm.in/rcs/acme-logo.png",
       provider: "JIO",
       agents: [
-        { id: "acme_promo_bot", name: "ACME Offers", type: "Promotional", agentId: "AG-JIO-10041", agentKey: "•••• stored in backend", verified: true, registeredOn: "04 Jun 2026" },
-        { id: "acme_utility_bot", name: "ACME Updates", type: "Transactional", agentId: "AG-JIO-10042", agentKey: "•••• stored in backend", verified: true, registeredOn: "04 Jun 2026" },
-        { id: "acme_otp_bot", name: "ACME Verify", type: "Transactional", agentId: "AG-JIO-10043", agentKey: "•••• stored in backend", verified: true, registeredOn: "11 Jun 2026" },
-        { id: "acme_promo_bot_2", name: "ACME Deals", type: "Promotional", agentId: "AG-JIO-10044", agentKey: "•••• stored in backend", verified: false, registeredOn: "22 Jun 2026" },
+        { id: "acme_promo_bot", name: "ACME Offers", type: "Promotional", agentId: "AG-JIO-10041", agentKey: "•••• stored in backend", registeredOn: "04 Jun 2026" },
+        { id: "acme_utility_bot", name: "ACME Updates", type: "Transactional", agentId: "AG-JIO-10042", agentKey: "•••• stored in backend", registeredOn: "04 Jun 2026" },
+        { id: "acme_otp_bot", name: "ACME Verify", type: "Transactional", agentId: "AG-JIO-10043", agentKey: "•••• stored in backend", registeredOn: "11 Jun 2026" },
+        { id: "acme_promo_bot_2", name: "ACME Deals", type: "Promotional", agentId: "AG-JIO-10044", agentKey: "•••• stored in backend", registeredOn: "22 Jun 2026" },
       ],
     },
     {
@@ -83,8 +81,8 @@ export const SEED_RCS_CONFIG: RcsChannelConfig = {
       logoUrl: "https://cdn.picomm.in/rcs/acme-retail-logo.png",
       provider: "Netcore-VI",
       agents: [
-        { id: "retail_promo_bot", name: "ACME Retail Offers", type: "Promotional", agentId: "AG-NC-20071", agentKey: "•••• stored in backend", verified: true, registeredOn: "18 Jun 2026" },
-        { id: "retail_utility_bot", name: "ACME Retail Updates", type: "Transactional", agentId: "AG-NC-20072", agentKey: "•••• stored in backend", verified: true, registeredOn: "18 Jun 2026" },
+        { id: "retail_promo_bot", name: "ACME Retail Offers", type: "Promotional", agentId: "AG-NC-20071", agentKey: "•••• stored in backend", registeredOn: "18 Jun 2026" },
+        { id: "retail_utility_bot", name: "ACME Retail Updates", type: "Transactional", agentId: "AG-NC-20072", agentKey: "•••• stored in backend", registeredOn: "18 Jun 2026" },
       ],
     },
   ],

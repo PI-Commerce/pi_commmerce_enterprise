@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Building2, Info, BadgeCheck, Bot as BotIcon } from "lucide-react";
+import { Building2, Info, Bot as BotIcon } from "lucide-react";
 import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
 } from "@/components/ui/select";
@@ -119,20 +119,9 @@ function ProviderPill({ brand }: { brand: RcsBrand }) {
 function AgentCard({ agent }: { agent: RcsAgent }) {
   return (
     <div className="rounded-xl border border-border bg-card p-4">
-      <div className="flex items-start justify-between gap-2">
-        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-accent text-foreground">
-          <BotIcon className="h-5 w-5" />
-        </span>
-        {agent.verified ? (
-          <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-success/30 bg-success/10 px-2 py-0.5 text-[10.5px] font-medium text-success">
-            <BadgeCheck className="h-3 w-3" /> Verified
-          </span>
-        ) : (
-          <span className="inline-flex shrink-0 items-center rounded-full border border-warning/30 bg-warning/10 px-2 py-0.5 text-[10.5px] font-medium text-warning">
-            Pending verification
-          </span>
-        )}
-      </div>
+      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-accent text-foreground">
+        <BotIcon className="h-5 w-5" />
+      </span>
       <p className="mt-3 truncate text-[14px] font-semibold text-foreground">{agent.name}</p>
       <div className="mt-2.5 flex items-center gap-2">
         <span className="inline-flex items-center rounded-full border border-border bg-secondary px-2 py-0.5 text-[10.5px] font-medium text-muted-foreground">
