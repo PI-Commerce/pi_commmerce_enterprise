@@ -35,7 +35,7 @@ import { templateButtons, type RcsTemplate } from "@/lib/rcs-templates";
  *    button, so button-click attribution is a first-class chart — but only
  *    meaningful at the level of a single template that actually carries buttons.
  */
-export function RcsChannelView({ refs }: { refs: RcsRef[] }) {
+export function RcsChannelView({ refs, templateLevel = false }: { refs: RcsRef[]; templateLevel?: boolean }) {
   // Outcome tiles are derived from each node's real `entered` volume via the
   // shared delivery rates — NOT counted off the 120-message sample, which would
   // make the tiles swing on sampling luck and disagree with the campaign Sankey.
@@ -58,12 +58,18 @@ export function RcsChannelView({ refs }: { refs: RcsRef[] }) {
   }, [refs]);
   const singleTemplate = templatesInScope.length === 1 ? templatesInScope[0] : undefined;
   const multiTemplate = templatesInScope.length > 1;
-  // Attribution needs a single template that actually carries buttons.
-  const clickTemplate = singleTemplate && templateButtons(singleTemplate).length > 0 ? singleTemplate : undefined;
+  // Attribution is a template-level view: only meaningful when the user is
+  // explicitly looking at one template (View By: Template), and only if that
+  // template actually carries buttons — not merely because a campaign-scoped
+  // view happens to contain a single template.
+  const clickTemplate =
+    templateLevel && singleTemplate && templateButtons(singleTemplate).length > 0
+      ? singleTemplate
+      : undefined;
 
   // The card that sits beside "Failure reasons": templates-in-scope only for a
-  // multi-template view, click attribution only for a single template with
-  // buttons, and nothing (Failure reasons goes full-width) otherwise.
+  // multi-template view, click attribution only at the template level, and
+  // nothing (Failure reasons goes full-width) otherwise.
   const secondaryCard = clickTemplate ? (
     <ClickAttribution template={clickTemplate} totalSent={totalSent} />
   ) : multiTemplate ? (

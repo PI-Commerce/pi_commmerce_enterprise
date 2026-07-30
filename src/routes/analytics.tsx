@@ -1926,7 +1926,12 @@ function ChannelAnalytics({
             const node = run.sankey.nodes.find((n) => n.id === ref.nodeId)!;
             return { run, node };
           });
-          return <RcsChannelView refs={rrefs} />;
+          return (
+            <RcsChannelView
+              refs={rrefs}
+              templateLevel={mode === "asset" && !!selection.assetId}
+            />
+          );
         })()
       ) : (
         <ChannelDetail kind={kind} refs={selectedRefs} dateRange={dateRange} />
