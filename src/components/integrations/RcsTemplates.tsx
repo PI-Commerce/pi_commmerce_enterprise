@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Plus, Search, Trash2, Pencil, ChevronLeft, ChevronRight, AlertCircle, Info,
-  Type as TypeIcon, Image as ImageIcon, X, Link2, UploadCloud, Reply, ExternalLink, Phone,
+  Type as TypeIcon, Image as ImageIcon, Video, X, Link2, UploadCloud, Reply, ExternalLink, Phone,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -313,6 +313,9 @@ function RcsTemplateForm({ config, initial, existing, onCancel, onSave }: {
   const [buttons, setButtons] = useState<RcsButton[]>(initial?.buttons ?? []);
   const [showErrors, setShowErrors] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const thumbFileRef = useRef<HTMLInputElement>(null);
+  const setThumb = (patch: Partial<NonNullable<RcsMedia["thumbnail"]>>) =>
+    setMedia((m) => ({ ...m, thumbnail: { source: "url", ...m.thumbnail, ...patch } }));
 
   const brand = brandById(config, brandId);
   const provider = brand?.provider;
@@ -605,6 +608,66 @@ function RcsTemplateForm({ config, initial, existing, onCancel, onSave }: {
                           <p className="mt-1 flex items-center gap-1 text-[11px] text-destructive"><AlertCircle className="h-3 w-3 shrink-0" /> {errors.media}</p>
                         )}
                       </div>
+
+                      {/* Video thumbnail (poster) — provider-specced */}
+                      {media.mediaType === "VIDEO" && (
+                        <div className="mt-3 rounded-lg border border-border bg-card/40 p-3">
+                          <div className="mb-1.5 flex items-center justify-between">
+                            <p className="text-[12px] font-medium text-foreground">Thumbnail</p>
+                            <span className="text-[10.5px] text-muted-foreground">Poster shown before the video plays</span>
+                          </div>
+                          <div className="mb-1.5 inline-flex rounded-md border border-border p-0.5">
+                            <button
+                              type="button"
+                              onClick={() => setThumb({ source: "url" })}
+                              className={cn("flex items-center gap-1 rounded px-2.5 py-1 text-[11.5px] font-medium transition-colors", (media.thumbnail?.source ?? "url") === "url" ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground")}
+                            >
+                              <Link2 className="h-3.5 w-3.5" /> URL
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setThumb({ source: "upload" })}
+                              className={cn("flex items-center gap-1 rounded px-2.5 py-1 text-[11.5px] font-medium transition-colors", media.thumbnail?.source === "upload" ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground")}
+                            >
+                              <UploadCloud className="h-3.5 w-3.5" /> Upload
+                            </button>
+                          </div>
+
+                          {(media.thumbnail?.source ?? "url") === "url" ? (
+                            <Input
+                              value={media.thumbnail?.url ?? ""}
+                              onChange={(e) => setThumb({ url: e.target.value })}
+                              placeholder="https://cdn.example.com/thumbnail.jpg"
+                              className="h-9 font-mono text-[12px]"
+                            />
+                          ) : (
+                            <div className="flex items-center gap-2">
+                              <input
+                                ref={thumbFileRef}
+                                type="file"
+                                accept={mediaAccept("IMAGE")}
+                                className="hidden"
+                                onChange={(e) => {
+                                  const f = e.target.files?.[0];
+                                  if (f) setThumb({ fileName: f.name });
+                                  e.target.value = "";
+                                }}
+                              />
+                              {media.thumbnail?.fileName ? (
+                                <span className="flex items-center gap-2 rounded-md border border-border bg-card px-2.5 py-1.5 text-[12px]">
+                                  <ImageIcon className="h-3.5 w-3.5 text-muted-foreground" /> {media.thumbnail.fileName}
+                                  <button onClick={() => setThumb({ fileName: undefined })} className="text-muted-foreground hover:text-foreground"><X className="h-3.5 w-3.5" /></button>
+                                </span>
+                              ) : (
+                                <Button variant="outline" size="sm" className="h-9 gap-1.5 text-xs" onClick={() => thumbFileRef.current?.click()}>
+                                  <UploadCloud className="h-3.5 w-3.5" /> Choose file
+                                </Button>
+                              )}
+                            </div>
+                          )}
+                          <p className="mt-1 text-[11px] text-muted-foreground">{thumbnailHint(provider, media)}</p>
+                        </div>
+                      )}
                     </>
                   )}
                 </div>
@@ -719,6 +782,17 @@ function mediaHint(provider: RcsProvider, media: RcsMedia): string {
   return parts.join(" · ");
 }
 
+/** Format / aspect / size hint for a video's poster thumbnail. */
+function thumbnailHint(provider: RcsProvider, media: RcsMedia): string {
+  const t = mediaKindSpec(provider, "VIDEO").thumbnail;
+  const parts: string[] = [];
+  const aspect = t?.aspect ?? (media.height ? t?.perHeightAspect?.[media.height] : undefined);
+  if (aspect) parts.push(`Aspect ${aspect}`);
+  parts.push(mediaFormatsHint("IMAGE"));
+  if (t) parts.push(`≤ ${t.maxSizeKb} KB`);
+  return parts.join(" · ");
+}
+
 /** Handset preview of an RCS message: agent header, card/text bubble, suggestion chips. */
 function RcsPreview({ agentName, type, title, body, media, buttons }: {
   agentName: string; type: RcsTemplateType; title: string; body: string; media: RcsMedia; buttons: RcsButton[];
@@ -726,11 +800,41 @@ function RcsPreview({ agentName, type, title, body, media, buttons }: {
   const sampleVars: Record<string, string> = {};
   const filledBody = fillRcsVariables(body, sampleVars);
   const filledTitle = fillRcsVariables(title, sampleVars);
-  const mediaLabel = media.source === "url" ? media.url : media.fileName;
+  // For a video, the poster thumbnail is what shows before playback.
+  const posterLabel =
+    media.mediaType === "VIDEO"
+      ? media.thumbnail?.source === "upload" ? media.thumbnail.fileName : media.thumbnail?.url
+      : undefined;
+  const mediaLabel = posterLabel ?? (media.source === "url" ? media.url : media.fileName);
   const heightPx =
     media.orientation === "VERTICAL"
       ? 150
       : media.height === "SHORT" ? 84 : media.height === "LARGE" ? 160 : 120;
+  // Netcore-VI horizontal cards place the media beside the text; alignment
+  // decides which side. Everything else is a top banner over the text.
+  const aligned = type === "RICH_CARD" && !!media.alignment;
+
+  const mediaTile = (
+    <div className="grid h-full min-h-[64px] w-full place-items-center bg-secondary text-muted-foreground">
+      {mediaLabel ? (
+        <div className="flex flex-col items-center gap-1 px-2 text-center">
+          {media.mediaType === "VIDEO" ? <Video className="h-5 w-5" /> : <ImageIcon className="h-5 w-5" />}
+          <span className="line-clamp-1 text-[9px] font-mono">{mediaLabel}</span>
+        </div>
+      ) : (
+        media.mediaType === "VIDEO" ? <Video className="h-5 w-5" /> : <ImageIcon className="h-5 w-5" />
+      )}
+    </div>
+  );
+
+  const textBlock = (
+    <div className="px-3 py-2.5">
+      {type === "RICH_CARD" && filledTitle && <p className="mb-1 text-[12.5px] font-semibold text-foreground">{filledTitle}</p>}
+      <p className="whitespace-pre-wrap break-words text-[12px] leading-relaxed text-foreground">
+        {filledBody || "Your message content will appear here."}
+      </p>
+    </div>
+  );
 
   return (
     <div className="mx-auto w-[300px] overflow-hidden rounded-[2rem] border-[6px] border-foreground/85 bg-background shadow-xl">
@@ -743,24 +847,19 @@ function RcsPreview({ agentName, type, title, body, media, buttons }: {
       </div>
       <div className="min-h-[340px] bg-muted/30 px-3 py-4">
         <div className="max-w-[88%] overflow-hidden rounded-2xl rounded-tl-sm bg-card shadow-sm">
-          {type === "RICH_CARD" && (
-            <div className="grid place-items-center bg-secondary text-muted-foreground" style={{ height: heightPx }}>
-              {mediaLabel ? (
-                <div className="flex flex-col items-center gap-1 px-3 text-center">
-                  <ImageIcon className="h-5 w-5" />
-                  <span className="line-clamp-1 text-[10px] font-mono">{mediaLabel}</span>
-                </div>
-              ) : (
-                <ImageIcon className="h-5 w-5" />
-              )}
+          {aligned ? (
+            <div className={cn("flex items-stretch", media.alignment === "RIGHT" && "flex-row-reverse")}>
+              <div className="w-[38%] shrink-0 self-stretch [&>div]:h-full">{mediaTile}</div>
+              <div className="flex-1">{textBlock}</div>
             </div>
+          ) : (
+            <>
+              {type === "RICH_CARD" && (
+                <div style={{ height: heightPx }}>{mediaTile}</div>
+              )}
+              {textBlock}
+            </>
           )}
-          <div className="px-3 py-2.5">
-            {type === "RICH_CARD" && filledTitle && <p className="mb-1 text-[12.5px] font-semibold text-foreground">{filledTitle}</p>}
-            <p className="whitespace-pre-wrap break-words text-[12px] leading-relaxed text-foreground">
-              {filledBody || "Your message content will appear here."}
-            </p>
-          </div>
         </div>
         {/* Suggestion chips */}
         {buttons.filter((b) => b.text.trim()).length > 0 && (

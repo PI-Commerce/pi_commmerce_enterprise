@@ -23,22 +23,22 @@ export type RcsStatus =
   | "Read"
   | "Clicked"
   | "Failed"
-  | "Not reachable"
   | "Timed out";
 
 /**
- * RCS delivery-failure taxonomy, weighted by real-world frequency. Distinct
- * from SMS: an RCS send that lands on a non-RCS handset is reported separately
- * as "Not reachable" (the fallback trigger), so the hard-failure reasons here
- * are the ones that occur *after* the handset was confirmed RCS-capable.
+ * RCS delivery-failure taxonomy, weighted by real-world frequency. "Failed"
+ * folds in handsets that aren't RCS-capable, which dominates the mix — so
+ * "Recipient not RCS-capable" carries the largest weight, ahead of the true
+ * hard-failure reasons.
  */
 const FAILURE_REASONS: { reason: string; weight: number }[] = [
-  { reason: "Invalid or non-existent number", weight: 30 },
-  { reason: "Message rejected by carrier RBM", weight: 22 },
-  { reason: "Handset unreachable or switched off", weight: 18 },
-  { reason: "Payload exceeded 250 KB card limit", weight: 12 },
-  { reason: "Agent not provisioned for recipient carrier", weight: 10 },
-  { reason: "Message expired before delivery", weight: 8 },
+  { reason: "Recipient not RCS-capable", weight: 58 },
+  { reason: "Invalid or non-existent number", weight: 13 },
+  { reason: "Message rejected by carrier RBM", weight: 9 },
+  { reason: "Handset unreachable or switched off", weight: 8 },
+  { reason: "Payload exceeded 250 KB card limit", weight: 5 },
+  { reason: "Agent not provisioned for recipient carrier", weight: 4 },
+  { reason: "Message expired before delivery", weight: 3 },
 ];
 
 const REASON_TOTAL = FAILURE_REASONS.reduce((s, r) => s + r.weight, 0);
@@ -68,18 +68,17 @@ export function rcsFailureBreakdown(
 
 /**
  * Outcome totals for a given sent volume, from the shared {@link RCS_DELIVERY_RATES}.
- * `delivered` / `failed` / `notReachable` / `timeout` are the four mutually
- * exclusive terminal states and sum to Sent (timeout absorbs the remainder);
- * `read` and `clicked` are engagement sub-slices of `delivered`.
+ * `delivered` / `failed` / `timeout` are the three mutually exclusive terminal
+ * states and sum to Sent (timeout absorbs the remainder); `read` and `clicked`
+ * are engagement sub-slices of `delivered`. `failed` folds in not-reachable.
  */
 export function rcsOutcomeTotals(sent: number) {
   const delivered = Math.round(sent * RCS_DELIVERY_RATES.delivered);
   const read = Math.round(sent * RCS_DELIVERY_RATES.read);
   const clicked = Math.round(sent * RCS_DELIVERY_RATES.clicked);
   const failed = Math.round(sent * RCS_DELIVERY_RATES.failed);
-  const notReachable = Math.round(sent * RCS_DELIVERY_RATES.notReachable);
-  const timeout = Math.max(0, sent - delivered - failed - notReachable);
-  return { delivered, read, clicked, failed, notReachable, timeout };
+  const timeout = Math.max(0, sent - delivered - failed);
+  return { delivered, read, clicked, failed, timeout };
 }
 
 export type RcsMessage = {
@@ -156,7 +155,6 @@ const OUTCOME_MIX: { status: RcsStatus; p: number }[] = [
       RCS_DELIVERY_RATES.read,
   },
   { status: "Failed", p: RCS_DELIVERY_RATES.failed },
-  { status: "Not reachable", p: RCS_DELIVERY_RATES.notReachable },
   { status: "Timed out", p: RCS_DELIVERY_RATES.timeout },
 ];
 

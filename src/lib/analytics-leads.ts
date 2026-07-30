@@ -21,9 +21,7 @@ export type LeadStatus =
   | "dropped"
   | "pending"
   /** SMS/RCS: the wait window closed without a delivery receipt. */
-  | "no_dlr"
-  /** RCS: the recipient's handset isn't RCS-capable. */
-  | "not_reachable";
+  | "no_dlr";
 
 export type Lead = {
   id: string;
@@ -117,8 +115,8 @@ const STATUS_BY_KIND: Record<SankeyNodeKind, LeadStatus[]> = {
   // `sent` state a lead occupies while the DLR window is still open.
   sms: ["sent", "delivered", "failed", "no_dlr"],
   // RCS: the node's delivery outcomes — delivered / read (RCS read receipt) /
-  // failed / not-reachable (handset not RCS-capable) / timeout.
-  rcs: ["delivered", "read", "failed", "not_reachable", "no_dlr"],
+  // failed (folds in handsets that aren't RCS-capable) / timeout.
+  rcs: ["delivered", "read", "failed", "no_dlr"],
   ads: ["clicked", "delivered"],
   aiTransform: [],
   end: [],

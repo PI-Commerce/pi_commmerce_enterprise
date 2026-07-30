@@ -1688,11 +1688,11 @@ function RcsFields({ config, readOnly, mark, onChange }: { config?: PresetConfig
 
 /**
  * RCS node core — template-driven like SMS/WhatsApp, but its outputs are a hybrid:
- * the client picks Category → Bot → an **Approved** template from the registry
+ * the client picks Brand → Agent → an **Approved** template from the registry
  * (Channels → RCS), maps its `{{var}}`s, and sets a DLR wait window. The node then
- * exposes one branch per REPLY button in the template PLUS the fixed delivery
- * outcomes (Delivered / Failed / Not Reachable / Timeout) — published here since
- * the reply handles vary with the chosen template.
+ * exposes one branch per button in the template PLUS the fixed delivery outcomes
+ * (Delivered / Failed / Timeout) — published here since the button handles vary
+ * with the chosen template.
  */
 function RcsCore({ config, readOnly, mark, onChange }: {
   config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void;
@@ -2337,7 +2337,7 @@ function ActionAdvanceBanner({ kind, type1 }: { kind: ActionKind; type1?: boolea
       : kind === "sms"
         ? "Always three outputs: “Delivered”, “Failed” and “Timeout” (no receipt within the wait window). Wire all three."
         : kind === "rcs"
-          ? "One output per button (RCS reports clicks for reply, URL and dialer buttons alike), plus fixed “Delivered”, “Failed”, “Not Reachable” and “Timeout”. Wire an SMS fallback off “Not Reachable”."
+          ? "One output per button (RCS reports clicks for reply, URL and dialer buttons alike), plus fixed “Delivered”, “Failed” and “Timeout”. “Failed” includes handsets that aren't RCS-capable — wire an SMS fallback off it."
         : type1
           ? "Always two outputs: “Replied (no button)” and “No response / continue” (24h session expiry + any untrackable tap). Wire both."
           : "Each trackable button is its own output, plus “Replied (no button)” and “No response / continue”. Phone numbers and untracked URLs aren’t trackable — those taps route through “No response / continue”. Wire every output.";

@@ -941,13 +941,12 @@ function buildNodeMetrics(
     // Derived from THIS node's volume via the shared RCS delivery rates, so the
     // tiles, the RCS channel view and the Sankey stay in agreement.
     const sent = node.entered;
-    const { delivered, read, failed, notReachable } = rcsOutcomeTotals(sent);
+    const { delivered, read, failed } = rcsOutcomeTotals(sent);
     return [
       { label: "Sent", value: sent.toLocaleString() },
       { label: "Delivered", value: delivered.toLocaleString() },
       { label: "Read", value: read.toLocaleString() },
       { label: "Failed", value: failed.toLocaleString() },
-      { label: "Not Reachable", value: notReachable.toLocaleString() },
     ];
   }
   if (k === "whatsapp" || k === "ads") {
@@ -1259,10 +1258,10 @@ function MiniFunnel({
     outcomeTitle = "Non-delivery outcomes";
     outcomeBase = "Sent";
   } else if (kind === "rcs") {
-    // Funnel = Sent→Delivered→Read; Failed / Not Reachable are mutually
-    // exclusive non-delivery outcomes, so they render beside the funnel, not
+    // Funnel = Sent→Delivered→Read; Failed (which folds in not-reachable) is a
+    // terminal non-delivery outcome, so it renders beside the funnel, not
     // stacked under Delivered.
-    const OUTCOME_LABELS = ["Failed", "Not Reachable"];
+    const OUTCOME_LABELS = ["Failed"];
     linear = metrics.filter((m) => !OUTCOME_LABELS.includes(m.label));
     outcomes = metrics.filter((m) => OUTCOME_LABELS.includes(m.label));
     readBase = linear.find((m) => m.label === "Sent")?.value ?? 0;
@@ -1409,7 +1408,7 @@ const CHANNEL_KPI_LABELS: Record<ChannelKind, string[]> = {
   voice: ["Total Base", "Running", "Completed", "Failed"],
   sms: ["Sent", "Delivered", "Failed"],
   // RCS renders via RcsChannelView; kept for completeness.
-  rcs: ["Sent", "Delivered", "Read", "Failed", "Not Reachable"],
+  rcs: ["Sent", "Delivered", "Read", "Failed"],
   ads: ["Impressions", "Clicks", "Total Leads"],
 };
 const CHANNEL_TREND_LABELS: Record<ChannelKind, string[]> = {
@@ -1462,10 +1461,9 @@ function deriveChannelValues(
       const sent = entered;
       return {
         Sent: sent,
-        Delivered: Math.round(sent * 0.9),
+        Delivered: Math.round(sent * 0.88),
         Read: Math.round(sent * 0.62),
-        Failed: Math.round(sent * 0.04),
-        "Not Reachable": Math.round(sent * 0.06),
+        Failed: Math.round(sent * 0.1),
       };
     }
     case "ads": {

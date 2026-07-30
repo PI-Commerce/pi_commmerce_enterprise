@@ -64,6 +64,12 @@ export type RcsMedia = {
   url?: string;
   /** Set when source === "upload" — the file name (prototype: no real bytes). */
   fileName?: string;
+  /** Optional poster thumbnail (video only) — a public URL or an upload. */
+  thumbnail?: {
+    source: "url" | "upload";
+    url?: string;
+    fileName?: string;
+  };
 };
 
 export type RcsTemplate = {

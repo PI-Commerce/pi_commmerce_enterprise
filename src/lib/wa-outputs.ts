@@ -136,14 +136,13 @@ export const DEFAULT_SMS_DLR_WINDOW = "30 minutes";
  *   - one branch per button in the selected template, labelled with the button
  *     text. RCS posts a click callback for every suggestion type — REPLY, URL
  *     and DIALER alike — so all of them are branchable, not just quick replies.
- *   - four fixed delivery defaults: `delivered`, `failed`, `not_reachable`
- *     (the recipient's handset isn't RCS-capable — wire an SMS fallback here),
- *     and `timeout` (no receipt before the wait window closed, its default).
+ *   - three fixed delivery defaults: `delivered`, `failed` (a hard failure OR a
+ *     handset that isn't RCS-capable — wire an SMS fallback here), and `timeout`
+ *     (no receipt before the wait window closed, its default).
  */
 const RCS_DEFAULT_OUTPUTS: NodeOutput[] = [
   { id: "delivered", label: "Delivered", kind: "outcome" },
   { id: "failed", label: "Failed", kind: "outcome" },
-  { id: "not_reachable", label: "Not Reachable", kind: "outcome" },
   { id: "timeout", label: "Timeout", kind: "default" },
 ];
 
@@ -236,8 +235,8 @@ export function deriveNodeOutcomeVariables(
       }
     } else if (kind === "rcs") {
       // Delivery facts this message produced, mirroring the node's default
-      // handles (delivered | failed | not_reachable | timeout) plus the clicked
-      // button as a value a Conditional can read.
+      // handles (delivered | failed | timeout) plus the clicked button as a
+      // value a Conditional can read.
       vars.push({ key: `${ns}.delivery_state`, source });
       vars.push({ key: `${ns}.click`, source });
       vars.push({ key: `${ns}.failure_reason`, source });

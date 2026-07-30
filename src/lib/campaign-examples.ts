@@ -511,7 +511,7 @@ const SMS_KYC_PENDING = "1107168421556731209";
 /**
  * An RCS send. Its outputs are dynamic: one branch per button on the template
  * (RCS reports a click for reply, URL and dialer buttons alike) PLUS the fixed
- * Delivered / Failed / Not Reachable / Timeout outcomes. `buildCampaign` fans a
+ * Delivered / Failed / Timeout outcomes. `buildCampaign` fans a
  * port-less onward edge to every handle, so a "linear" RCS send wires them all;
  * a journey that reacts to a specific click (or wires an SMS fallback off Not
  * Reachable) ports the edges explicitly. Agent + type are denormalised off the
@@ -1038,9 +1038,9 @@ const C_SEASONAL = buildCampaign("Retail · Seasonal Sale", [
 
 /* ---- RCS · Festive Engagement ------------------------------------------
  * An RCS-led journey (PICOM-4728) that shows every branch kind an RCS node
- * exposes: one path per quick-reply button (Shop now / See offers), the fixed
+ * exposes: one path per button (Shop now / See offers / Visit store), the fixed
  * delivery outcomes, and — the headline pattern — an SMS fallback wired off the
- * "Not Reachable" branch so recipients on non-RCS handsets still get reached. */
+ * "Failed" branch so recipients on non-RCS handsets still get reached. */
 const C_RCS = buildCampaign("Retail · RCS Festive Engagement", [
   sStart(),
   sAud("CSV · festive shoppers", ["fav_category", "rcs_capable"]),
@@ -1069,13 +1069,12 @@ const C_RCS = buildCampaign("Retail · RCS Festive Engagement", [
   ed("rcsWelcome", "dShop", "btn_0"), ed("dShop", "waCart"), ed("waCart", "end"),
   ed("rcsWelcome", "waCatalog", "btn_1"),
   ed("rcsWelcome", "waCatalog", "btn_2"), ed("waCatalog", "end"),
-  // Not Reachable → SMS fallback: the recipient's handset isn't RCS-capable, so
-  // reach them over SMS instead. This is the RCS→SMS fallback, configured
+  // Failed → SMS fallback: a hard failure or a handset that isn't RCS-capable,
+  // so reach them over SMS instead. This is the RCS→SMS fallback, configured
   // downstream rather than inside the node.
-  ed("rcsWelcome", "smsFallback", "not_reachable"), ed("smsFallback", "end"),
-  // Delivered but no click → a gentle payment nudge over RCS; hard outcomes end.
+  ed("rcsWelcome", "smsFallback", "failed"), ed("smsFallback", "end"),
+  // Delivered but no click → a gentle payment nudge over RCS; timeout ends.
   ed("rcsWelcome", "rcsPay", "delivered"), ed("rcsPay", "end"),
-  ed("rcsWelcome", "end", "failed"),
   ed("rcsWelcome", "end", "timeout"),
 ]);
 

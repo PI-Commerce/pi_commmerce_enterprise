@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import type { EChartsOption } from "echarts";
 import {
-  Send, CheckCircle2, Eye, XCircle, WifiOff,
+  Send, CheckCircle2, Eye, XCircle,
   Search, Download, type LucideIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -40,7 +40,7 @@ export function RcsChannelView({ refs }: { refs: RcsRef[] }) {
   // shared delivery rates — NOT counted off the 120-message sample, which would
   // make the tiles swing on sampling luck and disagree with the campaign Sankey.
   const totalSent = refs.reduce((s, { node }) => s + node.entered, 0);
-  const { delivered, read, failed, notReachable } = rcsOutcomeTotals(totalSent);
+  const { delivered, read, failed } = rcsOutcomeTotals(totalSent);
   const deliveryRate = totalSent > 0 ? (delivered / totalSent) * 100 : 0;
   const readRate = delivered > 0 ? (read / delivered) * 100 : 0;
 
@@ -60,7 +60,7 @@ export function RcsChannelView({ refs }: { refs: RcsRef[] }) {
   return (
     <div className="space-y-6">
       <Section title="Delivery performance" sub="Every RCS node in the selected scope.">
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <Kpi icon={Send} label="Sent" value={totalSent.toLocaleString()} sub="Messages submitted to the provider" />
           <Kpi
             icon={CheckCircle2}
@@ -80,15 +80,8 @@ export function RcsChannelView({ refs }: { refs: RcsRef[] }) {
             icon={XCircle}
             label="Failed"
             value={failed.toLocaleString()}
-            sub={totalSent > 0 ? `${((failed / totalSent) * 100).toFixed(1)}% of sent` : "—"}
+            sub={totalSent > 0 ? `${((failed / totalSent) * 100).toFixed(1)}% of sent · incl. not RCS-capable` : "—"}
             tone="negative"
-          />
-          <Kpi
-            icon={WifiOff}
-            label="Not Reachable"
-            value={notReachable.toLocaleString()}
-            sub="Handset not RCS-capable"
-            tone="warning"
           />
         </div>
       </Section>
@@ -182,7 +175,6 @@ const OUTCOME_COLOR = {
   read: "#6366f1",
   clicked: "#8b5cf6",
   failed: "#ef4444",
-  notReachable: "#f59e0b",
   timeout: "#94a3b8",
 } as const;
 
@@ -194,11 +186,10 @@ const OUTCOME_COLOR = {
  * the same pie would double-count. Engagement lives in the funnel beside this.
  */
 function OutcomeSplit({ totalSent }: { totalSent: number }) {
-  const { delivered, failed, notReachable, timeout } = rcsOutcomeTotals(totalSent);
+  const { delivered, failed, timeout } = rcsOutcomeTotals(totalSent);
   const data = [
     { name: "Delivered", value: delivered, color: OUTCOME_COLOR.delivered },
     { name: "Failed", value: failed, color: OUTCOME_COLOR.failed },
-    { name: "Not reachable", value: notReachable, color: OUTCOME_COLOR.notReachable },
     { name: "Timed out", value: timeout, color: OUTCOME_COLOR.timeout },
   ].filter((d) => d.value > 0);
 
@@ -617,7 +608,6 @@ const STATUS_TONE: Record<RcsStatus, string> = {
   Read: "bg-success/10 text-success",
   Clicked: "bg-primary/10 text-primary",
   Failed: "bg-destructive/10 text-destructive",
-  "Not reachable": "bg-warning/10 text-warning",
   "Timed out": "bg-secondary text-muted-foreground",
 };
 
@@ -626,7 +616,6 @@ const STATUS_FILTERS: RcsStatus[] = [
   "Read",
   "Clicked",
   "Failed",
-  "Not reachable",
   "Timed out",
 ];
 
