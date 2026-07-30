@@ -44,18 +44,31 @@ export function RcsChannelView({ refs }: { refs: RcsRef[] }) {
   const deliveryRate = totalSent > 0 ? (delivered / totalSent) * 100 : 0;
   const readRate = delivered > 0 ? (read / delivered) * 100 : 0;
 
-  // Button-click attribution is only meaningful when the scope resolves to a
-  // single template AND that template carries buttons — attributing clicks
-  // across a mix of templates (some without buttons) is meaningless.
-  const clickTemplate = useMemo(() => {
+  // The distinct templates the scope resolves to. When it's exactly one, the
+  // view is single-template: "Templates in scope" is pointless (it would be a
+  // one-bar chart of the template you're already looking at), while per-button
+  // click attribution becomes meaningful. Multi-template flips that.
+  const templatesInScope = useMemo(() => {
     const byId = new Map<string, RcsTemplate>();
     for (const ref of refs) {
       const t = templateForNode(ref.node);
       if (t) byId.set(t.id, t);
     }
-    const all = [...byId.values()];
-    return all.length === 1 && templateButtons(all[0]).length > 0 ? all[0] : undefined;
+    return [...byId.values()];
   }, [refs]);
+  const singleTemplate = templatesInScope.length === 1 ? templatesInScope[0] : undefined;
+  const multiTemplate = templatesInScope.length > 1;
+  // Attribution needs a single template that actually carries buttons.
+  const clickTemplate = singleTemplate && templateButtons(singleTemplate).length > 0 ? singleTemplate : undefined;
+
+  // The card that sits beside "Failure reasons": templates-in-scope only for a
+  // multi-template view, click attribution only for a single template with
+  // buttons, and nothing (Failure reasons goes full-width) otherwise.
+  const secondaryCard = clickTemplate ? (
+    <ClickAttribution template={clickTemplate} totalSent={totalSent} />
+  ) : multiTemplate ? (
+    <TemplateComparison refs={refs} />
+  ) : null;
 
   return (
     <div className="space-y-6">
@@ -91,13 +104,13 @@ export function RcsChannelView({ refs }: { refs: RcsRef[] }) {
         <EngagementFunnel totalSent={totalSent} />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      {secondaryCard ? (
+        <div className="grid gap-4 lg:grid-cols-2">
+          <FailureReasons totalFailed={failed} />
+          {secondaryCard}
+        </div>
+      ) : (
         <FailureReasons totalFailed={failed} />
-        <TemplateComparison refs={refs} />
-      </div>
-
-      {clickTemplate && (
-        <ClickAttribution template={clickTemplate} totalSent={totalSent} />
       )}
 
       <DayWise sent={totalSent} delivered={delivered} read={read} />
