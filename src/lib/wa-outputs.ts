@@ -16,7 +16,7 @@ import { getTool } from "./tool-registry";
  * Whether a template button produces a usable inbound signal we can branch on.
  *  - Quick Reply (Custom): always branchable — Meta delivers a button-reply webhook.
  *  - URL (Visit website): branchable ONLY when click tracking is enabled on the
- *    button; an untracked URL tap gives us no event, so it folds into "No response".
+ *    button; an untracked URL tap gives us no event, so it folds into "Timeout".
  *  - Phone Number (Call): no native WhatsApp webhook — never branchable.
  *  - Link Flow: legacy, not offered in v1 — never branchable.
  */
@@ -34,20 +34,32 @@ export function resolveWaTemplate(idOrName?: string): WaTemplate | undefined {
     ?? SEED_TEMPLATES.find((t) => t.name === idOrName);
 }
 
-/** Trackable freeform reply — the lead replied without tapping a button. */
-const REPLY_OUTPUT: NodeOutput = { id: "reply_received", label: "Replied (no button)", kind: "outcome" };
+/** Trackable freeform reply — the lead typed a message instead of tapping a button. */
+const REPLY_OUTPUT: NodeOutput = { id: "reply_received", label: "Text Reply Received", kind: "outcome" };
 
-/** Always-on catch-all: 24h session expiry + every untrackable tap (phone numbers,
- *  untracked URL buttons). Guarantees a lead is never stuck — there is always a
- *  default path forward. */
-const NO_RESPONSE_OUTPUT: NodeOutput = { id: "no_response", label: "No response / continue", kind: "default" };
+/** Always-on catch-all: the inactivity window closed + every untrackable tap
+ *  (phone numbers, untracked URL buttons). Guarantees a lead is never stuck —
+ *  there is always a default path forward. Keeps the internal id `no_response`
+ *  (edges in saved campaigns reference it); only the display label reads
+ *  "Timeout". */
+const NO_RESPONSE_OUTPUT: NodeOutput = { id: "no_response", label: "Timeout", kind: "default" };
+
+/**
+ * How long a WhatsApp node holds a lead waiting for a reply before taking the
+ * "Timeout" path. Meta closes the customer-service session at 24h, so that is
+ * the ceiling and the default; authors can shorten it in whole hours.
+ */
+export const WA_TIMEOUT_HOURS = Array.from({ length: 24 }, (_, i) => i + 1);
+export const DEFAULT_WA_TIMEOUT_HOURS = 24;
+export const waTimeoutLabel = (h: number) => `${h} ${h === 1 ? "hour" : "hours"}`;
 
 /**
  * Outputs for a WhatsApp node given its selected template. There is no toggle —
  * a WhatsApp node ALWAYS has at least two branches:
  *   - `reply_received`  — a trackable freeform reply (no button tapped)
- *   - `no_response`     — the catch-all default: 24h session expiry + any
- *                         untrackable tap (phone number, untracked URL)
+ *   - `no_response`     — the catch-all default ("Timeout"): the configured
+ *                         inactivity window closed, or an untrackable tap
+ *                         (phone number, untracked URL)
  * plus one tracked handle per branchable button (Quick Reply / tracked URL).
  *
  * Non-trackable buttons (phone numbers, untracked URLs) deliberately get no

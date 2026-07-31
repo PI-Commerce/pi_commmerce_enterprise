@@ -5,7 +5,7 @@
  */
 import { EXAMPLE_CAMPAIGNS, type ExampleCampaign } from "./campaign-examples";
 import type { NodeKind, PresetConfig } from "./campaign-types";
-import { resolveWaTemplate } from "./wa-outputs";
+import { resolveWaTemplate, waTimeoutLabel, DEFAULT_WA_TIMEOUT_HOURS } from "./wa-outputs";
 import { languageLabel } from "./waba-templates";
 import { resolveAgent } from "./agent-data";
 import { getTool } from "./tool-registry";
@@ -459,6 +459,10 @@ export function nodeConfigSnapshot(node: SankeyNode): NodeConfigField[] {
           out.push({ label: "Template", value: dash(c.waTemplate) });
         }
       }
+      out.push({
+        label: "Response Timeout",
+        value: waTimeoutLabel(c.waTimeoutHours ?? DEFAULT_WA_TIMEOUT_HOURS),
+      });
       return out;
     }
     case "voice": {

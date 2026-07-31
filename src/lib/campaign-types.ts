@@ -252,6 +252,8 @@ export type PresetConfig = {
   /** Header variables, separate from body `waVarMap`. May share variable names with the body. */
   waHeaderVarMap?: PresetVarMap[];
   waBody?: string;
+  /** Whole hours (1–24) the node waits for a reply before taking the "Timeout" path. */
+  waTimeoutHours?: number;
   // ---- SMS core ----
   smsType?: string;
   smsFormat?: string;

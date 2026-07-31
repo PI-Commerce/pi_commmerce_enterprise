@@ -96,8 +96,8 @@ const EX1_NODES: Node<WorkflowNodeData>[] = [
       outputs: [
         { id: "btn_0", label: "Complete purchase", kind: "outcome" },
         { id: "btn_1", label: "Not interested", kind: "outcome" },
-        { id: "reply_received", label: "Replied (no button)", kind: "outcome" },
-        { id: "no_response", label: "No response / continue", kind: "default" },
+        { id: "reply_received", label: "Text Reply Received", kind: "outcome" },
+        { id: "no_response", label: "Timeout", kind: "default" },
       ],
       config: {
         waNumber: "+91 98100 12345 · PiCommerce",
@@ -253,8 +253,8 @@ const EX2_NODES: Node<WorkflowNodeData>[] = [
       outputs: [
         { id: "btn_0", label: "Pay now", kind: "outcome" },
         { id: "btn_1", label: "Remind me later", kind: "outcome" },
-        { id: "reply_received", label: "Replied (no button)", kind: "outcome" },
-        { id: "no_response", label: "No response / continue", kind: "default" },
+        { id: "reply_received", label: "Text Reply Received", kind: "outcome" },
+        { id: "no_response", label: "Timeout", kind: "default" },
       ],
       config: {
         waNumber: "+91 98100 12345 · PiCommerce",
