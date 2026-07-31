@@ -135,9 +135,55 @@ export const MEDIA_HINTS: Record<Exclude<TemplateFormat, "TEXT">, { verb: string
   DOCUMENT: { verb: "document", accept: "PDF. Max 100MB" },
 };
 
+/**
+ * Meta's per-format extension allow-list for template header media supplied via a
+ * public URL. Mirrors https://developers.facebook.com/docs/whatsapp/cloud-api/reference/media —
+ * we support the URL path for now (upload-then-media-ID isn't wired). The runtime
+ * validates the file itself; we only shape-check the URL string at design time.
+ */
+export const MEDIA_URL_EXTENSIONS: Record<Exclude<TemplateFormat, "TEXT">, string[]> = {
+  IMAGE: ["jpg", "jpeg", "png"],
+  VIDEO: ["mp4"],
+  DOCUMENT: ["pdf"],
+};
+
+/**
+ * Shape-check a media URL that's been mapped to a constant (a literal, not a
+ * runtime variable). Returns an error message or `null` if the URL looks well
+ * formed for the template's header format. Runtime still asks Meta — this catches
+ * obvious typos in the config panel before the campaign ever runs.
+ */
+export function validateMediaUrl(
+  url: string,
+  format: Exclude<TemplateFormat, "TEXT">,
+): string | null {
+  const trimmed = url.trim();
+  if (!trimmed) return "Add a media URL.";
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return "Enter a valid URL (must start with https://).";
+  }
+  if (parsed.protocol !== "https:") return "Meta requires an HTTPS URL.";
+  const allowed = MEDIA_URL_EXTENSIONS[format];
+  const path = parsed.pathname.toLowerCase();
+  const ext = path.includes(".") ? path.split(".").pop() ?? "" : "";
+  if (!allowed.includes(ext)) {
+    return `URL must end in ${allowed.map((e) => "." + e).join(" / ")} for ${format.toLowerCase()} headers.`;
+  }
+  return null;
+}
+
 /** Seed templates for the connected AcmeBank WABA — FinServ Collections + Renewal only. */
 export const SEED_TEMPLATES: WaTemplate[] = [
   /* ---- BFSI · Insurance Renewal (used by c_ex4 / C_RENEWAL) ---- */
+  /* Media-header example — VIDEO explainer of renewal benefits. Ships as
+   * the FinServ WABA's approved video template so the WhatsApp node's
+   * media-URL mapping step has a live template to demo against. */
+  { id: "10248298000200", name: "renewal_explainer_video_v1", category: "Marketing", language: "en", format: "VIDEO", status: "Approved", createdAt: "13 Jun 2026",
+    body: "Hi {{1}}, here's a 30-second look at what your {{2}} renewal covers this year. Renew now to keep your benefits without a break.", footer: "AcmeBank Insurance",
+    buttons: [{ type: "URL", text: "Renew now", clickTracking: true }, { type: "Quick Reply", text: "Remind me later" }] },
   { id: "10248298000201", name: "renewal_link_v1", category: "Utility", language: "en", format: "TEXT", status: "Approved", createdAt: "13 Jun 2026",
     body: "Hi {{1}}, your {{2}} policy renews on {{3}}. Renew now to keep your cover active without a break.", footer: "AcmeBank Insurance",
     buttons: [{ type: "URL", text: "Renew now" }] },
