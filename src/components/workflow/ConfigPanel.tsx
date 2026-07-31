@@ -26,6 +26,7 @@ import { NODE_LABELS, SAMPLE_WORKFLOW_VARIABLES, branchConditions } from "@/lib/
 import { SEED_TEMPLATES } from "@/lib/waba-templates";
 import {
   whatsappOutputs, resolveWaTemplate, completedOutput, isBranchableButton,
+  WA_TIMEOUT_HOURS, DEFAULT_WA_TIMEOUT_HOURS, waTimeoutLabel,
   smsOutputs, SMS_DLR_WINDOWS, DEFAULT_SMS_DLR_WINDOW,
   rcsOutputs, RCS_DLR_WINDOWS, DEFAULT_RCS_DLR_WINDOW,
 } from "@/lib/wa-outputs";
@@ -1274,11 +1275,12 @@ function WhatsAppCore({
   const [templateId, setTemplateId] = useState(config?.waTemplate ?? "");
   const [numberSelected, setNumberSelected] = useState(!!config?.waNumber);
   const [contentReady, setContentReady] = useState(!!config?.waTemplate || !!config?.waBody);
+  const [timeoutHours, setTimeoutHours] = useState(config?.waTimeoutHours ?? DEFAULT_WA_TIMEOUT_HOURS);
   const template = resolveWaTemplate(templateId);
   const templateSelected = !!template;
   // "Branchable" buttons produce a trackable handle (Quick Reply / tracked URL).
   // Phone numbers and untracked URLs are NOT branchable — those taps route through
-  // the always-on "No response / continue" path.
+  // the always-on "Timeout" path.
   const hasButtons = mode !== "freeform" && !!template
     && (template.buttons ?? []).some(isBranchableButton);
   const isType1 = !hasButtons;
@@ -1315,10 +1317,10 @@ function WhatsAppCore({
     const outs = mode === "freeform" ? whatsappOutputs(undefined) : whatsappOutputs(template);
     onChange({
       outputs: outs,
-      config: { ...config, waMode: mode, waTemplate: templateId },
+      config: { ...config, waMode: mode, waTemplate: templateId, waTimeoutHours: timeoutHours },
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, templateId]);
+  }, [mode, templateId, timeoutHours]);
 
   return (
     <>
@@ -1463,11 +1465,30 @@ function WhatsAppCore({
         </Section>
       )}
 
-      {/* A WhatsApp node always exposes "Replied (no button)" + "No response /
-          continue" (and one handle per trackable button). Untrackable taps —
-          phone numbers, untracked URLs — route through "No response / continue",
-          so call it out when the template carries any. */}
-      <ActionAdvanceBanner kind="whatsapp" type1={isType1} />
+      <Section title="Response window">
+        <Field label="Wait for a response" required>
+          <Select value={String(timeoutHours)} disabled={readOnly} onValueChange={(v) => setTimeoutHours(Number(v))}>
+            <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {WA_TIMEOUT_HOURS.map((h) => (
+                <SelectItem key={h} value={String(h)}>
+                  {waTimeoutLabel(h)}{h === DEFAULT_WA_TIMEOUT_HOURS ? " · WhatsApp session limit" : ""}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="mt-1 text-[10.5px] text-muted-foreground">
+            How long a lead waits here with no reply before taking the “Timeout” path. WhatsApp closes the
+            session at 24 hours, so that is the maximum.
+          </p>
+        </Field>
+      </Section>
+
+      {/* A WhatsApp node always exposes "Text Reply Received" + "Timeout" (and one
+          handle per trackable button). Untrackable taps — phone numbers,
+          untracked URLs — route through "Timeout", so call it out when the
+          template carries any. */}
+      <ActionAdvanceBanner kind="whatsapp" type1={isType1} timeoutHours={timeoutHours} />
     </>
   );
 }
@@ -2330,7 +2351,8 @@ function ActionNodeShell({
 /** Static, non-editable explainer of when a lead advances off an action node.
  *  Replaces the old (editable) Exit Conditions section — branching is now done
  *  with a downstream Conditional node. */
-function ActionAdvanceBanner({ kind, type1 }: { kind: ActionKind; type1?: boolean }) {
+function ActionAdvanceBanner({ kind, type1, timeoutHours }: { kind: ActionKind; type1?: boolean; timeoutHours?: number }) {
+  const window = waTimeoutLabel(timeoutHours ?? DEFAULT_WA_TIMEOUT_HOURS);
   const text =
     kind === "voiceCall"
       ? "Leads advance when the call concludes or retries are exhausted. Branch on the outcome with a Conditional node downstream."
@@ -2339,8 +2361,8 @@ function ActionAdvanceBanner({ kind, type1 }: { kind: ActionKind; type1?: boolea
         : kind === "rcs"
           ? "One output per button (RCS reports clicks for reply, URL and dialer buttons alike), plus fixed “Delivered”, “Failed” and “Timeout”. “Failed” includes handsets that aren't RCS-capable — wire an SMS fallback off it."
         : type1
-          ? "Always two outputs: “Replied (no button)” and “No response / continue” (24h session expiry + any untrackable tap). Wire both."
-          : "Each trackable button is its own output, plus “Replied (no button)” and “No response / continue”. Phone numbers and untracked URLs aren’t trackable — those taps route through “No response / continue”. Wire every output.";
+          ? `Always two outputs: “Text Reply Received” and “Timeout” (no reply within ${window} + any untrackable tap). Wire both.`
+          : `Each trackable button is its own output, plus “Text Reply Received” and “Timeout” (no reply within ${window}). Phone numbers and untracked URLs aren’t trackable — those taps route through “Timeout”. Wire every output.`;
   return (
     <div className="mt-4 flex items-start gap-2 rounded-md border border-dashed border-border bg-muted/30 px-2.5 py-2 text-[11px] text-muted-foreground">
       <GitBranch className="mt-0.5 h-3.5 w-3.5 shrink-0" />

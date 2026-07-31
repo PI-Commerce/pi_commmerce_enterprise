@@ -1033,11 +1033,11 @@ function NodeDrawer({
       const label =
         e.handleLabel ??
         (h === "no_response"
-          ? "No response"
+          ? "Timeout"
           : h === "session_expired"
             ? "Session expired"
             : h === "reply_received"
-              ? "Replied"
+              ? "Text Reply Received"
               : h === "advance" || h === "__advance__"
                 ? "Continue"
                 : h);
