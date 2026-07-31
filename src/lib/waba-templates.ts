@@ -130,6 +130,46 @@ export const MEDIA_HINTS: Record<Exclude<TemplateFormat, "TEXT">, { verb: string
   DOCUMENT: { verb: "document", accept: "PDF. Max 100MB" },
 };
 
+/**
+ * Meta's per-format extension allow-list for template header media supplied via a
+ * public URL. Mirrors https://developers.facebook.com/docs/whatsapp/cloud-api/reference/media —
+ * we support the URL path for now (upload-then-media-ID isn't wired). The runtime
+ * validates the file itself; we only shape-check the URL string at design time.
+ */
+export const MEDIA_URL_EXTENSIONS: Record<Exclude<TemplateFormat, "TEXT">, string[]> = {
+  IMAGE: ["jpg", "jpeg", "png"],
+  VIDEO: ["mp4"],
+  DOCUMENT: ["pdf"],
+};
+
+/**
+ * Shape-check a media URL that's been mapped to a constant (a literal, not a
+ * runtime variable). Returns an error message or `null` if the URL looks well
+ * formed for the template's header format. Runtime still asks Meta — this catches
+ * obvious typos in the config panel before the campaign ever runs.
+ */
+export function validateMediaUrl(
+  url: string,
+  format: Exclude<TemplateFormat, "TEXT">,
+): string | null {
+  const trimmed = url.trim();
+  if (!trimmed) return "Add a media URL.";
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return "Enter a valid URL (must start with https://).";
+  }
+  if (parsed.protocol !== "https:") return "Meta requires an HTTPS URL.";
+  const allowed = MEDIA_URL_EXTENSIONS[format];
+  const path = parsed.pathname.toLowerCase();
+  const ext = path.includes(".") ? path.split(".").pop() ?? "" : "";
+  if (!allowed.includes(ext)) {
+    return `URL must end in ${allowed.map((e) => "." + e).join(" / ")} for ${format.toLowerCase()} headers.`;
+  }
+  return null;
+}
+
 /** Seed templates for the connected Paytm Commerce WABA. */
 export const SEED_TEMPLATES: WaTemplate[] = [
   {
@@ -221,6 +261,21 @@ export const SEED_TEMPLATES: WaTemplate[] = [
     body: "Hi {{1}}, your account statement for {{2}} is ready. The PDF is attached for your records.",
     footer: "Paytm",
     buttons: [{ type: "URL", text: "View in app" }],
+  },
+  {
+    id: "10248299772238",
+    name: "product_launch_video",
+    category: "Marketing",
+    language: "en_US",
+    format: "VIDEO",
+    status: "Approved",
+    createdAt: "05 Jun 2026",
+    body: "Hi {{1}}, take 30 seconds to see what's new — introducing {{2}}, now live on Paytm.",
+    footer: "Reply STOP to opt out",
+    buttons: [
+      { type: "URL", text: "Explore now", clickTracking: true },
+      { type: "Quick Reply", text: "Remind me later" },
+    ],
   },
   {
     id: "10248299551098",

@@ -175,6 +175,12 @@ export type PresetConfig = {
   waVarMap?: PresetVarMap[];
   /** Header variables, separate from body `waVarMap`. May share variable names with the body. */
   waHeaderVarMap?: PresetVarMap[];
+  /**
+   * URL to the media file for templates whose header is IMAGE / VIDEO / DOCUMENT.
+   * `def` holds either an upstream key (per-lead URL column) or a hardcoded literal.
+   * The upload-and-mediaID path (Meta's other option) isn't wired yet — only URL.
+   */
+  waMediaUrl?: PresetVarMap;
   waBody?: string;
   /** Whole hours (1–24) the node waits for a reply before taking the "Timeout" path. */
   waTimeoutHours?: number;

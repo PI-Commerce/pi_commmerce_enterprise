@@ -23,7 +23,7 @@ import {
 import { toast } from "sonner";
 import type { WorkflowNodeData, NodeKind, PresetConfig, PresetBranch, PresetCondition, PresetVarMap, PresetValueRemap, NodeOutput } from "@/lib/campaign-types";
 import { NODE_LABELS, SAMPLE_WORKFLOW_VARIABLES, branchConditions } from "@/lib/campaign-types";
-import { SEED_TEMPLATES } from "@/lib/waba-templates";
+import { SEED_TEMPLATES, MEDIA_HINTS, validateMediaUrl, type TemplateFormat } from "@/lib/waba-templates";
 import {
   whatsappOutputs, resolveWaTemplate, completedOutput, isBranchableButton,
   WA_TIMEOUT_HOURS, DEFAULT_WA_TIMEOUT_HOURS, waTimeoutLabel,
@@ -1278,6 +1278,20 @@ function WhatsAppCore({
   const [timeoutHours, setTimeoutHours] = useState(config?.waTimeoutHours ?? DEFAULT_WA_TIMEOUT_HOURS);
   const template = resolveWaTemplate(templateId);
   const templateSelected = !!template;
+  // Media-header templates (IMAGE / VIDEO / DOCUMENT) need one URL per lead, on top
+  // of the usual text-variable mapping. Meta accepts either a public URL or an
+  // uploaded media ID — we support the URL path only for now.
+  const mediaFormat: Exclude<TemplateFormat, "TEXT"> | null =
+    template && template.format !== "TEXT" ? template.format : null;
+  const waMediaUrl: PresetVarMap = config?.waMediaUrl ?? { v: "media_url", def: "", mode: "variable" };
+  const mediaConstantError =
+    mediaFormat && waMediaUrl.mode === "constant" && waMediaUrl.def.trim()
+      ? validateMediaUrl(waMediaUrl.def, mediaFormat)
+      : null;
+  const mediaMapped = !!waMediaUrl.def.trim() && !mediaConstantError;
+  const setWaMediaUrl = (def: string, m?: "variable" | "constant") => {
+    onChange({ config: { ...config, waMediaUrl: { v: "media_url", def, mode: m ?? waMediaUrl.mode ?? "variable" } } });
+  };
   // "Branchable" buttons produce a trackable handle (Quick Reply / tracked URL).
   // Phone numbers and untracked URLs are NOT branchable — those taps route through
   // the always-on "Timeout" path.
@@ -1308,8 +1322,14 @@ function WhatsAppCore({
   };
 
   useEffect(() => {
-    mark(numberSelected && contentReady, numberSelected ? undefined : "Select a connected WhatsApp number");
-  }, [numberSelected, contentReady]);
+    const mediaOk = !mediaFormat || mediaMapped;
+    const err = !numberSelected
+      ? "Select a connected WhatsApp number"
+      : mediaFormat && !mediaMapped
+        ? `Map the ${mediaFormat.toLowerCase()} URL for this template's header`
+        : undefined;
+    mark(numberSelected && contentReady && mediaOk, err);
+  }, [numberSelected, contentReady, mediaFormat, mediaMapped]);
 
   // Publish the canvas handles (derived from template buttons + the Type-1 split
   // toggle) AND persist the config so the node restores correctly when reopened.
@@ -1389,12 +1409,48 @@ function WhatsAppCore({
               )}
             </div>
 
+            {/* Step 2: media URL — only for templates whose header is a media file.
+                Meta accepts either a public URL or an uploaded media ID; we support
+                the URL path for now. Runtime asks Meta to fetch the URL, so file-
+                level checks (size, dimensions, MIME) surface at send time. */}
+            {mediaFormat && (
+              <>
+                <div className="border-t border-border/60" />
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <StepChip n={2} done={mediaMapped} muted={!templateSelected} />
+                    <Label className="flex items-center gap-1 text-[12px] font-medium text-foreground">
+                      {mediaFormat === "IMAGE" ? "Image URL" : mediaFormat === "VIDEO" ? "Video URL" : "Document URL"}
+                      <span className="text-destructive">*</span>
+                    </Label>
+                  </div>
+                  <div className="space-y-1">
+                    <VariablePicker
+                      value={waMediaUrl.def}
+                      disabled={readOnly}
+                      allowConstant
+                      mode={waMediaUrl.mode}
+                      onChange={(v, m) => setWaMediaUrl(v, m)}
+                    />
+                    {mediaConstantError ? (
+                      <p className="text-[11px] text-destructive">{mediaConstantError}</p>
+                    ) : (
+                      <p className="text-[10.5px] text-muted-foreground">
+                        Meta accepts: {MEDIA_HINTS[mediaFormat].accept}. Must be a public HTTPS URL.
+                        Files that exceed the size or format limit are rejected by Meta at send time.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </>
+            )}
+
             <div className="border-t border-border/60" />
 
-            {/* Step 2: variable mapping */}
+            {/* Variable mapping — step 3 when a media step precedes it, otherwise 2. */}
             <div className="space-y-2">
               <div className="flex items-center gap-2">
-                <StepChip n={2} muted={!templateSelected} />
+                <StepChip n={mediaFormat ? 3 : 2} muted={!templateSelected} />
                 <Label className="text-[12px] font-medium text-foreground">Variable mapping</Label>
               </div>
               {templateSelected ? (
