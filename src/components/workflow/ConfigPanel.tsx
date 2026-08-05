@@ -2075,7 +2075,7 @@ function AdsCampaignFields({ readOnly, mark }: { readOnly?: boolean; mark: (v: b
  * flags the lead as Human Escalation (shown in Leads + Analytics).
  *
  * The "Notify Client System" section attaches zero or more Human Escalation
- * webhooks (registered under Integrations → Developer). Each selected
+ * webhooks (registered under Settings → Developer). Each selected
  * webhook receives the same JSON body: the platform's base fields plus any
  * upstream workflow variables the author adds under "Payload extras".
  */
@@ -2118,7 +2118,7 @@ function NeedsReviewFields({
               readOnly={readOnly}
             />
             <p className="text-[10.5px] text-muted-foreground">
-              Registered under <Link to="/integrations" className="text-foreground underline underline-offset-2 hover:text-ai">Integrations → Developer</Link>.
+              Registered under <Link to="/settings" className="text-foreground underline underline-offset-2 hover:text-ai">Settings → Developer</Link>.
             </p>
           </div>
 
@@ -2148,7 +2148,7 @@ function NeedsReviewFields({
 
           {registeredCount === 0 && availableHooks.length === 0 && (
             <p className="text-[11px] text-warning">
-              No Human Escalation webhooks registered. Add one under <Link to="/integrations" className="text-warning underline underline-offset-2">Integrations → Developer</Link>.
+              No Human Escalation webhooks registered. Add one under <Link to="/settings" className="text-warning underline underline-offset-2">Settings → Developer</Link>.
             </p>
           )}
         </div>

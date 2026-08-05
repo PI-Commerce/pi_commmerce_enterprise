@@ -26,7 +26,7 @@ const channelChildren: ChannelChild[] = [
 
 const secondary = [
   { to: "/integrations", label: "Integrations", icon: Plug },
-  { to: "/settings", label: "Settings", icon: Settings, disabled: true },
+  { to: "/settings", label: "Settings", icon: Settings },
 ] as const;
 
 const STORAGE_KEY = "pc_sidebar_collapsed";

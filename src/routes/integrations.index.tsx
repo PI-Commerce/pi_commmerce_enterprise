@@ -1,12 +1,7 @@
-import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { AppShell, PageHeader } from "@/components/app/AppShell";
-import { PageTabs } from "@/components/app/Tabs";
 import { Button } from "@/components/ui/button";
 import { CreditCard, LineChart, ShoppingBag } from "lucide-react";
-import { Developer } from "@/components/integrations/Developer";
-import { useWebhooks } from "@/lib/webhooks-store";
-import { useApiKeys } from "@/lib/api-keys-data";
 
 export const Route = createFileRoute("/integrations/")({
   component: Integrations,
@@ -14,16 +9,12 @@ export const Route = createFileRoute("/integrations/")({
 });
 
 /**
- * Integrations — two tabs in v2:
- *   - Vendors — the curated third-party catalog (Paytm PG, CleverTap, Shopify).
- *   - Developer — outbound webhook subscriptions (a client registers URLs and
- *     topic subscriptions here; nodes just declare which event they emit).
- *     Room to grow: API keys, IP allowlists, rate-limit config as future cards.
+ * Integrations — v2 lean surface: a curated vendor catalog only.
+ *
+ * Developer surfaces (API keys, webhooks) live under /settings. This page
+ * hosts the third-party vendor connections. All "Connect" flows are stubbed
+ * in v1; nothing wires to a real credential store.
  */
-
-type Tab = "vendors" | "developer";
-
-/* ---------------- Vendors data ---------------- */
 
 type Category = "Payments" | "Customer Data" | "E-commerce";
 type Vendor = {
@@ -60,69 +51,42 @@ const VENDORS: Vendor[] = [
 ];
 
 const CATEGORY_META: Record<Category, { label: string; tint: string; icon: React.ComponentType<{ className?: string }> }> = {
-  Payments:        { label: "Payment Gateways",         tint: "text-ai bg-ai/10 border-ai/25",             icon: CreditCard },
+  Payments:        { label: "Payment Gateways",         tint: "text-ai bg-ai/10 border-ai/25",                icon: CreditCard },
   "Customer Data": { label: "Customer Data Platforms",  tint: "text-success bg-success/10 border-success/25", icon: LineChart },
   "E-commerce":    { label: "E-commerce",               tint: "text-warning bg-warning/10 border-warning/25", icon: ShoppingBag },
 };
 
 const CATEGORY_ORDER: Category[] = ["Payments", "Customer Data", "E-commerce"];
 
-/* ---------------- Page component ---------------- */
-
 function Integrations() {
-  const [tab, setTab] = useState<Tab>("vendors");
-  const webhooks = useWebhooks();
-  const apiKeys = useApiKeys();
-  // Developer count = api keys + webhooks combined (the surface holds both)
-  const developerCount = apiKeys.length + webhooks.length;
-
   return (
     <AppShell>
       <PageHeader
         title="Integrations"
-        description="Third-party vendors your workspace can connect to, plus developer surfaces for API keys and outbound webhooks."
+        description="Third-party vendors your workspace can connect to. Developer surfaces (API keys, webhooks) live under Settings."
       />
-
-      <PageTabs<Tab>
-        value={tab}
-        onChange={setTab}
-        tabs={[
-          { id: "vendors",   label: "Vendors",   count: VENDORS.length },
-          { id: "developer", label: "Developer", count: developerCount },
-        ]}
-      />
-
-      {tab === "vendors"   && <VendorsCatalog />}
-      {tab === "developer" && <Developer />}
+      <div className="space-y-6">
+        {CATEGORY_ORDER.map((cat) => {
+          const items = VENDORS.filter((v) => v.category === cat);
+          if (items.length === 0) return null;
+          return (
+            <section key={cat}>
+              <div className="mb-2 flex items-center gap-2">
+                <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  {CATEGORY_META[cat].label}
+                </h3>
+                <span className="text-[11px] text-muted-foreground/70">· {items.length}</span>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                {items.map((v) => (
+                  <VendorCard key={v.name} icon={v.icon} logoUrl={v.logoUrl} title={v.name} meta={v.meta} connected={v.connected} category={v.category} />
+                ))}
+              </div>
+            </section>
+          );
+        })}
+      </div>
     </AppShell>
-  );
-}
-
-/* ---------------- Vendors tab ---------------- */
-
-function VendorsCatalog() {
-  return (
-    <div className="space-y-6">
-      {CATEGORY_ORDER.map((cat) => {
-        const items = VENDORS.filter((v) => v.category === cat);
-        if (items.length === 0) return null;
-        return (
-          <section key={cat}>
-            <div className="mb-2 flex items-center gap-2">
-              <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                {CATEGORY_META[cat].label}
-              </h3>
-              <span className="text-[11px] text-muted-foreground/70">· {items.length}</span>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              {items.map((v) => (
-                <VendorCard key={v.name} icon={v.icon} logoUrl={v.logoUrl} title={v.name} meta={v.meta} connected={v.connected} category={v.category} />
-              ))}
-            </div>
-          </section>
-        );
-      })}
-    </div>
   );
 }
 
