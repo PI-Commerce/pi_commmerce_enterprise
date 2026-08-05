@@ -120,6 +120,9 @@ const STATUS_BY_KIND: Record<SankeyNodeKind, LeadStatus[]> = {
   ads: ["clicked", "delivered"],
   aiTransform: [],
   end: [],
+  // Terminal — a lead sitting on this node "just moves forward" analytically,
+  // even though semantically it's been flagged for human review.
+  needsReview: [],
 };
 
 const CHANNEL_BY_KIND: Partial<Record<SankeyNodeKind, ChannelKind>> = {

@@ -34,7 +34,9 @@ export type SankeyNodeKind =
   | "conditional"
   | "delay"
   | "aiTransform"
-  | "end";
+  | "end"
+  // Human Escalation (terminal): counts as a distinct exit lane in analytics.
+  | "needsReview";
 
 export type SankeyNode = {
   id: string;
@@ -113,6 +115,7 @@ const KIND_TO_SANKEY: Record<NodeKind, SankeyNodeKind> = {
   // has no channel funnel of its own.
   apiToolCall: "apiToolCall",
   aiTransform: "aiTransform",
+  needsReview: "needsReview",
 };
 
 const PASS_RATE: Record<SankeyNodeKind, number> = {
@@ -129,6 +132,7 @@ const PASS_RATE: Record<SankeyNodeKind, number> = {
   sms: 0.9,
   rcs: 0.88,
   ads: 0.95,
+  needsReview: 1, // terminal — all leads that reach it are counted as flagged.
 };
 
 /** Stable string hash for deterministic per-node variance. */

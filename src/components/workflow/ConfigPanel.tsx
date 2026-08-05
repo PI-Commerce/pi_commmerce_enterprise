@@ -1,4 +1,7 @@
 import { useState, useEffect, useRef, useMemo, createContext, useContext } from "react";
+import { Link } from "@tanstack/react-router";
+import { webhooksOfType, activeCountForType } from "@/lib/webhooks-store";
+import { AUTO_INCLUDED_FIELDS } from "@/lib/webhooks-data";
 import {
   X, Copy, Trash2, AlertCircle, CheckCircle2, Plus, GripVertical, ChevronDown, Variable,
   Sparkles, GitBranch, FlaskConical, ArrowUp, ArrowDown, ArrowRight, ArrowLeftRight,
@@ -408,6 +411,9 @@ function KindFields({
 
     case "adsCampaign":
       return <AdsCampaignFields readOnly={readOnly} mark={mark} />;
+
+    case "needsReview":
+      return <NeedsReviewFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
   }
 }
 
@@ -2057,6 +2063,285 @@ function AdsCampaignFields({ readOnly, mark }: { readOnly?: boolean; mark: (v: b
         </Field>
       </Section>
     </>
+  );
+}
+
+/* --------------------------- Human Escalation --------------------------- */
+
+/**
+ * Human Escalation (needsReview) node config.
+ *
+ * Terminal node. Auto-wires an edge to End on drop. Reaching this node
+ * flags the lead as Human Escalation (shown in Leads + Analytics).
+ *
+ * The "Notify Client System" section attaches zero or more Human Escalation
+ * webhooks (registered under Integrations → Developer). Each selected
+ * webhook receives the same JSON body: the platform's base fields plus any
+ * upstream workflow variables the author adds under "Payload extras".
+ */
+function NeedsReviewFields({
+  config, readOnly, mark, onChange,
+}: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
+  useEffect(() => { mark(true); }, []);
+  const selectedIds = config?.notifyWebhookIds ?? [];
+  const payloadExtras = config?.notifyPayloadExtras ?? [];
+  const availableHooks = webhooksOfType("human_escalation");
+  const registeredCount = activeCountForType("human_escalation");
+  const patch = (next: Partial<PresetConfig>) => {
+    if (readOnly) return;
+    onChange({ config: { ...(config ?? {}), ...next } });
+  };
+  const setSelectedIds = (next: string[]) => patch({ notifyWebhookIds: next });
+  const setExtras = (next: string[]) => patch({ notifyPayloadExtras: next });
+
+  return (
+    <>
+      <Section title="Flag Lead">
+        <div className="rounded-xl border border-border bg-card/50 p-4">
+          <div className="flex items-start gap-2 text-[12px]">
+            <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-success" />
+            <p className="leading-snug text-foreground">
+              This node flags the lead as <span className="font-medium">Human Escalation</span> in Leads and Analytics, then exits to End.
+            </p>
+          </div>
+        </div>
+      </Section>
+
+      <Section title="Notify Client System">
+        <div className="space-y-3 rounded-xl border border-border bg-card/50 p-4">
+          <div className="space-y-1.5">
+            <p className="text-[11.5px] font-medium">Webhooks</p>
+            <WebhookMultiSelect
+              options={availableHooks}
+              selectedIds={selectedIds}
+              onChange={setSelectedIds}
+              readOnly={readOnly}
+            />
+            <p className="text-[10.5px] text-muted-foreground">
+              Registered under <Link to="/integrations" className="text-foreground underline underline-offset-2 hover:text-ai">Integrations → Developer</Link>.
+            </p>
+          </div>
+
+          <div className="space-y-1.5">
+            <p className="text-[11.5px] font-medium">Payload</p>
+            <div className="rounded-md border border-border bg-background/40 p-2">
+              <p className="text-[10.5px] uppercase tracking-wider text-muted-foreground">Base fields</p>
+              <div className="mt-1 flex flex-wrap gap-1">
+                {AUTO_INCLUDED_FIELDS.human_escalation.map((f) => (
+                  <span key={f} className="rounded-md border border-border bg-secondary px-1.5 py-0.5 font-mono text-[10.5px] text-muted-foreground">{f}</span>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <div className="flex items-baseline justify-between gap-2">
+              <p className="text-[11px] font-medium">Payload extras</p>
+              <p className="text-[10.5px] text-muted-foreground">Optional upstream variables to add to the body.</p>
+            </div>
+            <PayloadExtrasPicker
+              fields={payloadExtras}
+              readOnly={readOnly}
+              onChange={setExtras}
+            />
+          </div>
+
+          {registeredCount === 0 && availableHooks.length === 0 && (
+            <p className="text-[11px] text-warning">
+              No Human Escalation webhooks registered. Add one under <Link to="/integrations" className="text-warning underline underline-offset-2">Integrations → Developer</Link>.
+            </p>
+          )}
+        </div>
+      </Section>
+    </>
+  );
+}
+
+/**
+ * Multi-select "dropdown" of webhooks. Popover trigger shows current
+ * selection ("2 webhooks" / "Select webhooks…") with a chevron. Inside is a
+ * checkbox list. Selected items also render as removable chips above the
+ * trigger, so the value is visible without opening the popover.
+ */
+function WebhookMultiSelect({
+  options, selectedIds, onChange, readOnly,
+}: {
+  options: { id: string; name: string; endpointUrl: string; status: "active" | "paused" }[];
+  selectedIds: string[];
+  onChange: (next: string[]) => void;
+  readOnly?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const toggle = (id: string) => {
+    if (readOnly) return;
+    const next = selectedIds.includes(id) ? selectedIds.filter((x) => x !== id) : [...selectedIds, id];
+    onChange(next);
+  };
+  const selected = options.filter((o) => selectedIds.includes(o.id));
+  const label = selected.length === 0
+    ? "Select webhooks…"
+    : `${selected.length} webhook${selected.length === 1 ? "" : "s"} selected`;
+
+  return (
+    <div className="space-y-1.5">
+      {selected.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {selected.map((s) => (
+            <span key={s.id} className="inline-flex items-center gap-1 rounded-md border border-ai/25 bg-ai/10 px-1.5 py-0.5 text-[10.5px] text-ai">
+              {s.name}
+              {!readOnly && (
+                <button type="button" onClick={() => toggle(s.id)} className="text-ai/70 hover:text-destructive" title="Remove">
+                  <X className="h-2.5 w-2.5" />
+                </button>
+              )}
+            </span>
+          ))}
+        </div>
+      )}
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            disabled={readOnly || options.length === 0}
+            className={cn(
+              "flex w-full items-center justify-between rounded-md border border-border bg-background px-2 py-1.5 text-left text-[12px]",
+              options.length === 0 ? "cursor-not-allowed text-muted-foreground" : "hover:bg-accent/40",
+            )}
+          >
+            <span className={selected.length === 0 ? "text-muted-foreground" : ""}>{label}</span>
+            <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+          </button>
+        </PopoverTrigger>
+        <PopoverContent align="start" className="w-[--radix-popover-trigger-width] p-1">
+          {options.length === 0 ? (
+            <p className="px-2 py-3 text-center text-[11.5px] text-muted-foreground">
+              No Human Escalation webhooks registered.
+            </p>
+          ) : (
+            <div className="max-h-60 overflow-y-auto">
+              {options.map((wh) => {
+                const checked = selectedIds.includes(wh.id);
+                return (
+                  <label
+                    key={wh.id}
+                    className={cn(
+                      "flex cursor-pointer items-start gap-2 rounded-md px-2 py-1.5 hover:bg-accent",
+                      checked && "bg-accent/60",
+                    )}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggle(wh.id)}
+                      className="mt-0.5 h-3.5 w-3.5 cursor-pointer accent-foreground"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <p className="truncate text-[12px] font-medium">{wh.name}</p>
+                        {wh.status === "paused" && (
+                          <span className="rounded-full border border-border bg-secondary px-1.5 py-0.5 text-[9.5px] uppercase tracking-wide text-muted-foreground">Paused</span>
+                        )}
+                      </div>
+                      <p className="mt-0.5 truncate font-mono text-[10.5px] text-muted-foreground" title={wh.endpointUrl}>{wh.endpointUrl}</p>
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+          )}
+        </PopoverContent>
+      </Popover>
+    </div>
+  );
+}
+
+/**
+ * Payload extras picker. Multi-select of upstream workflow variables shown
+ * grouped by their producing node — same variable pool consumed by
+ * {@link VariablePicker} elsewhere in the config panel.
+ */
+function PayloadExtrasPicker({
+  fields, readOnly, onChange,
+}: { fields: string[]; readOnly?: boolean; onChange: (f: string[]) => void }) {
+  const [open, setOpen] = useState(false);
+  const extraVariables = useContext(ExtraVariablesContext);
+  const allVariables = useMemo(() => mergeVariables(extraVariables), [extraVariables]);
+  const grouped = useMemo(() => groupVariablesBySource(allVariables), [allVariables]);
+
+  const toggle = (key: string) => {
+    if (readOnly) return;
+    const next = fields.includes(key) ? fields.filter((f) => f !== key) : [...fields, key];
+    onChange(next);
+  };
+  const remove = (key: string) => {
+    if (readOnly) return;
+    onChange(fields.filter((f) => f !== key));
+  };
+
+  const label = fields.length === 0 ? "Add fields…" : `${fields.length} field${fields.length === 1 ? "" : "s"} added`;
+
+  return (
+    <div className="space-y-1.5">
+      {fields.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {fields.map((f) => (
+            <span key={f} className="inline-flex items-center gap-1 rounded-md border border-ai/25 bg-ai/10 px-1.5 py-0.5 font-mono text-[10.5px] text-ai">
+              {f}
+              {!readOnly && (
+                <button type="button" onClick={() => remove(f)} className="text-ai/70 hover:text-destructive">
+                  <X className="h-2.5 w-2.5" />
+                </button>
+              )}
+            </span>
+          ))}
+        </div>
+      )}
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            disabled={readOnly}
+            className="flex w-full items-center justify-between rounded-md border border-border bg-background px-2 py-1.5 text-left text-[12px] hover:bg-accent/40"
+          >
+            <span className={fields.length === 0 ? "text-muted-foreground" : ""}>{label}</span>
+            <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+          </button>
+        </PopoverTrigger>
+        <PopoverContent align="start" className="w-[--radix-popover-trigger-width] max-h-72 overflow-y-auto p-1">
+          {grouped.length === 0 ? (
+            <p className="px-2 py-3 text-center text-[11.5px] text-muted-foreground">
+              No upstream variables available.
+            </p>
+          ) : (
+            grouped.map((g) => (
+              <div key={g.source} className="mb-1 last:mb-0">
+                <p className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/80">{g.source}</p>
+                {g.items.map((v) => {
+                  const checked = fields.includes(v.key);
+                  return (
+                    <label
+                      key={v.key}
+                      className={cn(
+                        "flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-[11.5px] hover:bg-accent",
+                        checked && "bg-accent/60",
+                      )}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggle(v.key)}
+                        className="h-3.5 w-3.5 cursor-pointer accent-foreground"
+                      />
+                      <span className="font-mono">{v.key}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            ))
+          )}
+        </PopoverContent>
+      </Popover>
+    </div>
   );
 }
 

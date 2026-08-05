@@ -557,6 +557,21 @@ const sAiTransform = (
   config: { transforms },
 });
 
+/** Human Escalation (needsReview) node — TERMINAL. Flags the lead as
+ *  Human Escalation and (in the runtime) exits to End. Optional client-notify
+ *  webhook is picked up via `notifyEnabled` / `notifyEndpointUrl` /
+ *  `customPayloadFields` on `config`. Every graph that includes this node
+ *  must also carry the `<review>_end` edge in its edge list. */
+const sReview = (
+  id: string,
+  title: string,
+  subtitle: string,
+  cfg?: Partial<PresetConfig>,
+): Spec => ({
+  id, kind: "needsReview", title, subtitle,
+  config: cfg,
+});
+
 const ed = (from: string, to: string, port?: string): SpecEdge => ({ from, to, port });
 
 /* ---- assembly: tag edges as routed; layout runs at render-time (ELK) ----- */
@@ -1471,6 +1486,44 @@ const C_SMS_LIFECYCLE = buildCampaign("D2C · Order Lifecycle (SMS-led)", [
 const EX1_LAID = assemble(EX1_NODES, EX1_EDGES);
 const EX2_LAID = assemble(EX2_NODES, EX2_EDGES);
 
+/* ---- Support · WhatsApp with human handoff ----------------------------- */
+/**
+ * Minimal demo that wires the *Human Escalation* (needsReview) node.
+ *
+ * Flow: WhatsApp support prompt → conditional on the user's reply
+ *   - resolved  → End (agent handled it)
+ *   - escalate  → Human Escalation (flags the lead + optional webhook) → End
+ *
+ * `handoff` node's config enables the webhook to demo the "notify client
+ * system" surface end-to-end. The Leads list uses the `humanEscalated` flag
+ * this node emits (rolled up on `LeadRecord.humanEscalated`) to show the
+ * conditional Human Escalation column.
+ */
+const C_HANDOFF = buildCampaign("Support · WhatsApp with human handoff", [
+  sStart(),
+  sAud("CSV · support inbound", ["intent", "issue_summary"]),
+  sWa("waSupport", "WhatsApp support triage", "WhatsApp · greet + ask", "support_triage_v1"),
+  sCond("resolveOrEscalate", "Resolvable?", "waSupport.reply", [
+    { id: "resolved", label: "Resolved by bot", value: "resolved" },
+    { id: "escalate", label: "Needs a human",   value: "escalate" },
+  ]),
+  sReview("handoff", "Human Escalation", "Support L2 queue", {
+    // Fire the two registered Human Escalation webhooks (see webhooks-data seed).
+    notifyWebhookIds: ["wh_crm_esc", "wh_ops_slack_esc"],
+    // Per-node payload extras — added on top of the auto-included fields.
+    notifyPayloadExtras: ["contact.customer_id", "waSupport.reply"],
+  }),
+  sEnd(),
+], [
+  ed("start", "aud"), ed("aud", "waSupport"),
+  ed("waSupport", "resolveOrEscalate"),
+  ed("resolveOrEscalate", "end", "resolved"),
+  ed("resolveOrEscalate", "handoff", "escalate"),
+  // Human Escalation is terminal — auto-wired to End at add-time in the
+  // builder; we pre-wire it here so the example graph is consistent.
+  ed("handoff", "end"),
+]);
+
 const RAW_EXAMPLE_CAMPAIGNS: Record<string, ExampleCampaign> = {
   // Order here drives the Campaigns-list order (the list staggers `lastEdited` by
   // index). The ACME Corp FCC loyalty campaign leads, followed by the rest of the
@@ -1495,6 +1548,7 @@ const RAW_EXAMPLE_CAMPAIGNS: Record<string, ExampleCampaign> = {
   c_ex14: C_CART,
   c_ex15: C_PRICEDROP,
   c_ex16: C_BACKINSTOCK,
+  c_ex20: C_HANDOFF,
 };
 
 /* ---- normalization ------------------------------------------------------

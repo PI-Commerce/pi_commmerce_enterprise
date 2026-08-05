@@ -24,7 +24,10 @@ export type NodeKind =
   // ai
   | "aiTransform"
   // ads
-  | "adsCampaign";
+  | "adsCampaign"
+  // human handoff — terminal node; every lead reaching it is flagged
+  // "Human Escalation" and exits the flow to End (auto-wired on drop).
+  | "needsReview";
 
 export type NodeRunState = "idle" | "running" | "success" | "failed";
 
@@ -236,6 +239,27 @@ export type PresetConfig = {
   apiTool?: string;
   /** Maps each non-constant tool input (`v` = input key) to an upstream variable (`def`). */
   apiInputMap?: PresetVarMap[];
+  // ---- Human Escalation (needsReview) ----
+  /**
+   * IDs of `human_escalation`-typed webhooks registered under Integrations →
+   * Developer that this node should fire on every escalation. Zero, one, or
+   * many. See {@link file://./webhooks-data.ts}.
+   */
+  notifyWebhookIds?: string[];
+  /**
+   * Extra workflow variables to add to the payload for events emitted by
+   * *this* node — on top of the auto-included fields that the router always
+   * sends (lead_id, phone, campaign_id, run_id, timestamp, etc.). Per-node,
+   * not per-webhook: every selected webhook receives the same extras when
+   * this node fires.
+   */
+  notifyPayloadExtras?: string[];
+
+  // Legacy fields — kept in the type so pre-registry example configs still
+  // parse. Never read by the new UI; the router ignores them.
+  notifyEnabled?: boolean;
+  notifyEndpointUrl?: string;
+  customPayloadFields?: string[];
 };
 
 export type WorkflowNodeData = {
@@ -287,6 +311,7 @@ export const NODE_GROUPS: Record<NodeKind, NodeGroup> = {
   rcs: "action",
   aiTransform: "ai",
   adsCampaign: "ads",
+  needsReview: "action",
 };
 
 export const NODE_LABELS: Record<NodeKind, string> = {
@@ -303,6 +328,7 @@ export const NODE_LABELS: Record<NodeKind, string> = {
   rcs: "RCS",
   aiTransform: "AI Transformation",
   adsCampaign: "Ads Campaign Setup",
+  needsReview: "Human Escalation",
 };
 
 export const STATUS_TONE: Record<CampaignStatus, string> = {
@@ -325,6 +351,7 @@ export const SERIAL_PREFIX: Record<NodeKind, string> = {
   rcs: "rcs",
   aiTransform: "ait",
   adsCampaign: "ads",
+  needsReview: "review",
 };
 
 /**

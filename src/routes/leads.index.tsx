@@ -1,17 +1,36 @@
+/**
+ * Leads Management — list surface (v2).
+ *
+ * One consolidated table across all campaigns / runs, keyed by unique person.
+ * Segment / Tags / PII redaction were dropped from this pass — the filter bar
+ * (Campaign → Run + date range + search) IS the segmentation for v2.
+ *
+ * The `Human Escalation` column is conditional — it only renders when the
+ * currently-active filter scope includes at least one campaign whose graph
+ * contains a Human Escalation (needsReview) node. Rationale: outside of that
+ * scope the column would always read "—", which is noise.
+ */
+
 import { useMemo, useState } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { AppShell, PageHeader } from "@/components/app/AppShell";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { LEAD_RECORDS, maskPhone, type LeadRecord, type Segment } from "@/lib/leads-data";
 import {
-  ArrowUpDown, Search, ShieldCheck, Eye, EyeOff, Calendar, X, ChevronDown, Megaphone,
+  LEAD_RECORDS, formatDate, formatDateTime, relTime, scopeHasHitl,
+  CAMPAIGN_CATALOG,
+  type LeadRecord, type LeadCampaignEntry,
+} from "@/lib/leads-data";
+import {
+  ArrowUpDown, Search, Calendar, X, ChevronDown, Megaphone, Flag,
 } from "lucide-react";
 
 export const Route = createFileRoute("/leads/")({
   component: LeadsManagement,
   head: () => ({ meta: [{ title: "Leads · Pi Commerce Enterprise" }] }),
 });
+
+/* ---------- Date-window filter (unchanged from v2-alpha) ---------- */
 
 type DateWindow = "all" | "7d" | "30d" | "90d";
 const DATE_WINDOWS: { value: DateWindow; label: string }[] = [
@@ -28,45 +47,47 @@ function withinWindow(iso: string | undefined, win: DateWindow): boolean {
   const d = daysAgo(iso);
   return win === "7d" ? d <= 7 : win === "30d" ? d <= 30 : d <= 90;
 }
-function relTime(iso: string): string {
-  const d = daysAgo(iso);
-  if (d === 0) return "today";
-  if (d === 1) return "1 day ago";
-  if (d < 30) return `${d} days ago`;
-  if (d < 60) return `1 month ago`;
-  return `${Math.floor(d / 30)} months ago`;
-}
 
-type SortKey = "lastUpdated" | "created" | "lastInteraction" | "name";
-
-const ALL_CAMPAIGNS = (() => {
-  const map = new Map<string, string>();
-  for (const l of LEAD_RECORDS) for (const c of l.campaigns) if (!map.has(c.campaignId)) map.set(c.campaignId, c.campaignName);
-  return Array.from(map.entries()).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
-})();
-
-const SEGMENT_TINT: Record<Segment, string> = {
-  VIP:    "border-ai/30 bg-ai/10 text-ai",
-  Retail: "border-border bg-secondary text-muted-foreground",
-  SME:    "border-success/30 bg-success/10 text-success",
-};
+type SortKey = "lastInteraction" | "created" | "name";
 
 function LeadsManagement() {
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
-  const [segments, setSegments] = useState<Set<Segment>>(new Set());
   const [campaigns, setCampaigns] = useState<Set<string>>(new Set());
+  /** When a single campaign is selected, this narrows to a specific Run within it. */
+  const [runId, setRunId] = useState<string | null>(null);
   const [createdWin, setCreatedWin] = useState<DateWindow>("all");
-  const [updatedWin, setUpdatedWin] = useState<DateWindow>("all");
   const [interactedWin, setInteractedWin] = useState<DateWindow>("all");
-  const [sortKey, setSortKey] = useState<SortKey>("lastUpdated");
+  const [sortKey, setSortKey] = useState<SortKey>("lastInteraction");
   const [sortAsc, setSortAsc] = useState(false);
-  const [piiRedacted, setPiiRedacted] = useState(true);
 
+  /** Runs available in the currently-selected single campaign, else empty. */
+  const availableRuns = useMemo(() => {
+    if (campaigns.size !== 1) return [];
+    const only = [...campaigns][0];
+    const seen = new Map<string, string>();
+    for (const l of LEAD_RECORDS) for (const c of l.campaigns) {
+      if (c.campaignId === only && !seen.has(c.runId)) seen.set(c.runId, c.runName);
+    }
+    return Array.from(seen.entries()).map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [campaigns]);
+
+  // If the currently-picked Run disappears (e.g. after Campaign filter change), clear it.
+  const runIdEffective = useMemo(() => {
+    if (!runId) return null;
+    return availableRuns.some((r) => r.id === runId) ? runId : null;
+  }, [runId, availableRuns]);
+
+  // Filter pass — apply search + campaigns + run + date windows.
   const rows = useMemo(() => {
     let list = LEAD_RECORDS.slice();
-    if (segments.size) list = list.filter((l) => segments.has(l.segment));
-    if (campaigns.size) list = list.filter((l) => l.campaigns.some((c) => campaigns.has(c.campaignId)));
+    if (campaigns.size) {
+      list = list.filter((l) => l.campaigns.some((c) => campaigns.has(c.campaignId)));
+    }
+    if (runIdEffective) {
+      list = list.filter((l) => l.campaigns.some((c) => c.runId === runIdEffective));
+    }
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       list = list.filter((l) =>
@@ -77,67 +98,56 @@ function LeadsManagement() {
       );
     }
     list = list.filter((l) => withinWindow(l.createdAt, createdWin));
-    list = list.filter((l) => withinWindow(l.lastUpdatedAt, updatedWin));
     list = list.filter((l) => withinWindow(l.lastInteractionAt, interactedWin));
     list.sort((a, b) => {
       const dir = sortAsc ? 1 : -1;
       switch (sortKey) {
         case "name":            return dir * a.name.localeCompare(b.name);
         case "created":         return dir * (Date.parse(a.createdAt) - Date.parse(b.createdAt));
-        case "lastUpdated":     return dir * (Date.parse(a.lastUpdatedAt) - Date.parse(b.lastUpdatedAt));
         case "lastInteraction": return dir * (Date.parse(a.lastInteractionAt) - Date.parse(b.lastInteractionAt));
       }
     });
     return list;
-  }, [segments, campaigns, search, createdWin, updatedWin, interactedWin, sortKey, sortAsc]);
+  }, [campaigns, runIdEffective, search, createdWin, interactedWin, sortKey, sortAsc]);
 
-  const toggleSeg = (s: Segment) => {
-    setSegments((prev) => {
-      const next = new Set(prev);
-      if (next.has(s)) next.delete(s); else next.add(s);
-      return next;
-    });
-  };
   const toggleCampaign = (id: string) => {
     setCampaigns((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id); else next.add(id);
       return next;
     });
+    // Clear the Run filter whenever the campaign selection changes — it's only
+    // meaningful when exactly one campaign is picked, and even then the runs
+    // change with the pick.
+    setRunId(null);
   };
+
   const clearFilters = () => {
-    setSegments(new Set()); setCampaigns(new Set());
-    setCreatedWin("all"); setUpdatedWin("all"); setInteractedWin("all"); setSearch("");
+    setCampaigns(new Set());
+    setRunId(null);
+    setCreatedWin("all");
+    setInteractedWin("all");
+    setSearch("");
   };
-  const filtersActive = segments.size > 0 || campaigns.size > 0
-    || createdWin !== "all" || updatedWin !== "all" || interactedWin !== "all" || !!search.trim();
+  const filtersActive = campaigns.size > 0 || !!runIdEffective
+    || createdWin !== "all" || interactedWin !== "all" || !!search.trim();
 
   const toggleSort = (k: SortKey) => {
     if (sortKey === k) setSortAsc((s) => !s);
     else { setSortKey(k); setSortAsc(false); }
   };
 
+  // Conditional Human Escalation column: shown only when the current scope
+  // includes at least one campaign that has an HITL node in its graph. If no
+  // campaigns are picked, we consider all campaigns in-scope.
+  const scopeIds = campaigns.size ? campaigns : new Set(CAMPAIGN_CATALOG.map((c) => c.id));
+  const showEscalation = scopeHasHitl(scopeIds);
+
   return (
     <AppShell>
       <PageHeader
         title="Leads"
         description="One contact, many campaigns — persistent per-lead memory across every touchpoint."
-        actions={
-          <button
-            onClick={() => setPiiRedacted((v) => !v)}
-            className={cn(
-              "inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11.5px] font-medium transition-colors",
-              piiRedacted
-                ? "border-ai/30 bg-ai/10 text-ai hover:bg-ai/15"
-                : "border-warning/40 bg-warning/10 text-warning hover:bg-warning/15",
-            )}
-            title={piiRedacted ? "PII currently masked · click to reveal" : "PII revealed · click to mask"}
-          >
-            {piiRedacted ? <ShieldCheck className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
-            {piiRedacted ? "PII redacted" : "PII revealed"}
-            {piiRedacted ? <Eye className="h-3.5 w-3.5 opacity-50" /> : null}
-          </button>
-        }
       />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -150,10 +160,11 @@ function LeadsManagement() {
             className="h-9 pl-8 text-[12.5px]"
           />
         </div>
-        <SegmentFilter selected={segments} onToggle={toggleSeg} />
         <CampaignFilter selected={campaigns} onToggle={toggleCampaign} />
+        {campaigns.size === 1 && availableRuns.length > 0 && (
+          <RunFilter runs={availableRuns} value={runIdEffective} onChange={setRunId} />
+        )}
         <DateFilter icon={Calendar} label="Created"          value={createdWin}    onChange={setCreatedWin} />
-        <DateFilter icon={Calendar} label="Last updated"     value={updatedWin}    onChange={setUpdatedWin} />
         <DateFilter icon={Calendar} label="Last interaction" value={interactedWin} onChange={setInteractedWin} />
         {filtersActive && (
           <button onClick={clearFilters} className="inline-flex items-center gap-1 rounded-md border border-border bg-secondary px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground">
@@ -172,20 +183,28 @@ function LeadsManagement() {
               <Th>Lead ID</Th>
               <Th onClick={() => toggleSort("name")} sorted={sortKey === "name" ? sortAsc : undefined}>Name</Th>
               <Th>Phone</Th>
-              <Th>Segment</Th>
-              <Th onClick={() => toggleSort("lastUpdated")} sorted={sortKey === "lastUpdated" ? sortAsc : undefined}>Last Updated</Th>
-              <Th onClick={() => toggleSort("lastInteraction")} sorted={sortKey === "lastInteraction" ? sortAsc : undefined}>Last Interaction</Th>
-              <Th>Active in</Th>
-              <Th>Tags</Th>
+              <Th onClick={() => toggleSort("lastInteraction")} sorted={sortKey === "lastInteraction" ? sortAsc : undefined}>
+                Last interaction
+              </Th>
+              <Th>Campaigns</Th>
+              <Th onClick={() => toggleSort("created")} sorted={sortKey === "created" ? sortAsc : undefined}>Created</Th>
+              {showEscalation && <Th>Human Escalation</Th>}
             </tr>
           </thead>
           <tbody>
             {rows.map((lead) => (
-              <Row key={lead.id} lead={lead} piiRedacted={piiRedacted} onOpen={() => navigate({ to: "/leads/$id", params: { id: lead.id } })} />
+              <Row
+                key={lead.id}
+                lead={lead}
+                showEscalation={showEscalation}
+                scopeIds={scopeIds}
+                runIdFilter={runIdEffective}
+                onOpen={() => navigate({ to: "/leads/$id", params: { id: lead.id } })}
+              />
             ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-4 py-12 text-center text-[12px] text-muted-foreground">
+                <td colSpan={showEscalation ? 7 : 6} className="px-4 py-12 text-center text-[12px] text-muted-foreground">
                   No leads match these filters.
                 </td>
               </tr>
@@ -212,85 +231,145 @@ function Th({ children, onClick, sorted }: { children: React.ReactNode; onClick?
   );
 }
 
-function Row({ lead, piiRedacted, onOpen }: { lead: LeadRecord; piiRedacted: boolean; onOpen: () => void }) {
-  const primary = lead.campaigns[0];
-  const overflow = lead.campaigns.length - 1;
+function Row({
+  lead, showEscalation, scopeIds, runIdFilter, onOpen,
+}: {
+  lead: LeadRecord;
+  showEscalation: boolean;
+  scopeIds: Set<string>;
+  runIdFilter: string | null;
+  onOpen: () => void;
+}) {
+  // Campaigns column: show a count pill + hover popover with the run list.
+  const campaignsForLead = lead.campaigns;
+  const escalatedEntries = campaignsForLead.filter(
+    (c) => c.humanEscalated && scopeIds.has(c.campaignId) && (!runIdFilter || c.runId === runIdFilter),
+  );
   return (
     <tr onClick={onOpen} className="cursor-pointer border-t border-border/60 transition-colors hover:bg-accent/30">
       <td className="px-4 py-3 font-mono text-[11.5px] text-muted-foreground">{lead.id}</td>
       <td className="px-4 py-3 font-medium">{lead.name}</td>
-      <td className="px-4 py-3 font-mono text-[11.5px]">{piiRedacted ? maskPhone(lead.phone) : lead.phone}</td>
-      <td className="px-4 py-3">
-        <span className={cn("inline-flex items-center rounded-full border px-1.5 py-0.5 text-[10.5px] font-medium", SEGMENT_TINT[lead.segment])}>
-          {lead.segment}
-        </span>
-      </td>
-      <td className="px-4 py-3 text-[11.5px] text-muted-foreground">{relTime(lead.lastUpdatedAt)}</td>
-      <td className="px-4 py-3 text-[11.5px] text-muted-foreground">{relTime(lead.lastInteractionAt)}</td>
-      <td className="px-4 py-3">
-        {primary ? (
-          <div className="flex items-center gap-1.5">
-            <span className="truncate text-[11.5px]" title={primary.campaignName}>{primary.campaignName}</span>
-            {overflow > 0 && (
-              <span className="rounded-full border border-border bg-secondary px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">+{overflow}</span>
-            )}
-          </div>
-        ) : (
-          <span className="text-[11px] text-muted-foreground">—</span>
-        )}
+      <td className="px-4 py-3 font-mono text-[11.5px]">{lead.phone}</td>
+      <td
+        className="px-4 py-3 text-[11.5px] text-muted-foreground"
+        title={formatDateTime(lead.lastInteractionAt)}
+      >
+        {relTime(lead.lastInteractionAt)}
       </td>
       <td className="px-4 py-3">
-        <div className="flex flex-wrap gap-1">
-          {lead.tags.slice(0, 3).map((t) => (
-            <span key={t} className="rounded-full border border-border bg-secondary px-1.5 py-0.5 text-[10px] text-muted-foreground">
-              {t}
-            </span>
-          ))}
-        </div>
+        <CampaignsCell campaigns={campaignsForLead} />
       </td>
+      <td className="px-4 py-3 text-[11.5px] text-muted-foreground">
+        {formatDate(lead.createdAt)}
+      </td>
+      {showEscalation && (
+        <td className="px-4 py-3">
+          {escalatedEntries.length > 0 ? (
+            <EscalatedCell entries={escalatedEntries} />
+          ) : (
+            <span className="text-[11px] text-muted-foreground">—</span>
+          )}
+        </td>
+      )}
     </tr>
   );
 }
 
-function SegmentFilter({ selected, onToggle }: { selected: Set<Segment>; onToggle: (s: Segment) => void }) {
-  const [open, setOpen] = useState(false);
-  const all: Segment[] = ["VIP", "Retail", "SME"];
+/* ---------- Cells ---------- */
+
+/** Campaigns cell: renders a count pill with a hover popover listing all
+ *  Campaign · Run · Status rows for this lead. Hovering the pill (not the row)
+ *  triggers it — click-through on the row still opens the lead. */
+function CampaignsCell({ campaigns }: { campaigns: LeadCampaignEntry[] }) {
+  if (campaigns.length === 0) return <span className="text-[11px] text-muted-foreground">—</span>;
+  const label = campaigns.length === 1 ? "In 1 campaign" : `In ${campaigns.length} campaigns`;
   return (
-    <div className="relative">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className={cn(
-          "inline-flex h-9 items-center gap-1.5 rounded-lg border px-2.5 text-[12px] transition-colors",
-          selected.size ? "border-ai/40 bg-ai/5 text-foreground" : "border-border bg-card hover:bg-accent/40",
-        )}
+    <div className="relative inline-flex group">
+      <span
+        onClick={(e) => e.stopPropagation()}
+        className="inline-flex cursor-help items-center gap-1 rounded-full border border-border bg-secondary px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground"
       >
-        Segment
-        {selected.size > 0 && <span className="rounded-full bg-ai/15 px-1.5 text-[10px] font-semibold text-ai">{selected.size}</span>}
-        <ChevronDown className={cn("h-3 w-3 transition-transform", open && "rotate-180")} />
-      </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div className="absolute z-40 mt-1 w-48 rounded-lg border border-border bg-card p-1 shadow-lg">
-            {all.map((s) => (
-              <button
-                key={s}
-                onClick={() => onToggle(s)}
-                className={cn(
-                  "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] hover:bg-accent",
-                  selected.has(s) && "bg-accent",
+        <Megaphone className="h-3 w-3" />
+        {label}
+      </span>
+      {/* Popover — CSS-only via group-hover; positioned absolutely so it doesn't
+          reflow the table rows. */}
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="pointer-events-none absolute left-0 top-full z-30 mt-1 hidden w-72 rounded-lg border border-border bg-card p-2 text-[11.5px] shadow-lg group-hover:block group-hover:pointer-events-auto"
+      >
+        <ul className="divide-y divide-border/60">
+          {campaigns.map((c) => (
+            <li key={c.runId} className="flex items-start justify-between gap-2 py-1.5">
+              <div className="min-w-0">
+                <p className="truncate font-medium text-foreground">{c.campaignName}</p>
+                <p className="mt-0.5 font-mono text-[10.5px] text-muted-foreground">{c.runName}</p>
+              </div>
+              <div className="flex shrink-0 flex-col items-end gap-0.5">
+                <StatusPill status={c.status} />
+                {c.humanEscalated && (
+                  <span className="inline-flex items-center gap-0.5 rounded-full border border-warning/40 bg-warning/10 px-1 py-0.5 text-[9.5px] font-medium text-warning">
+                    <Flag className="h-2.5 w-2.5" /> Escalated
+                  </span>
                 )}
-              >
-                <span className={cn("h-2 w-2 rounded-full", selected.has(s) ? "bg-ai" : "bg-muted-foreground/30")} />
-                {s}
-              </button>
-            ))}
-          </div>
-        </>
-      )}
+              </div>
+            </li>
+          ))}
+        </ul>
+      </div>
     </div>
   );
 }
+
+function EscalatedCell({ entries }: { entries: LeadCampaignEntry[] }) {
+  return (
+    <div className="relative inline-flex group">
+      <span
+        onClick={(e) => e.stopPropagation()}
+        className="inline-flex cursor-help items-center gap-1 rounded-full border border-warning/40 bg-warning/10 px-2 py-0.5 text-[11px] font-medium text-warning"
+      >
+        <Flag className="h-3 w-3" /> Yes
+      </span>
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="pointer-events-none absolute left-0 top-full z-30 mt-1 hidden w-72 rounded-lg border border-border bg-card p-2 text-[11.5px] shadow-lg group-hover:block group-hover:pointer-events-auto"
+      >
+        <p className="mb-1 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">
+          Escalated in
+        </p>
+        <ul className="divide-y divide-border/60">
+          {entries.map((c) => (
+            <li key={c.runId} className="py-1.5">
+              <p className="truncate text-foreground">{c.campaignName}</p>
+              <p className="mt-0.5 font-mono text-[10.5px] text-muted-foreground">{c.runName}</p>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+const STATUS_TINT: Record<LeadCampaignEntry["status"], string> = {
+  running:    "border-ai/30 bg-ai/10 text-ai",
+  completed:  "border-success/30 bg-success/10 text-success",
+  paused:     "border-border bg-secondary text-muted-foreground",
+  failed:     "border-destructive/30 bg-destructive/10 text-destructive",
+  terminated: "border-warning/30 bg-warning/10 text-warning",
+};
+
+function StatusPill({ status }: { status: LeadCampaignEntry["status"] }) {
+  return (
+    <span className={cn(
+      "inline-flex items-center rounded-full border px-1.5 py-0.5 text-[9.5px] font-medium capitalize",
+      STATUS_TINT[status],
+    )}>
+      {status}
+    </span>
+  );
+}
+
+/* ---------- Filter controls ---------- */
 
 function CampaignFilter({ selected, onToggle }: { selected: Set<string>; onToggle: (id: string) => void }) {
   const [open, setOpen] = useState(false);
@@ -311,8 +390,8 @@ function CampaignFilter({ selected, onToggle }: { selected: Set<string>; onToggl
       {open && (
         <>
           <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div className="absolute z-40 mt-1 max-h-72 w-72 overflow-y-auto rounded-lg border border-border bg-card p-1 shadow-lg">
-            {ALL_CAMPAIGNS.map((c) => (
+          <div className="absolute z-40 mt-1 max-h-80 w-80 overflow-y-auto rounded-lg border border-border bg-card p-1 shadow-lg">
+            {CAMPAIGN_CATALOG.map((c) => (
               <button
                 key={c.id}
                 onClick={() => onToggle(c.id)}
@@ -323,6 +402,60 @@ function CampaignFilter({ selected, onToggle }: { selected: Set<string>; onToggl
               >
                 <span className={cn("h-2 w-2 shrink-0 rounded-full", selected.has(c.id) ? "bg-ai" : "bg-muted-foreground/30")} />
                 <span className="truncate">{c.name}</span>
+                {c.hasHitl && (
+                  <span className="ml-auto inline-flex items-center gap-0.5 rounded border border-warning/30 bg-warning/10 px-1 py-0.5 text-[9.5px] font-medium text-warning" title="Campaign includes a Human Escalation node">
+                    <Flag className="h-2.5 w-2.5" />
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function RunFilter({
+  runs, value, onChange,
+}: {
+  runs: { id: string; name: string }[];
+  value: string | null;
+  onChange: (v: string | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const currentLabel = runs.find((r) => r.id === value)?.name;
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className={cn(
+          "inline-flex h-9 items-center gap-1.5 rounded-lg border px-2.5 text-[12px] transition-colors",
+          value ? "border-ai/40 bg-ai/5 text-foreground" : "border-border bg-card hover:bg-accent/40",
+        )}
+      >
+        Run
+        {currentLabel && <span className="max-w-[160px] truncate text-[10.5px] text-ai">· {currentLabel}</span>}
+        <ChevronDown className={cn("h-3 w-3 transition-transform", open && "rotate-180")} />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
+          <div className="absolute z-40 mt-1 max-h-72 w-72 overflow-y-auto rounded-lg border border-border bg-card p-1 shadow-lg">
+            <button
+              onClick={() => { onChange(null); setOpen(false); }}
+              className={cn("flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] hover:bg-accent", value === null && "bg-accent")}
+            >
+              All runs
+            </button>
+            {runs.map((r) => (
+              <button
+                key={r.id}
+                onClick={() => { onChange(r.id); setOpen(false); }}
+                className={cn("flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12px] hover:bg-accent", value === r.id && "bg-accent")}
+              >
+                <span className={cn("h-2 w-2 shrink-0 rounded-full", value === r.id ? "bg-ai" : "bg-muted-foreground/30")} />
+                <span className="truncate">{r.name}</span>
               </button>
             ))}
           </div>

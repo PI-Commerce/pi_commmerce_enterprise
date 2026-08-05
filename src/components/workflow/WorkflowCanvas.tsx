@@ -63,6 +63,8 @@ const DEFAULT_NODE_DATA: Record<NodeKind, Partial<WorkflowNodeData>> = {
   rcs: { subtitle: "Send RCS message", valid: false, error: "Select a template", outputs: rcsOutputs() },
   aiTransform: { subtitle: "Derive AI variables", valid: true },
   adsCampaign: { subtitle: "WhatsApp CTWA ad", valid: false, error: "Complete setup" },
+  // Terminal — flags the lead as Human Escalation and exits to End (auto-wired on drop).
+  needsReview: { subtitle: "Flag & optionally notify", valid: true },
 };
 
 let nodeCounter = 100;
@@ -325,9 +327,27 @@ export function WorkflowCanvas({
           },
         ];
       });
+      // Human Escalation is terminal — auto-wire an edge to End on drop so the
+      // "always ends in End" invariant is preserved without user work. The
+      // edge is a normal routed edge and can be re-routed by dragging.
+      if (kind === "needsReview") {
+        setEdges((eds) => {
+          const end = nodesRef.current.find((n) => n.data.kind === "end");
+          if (!end) return eds;
+          return [
+            ...eds,
+            {
+              id: `e_${newId}_end`,
+              source: newId,
+              target: end.id,
+              type: "routed" as const,
+            },
+          ];
+        });
+      }
       onDirty?.();
     },
-    [setNodes, onDirty],
+    [setNodes, setEdges, onDirty],
   );
 
   const defaultEdgeOptions = useMemo(() => ({ type: "routed" as const }), []);

@@ -137,6 +137,7 @@ const NODE_COLOR: Record<SankeyNodeKind, string> = {
   delay: "#94a3b8",
   aiTransform: "#a855f7",
   end: "#f59e0b",
+  needsReview: "#f97316",
 };
 const NODE_TYPE_LABEL: Record<SankeyNodeKind, string> = {
   start: "Start",
@@ -152,6 +153,7 @@ const NODE_TYPE_LABEL: Record<SankeyNodeKind, string> = {
   delay: "Delay",
   aiTransform: "AI Transformation",
   end: "End",
+  needsReview: "Human Escalation",
 };
 const STATUS_TONE: Record<string, string> = {
   sent: "text-sky-600 bg-sky-500/10",

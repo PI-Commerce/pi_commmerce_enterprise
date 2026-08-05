@@ -1,7 +1,12 @@
+import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { AppShell, PageHeader } from "@/components/app/AppShell";
+import { PageTabs } from "@/components/app/Tabs";
 import { Button } from "@/components/ui/button";
 import { CreditCard, LineChart, ShoppingBag } from "lucide-react";
+import { Developer } from "@/components/integrations/Developer";
+import { useWebhooks } from "@/lib/webhooks-store";
+import { useApiKeys } from "@/lib/api-keys-data";
 
 export const Route = createFileRoute("/integrations/")({
   component: Integrations,
@@ -9,12 +14,16 @@ export const Route = createFileRoute("/integrations/")({
 });
 
 /**
- * Integrations — v2 reintroduces a lean vendor catalog. Just three cards for
- * now (Paytm PG · CleverTap · Shopify), grouped by category. All mock — the
- * "Connect" flow is stubbed; nothing wires to a real credential store. When we
- * add more vendors, keep the pattern: 1 icon + name + one-line meta + a
- * category chip so the classification is visible even in isolation.
+ * Integrations — two tabs in v2:
+ *   - Vendors — the curated third-party catalog (Paytm PG, CleverTap, Shopify).
+ *   - Developer — outbound webhook subscriptions (a client registers URLs and
+ *     topic subscriptions here; nodes just declare which event they emit).
+ *     Room to grow: API keys, IP allowlists, rate-limit config as future cards.
  */
+
+type Tab = "vendors" | "developer";
+
+/* ---------------- Vendors data ---------------- */
 
 type Category = "Payments" | "Customer Data" | "E-commerce";
 type Vendor = {
@@ -51,46 +60,73 @@ const VENDORS: Vendor[] = [
 ];
 
 const CATEGORY_META: Record<Category, { label: string; tint: string; icon: React.ComponentType<{ className?: string }> }> = {
-  Payments:        { label: "Payment Gateways",  tint: "text-ai bg-ai/10 border-ai/25",           icon: CreditCard },
-  "Customer Data": { label: "Customer Data Platforms", tint: "text-success bg-success/10 border-success/25", icon: LineChart },
-  "E-commerce":    { label: "E-commerce",       tint: "text-warning bg-warning/10 border-warning/25", icon: ShoppingBag },
+  Payments:        { label: "Payment Gateways",         tint: "text-ai bg-ai/10 border-ai/25",             icon: CreditCard },
+  "Customer Data": { label: "Customer Data Platforms",  tint: "text-success bg-success/10 border-success/25", icon: LineChart },
+  "E-commerce":    { label: "E-commerce",               tint: "text-warning bg-warning/10 border-warning/25", icon: ShoppingBag },
 };
 
 const CATEGORY_ORDER: Category[] = ["Payments", "Customer Data", "E-commerce"];
 
+/* ---------------- Page component ---------------- */
+
 function Integrations() {
+  const [tab, setTab] = useState<Tab>("vendors");
+  const webhooks = useWebhooks();
+  const apiKeys = useApiKeys();
+  // Developer count = api keys + webhooks combined (the surface holds both)
+  const developerCount = apiKeys.length + webhooks.length;
+
   return (
     <AppShell>
       <PageHeader
         title="Integrations"
-        description="Connect data sources, developer tooling, and third-party services. Messaging channels live under Channels."
+        description="Third-party vendors your workspace can connect to, plus developer surfaces for API keys and outbound webhooks."
       />
-      <div className="space-y-6">
-        {CATEGORY_ORDER.map((cat) => {
-          const items = VENDORS.filter((v) => v.category === cat);
-          if (items.length === 0) return null;
-          return (
-            <section key={cat}>
-              <div className="mb-2 flex items-center gap-2">
-                <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  {CATEGORY_META[cat].label}
-                </h3>
-                <span className="text-[11px] text-muted-foreground/70">· {items.length}</span>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                {items.map((v) => (
-                  <Card key={v.name} icon={v.icon} logoUrl={v.logoUrl} title={v.name} meta={v.meta} connected={v.connected} category={v.category} />
-                ))}
-              </div>
-            </section>
-          );
-        })}
-      </div>
+
+      <PageTabs<Tab>
+        value={tab}
+        onChange={setTab}
+        tabs={[
+          { id: "vendors",   label: "Vendors",   count: VENDORS.length },
+          { id: "developer", label: "Developer", count: developerCount },
+        ]}
+      />
+
+      {tab === "vendors"   && <VendorsCatalog />}
+      {tab === "developer" && <Developer />}
     </AppShell>
   );
 }
 
-function Card({
+/* ---------------- Vendors tab ---------------- */
+
+function VendorsCatalog() {
+  return (
+    <div className="space-y-6">
+      {CATEGORY_ORDER.map((cat) => {
+        const items = VENDORS.filter((v) => v.category === cat);
+        if (items.length === 0) return null;
+        return (
+          <section key={cat}>
+            <div className="mb-2 flex items-center gap-2">
+              <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                {CATEGORY_META[cat].label}
+              </h3>
+              <span className="text-[11px] text-muted-foreground/70">· {items.length}</span>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              {items.map((v) => (
+                <VendorCard key={v.name} icon={v.icon} logoUrl={v.logoUrl} title={v.name} meta={v.meta} connected={v.connected} category={v.category} />
+              ))}
+            </div>
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
+function VendorCard({
   icon: Icon, logoUrl, title, meta, connected, category,
 }: {
   icon?: React.ComponentType<{ className?: string }>;
