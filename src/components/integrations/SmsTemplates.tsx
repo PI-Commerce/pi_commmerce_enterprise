@@ -2,7 +2,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Plus, Search, Trash2, Pencil, ChevronLeft, ChevronRight, AlertCircle, UploadCloud,
   Download, FileSpreadsheet, Check, X, Type as TypeIcon, Languages, Zap, Info,
+  MoreHorizontal, CopyPlus, Terminal,
 } from "lucide-react";
+import {
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
+import { GetCurlDialog } from "@/components/integrations/GetCurlDialog";
+import { smsToCurlTemplate } from "@/lib/template-send";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -72,6 +78,11 @@ export function SmsTemplates({ config }: { config: SmsChannelConfig }) {
         templates={templates}
         onCreate={() => { setEditing(null); setCreating(true); }}
         onEdit={(t) => { setEditing(t); setCreating(true); }}
+        onClone={(t) => {
+          const copy: SmsTemplate = { ...t, id: String(Date.now()), name: `${t.name}_copy`, createdAt: todayLabel() };
+          upsertSmsTemplate(copy);
+          toast.success(`Cloned as ${copy.name}`);
+        }}
         onDelete={(id) => {
           removeSmsTemplate(id);
           toast.success("Template removed from the registry");
@@ -96,14 +107,16 @@ export function SmsTemplates({ config }: { config: SmsChannelConfig }) {
 
 const GRID = "grid-cols-[1.5fr_1.7fr_1fr_1fr_0.9fr_0.7fr_auto]";
 
-function SmsTemplateList({ templates, onCreate, onEdit, onDelete, onBulk }: {
+function SmsTemplateList({ templates, onCreate, onEdit, onClone, onDelete, onBulk }: {
   templates: SmsTemplate[];
   onCreate: () => void;
   onEdit: (t: SmsTemplate) => void;
+  onClone: (t: SmsTemplate) => void;
   onDelete: (id: string) => void;
   onBulk: () => void;
 }) {
   const [q, setQ] = useState("");
+  const [curlFor, setCurlFor] = useState<SmsTemplate | null>(null);
   const [type, setType] = useState<SmsCategory | "all">("all");
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
@@ -208,25 +221,26 @@ function SmsTemplateList({ templates, onCreate, onEdit, onDelete, onBulk }: {
                     <span className="text-right font-mono text-[12px] text-muted-foreground" title={`${seg.encoding} · up to ${seg.segments} SMS per recipient`}>
                       {seg.segments}
                     </span>
-                    <span className="flex w-16 items-center justify-end gap-1">
-                      <span
-                        role="button"
-                        tabIndex={0}
-                        onClick={(e) => { e.stopPropagation(); onEdit(t); }}
-                        className="grid h-7 w-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                        aria-label="Edit"
-                      >
-                        <Pencil className="h-3.5 w-3.5" />
-                      </span>
-                      <span
-                        role="button"
-                        tabIndex={0}
-                        onClick={(e) => { e.stopPropagation(); onDelete(t.id); }}
-                        className="grid h-7 w-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-                        aria-label="Delete"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </span>
+                    <span className="flex w-16 items-center justify-end" onClick={(e) => e.stopPropagation()}>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <span
+                            role="button"
+                            tabIndex={0}
+                            aria-label="More actions"
+                            className="grid h-7 w-7 place-items-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground"
+                          >
+                            <MoreHorizontal className="h-4 w-4" />
+                          </span>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-40">
+                          <DropdownMenuItem onSelect={() => onEdit(t)}><Pencil className="mr-2 h-3.5 w-3.5" /> Edit</DropdownMenuItem>
+                          <DropdownMenuItem onSelect={() => onClone(t)}><CopyPlus className="mr-2 h-3.5 w-3.5" /> Clone</DropdownMenuItem>
+                          <DropdownMenuItem onSelect={() => setCurlFor(t)}><Terminal className="mr-2 h-3.5 w-3.5" /> Get Curl</DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem onSelect={() => onDelete(t.id)} className="text-destructive focus:text-destructive"><Trash2 className="mr-2 h-3.5 w-3.5" /> Delete</DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </span>
                   </button>
                 );
@@ -265,6 +279,12 @@ function SmsTemplateList({ templates, onCreate, onEdit, onDelete, onBulk }: {
           )}
         </div>
       </div>
+
+      <GetCurlDialog
+        template={curlFor ? smsToCurlTemplate(curlFor) : null}
+        open={!!curlFor}
+        onOpenChange={(open) => { if (!open) setCurlFor(null); }}
+      />
     </div>
   );
 }

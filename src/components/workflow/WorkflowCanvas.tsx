@@ -6,11 +6,12 @@ import ReactFlow, {
   type ReactFlowInstance,
 } from "reactflow";
 import { Wand2 } from "lucide-react";
+import { toast } from "sonner";
 import { nodeTypes } from "./nodes";
 import { edgeTypes } from "./edges";
 import type { WorkflowNodeData, NodeKind, CampaignStatus } from "@/lib/campaign-types";
 import { NODE_LABELS, SERIAL_PREFIX } from "@/lib/campaign-types";
-import { whatsappOutputs, completedOutput, smsOutputs, rcsOutputs, apiOutcomeOutputs, deriveNodeOutcomeVariables } from "@/lib/wa-outputs";
+import { whatsappOutputs, completedOutput, chatOutputs, smsOutputs, rcsOutputs, apiOutcomeOutputs, deriveNodeOutcomeVariables } from "@/lib/wa-outputs";
 import { EXAMPLE_CAMPAIGNS } from "@/lib/campaign-examples";
 import { elkLayout, type Point } from "@/lib/flow-layout";
 import { useRegion, localizeTzAbbrev, localizeCurrency } from "@/lib/region";
@@ -59,6 +60,7 @@ const DEFAULT_NODE_DATA: Record<NodeKind, Partial<WorkflowNodeData>> = {
   delay: { subtitle: "Wait", valid: false, error: "Set duration" },
   voiceCall: { subtitle: "AI voice outreach", valid: false, error: "Select agent", outputs: completedOutput() },
   whatsapp: { subtitle: "Send WhatsApp message", valid: false, error: "Pick template", outputs: whatsappOutputs(undefined) },
+  aiChat: { subtitle: "AI chat conversation", valid: false, error: "Select agent", outputs: chatOutputs() },
   sms: { subtitle: "Send SMS", valid: false, error: "Select a DLT template", outputs: smsOutputs() },
   rcs: { subtitle: "Send RCS message", valid: false, error: "Select a template", outputs: rcsOutputs() },
   aiTransform: { subtitle: "Derive AI variables", valid: true },
@@ -66,6 +68,19 @@ const DEFAULT_NODE_DATA: Record<NodeKind, Partial<WorkflowNodeData>> = {
 };
 
 let nodeCounter = 100;
+
+// The AI Chat node hands over a *live* WhatsApp conversation, so its upstream edge must
+// come from a WhatsApp output where the customer just messaged back — either the
+// free-text reply (`reply_received`) OR a button tap (`btn_*`). Both keep the 24h window
+// open. The deterministic "Timeout" (`no_response`) and `failure` paths are excluded:
+// no customer message, no open window to take over.
+const isChatHandoffHandle = (handle: string | null | undefined): boolean =>
+  handle === "reply_received" || (handle ?? "").startsWith("btn_");
+
+// Shown on an AI Chat node that isn't fed by a valid WhatsApp hand-off output, and in the
+// toast when such a connection is rejected. Kept in one place so the inline hint and the
+// toast stay in sync.
+const CHAT_CONNECTION_ERROR = "Connect to a WhatsApp reply or button output";
 
 // A fresh canvas always has the three structural nodes — Start, Audience, End —
 // and all three are non-deletable (locked). Audience is the single entry point for
@@ -114,6 +129,9 @@ export function WorkflowCanvas({
     isNew ? BLANK_EDGES : example?.edges ?? SEED_EDGES,
   );
   const [selected, setSelected] = useState<{ id: string; data: WorkflowNodeData } | null>(null);
+  // Debounce for the "AI Chat must follow a WhatsApp reply" rejection toast —
+  // isValidConnection fires many times during a single drag hover.
+  const chatToastAt = useRef(0);
   // ELK runs async at render-time for example/seed graphs; hide the graph until the
   // initial layout lands so we never flash positionless nodes stacked at the origin.
   // Blank new campaigns ship pre-laid-out and render immediately.
@@ -223,6 +241,53 @@ export function WorkflowCanvas({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [waButtonWiringSig, editable, setNodes]);
 
+  // AI Chat is a follow-up node, never standalone: it can only run if it's fed by a
+  // WhatsApp node hand-off output — the customer either replied with free text
+  // (`reply_received`) or tapped a button (`btn_*`), so the agent can take over the live
+  // conversation (see isValidConnection / isChatHandoffHandle). Placement isn't blocked,
+  // so a dropped-but-unwired (or mis-wired) AI Chat node is surfaced as INVALID with an
+  // explanatory hint, mirroring the WhatsApp button-wiring guardrail above. This effect
+  // is authoritative for aiChat validity: it folds in the config "agent selected" check
+  // too, so the node can never read as valid while it has no upstream WhatsApp hand-off
+  // feeding it. Keyed on a signature of aiChat ids + their selected agent + edge wiring
+  // (NOT valid/error) to avoid an update loop.
+  const aiChatWiringSig = useMemo(() => {
+    const chatPart = nodes
+      .filter((n) => n.data.kind === "aiChat")
+      .map((n) => n.id + ":" + (n.data.config?.chatAgent ?? ""))
+      .join("|");
+    const edgePart = edges.map((e) => e.source + ">" + (e.sourceHandle ?? "") + ">" + e.target).join("|");
+    return chatPart + "#" + edgePart;
+  }, [nodes, edges]);
+
+  useEffect(() => {
+    if (!editable) return;
+    setNodes((nds) => {
+      let changed = false;
+      const next = nds.map((n) => {
+        if (n.data.kind !== "aiChat") return n;
+        const fedByWaHandoff = edges.some(
+          (e) =>
+            e.target === n.id &&
+            isChatHandoffHandle(e.sourceHandle) &&
+            nds.find((s) => s.id === e.source)?.data.kind === "whatsapp",
+        );
+        const agentSet = !!n.data.config?.chatAgent;
+        const nextValid = fedByWaHandoff && agentSet;
+        const nextError = !fedByWaHandoff
+          ? CHAT_CONNECTION_ERROR
+          : !agentSet
+            ? "Select a chat agent"
+            : undefined;
+        if (n.data.valid === nextValid && (n.data.error ?? undefined) === nextError) return n;
+        changed = true;
+        return { ...n, data: { ...n.data, valid: nextValid, error: nextError } };
+      });
+      return changed ? next : nds;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aiChatWiringSig, editable, setNodes]);
+
   const outcomeVariables = useMemo(() => deriveNodeOutcomeVariables(nodes), [nodes]);
 
   // Campaign status is config-only (draft | ready) — liveness lives on Runs, not
@@ -254,6 +319,23 @@ export function WorkflowCanvas({
       if (!src || !tgt) return false;
       if (tgt.data.kind === "start") return false;
       if (src.data.kind === "end") return false;
+      // AI Chat is not a standalone node: it exists only to take over a live
+      // WhatsApp conversation once the customer has messaged back — either a free-text
+      // reply (`reply_received`) or a button tap (`btn_*`), both of which open the 24h
+      // window. So the ONLY valid edge into an AI Chat node comes from a WhatsApp node's
+      // reply/button output (not Timeout, not Failure). Explain the rejection with a
+      // toast (debounced — isValidConnection fires repeatedly during a drag hover).
+      if (tgt.data.kind === "aiChat") {
+        const ok = src.data.kind === "whatsapp" && isChatHandoffHandle(c.sourceHandle);
+        if (!ok) {
+          const now = Date.now();
+          if (now - chatToastAt.current > 2500) {
+            chatToastAt.current = now;
+            toast.error("AI Chat can only follow a WhatsApp reply or button-tap output.");
+          }
+          return false;
+        }
+      }
       // Each output handle (branch / variant / exit path) routes to exactly one target.
       const srcHandle = c.sourceHandle ?? null;
       if (edges.some((e) => e.source === c.source && (e.sourceHandle ?? null) === srcHandle)) return false;

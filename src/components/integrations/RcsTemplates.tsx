@@ -2,7 +2,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Plus, Search, Trash2, Pencil, ChevronLeft, ChevronRight, AlertCircle, Info,
   Type as TypeIcon, Image as ImageIcon, Video, X, Link2, UploadCloud, Reply, ExternalLink, Phone,
+  MoreHorizontal, CopyPlus, Terminal,
 } from "lucide-react";
+import {
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
+import { GetCurlDialog } from "@/components/integrations/GetCurlDialog";
+import { rcsToCurlTemplate } from "@/lib/template-send";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -65,6 +71,17 @@ export function RcsTemplates({ config }: { config: RcsChannelConfig }) {
       templates={templates}
       onCreate={() => { setEditing(null); setCreating(true); }}
       onEdit={(t) => { setEditing(t); setCreating(true); }}
+      onClone={(t) => {
+        const copy: RcsTemplate = {
+          ...t,
+          id: `rcs_tpl_${Date.now().toString(36)}`,
+          name: `${t.name}_copy`,
+          approvalStatus: "Pending",
+          createdAt: todayLabel(),
+        };
+        upsertRcsTemplate(copy);
+        toast.success(`Cloned as ${copy.name}`);
+      }}
       onDelete={(id) => {
         removeRcsTemplate(id);
         toast.success("Template removed from the registry");
@@ -77,14 +94,16 @@ export function RcsTemplates({ config }: { config: RcsChannelConfig }) {
 
 const GRID = "grid-cols-[1.6fr_1.2fr_1fr_0.9fr_1fr_1fr_auto]";
 
-function RcsTemplateList({ config, templates, onCreate, onEdit, onDelete }: {
+function RcsTemplateList({ config, templates, onCreate, onEdit, onClone, onDelete }: {
   config: RcsChannelConfig;
   templates: RcsTemplate[];
   onCreate: () => void;
   onEdit: (t: RcsTemplate) => void;
+  onClone: (t: RcsTemplate) => void;
   onDelete: (id: string) => void;
 }) {
   const [q, setQ] = useState("");
+  const [curlFor, setCurlFor] = useState<RcsTemplate | null>(null);
   const [typeFilter, setTypeFilter] = useState<RcsAgentType | "all">("all");
   const [status, setStatus] = useState<RcsApprovalStatus | "all">("all");
   const [page, setPage] = useState(1);
@@ -185,25 +204,26 @@ function RcsTemplateList({ config, templates, onCreate, onEdit, onDelete }: {
                     <span className="text-[12px] text-muted-foreground">{t.type === "TEXT" ? "Text" : "Rich card"}</span>
                     <span><StatusTag status={t.approvalStatus} /></span>
                     <span className="text-muted-foreground">{t.createdAt}</span>
-                    <span className="flex w-16 items-center justify-end gap-1">
-                      <span
-                        role="button"
-                        tabIndex={0}
-                        onClick={(e) => { e.stopPropagation(); onEdit(t); }}
-                        className="grid h-7 w-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                        aria-label="Edit"
-                      >
-                        <Pencil className="h-3.5 w-3.5" />
-                      </span>
-                      <span
-                        role="button"
-                        tabIndex={0}
-                        onClick={(e) => { e.stopPropagation(); onDelete(t.id); }}
-                        className="grid h-7 w-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-                        aria-label="Delete"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </span>
+                    <span className="flex w-16 items-center justify-end" onClick={(e) => e.stopPropagation()}>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <span
+                            role="button"
+                            tabIndex={0}
+                            aria-label="More actions"
+                            className="grid h-7 w-7 place-items-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground"
+                          >
+                            <MoreHorizontal className="h-4 w-4" />
+                          </span>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-40">
+                          <DropdownMenuItem onSelect={() => onEdit(t)}><Pencil className="mr-2 h-3.5 w-3.5" /> Edit</DropdownMenuItem>
+                          <DropdownMenuItem onSelect={() => onClone(t)}><CopyPlus className="mr-2 h-3.5 w-3.5" /> Clone</DropdownMenuItem>
+                          <DropdownMenuItem onSelect={() => setCurlFor(t)}><Terminal className="mr-2 h-3.5 w-3.5" /> Get Curl</DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem onSelect={() => onDelete(t.id)} className="text-destructive focus:text-destructive"><Trash2 className="mr-2 h-3.5 w-3.5" /> Delete</DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </span>
                   </button>
                 );
@@ -240,6 +260,12 @@ function RcsTemplateList({ config, templates, onCreate, onEdit, onDelete }: {
           )}
         </div>
       </div>
+
+      <GetCurlDialog
+        template={curlFor ? rcsToCurlTemplate(curlFor) : null}
+        open={!!curlFor}
+        onOpenChange={(open) => { if (!open) setCurlFor(null); }}
+      />
     </div>
   );
 }

@@ -9,18 +9,21 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as UsersRouteImport } from './routes/users'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as IntegrationsRouteImport } from './routes/integrations'
 import { Route as ChannelsRouteImport } from './routes/channels'
 import { Route as CampaignsRouteImport } from './routes/campaigns'
 import { Route as AnalyticsRouteImport } from './routes/analytics'
 import { Route as AgentsRouteImport } from './routes/agents'
+import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as LeadsIndexRouteImport } from './routes/leads.index'
 import { Route as IntegrationsIndexRouteImport } from './routes/integrations.index'
 import { Route as ChannelsIndexRouteImport } from './routes/channels.index'
 import { Route as CampaignsIndexRouteImport } from './routes/campaigns.index'
 import { Route as AgentsIndexRouteImport } from './routes/agents.index'
+import { Route as AdminIndexRouteImport } from './routes/admin.index'
 import { Route as LeadsIdRouteImport } from './routes/leads.$id'
 import { Route as ChannelsWhatsappRouteImport } from './routes/channels.whatsapp'
 import { Route as ChannelsSmsRouteImport } from './routes/channels.sms'
@@ -28,9 +31,21 @@ import { Route as ChannelsRcsRouteImport } from './routes/channels.rcs'
 import { Route as CampaignsIdRouteImport } from './routes/campaigns.$id'
 import { Route as AgentsNewRouteImport } from './routes/agents.new'
 import { Route as AgentsIdRouteImport } from './routes/agents.$id'
+import { Route as AdminTrunksRouteImport } from './routes/admin.trunks'
+import { Route as AdminTenantsRouteImport } from './routes/admin.tenants'
+import { Route as AdminTenantUsersRouteImport } from './routes/admin.tenant-users'
+import { Route as AdminRolesRouteImport } from './routes/admin.roles'
+import { Route as AdminProviderUsersRouteImport } from './routes/admin.provider-users'
+import { Route as AdminImpersonateRouteImport } from './routes/admin.impersonate'
+import { Route as AdminAuditRouteImport } from './routes/admin.audit'
 import { Route as CampaignsVersionsIdRouteImport } from './routes/campaigns.versions.$id'
 import { Route as AgentsToolsNewRouteImport } from './routes/agents.tools.new'
 
+const UsersRoute = UsersRouteImport.update({
+  id: '/users',
+  path: '/users',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
@@ -59,6 +74,11 @@ const AnalyticsRoute = AnalyticsRouteImport.update({
 const AgentsRoute = AgentsRouteImport.update({
   id: '/agents',
   path: '/agents',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminRoute = AdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IndexRoute = IndexRouteImport.update({
@@ -90,6 +110,11 @@ const AgentsIndexRoute = AgentsIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => AgentsRoute,
+} as any)
+const AdminIndexRoute = AdminIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AdminRoute,
 } as any)
 const LeadsIdRoute = LeadsIdRouteImport.update({
   id: '/leads/$id',
@@ -126,6 +151,41 @@ const AgentsIdRoute = AgentsIdRouteImport.update({
   path: '/$id',
   getParentRoute: () => AgentsRoute,
 } as any)
+const AdminTrunksRoute = AdminTrunksRouteImport.update({
+  id: '/trunks',
+  path: '/trunks',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminTenantsRoute = AdminTenantsRouteImport.update({
+  id: '/tenants',
+  path: '/tenants',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminTenantUsersRoute = AdminTenantUsersRouteImport.update({
+  id: '/tenant-users',
+  path: '/tenant-users',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminRolesRoute = AdminRolesRouteImport.update({
+  id: '/roles',
+  path: '/roles',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminProviderUsersRoute = AdminProviderUsersRouteImport.update({
+  id: '/provider-users',
+  path: '/provider-users',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminImpersonateRoute = AdminImpersonateRouteImport.update({
+  id: '/impersonate',
+  path: '/impersonate',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminAuditRoute = AdminAuditRouteImport.update({
+  id: '/audit',
+  path: '/audit',
+  getParentRoute: () => AdminRoute,
+} as any)
 const CampaignsVersionsIdRoute = CampaignsVersionsIdRouteImport.update({
   id: '/versions/$id',
   path: '/versions/$id',
@@ -139,12 +199,21 @@ const AgentsToolsNewRoute = AgentsToolsNewRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/admin': typeof AdminRouteWithChildren
   '/agents': typeof AgentsRouteWithChildren
   '/analytics': typeof AnalyticsRoute
   '/campaigns': typeof CampaignsRouteWithChildren
   '/channels': typeof ChannelsRouteWithChildren
   '/integrations': typeof IntegrationsRouteWithChildren
   '/settings': typeof SettingsRoute
+  '/users': typeof UsersRoute
+  '/admin/audit': typeof AdminAuditRoute
+  '/admin/impersonate': typeof AdminImpersonateRoute
+  '/admin/provider-users': typeof AdminProviderUsersRoute
+  '/admin/roles': typeof AdminRolesRoute
+  '/admin/tenant-users': typeof AdminTenantUsersRoute
+  '/admin/tenants': typeof AdminTenantsRoute
+  '/admin/trunks': typeof AdminTrunksRoute
   '/agents/$id': typeof AgentsIdRoute
   '/agents/new': typeof AgentsNewRoute
   '/campaigns/$id': typeof CampaignsIdRoute
@@ -152,6 +221,7 @@ export interface FileRoutesByFullPath {
   '/channels/sms': typeof ChannelsSmsRoute
   '/channels/whatsapp': typeof ChannelsWhatsappRoute
   '/leads/$id': typeof LeadsIdRoute
+  '/admin/': typeof AdminIndexRoute
   '/agents/': typeof AgentsIndexRoute
   '/campaigns/': typeof CampaignsIndexRoute
   '/channels/': typeof ChannelsIndexRoute
@@ -164,6 +234,14 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/analytics': typeof AnalyticsRoute
   '/settings': typeof SettingsRoute
+  '/users': typeof UsersRoute
+  '/admin/audit': typeof AdminAuditRoute
+  '/admin/impersonate': typeof AdminImpersonateRoute
+  '/admin/provider-users': typeof AdminProviderUsersRoute
+  '/admin/roles': typeof AdminRolesRoute
+  '/admin/tenant-users': typeof AdminTenantUsersRoute
+  '/admin/tenants': typeof AdminTenantsRoute
+  '/admin/trunks': typeof AdminTrunksRoute
   '/agents/$id': typeof AgentsIdRoute
   '/agents/new': typeof AgentsNewRoute
   '/campaigns/$id': typeof CampaignsIdRoute
@@ -171,6 +249,7 @@ export interface FileRoutesByTo {
   '/channels/sms': typeof ChannelsSmsRoute
   '/channels/whatsapp': typeof ChannelsWhatsappRoute
   '/leads/$id': typeof LeadsIdRoute
+  '/admin': typeof AdminIndexRoute
   '/agents': typeof AgentsIndexRoute
   '/campaigns': typeof CampaignsIndexRoute
   '/channels': typeof ChannelsIndexRoute
@@ -182,12 +261,21 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/admin': typeof AdminRouteWithChildren
   '/agents': typeof AgentsRouteWithChildren
   '/analytics': typeof AnalyticsRoute
   '/campaigns': typeof CampaignsRouteWithChildren
   '/channels': typeof ChannelsRouteWithChildren
   '/integrations': typeof IntegrationsRouteWithChildren
   '/settings': typeof SettingsRoute
+  '/users': typeof UsersRoute
+  '/admin/audit': typeof AdminAuditRoute
+  '/admin/impersonate': typeof AdminImpersonateRoute
+  '/admin/provider-users': typeof AdminProviderUsersRoute
+  '/admin/roles': typeof AdminRolesRoute
+  '/admin/tenant-users': typeof AdminTenantUsersRoute
+  '/admin/tenants': typeof AdminTenantsRoute
+  '/admin/trunks': typeof AdminTrunksRoute
   '/agents/$id': typeof AgentsIdRoute
   '/agents/new': typeof AgentsNewRoute
   '/campaigns/$id': typeof CampaignsIdRoute
@@ -195,6 +283,7 @@ export interface FileRoutesById {
   '/channels/sms': typeof ChannelsSmsRoute
   '/channels/whatsapp': typeof ChannelsWhatsappRoute
   '/leads/$id': typeof LeadsIdRoute
+  '/admin/': typeof AdminIndexRoute
   '/agents/': typeof AgentsIndexRoute
   '/campaigns/': typeof CampaignsIndexRoute
   '/channels/': typeof ChannelsIndexRoute
@@ -207,12 +296,21 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/admin'
     | '/agents'
     | '/analytics'
     | '/campaigns'
     | '/channels'
     | '/integrations'
     | '/settings'
+    | '/users'
+    | '/admin/audit'
+    | '/admin/impersonate'
+    | '/admin/provider-users'
+    | '/admin/roles'
+    | '/admin/tenant-users'
+    | '/admin/tenants'
+    | '/admin/trunks'
     | '/agents/$id'
     | '/agents/new'
     | '/campaigns/$id'
@@ -220,6 +318,7 @@ export interface FileRouteTypes {
     | '/channels/sms'
     | '/channels/whatsapp'
     | '/leads/$id'
+    | '/admin/'
     | '/agents/'
     | '/campaigns/'
     | '/channels/'
@@ -232,6 +331,14 @@ export interface FileRouteTypes {
     | '/'
     | '/analytics'
     | '/settings'
+    | '/users'
+    | '/admin/audit'
+    | '/admin/impersonate'
+    | '/admin/provider-users'
+    | '/admin/roles'
+    | '/admin/tenant-users'
+    | '/admin/tenants'
+    | '/admin/trunks'
     | '/agents/$id'
     | '/agents/new'
     | '/campaigns/$id'
@@ -239,6 +346,7 @@ export interface FileRouteTypes {
     | '/channels/sms'
     | '/channels/whatsapp'
     | '/leads/$id'
+    | '/admin'
     | '/agents'
     | '/campaigns'
     | '/channels'
@@ -249,12 +357,21 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/admin'
     | '/agents'
     | '/analytics'
     | '/campaigns'
     | '/channels'
     | '/integrations'
     | '/settings'
+    | '/users'
+    | '/admin/audit'
+    | '/admin/impersonate'
+    | '/admin/provider-users'
+    | '/admin/roles'
+    | '/admin/tenant-users'
+    | '/admin/tenants'
+    | '/admin/trunks'
     | '/agents/$id'
     | '/agents/new'
     | '/campaigns/$id'
@@ -262,6 +379,7 @@ export interface FileRouteTypes {
     | '/channels/sms'
     | '/channels/whatsapp'
     | '/leads/$id'
+    | '/admin/'
     | '/agents/'
     | '/campaigns/'
     | '/channels/'
@@ -273,18 +391,27 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AdminRoute: typeof AdminRouteWithChildren
   AgentsRoute: typeof AgentsRouteWithChildren
   AnalyticsRoute: typeof AnalyticsRoute
   CampaignsRoute: typeof CampaignsRouteWithChildren
   ChannelsRoute: typeof ChannelsRouteWithChildren
   IntegrationsRoute: typeof IntegrationsRouteWithChildren
   SettingsRoute: typeof SettingsRoute
+  UsersRoute: typeof UsersRoute
   LeadsIdRoute: typeof LeadsIdRoute
   LeadsIndexRoute: typeof LeadsIndexRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/users': {
+      id: '/users'
+      path: '/users'
+      fullPath: '/users'
+      preLoaderRoute: typeof UsersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/settings': {
       id: '/settings'
       path: '/settings'
@@ -325,6 +452,13 @@ declare module '@tanstack/react-router' {
       path: '/agents'
       fullPath: '/agents'
       preLoaderRoute: typeof AgentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin': {
+      id: '/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AdminRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/': {
@@ -368,6 +502,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/agents/'
       preLoaderRoute: typeof AgentsIndexRouteImport
       parentRoute: typeof AgentsRoute
+    }
+    '/admin/': {
+      id: '/admin/'
+      path: '/'
+      fullPath: '/admin/'
+      preLoaderRoute: typeof AdminIndexRouteImport
+      parentRoute: typeof AdminRoute
     }
     '/leads/$id': {
       id: '/leads/$id'
@@ -418,6 +559,55 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AgentsIdRouteImport
       parentRoute: typeof AgentsRoute
     }
+    '/admin/trunks': {
+      id: '/admin/trunks'
+      path: '/trunks'
+      fullPath: '/admin/trunks'
+      preLoaderRoute: typeof AdminTrunksRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/tenants': {
+      id: '/admin/tenants'
+      path: '/tenants'
+      fullPath: '/admin/tenants'
+      preLoaderRoute: typeof AdminTenantsRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/tenant-users': {
+      id: '/admin/tenant-users'
+      path: '/tenant-users'
+      fullPath: '/admin/tenant-users'
+      preLoaderRoute: typeof AdminTenantUsersRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/roles': {
+      id: '/admin/roles'
+      path: '/roles'
+      fullPath: '/admin/roles'
+      preLoaderRoute: typeof AdminRolesRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/provider-users': {
+      id: '/admin/provider-users'
+      path: '/provider-users'
+      fullPath: '/admin/provider-users'
+      preLoaderRoute: typeof AdminProviderUsersRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/impersonate': {
+      id: '/admin/impersonate'
+      path: '/impersonate'
+      fullPath: '/admin/impersonate'
+      preLoaderRoute: typeof AdminImpersonateRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/audit': {
+      id: '/admin/audit'
+      path: '/audit'
+      fullPath: '/admin/audit'
+      preLoaderRoute: typeof AdminAuditRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/campaigns/versions/$id': {
       id: '/campaigns/versions/$id'
       path: '/versions/$id'
@@ -434,6 +624,30 @@ declare module '@tanstack/react-router' {
     }
   }
 }
+
+interface AdminRouteChildren {
+  AdminAuditRoute: typeof AdminAuditRoute
+  AdminImpersonateRoute: typeof AdminImpersonateRoute
+  AdminProviderUsersRoute: typeof AdminProviderUsersRoute
+  AdminRolesRoute: typeof AdminRolesRoute
+  AdminTenantUsersRoute: typeof AdminTenantUsersRoute
+  AdminTenantsRoute: typeof AdminTenantsRoute
+  AdminTrunksRoute: typeof AdminTrunksRoute
+  AdminIndexRoute: typeof AdminIndexRoute
+}
+
+const AdminRouteChildren: AdminRouteChildren = {
+  AdminAuditRoute: AdminAuditRoute,
+  AdminImpersonateRoute: AdminImpersonateRoute,
+  AdminProviderUsersRoute: AdminProviderUsersRoute,
+  AdminRolesRoute: AdminRolesRoute,
+  AdminTenantUsersRoute: AdminTenantUsersRoute,
+  AdminTenantsRoute: AdminTenantsRoute,
+  AdminTrunksRoute: AdminTrunksRoute,
+  AdminIndexRoute: AdminIndexRoute,
+}
+
+const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
 
 interface AgentsRouteChildren {
   AgentsIdRoute: typeof AgentsIdRoute
@@ -500,12 +714,14 @@ const IntegrationsRouteWithChildren = IntegrationsRoute._addFileChildren(
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AdminRoute: AdminRouteWithChildren,
   AgentsRoute: AgentsRouteWithChildren,
   AnalyticsRoute: AnalyticsRoute,
   CampaignsRoute: CampaignsRouteWithChildren,
   ChannelsRoute: ChannelsRouteWithChildren,
   IntegrationsRoute: IntegrationsRouteWithChildren,
   SettingsRoute: SettingsRoute,
+  UsersRoute: UsersRoute,
   LeadsIdRoute: LeadsIdRoute,
   LeadsIndexRoute: LeadsIndexRoute,
 }

@@ -104,6 +104,21 @@ export function completedOutput(): NodeOutput[] {
 }
 
 /**
+ * Outputs for an AI Chat node — two fixed branches, mirroring the Voice node:
+ *   - `success` — the agent closed the conversation (with any disposition; branch
+ *                 on the semantic outcome via a downstream Conditional on
+ *                 `chat_N.disposition`).
+ *   - `failure` — the session couldn't complete: the idle window closed with no
+ *                 customer reply, or the relay to/from the Agentic platform broke.
+ */
+export function chatOutputs(): NodeOutput[] {
+  return [
+    { id: "success", label: "Success", kind: "outcome" },
+    { id: "failure", label: "Failed", kind: "outcome" },
+  ];
+}
+
+/**
  * Outputs for an SMS node — the one action node that branches on *delivery*
  * rather than advancing on send (PICOM-4726 §4).
  *
@@ -191,6 +206,7 @@ export function actionNodeOutputs(kind: NodeKind, config?: WorkflowNodeData["con
   if (kind === "sms") return smsOutputs();
   if (kind === "rcs") return rcsOutputs(resolveRcsTemplate(config?.rcsTemplateId));
   if (kind === "voiceCall") return completedOutput();
+  if (kind === "aiChat") return chatOutputs();
   return undefined;
 }
 
@@ -230,6 +246,17 @@ export function deriveNodeOutcomeVariables(
       // …plus the configured agent's post-call analysis eval variables. (Tool
       // outputs are in-call only and are deliberately NOT exposed downstream.)
       const agent = resolveAgent(config?.agent);
+      if (agent) for (const pc of agent.postCall) vars.push({ key: `${ns}.${pc.name}`, source });
+    } else if (kind === "aiChat") {
+      // Conversation facts every chat node produces, mirroring its handles:
+      // `disposition` (the closing outcome, = one of the agent's dispositions),
+      // `closure_reason` (why it ended — disposition | timeout | handover_failed),
+      // and `conversation_length` (message count).
+      vars.push({ key: `${ns}.disposition`, source });
+      vars.push({ key: `${ns}.closure_reason`, source });
+      vars.push({ key: `${ns}.conversation_length`, source });
+      // …plus the configured chat agent's post-conversation analysis eval variables.
+      const agent = resolveAgent(config?.chatAgent);
       if (agent) for (const pc of agent.postCall) vars.push({ key: `${ns}.${pc.name}`, source });
     } else if (kind === "sms") {
       // Delivery facts this message produced. `delivery_state` mirrors the three

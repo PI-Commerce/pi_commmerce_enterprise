@@ -1,4 +1,5 @@
 import { AppSidebar } from "./AppSidebar";
+import { ImpersonationBanner } from "./ImpersonationBanner";
 import { cn } from "@/lib/utils";
 
 export function AppShell({
@@ -13,6 +14,7 @@ export function AppShell({
     <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground">
       <AppSidebar />
       <div className="relative flex min-w-0 flex-1 flex-col">
+        <ImpersonationBanner />
         <main className={cn("relative flex-1 overflow-y-auto", !bare && "px-8 py-6")}>{children}</main>
       </div>
     </div>

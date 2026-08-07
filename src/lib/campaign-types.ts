@@ -19,6 +19,7 @@ export type NodeKind =
   // action
   | "voiceCall"
   | "whatsapp"
+  | "aiChat"
   | "sms"
   | "rcs"
   // ai
@@ -184,6 +185,17 @@ export type PresetConfig = {
   waBody?: string;
   /** Whole hours (1–24) the node waits for a reply before taking the "Timeout" path. */
   waTimeoutHours?: number;
+  // ---- AI Chat core ----
+  /** A {@link AgentRecord} id or name (type "chat") from the agent registry. Drives the disposition outputs. */
+  chatAgent?: string;
+  /** WABA sender the chat conversation runs on. Mirrors {@link waNumber}. */
+  chatWaba?: string;
+  /** Maps the chat agent's campaign-input slots to CSV/audience columns. */
+  chatVarMap?: PresetVarMap[];
+  /** Max whole-minute cap on a single chat session before it is force-closed. */
+  chatMaxDuration?: string;
+  /** Idle window (no customer reply) before the session times out and takes the "Timeout" path. */
+  chatIdleTimeout?: string;
   // ---- SMS core ----
   /** DLT Template ID from the SMS registry — the node's primary selection. */
   smsTemplateId?: string;
@@ -283,6 +295,7 @@ export const NODE_GROUPS: Record<NodeKind, NodeGroup> = {
   delay: "logic",
   voiceCall: "action",
   whatsapp: "action",
+  aiChat: "action",
   sms: "action",
   rcs: "action",
   aiTransform: "ai",
@@ -299,6 +312,7 @@ export const NODE_LABELS: Record<NodeKind, string> = {
   delay: "Delay",
   voiceCall: "Voice Call",
   whatsapp: "WhatsApp",
+  aiChat: "AI Chat",
   sms: "SMS",
   rcs: "RCS",
   aiTransform: "AI Transformation",
@@ -321,6 +335,7 @@ export const SERIAL_PREFIX: Record<NodeKind, string> = {
   delay: "delay",
   voiceCall: "voice",
   whatsapp: "whatsapp",
+  aiChat: "chat",
   sms: "sms",
   rcs: "rcs",
   aiTransform: "ait",
