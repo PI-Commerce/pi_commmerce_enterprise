@@ -768,6 +768,68 @@ const DURATION_FILTERS: {
   { value: "600+", label: "10m+", lo: 600, hi: Infinity },
 ];
 
+type Turn = { role: "agent" | "customer"; text: string; at: string };
+
+/**
+ * The call transcript, synthesized deterministically from the call id. Shared by
+ * the call tray (chat bubbles) and the CSV export (flattened text) so both read
+ * the exact same conversation.
+ */
+function callTranscript(call: Call): Turn[] {
+  const first = call.customer.split(" ")[0];
+  const lines: [Turn["role"], string][] = [
+    [
+      "agent",
+      `Hi ${first}, this is Maya from Paytm. I noticed you haven't used your trading account in a while — is now a good time to talk?`,
+    ],
+    ["customer", "Okay, but just for a minute."],
+    ["agent", "Of course. May I know what's been keeping you away from the app?"],
+    [
+      "customer",
+      "Honestly the charges felt a bit high, and I started using another app.",
+    ],
+    [
+      "agent",
+      "I understand. We've reduced charges and added zero brokerage for 30 days for returning traders.",
+    ],
+    [
+      "customer",
+      "Hmm, interesting. I also had trouble adding my credit card last time.",
+    ],
+    [
+      "agent",
+      "I can help with that — I'll send a step-by-step link on WhatsApp right after this call.",
+    ],
+    ["customer", "Sure, please do. I'll give it another try."],
+    ["agent", "Wonderful. Thanks for your time, and welcome back!"],
+  ];
+  const r = seed(call.id);
+  let t = 0;
+  return lines.map(([role, text]) => {
+    const at = `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`;
+    t += 6 + Math.floor(r() * 12);
+    return { role, text, at };
+  });
+}
+
+/** Flatten the transcript to one CSV cell: "[m:ss] Agent: …" lines, newline-joined. */
+function transcriptText(call: Call): string {
+  return callTranscript(call)
+    .map((t) => `[${t.at}] ${t.role === "agent" ? "Agent" : "Customer"}: ${t.text}`)
+    .join("\n");
+}
+
+/** Observability recording URL. Only a completed call has a recording to link. */
+function recordingUrl(call: Call): string {
+  return call.status === "Completed"
+    ? `https://recordings.picom.ai/voice/${call.id}.mp3`
+    : "";
+}
+
+// The export mirrors the observability data surfaced when a call tray is opened.
+// Beyond the row attributes, that means the two observability outputs: the
+// recording URL and the full transcript. Both are present only for completed
+// calls (others never produced a recording/transcript).
 function callsToCsv(calls: Call[]): string {
   const head = [
     "scheduled_at",
@@ -780,6 +842,8 @@ function callsToCsv(calls: Call[]): string {
     "sentiment",
     "social_media_mention",
     "dnd_request",
+    "recording_url",
+    "transcript",
   ];
   const rows = calls.map((c) => [
     c.scheduledAt,
@@ -792,6 +856,8 @@ function callsToCsv(calls: Call[]): string {
     c.sentiment ?? "",
     c.socialMention ?? "",
     c.dndRequest ?? "",
+    recordingUrl(c),
+    c.status === "Completed" ? transcriptText(c) : "",
   ]);
   return [head, ...rows]
     .map((r) =>
@@ -997,11 +1063,13 @@ function CallsTable({ refs }: { refs: VoiceRef[] }) {
     [calls, q, durF, facets],
   );
 
+  // Exports are scoped to the current filter selection (search, duration and the
+  // facet filters) — the CSV is exactly the rows in view, not the whole base.
   const exportCsv = (scope: "all" | "completed" | "failed") => {
     const rows =
       scope === "all"
-        ? calls
-        : calls.filter((c) => c.status.toLowerCase() === scope);
+        ? filtered
+        : filtered.filter((c) => c.status.toLowerCase() === scope);
     downloadCsv(`voice-calls-${scope}.csv`, callsToCsv(rows));
   };
 
@@ -1064,7 +1132,7 @@ function CallsTable({ refs }: { refs: VoiceRef[] }) {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuItem onClick={() => exportCsv("all")}>
-                All calls
+                Current view (all filters)
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => exportCsv("completed")}>
                 Completed only
@@ -1250,46 +1318,7 @@ function CallDrawer({
     }));
   }, [call, agent]);
 
-  const turns = useMemo(() => {
-    if (!call) return [];
-    const first = call.customer.split(" ")[0];
-    const lines: [string, string][] = [
-      [
-        "agent",
-        `Hi ${first}, this is Maya from Paytm. I noticed you haven't used your trading account in a while — is now a good time to talk?`,
-      ],
-      ["customer", "Okay, but just for a minute."],
-      [
-        "agent",
-        "Of course. May I know what's been keeping you away from the app?",
-      ],
-      [
-        "customer",
-        "Honestly the charges felt a bit high, and I started using another app.",
-      ],
-      [
-        "agent",
-        "I understand. We've reduced charges and added zero brokerage for 30 days for returning traders.",
-      ],
-      [
-        "customer",
-        "Hmm, interesting. I also had trouble adding my credit card last time.",
-      ],
-      [
-        "agent",
-        "I can help with that — I'll send a step-by-step link on WhatsApp right after this call.",
-      ],
-      ["customer", "Sure, please do. I'll give it another try."],
-      ["agent", "Wonderful. Thanks for your time, and welcome back!"],
-    ];
-    const r = seed(call.id);
-    let t = 0;
-    return lines.map(([role, text]) => {
-      const at = `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`;
-      t += 6 + Math.floor(r() * 12);
-      return { role, text, at };
-    });
-  }, [call]);
+  const turns = useMemo(() => (call ? callTranscript(call) : []), [call]);
 
   return (
     <Sheet
