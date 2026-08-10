@@ -18,6 +18,17 @@ import {
   DropdownMenuItem,
 } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import {
   PhoneIncoming,
@@ -35,6 +46,7 @@ import {
   Download,
   ChevronRight,
   ChevronDown,
+  ListFilter,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -61,6 +73,33 @@ const INTENTS = [
   "Forgot About App",
 ];
 
+/**
+ * Post-call sentiment, as scored by the agent's post-call analysis. Unlike the
+ * intent taxonomy this is a fixed three-point scale across every agent, so it is
+ * safe to filter on regardless of how many agents are in scope.
+ */
+const SENTIMENTS = ["Positive", "Neutral", "Negative"] as const;
+type Sentiment = (typeof SENTIMENTS)[number];
+
+const YES_NO = ["Yes", "No"] as const;
+type YesNo = (typeof YES_NO)[number];
+
+/**
+ * Sentiment correlates with intent rather than being drawn independently — a
+ * caller who is "Interested & Ready" reading as Negative would undermine the
+ * demo. Intents not listed here fall back to a seeded pick.
+ */
+const INTENT_SENTIMENT: Record<string, Sentiment> = {
+  "Interested & Ready": "Positive",
+  "Not Interested": "Negative",
+  "Charges are High": "Negative",
+  "Faced Technical Issue": "Negative",
+  "Using a Different App": "Neutral",
+  "Don't Know How to Use": "Neutral",
+  "No Credit Card Added": "Neutral",
+  "Forgot About App": "Neutral",
+};
+
 /** Voice call lifecycle — tech keeps four states; only Completed is terminal-success. */
 type VoiceStatus = "Pending" | "Running" | "Completed" | "Failed";
 const STATUS_TONE: Record<VoiceStatus, string> = {
@@ -69,6 +108,39 @@ const STATUS_TONE: Record<VoiceStatus, string> = {
   Completed: "border-emerald-500/30 bg-emerald-500/10 text-emerald-600",
   Failed: "border-destructive/30 bg-destructive/10 text-destructive",
 };
+
+const SENTIMENT_TONE: Record<Sentiment, string> = {
+  Positive: "border-emerald-500/30 bg-emerald-500/10 text-emerald-600",
+  Neutral: "border-border bg-secondary text-muted-foreground",
+  Negative: "border-destructive/30 bg-destructive/10 text-destructive",
+};
+
+/** A Yes/No table cell. "Yes" reads as a tinted badge (default sky, or `warning`
+ *  for flags like DND); "No" and null stay quiet so the eye lands on the Yeses. */
+function YesNoCell({
+  value,
+  yesTone = "info",
+}: {
+  value: YesNo | null;
+  yesTone?: "info" | "warning";
+}) {
+  if (value == null) return <span className="text-muted-foreground">—</span>;
+  if (value === "No")
+    return <span className="text-[12.5px] text-muted-foreground">No</span>;
+  return (
+    <Badge
+      variant="outline"
+      className={cn(
+        "text-[10.5px]",
+        yesTone === "warning"
+          ? "border-amber-500/30 bg-amber-500/10 text-amber-600"
+          : "border-sky-500/30 bg-sky-500/10 text-sky-600",
+      )}
+    >
+      Yes
+    </Badge>
+  );
+}
 
 function seed(s: string) {
   let h = 2166136261;
@@ -90,6 +162,9 @@ type Call = {
   duration: number | null;
   status: VoiceStatus;
   intent: string | null;
+  sentiment: Sentiment | null;
+  socialMention: YesNo | null;
+  dndRequest: YesNo | null;
   agentId?: string;
 };
 
@@ -152,6 +227,15 @@ function buildCalls({ run, node }: VoiceRef): Call[] {
       : "Completed";
     const completed = status === "Completed";
     const sched = clock(r);
+    const intent = completed ? INTENTS[Math.floor(r() * INTENTS.length)] : null;
+    const sentiment: Sentiment | null = intent
+      ? (INTENT_SENTIMENT[intent] ??
+        SENTIMENTS[Math.floor(r() * SENTIMENTS.length)])
+      : null;
+    // Post-call flags: derived only for completed calls (no analysis otherwise).
+    // Both skew toward "No" to read like a realistic base.
+    const socialMention: YesNo | null = completed ? (r() < 0.28 ? "Yes" : "No") : null;
+    const dndRequest: YesNo | null = completed ? (r() < 0.16 ? "Yes" : "No") : null;
     return {
       id: l.id,
       phone: l.phone,
@@ -160,7 +244,10 @@ function buildCalls({ run, node }: VoiceRef): Call[] {
       updatedAt: `${fmtDate(l.updatedDate)}, ${clock(r)}`,
       duration: completed ? (l.duration ?? 30 + Math.floor(r() * 200)) : null,
       status,
-      intent: completed ? INTENTS[Math.floor(r() * INTENTS.length)] : null,
+      intent,
+      sentiment,
+      socialMention,
+      dndRequest,
       agentId: agent?.id,
     };
   });
@@ -690,6 +777,9 @@ function callsToCsv(calls: Call[]): string {
     "status",
     "updated_at",
     "intent",
+    "sentiment",
+    "social_media_mention",
+    "dnd_request",
   ];
   const rows = calls.map((c) => [
     c.scheduledAt,
@@ -699,6 +789,9 @@ function callsToCsv(calls: Call[]): string {
     c.status,
     c.updatedAt,
     c.intent ?? "",
+    c.sentiment ?? "",
+    c.socialMention ?? "",
+    c.dndRequest ?? "",
   ]);
   return [head, ...rows]
     .map((r) =>
@@ -712,10 +805,161 @@ function callsToCsv(calls: Call[]): string {
     .join("\n");
 }
 
+/** Each facet the filter popover can expand. `key` names the field on Call. */
+const ATTR_FILTERS = [
+  { key: "intent", label: "Call Intent", options: INTENTS as readonly string[], get: (c: Call) => c.intent },
+  { key: "sentiment", label: "Call Sentiment", options: SENTIMENTS as readonly string[], get: (c: Call) => c.sentiment },
+  { key: "social", label: "Social Media Mention", options: YES_NO as readonly string[], get: (c: Call) => c.socialMention },
+  { key: "dnd", label: "DND Request", options: YES_NO as readonly string[], get: (c: Call) => c.dndRequest },
+] as const;
+type AttrKey = (typeof ATTR_FILTERS)[number]["key"];
+
+/** Selected values per facet. Absent / empty array = that facet is unconstrained. */
+type FacetSelection = Partial<Record<AttrKey, string[]>>;
+
+/**
+ * Faceted filter control. A single trigger opens a popover listing every facet
+ * as a collapsible row; the chevron on each row expands its values as
+ * multi-select checkboxes. The trigger surfaces how many values are active so
+ * the applied state is legible without opening the menu.
+ */
+function FacetFilterMenu({
+  facets,
+  activeCount,
+  onToggle,
+  onClear,
+}: {
+  facets: FacetSelection;
+  activeCount: number;
+  onToggle: (key: AttrKey, val: string) => void;
+  onClear: () => void;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  // Which facet rows are expanded. A facet with active values starts open so the
+  // user can see what is applied the moment they reopen the menu.
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const isExpanded = (key: AttrKey) =>
+    expanded[key] ?? (facets[key]?.length ?? 0) > 0;
+
+  return (
+    <Popover open={menuOpen} onOpenChange={setMenuOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          size="sm"
+          className={cn(
+            "h-8 gap-1.5 text-xs",
+            activeCount > 0 && "border-primary/40 bg-primary/5",
+          )}
+        >
+          <ListFilter className="h-3.5 w-3.5" />
+          Filters
+          {activeCount > 0 && (
+            <Badge
+              variant="secondary"
+              className="ml-0.5 h-4 min-w-4 justify-center rounded-full px-1 text-[10px] tabular-nums"
+            >
+              {activeCount}
+            </Badge>
+          )}
+          <ChevronDown className="h-3.5 w-3.5 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-[240px] p-0">
+        <div className="flex items-center justify-between border-b border-border px-3 py-2">
+          <span className="text-xs font-medium">Filter calls</span>
+          <button
+            type="button"
+            onClick={onClear}
+            disabled={activeCount === 0}
+            className="text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-40"
+          >
+            Clear
+          </button>
+        </div>
+        <div className="max-h-[320px] overflow-auto py-1">
+          {ATTR_FILTERS.map((f) => {
+            const picked = facets[f.key] ?? [];
+            const openRow = isExpanded(f.key);
+            return (
+              <Collapsible
+                key={f.key}
+                open={openRow}
+                onOpenChange={(o) =>
+                  setExpanded((prev) => ({ ...prev, [f.key]: o }))
+                }
+              >
+                <CollapsibleTrigger asChild>
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-accent"
+                  >
+                    <ChevronRight
+                      className={cn(
+                        "h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform",
+                        openRow && "rotate-90",
+                      )}
+                    />
+                    <span className="flex-1 font-medium">{f.label}</span>
+                    {picked.length > 0 && (
+                      <Badge
+                        variant="secondary"
+                        className="h-4 min-w-4 justify-center rounded-full px-1 text-[10px] tabular-nums"
+                      >
+                        {picked.length}
+                      </Badge>
+                    )}
+                  </button>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <div className="pb-1">
+                    {f.options.map((o) => {
+                      const checked = picked.includes(o);
+                      return (
+                        <button
+                          type="button"
+                          key={o}
+                          onClick={() => onToggle(f.key, o)}
+                          className="flex w-full items-center gap-2 py-1.5 pl-8 pr-3 text-left text-xs hover:bg-accent"
+                        >
+                          <Checkbox
+                            checked={checked}
+                            onCheckedChange={() => onToggle(f.key, o)}
+                            className="h-3.5 w-3.5"
+                          />
+                          <span className="truncate">{o}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
+            );
+          })}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 function CallsTable({ refs }: { refs: VoiceRef[] }) {
   const [q, setQ] = useState("");
   const [durF, setDurF] = useState("any");
   const [open, setOpen] = useState<Call | null>(null);
+
+  // Faceted multi-select: each facet holds a list of checked values. Within a
+  // facet the values are OR'd; across facets they are AND'd. Empty/absent =
+  // unconstrained, so the default (nothing checked) shows every call.
+  const [facets, setFacets] = useState<FacetSelection>({});
+  const activeCount = Object.values(facets).reduce((n, v) => n + (v?.length ?? 0), 0);
+
+  const toggleFacetValue = (key: AttrKey, val: string) =>
+    setFacets((prev) => {
+      const cur = prev[key] ?? [];
+      const next = cur.includes(val) ? cur.filter((x) => x !== val) : [...cur, val];
+      return { ...prev, [key]: next };
+    });
+  const clearFacets = () => setFacets({});
 
   // Calls table shows the latest selected run only; a banner notes the rest.
   const tableRunId = refs[0]?.run.id;
@@ -742,9 +986,15 @@ function CallsTable({ refs }: { refs: VoiceRef[] }) {
           const d = c.duration ?? -1;
           if (!(d >= f.lo && d < f.hi)) return false;
         }
+        for (const f of ATTR_FILTERS) {
+          const picked = facets[f.key];
+          if (!picked || picked.length === 0) continue; // facet unconstrained
+          const actual = f.get(c);
+          if (!actual || !picked.includes(actual)) return false; // AND across facets
+        }
         return true;
       }),
-    [calls, q, durF],
+    [calls, q, durF, facets],
   );
 
   const exportCsv = (scope: "all" | "completed" | "failed") => {
@@ -791,6 +1041,17 @@ function CallsTable({ refs }: { refs: VoiceRef[] }) {
               ))}
             </SelectContent>
           </Select>
+
+          {/* Faceted, multi-select filter. Each facet (Call Intent, Call
+              Sentiment) is a collapsible row; its arrow reveals value
+              checkboxes. Multiple values per facet are OR'd; facets are AND'd. */}
+          <FacetFilterMenu
+            facets={facets}
+            activeCount={activeCount}
+            onToggle={toggleFacetValue}
+            onClear={clearFacets}
+          />
+
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
@@ -814,21 +1075,55 @@ function CallsTable({ refs }: { refs: VoiceRef[] }) {
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
+        {activeCount > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-4 py-2.5">
+            {ATTR_FILTERS.flatMap((f) =>
+              (facets[f.key] ?? []).map((val) => (
+                <span
+                  key={`${f.key}:${val}`}
+                  className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/5 py-0.5 pl-2 pr-1 text-[11px]"
+                >
+                  <span className="text-muted-foreground">{f.label}:</span>
+                  <span className="font-medium">{val}</span>
+                  <button
+                    type="button"
+                    aria-label={`Remove ${f.label} ${val}`}
+                    onClick={() => toggleFacetValue(f.key, val)}
+                    className="ml-0.5 grid h-3.5 w-3.5 place-items-center rounded-full text-muted-foreground hover:bg-primary/15 hover:text-foreground"
+                  >
+                    <X className="h-2.5 w-2.5" />
+                  </button>
+                </span>
+              )),
+            )}
+            <button
+              type="button"
+              onClick={clearFacets}
+              className="ml-1 text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+            >
+              Clear all
+            </button>
+          </div>
+        )}
         <div className="border-b border-border px-4 py-2 text-[11px] text-muted-foreground">
           Showing 1–{Math.min(filtered.length, 50)} of{" "}
           {calls.length.toLocaleString()} calls
         </div>
         <div className="max-h-[560px] overflow-auto">
-          <table className="w-full text-sm">
+          <table className="w-full min-w-[1200px] text-sm">
             <thead className="sticky top-0 bg-card text-[11px] uppercase tracking-wider text-muted-foreground">
               <tr className="border-b border-border">
-                <th className="px-4 py-2 text-left font-medium">
+                <th className="whitespace-nowrap px-4 py-2 text-left font-medium">
                   Scheduled At
                 </th>
-                <th className="px-4 py-2 text-left font-medium">Phone</th>
-                <th className="px-4 py-2 text-right font-medium">Duration</th>
-                <th className="px-4 py-2 text-left font-medium">Status</th>
-                <th className="px-4 py-2 text-left font-medium">Updated At</th>
+                <th className="whitespace-nowrap px-4 py-2 text-left font-medium">Phone</th>
+                <th className="whitespace-nowrap px-4 py-2 text-right font-medium">Duration</th>
+                <th className="whitespace-nowrap px-4 py-2 text-left font-medium">Status</th>
+                <th className="whitespace-nowrap px-4 py-2 text-left font-medium">Call Intent</th>
+                <th className="whitespace-nowrap px-4 py-2 text-left font-medium">Call Sentiment</th>
+                <th className="whitespace-nowrap px-4 py-2 text-left font-medium">Social Media Mention</th>
+                <th className="whitespace-nowrap px-4 py-2 text-left font-medium">DND Request</th>
+                <th className="whitespace-nowrap px-4 py-2 text-left font-medium">Updated At</th>
                 <th className="px-4 py-2" />
               </tr>
             </thead>
@@ -862,7 +1157,28 @@ function CallsTable({ refs }: { refs: VoiceRef[] }) {
                         {c.status}
                       </Badge>
                     </td>
-                    <td className="px-4 py-2.5 text-[12.5px] tabular-nums text-muted-foreground">
+                    <td className="whitespace-nowrap px-4 py-2.5 text-[12.5px]">
+                      {c.intent ?? <span className="text-muted-foreground">—</span>}
+                    </td>
+                    <td className="px-4 py-2.5">
+                      {c.sentiment ? (
+                        <Badge
+                          variant="outline"
+                          className={cn("text-[10.5px]", SENTIMENT_TONE[c.sentiment])}
+                        >
+                          {c.sentiment}
+                        </Badge>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <YesNoCell value={c.socialMention} />
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <YesNoCell value={c.dndRequest} yesTone="warning" />
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-2.5 text-[12.5px] tabular-nums text-muted-foreground">
                       {c.updatedAt}
                     </td>
                     <td className="px-4 py-2.5 text-right text-muted-foreground">
@@ -894,7 +1210,9 @@ function humanizeVar(name: string): string {
 function insightValue(name: string, r: () => number, call: Call): string {
   const n = name.toLowerCase();
   const pick = (arr: string[]) => arr[Math.floor(r() * arr.length)];
-  if (n.includes("sentiment")) return pick(["Positive", "Neutral", "Negative"]);
+  // Read the call's own sentiment rather than re-rolling, so a row filtered as
+  // "Positive" cannot open a drawer that claims Negative.
+  if (n.includes("sentiment")) return call.sentiment ?? pick([...SENTIMENTS]);
   if (n.includes("intent") || n.includes("engagement"))
     return call.intent ?? pick(INTENTS);
   if (n.includes("availab"))
