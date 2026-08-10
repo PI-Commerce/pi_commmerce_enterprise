@@ -1,0 +1,12 @@
+scheduled_at,phone,customer,duration_sec,status,updated_at,intent,sentiment,social_media_mention,dnd_request,recording_url,transcript
+"26 Jul 2026, 11:21 am",+91 9246296369,Rahul Mehta,85,Completed,"26 Jul 2026, 5:42 pm",Interested & Ready,Positive,No,No,https://recordings.picom.ai/voice/L-10288.mp3,"[0:00] Agent: Hi Rahul, this is Maya from Paytm. I noticed you haven't used your trading account in a while — is now a good time to talk?
+[0:06] Customer: Okay, but just for a minute.
+[0:19] Agent: Of course. May I know what's been keeping you away from the app?
+[0:25] Customer: Honestly the charges felt a bit high, and I started using another app.
+[0:41] Agent: I understand. We've reduced charges and added zero brokerage for 30 days for returning traders.
+[0:47] Customer: Hmm, interesting. I also had trouble adding my credit card last time.
+[1:03] Agent: I can help with that — I'll send a step-by-step link on WhatsApp right after this call.
+[1:10] Customer: Sure, please do. I'll give it another try.
+[1:18] Agent: Wonderful. Thanks for your time, and welcome back!"
+"7 Aug 2026, 4:19 pm",+91 9995796415,Aman Singh,,Pending,"7 Aug 2026, 11:43 am",,,,,,
+"29 Jul 2026, 11:22 am",+91 9641335415,Sneha Khan,,Failed,"29 Jul 2026, 11:16 am",,,,,,
