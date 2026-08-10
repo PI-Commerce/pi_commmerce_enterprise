@@ -11,12 +11,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
-} from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import {
   Popover,
@@ -1063,14 +1057,11 @@ function CallsTable({ refs }: { refs: VoiceRef[] }) {
     [calls, q, durF, facets],
   );
 
-  // Exports are scoped to the current filter selection (search, duration and the
-  // facet filters) — the CSV is exactly the rows in view, not the whole base.
-  const exportCsv = (scope: "all" | "completed" | "failed") => {
-    const rows =
-      scope === "all"
-        ? filtered
-        : filtered.filter((c) => c.status.toLowerCase() === scope);
-    downloadCsv(`voice-calls-${scope}.csv`, callsToCsv(rows));
+  // Export is scoped to the current filter selection (search, duration and the
+  // facet filters). With no filters active `filtered` is the full set, so the
+  // CSV is simply "everything in view" — all rows, or only the matching rows.
+  const exportCsv = () => {
+    downloadCsv("voice-calls.csv", callsToCsv(filtered));
   };
 
   return (
@@ -1120,28 +1111,14 @@ function CallsTable({ refs }: { refs: VoiceRef[] }) {
             onClear={clearFacets}
           />
 
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="outline"
-                size="sm"
-                className="ml-auto h-8 gap-1.5 text-xs"
-              >
-                <Download className="h-3.5 w-3.5" /> Export CSV
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => exportCsv("all")}>
-                Current view (all filters)
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => exportCsv("completed")}>
-                Completed only
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => exportCsv("failed")}>
-                Failed only
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <Button
+            variant="outline"
+            size="sm"
+            className="ml-auto h-8 gap-1.5 text-xs"
+            onClick={exportCsv}
+          >
+            <Download className="h-3.5 w-3.5" /> Export CSV
+          </Button>
         </div>
         {activeCount > 0 && (
           <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-4 py-2.5">
