@@ -61,6 +61,30 @@ const INTENTS = [
   "Forgot About App",
 ];
 
+/**
+ * Post-call sentiment, as scored by the agent's post-call analysis. Unlike the
+ * intent taxonomy this is a fixed three-point scale across every agent, so it is
+ * safe to filter on regardless of how many agents are in scope.
+ */
+const SENTIMENTS = ["Positive", "Neutral", "Negative"] as const;
+type Sentiment = (typeof SENTIMENTS)[number];
+
+/**
+ * Sentiment correlates with intent rather than being drawn independently — a
+ * caller who is "Interested & Ready" reading as Negative would undermine the
+ * demo. Intents not listed here fall back to a seeded pick.
+ */
+const INTENT_SENTIMENT: Record<string, Sentiment> = {
+  "Interested & Ready": "Positive",
+  "Not Interested": "Negative",
+  "Charges are High": "Negative",
+  "Faced Technical Issue": "Negative",
+  "Using a Different App": "Neutral",
+  "Don't Know How to Use": "Neutral",
+  "No Credit Card Added": "Neutral",
+  "Forgot About App": "Neutral",
+};
+
 /** Voice call lifecycle — tech keeps four states; only Completed is terminal-success. */
 type VoiceStatus = "Pending" | "Running" | "Completed" | "Failed";
 const STATUS_TONE: Record<VoiceStatus, string> = {
@@ -90,6 +114,7 @@ type Call = {
   duration: number | null;
   status: VoiceStatus;
   intent: string | null;
+  sentiment: Sentiment | null;
   agentId?: string;
 };
 
@@ -152,6 +177,7 @@ function buildCalls({ run, node }: VoiceRef): Call[] {
       : "Completed";
     const completed = status === "Completed";
     const sched = clock(r);
+    const intent = completed ? INTENTS[Math.floor(r() * INTENTS.length)] : null;
     return {
       id: l.id,
       phone: l.phone,
@@ -160,7 +186,11 @@ function buildCalls({ run, node }: VoiceRef): Call[] {
       updatedAt: `${fmtDate(l.updatedDate)}, ${clock(r)}`,
       duration: completed ? (l.duration ?? 30 + Math.floor(r() * 200)) : null,
       status,
-      intent: completed ? INTENTS[Math.floor(r() * INTENTS.length)] : null,
+      intent,
+      sentiment: intent
+        ? (INTENT_SENTIMENT[intent] ??
+          SENTIMENTS[Math.floor(r() * SENTIMENTS.length)])
+        : null,
       agentId: agent?.id,
     };
   });
@@ -690,6 +720,7 @@ function callsToCsv(calls: Call[]): string {
     "status",
     "updated_at",
     "intent",
+    "sentiment",
   ];
   const rows = calls.map((c) => [
     c.scheduledAt,
@@ -699,6 +730,7 @@ function callsToCsv(calls: Call[]): string {
     c.status,
     c.updatedAt,
     c.intent ?? "",
+    c.sentiment ?? "",
   ]);
   return [head, ...rows]
     .map((r) =>
@@ -712,10 +744,23 @@ function callsToCsv(calls: Call[]): string {
     .join("\n");
 }
 
+/** The attribute the second dropdown draws its options from. */
+const ATTR_FILTERS = [
+  { value: "intent", label: "Call Intent", options: INTENTS as readonly string[] },
+  { value: "sentiment", label: "Call Sentiment", options: SENTIMENTS as readonly string[] },
+] as const;
+type AttrKey = (typeof ATTR_FILTERS)[number]["value"];
+
 function CallsTable({ refs }: { refs: VoiceRef[] }) {
   const [q, setQ] = useState("");
   const [durF, setDurF] = useState("any");
   const [open, setOpen] = useState<Call | null>(null);
+
+  // Two paired dropdowns: pick an attribute, then a value within it. "none" /
+  // "any" are sentinels because Radix Select forbids an empty-string item value.
+  const [attr, setAttr] = useState<AttrKey | "none">("none");
+  const [attrVal, setAttrVal] = useState("any");
+  const attrMeta = ATTR_FILTERS.find((f) => f.value === attr) ?? null;
 
   // Calls table shows the latest selected run only; a banner notes the rest.
   const tableRunId = refs[0]?.run.id;
@@ -742,9 +787,13 @@ function CallsTable({ refs }: { refs: VoiceRef[] }) {
           const d = c.duration ?? -1;
           if (!(d >= f.lo && d < f.hi)) return false;
         }
+        if (attr !== "none" && attrVal !== "any") {
+          const actual = attr === "intent" ? c.intent : c.sentiment;
+          if (actual !== attrVal) return false;
+        }
         return true;
       }),
-    [calls, q, durF],
+    [calls, q, durF, attr, attrVal],
   );
 
   const exportCsv = (scope: "all" | "completed" | "failed") => {
@@ -791,6 +840,52 @@ function CallsTable({ refs }: { refs: VoiceRef[] }) {
               ))}
             </SelectContent>
           </Select>
+
+          {/* Attribute filter — picking a new attribute clears the stale value,
+              otherwise "Positive" could linger while Call Intent is selected. */}
+          <Select
+            value={attr}
+            onValueChange={(v) => {
+              setAttr(v as AttrKey | "none");
+              setAttrVal("any");
+            }}
+          >
+            <SelectTrigger className="h-8 w-[150px] text-xs">
+              <SelectValue placeholder="Select Filter" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">Select Filter</SelectItem>
+              {ATTR_FILTERS.map((f) => (
+                <SelectItem key={f.value} value={f.value}>
+                  {f.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select
+            value={attrVal}
+            onValueChange={setAttrVal}
+            disabled={!attrMeta}
+          >
+            <SelectTrigger
+              className="h-8 w-[190px] text-xs disabled:opacity-50"
+              title={attrMeta ? undefined : "Pick a filter first"}
+            >
+              <SelectValue placeholder="Select Values" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="any">
+                {attrMeta ? `All ${attrMeta.label.replace("Call ", "")}` : "Select Values"}
+              </SelectItem>
+              {attrMeta?.options.map((o) => (
+                <SelectItem key={o} value={o}>
+                  {o}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
@@ -894,7 +989,9 @@ function humanizeVar(name: string): string {
 function insightValue(name: string, r: () => number, call: Call): string {
   const n = name.toLowerCase();
   const pick = (arr: string[]) => arr[Math.floor(r() * arr.length)];
-  if (n.includes("sentiment")) return pick(["Positive", "Neutral", "Negative"]);
+  // Read the call's own sentiment rather than re-rolling, so a row filtered as
+  // "Positive" cannot open a drawer that claims Negative.
+  if (n.includes("sentiment")) return call.sentiment ?? pick([...SENTIMENTS]);
   if (n.includes("intent") || n.includes("engagement"))
     return call.intent ?? pick(INTENTS);
   if (n.includes("availab"))
