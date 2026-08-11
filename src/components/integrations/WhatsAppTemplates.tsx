@@ -4,6 +4,7 @@ import {
   Smile, X, Trash2, Pencil, UploadCloud, Phone, Reply, Workflow, ExternalLink, Check,
   Signal, Wifi, BatteryFull, ChevronLeft, ChevronRight, AlertCircle,
   Bold, Italic, Strikethrough, Code, Info, List, ArrowUp, ArrowDown, ChevronDown, Copy,
+  MoreHorizontal, CopyPlus, Terminal,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,8 +15,10 @@ import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
 } from "@/components/ui/select";
 import {
-  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
+import { GetCurlDialog } from "@/components/integrations/GetCurlDialog";
+import { waToCurlTemplate } from "@/lib/template-send";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -95,14 +98,33 @@ export function WhatsAppTemplates({ waba }: { waba: ConnectedWaba }) {
   if (creating) {
     return <TemplateForm waba={waba} initial={editing} onCancel={close} onSave={save} />;
   }
+  const clone = (t: WaTemplate) => {
+    const copy: WaTemplate = {
+      ...t,
+      id: String(Date.now()),
+      name: `${t.name}_copy`,
+      status: "Draft",
+      createdAt: formatToday(),
+    };
+    setTemplates((prev) => [copy, ...prev]);
+    toast.success(`Cloned as ${copy.name}`);
+  };
+
   return (
     <TemplateList
       templates={templates}
       onCreate={openCreate}
       onEdit={openEdit}
+      onClone={clone}
       onDelete={(id) => setTemplates((prev) => prev.filter((t) => t.id !== id))}
     />
   );
+}
+
+/** "6 Aug 2026" style date for freshly cloned templates. */
+function formatToday(): string {
+  const d = new Date();
+  return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
 }
 
 /* ================================ List view ================================ */
@@ -115,16 +137,18 @@ function parseCreated(s: string): Date {
   return new Date(Number(y), Math.max(0, MONTHS.indexOf(mon)), Number(d));
 }
 
-function TemplateList({ templates, onCreate, onEdit, onDelete }: {
+function TemplateList({ templates, onCreate, onEdit, onClone, onDelete }: {
   templates: WaTemplate[];
   onCreate: () => void;
   onEdit: (t: WaTemplate) => void;
+  onClone: (t: WaTemplate) => void;
   onDelete: (id: string) => void;
 }) {
   const [q, setQ] = useState("");
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
   const [page, setPage] = useState(1);
+  const [curlFor, setCurlFor] = useState<WaTemplate | null>(null);
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -205,25 +229,37 @@ function TemplateList({ templates, onCreate, onEdit, onDelete }: {
               <span className="text-muted-foreground">{t.createdAt}</span>
               <span><CategoryTag category={t.category} /></span>
               <span><StatusTag status={t.status} /></span>
-              <span className="flex w-16 items-center justify-end gap-1">
-                <span
-                  role="button"
-                  tabIndex={0}
-                  onClick={(e) => { e.stopPropagation(); onEdit(t); }}
-                  className="grid h-7 w-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                  aria-label="Edit"
-                >
-                  <Pencil className="h-3.5 w-3.5" />
-                </span>
-                <span
-                  role="button"
-                  tabIndex={0}
-                  onClick={(e) => { e.stopPropagation(); onDelete(t.id); }}
-                  className="grid h-7 w-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-                  aria-label="Delete"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </span>
+              <span className="flex w-16 items-center justify-end" onClick={(e) => e.stopPropagation()}>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      aria-label="More actions"
+                      className="grid h-7 w-7 place-items-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground"
+                    >
+                      <MoreHorizontal className="h-4 w-4" />
+                    </span>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-40">
+                    <DropdownMenuItem onSelect={() => onEdit(t)}>
+                      <Pencil className="mr-2 h-3.5 w-3.5" /> Edit
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => onClone(t)}>
+                      <CopyPlus className="mr-2 h-3.5 w-3.5" /> Clone
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => setCurlFor(t)}>
+                      <Terminal className="mr-2 h-3.5 w-3.5" /> Get Curl
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onSelect={() => onDelete(t.id)}
+                      className="text-destructive focus:text-destructive"
+                    >
+                      <Trash2 className="mr-2 h-3.5 w-3.5" /> Delete
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </span>
             </button>
           ))
@@ -260,6 +296,12 @@ function TemplateList({ templates, onCreate, onEdit, onDelete }: {
         )}
       </div>
       </div>
+
+      <GetCurlDialog
+        template={curlFor ? waToCurlTemplate(curlFor) : null}
+        open={!!curlFor}
+        onOpenChange={(open) => { if (!open) setCurlFor(null); }}
+      />
     </div>
   );
 }
