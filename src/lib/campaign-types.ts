@@ -187,6 +187,9 @@ export type PresetConfig = {
   waBody?: string;
   /** Whole hours (1–24) the node waits for a reply before taking the "Timeout" path. */
   waTimeoutHours?: number;
+  // ---- AI Chat core ----
+  /** A {@link AgentRecord} id or name (type "chat") from the agent registry. Drives the disposition outputs. */
+  chatAgent?: string;
   // ---- SMS core ----
   /** DLT Template ID from the SMS registry — the node's primary selection. */
   smsTemplateId?: string;

@@ -46,6 +46,7 @@ import {
 import type { DateRange } from "react-day-picker";
 import { CampaignFlowView } from "@/components/analytics/CampaignFlowView";
 import { VoiceChannelView } from "@/components/analytics/VoiceChannelView";
+import { WhatsAppChatAgentView } from "@/components/analytics/WhatsAppChatAgentView";
 import { SmsChannelView } from "@/components/analytics/SmsChannelView";
 import { RcsChannelView } from "@/components/analytics/RcsChannelView";
 import {
@@ -199,12 +200,13 @@ const CHANNEL_TABS: {
  *               channel kind within that one run.
  */
 
-type ChannelMode = "asset" | "campaign";
+type ChannelMode = "asset" | "campaign" | "agent";
 
 type ChannelSelection = {
   kind: ChannelKind;
   mode: ChannelMode;
-  /** Asset-mode: single Voice Agent id (Voice) or single Template id (WhatsApp). */
+  /** Asset-mode: single Voice Agent id (Voice) or single Template id (WhatsApp).
+   *  Agent-mode (WhatsApp chat agents): single Chat Agent id. */
   assetId?: string;
   /** Asset-mode optional nested narrowing — campaign IDs DESELECTED from the
    *  default-all set; runs DESELECTED within still-included campaigns. */
@@ -269,6 +271,31 @@ function pickDefaultAsset(kind: ChannelKind): string | undefined {
     return undefined;
   }
   return undefined;
+}
+
+/** Pre-select the highest-volume chat agent for WhatsApp Agent-mode landing —
+ *  the chat agent handling the most sessions (= node entered) across all runs. */
+function pickDefaultChatAgent(kind: ChannelKind): string | undefined {
+  if (kind !== "whatsapp") return undefined;
+  const byAgent = new Map<string, number>();
+  for (const c of CAMPAIGNS) {
+    for (const r of c.runs) {
+      for (const n of r.sankey.nodes) {
+        if (n.kind !== "whatsapp") continue;
+        const a = resolveAgent(n.config?.chatAgent);
+        if (!a) continue;
+        byAgent.set(a.id, (byAgent.get(a.id) ?? 0) + n.entered);
+      }
+    }
+  }
+  let best: string | undefined;
+  let bestVol = -1;
+  for (const [id, vol] of byAgent)
+    if (vol > bestVol) {
+      best = id;
+      bestVol = vol;
+    }
+  return best;
 }
 
 /** Pre-select the latest campaign/version/run that contains a node of this kind
@@ -1549,6 +1576,32 @@ function ChannelAnalytics({
     return map;
   }, [kind]);
 
+  // refKey → the resolved Chat Agent on a WhatsApp node (for Agent-mode).
+  const chatAgentByRefKey = useMemo(() => {
+    const map = new Map<string, ReturnType<typeof resolveAgent>>();
+    if (kind !== "whatsapp") return map;
+    for (const c of CAMPAIGNS) {
+      for (const r of c.runs) {
+        for (const n of r.sankey.nodes) {
+          if (n.kind !== "whatsapp") continue;
+          const a = resolveAgent(n.config?.chatAgent);
+          if (a) map.set(`${c.id}|${r.id}|${n.id}`, a);
+        }
+      }
+    }
+    return map;
+  }, [kind]);
+
+  // Agent picker options (Agent-mode): unique chat agents touching any ref.
+  const chatAgentOptions = useMemo(() => {
+    const m = new Map<string, { id: string; label: string }>();
+    for (const r of allRefs) {
+      const a = chatAgentByRefKey.get(`${r.campaignId}|${r.runId}|${r.nodeId}`);
+      if (a) m.set(a.id, { id: a.id, label: a.name });
+    }
+    return [...m.values()];
+  }, [allRefs, chatAgentByRefKey]);
+
   // Asset picker options (Asset-mode): voice = unique resolved agents touching
   // any ref; whatsapp = unique templates touching any ref. Sorted by latest-use.
   const assetOptions = useMemo(() => {
@@ -1582,6 +1635,15 @@ function ChannelAnalytics({
 
   // ── Mode-driven resolved refs ──────────────────────────────────────────────
   const selectedRefs = useMemo(() => {
+    if (mode === "agent") {
+      // Every WhatsApp node whose chat agent matches the picked agent.
+      const agentId = selection.assetId;
+      return allRefs.filter(
+        (r) =>
+          chatAgentByRefKey.get(`${r.campaignId}|${r.runId}|${r.nodeId}`)?.id ===
+          agentId,
+      );
+    }
     if (mode === "asset") {
       const assetId = selection.assetId;
       const excludedCampaigns = new Set(selection.excludedCampaignIds ?? []);
@@ -1655,11 +1717,14 @@ function ChannelAnalytics({
       : undefined;
   const showDateRange =
     mode === "asset" ||
+    mode === "agent" ||
     (mode === "campaign" && pinnedRun?.runType === "always-on");
 
-  // Default the date window to "last 7 days" the first time we enter Asset-mode.
+  // Default the date window to "last 7 days" the first time we enter Asset- or
+  // Agent-mode (both are date-primary views).
   useEffect(() => {
-    if (mode === "asset" && !dateRange) onDateRangeChange(defaultDateRange(7));
+    if ((mode === "asset" || mode === "agent") && !dateRange)
+      onDateRangeChange(defaultDateRange(7));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode]);
 
@@ -1723,6 +1788,9 @@ function ChannelAnalytics({
                 const assetId =
                   selection.assetId ?? pickDefaultAsset(kind) ?? "";
                 onSelectionChange({ kind, mode: "asset", assetId });
+              } else if (m === "agent") {
+                const assetId = pickDefaultChatAgent(kind) ?? "";
+                onSelectionChange({ kind, mode: "agent", assetId });
               } else {
                 const t = pickDefaultCampaignTriple(kind);
                 onSelectionChange({ kind, mode: "campaign", ...t });
@@ -1735,12 +1803,45 @@ function ChannelAnalytics({
             <SelectContent>
               <SelectItem value="asset">{tabMeta.assetLabel}</SelectItem>
               <SelectItem value="campaign">Campaign run</SelectItem>
+              {kind === "whatsapp" && (
+                <SelectItem value="agent">Chat Agent</SelectItem>
+              )}
             </SelectContent>
           </Select>
         </FilterField>
 
         {/* Mode-driven filter row */}
-        {mode === "asset" ? (
+        {mode === "agent" ? (
+          <div className="flex flex-1 flex-col gap-2 sm:flex-row sm:items-end">
+            <FilterField label="Chat Agent" className="sm:w-[280px]">
+              <Select
+                value={selection.assetId ?? ""}
+                onValueChange={(v) =>
+                  onSelectionChange({ kind, mode: "agent", assetId: v })
+                }
+              >
+                <SelectTrigger className="h-9 w-full text-xs">
+                  <SelectValue placeholder="Pick a chat agent" />
+                </SelectTrigger>
+                <SelectContent>
+                  {chatAgentOptions.map((a) => (
+                    <SelectItem key={a.id} value={a.id}>
+                      {a.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </FilterField>
+            <FilterField label="Date range" className="sm:w-[280px]">
+              <DateRangePicker
+                value={dateRange}
+                onChange={onDateRangeChange}
+                align="start"
+                className="w-full"
+              />
+            </FilterField>
+          </div>
+        ) : mode === "asset" ? (
           <div className="flex flex-1 flex-col gap-2 sm:flex-row sm:items-end">
             <FilterField label={tabMeta.assetLabel} className="sm:w-[280px]">
               <Select
@@ -1892,6 +1993,23 @@ function ChannelAnalytics({
         <div className="rounded-xl border border-border bg-card px-6 py-12 text-center text-sm text-muted-foreground">
           No {tabMeta.label} nodes found in scope.
         </div>
+      ) : kind === "whatsapp" && mode === "agent" ? (
+        (() => {
+          const crefs = selectedRefs.map((ref) => {
+            const run = CAMPAIGNS.find(
+              (c) => c.id === ref.campaignId,
+            )!.runs.find((r) => r.id === ref.runId)!;
+            const node = run.sankey.nodes.find((n) => n.id === ref.nodeId)!;
+            return { run, node };
+          });
+          const agent = resolveAgent(selection.assetId);
+          return (
+            <WhatsAppChatAgentView
+              refs={crefs}
+              agentName={agent?.name ?? "Chat Agent"}
+            />
+          );
+        })()
       ) : kind === "voice" ? (
         (() => {
           const vrefs = selectedRefs.map((ref) => {

@@ -100,6 +100,7 @@ const EX1_NODES: Node<WorkflowNodeData>[] = [
         waNumber: "+91 98100 12345 · PiCommerce",
         waMode: "template",
         waTemplate: "10248300981244",
+        chatAgent: "pi_concierge",
         waVarMap: [
           { v: "{{1}}", def: "contact.first_name" },
           { v: "{{2}}", def: "favorite_category" },
@@ -141,6 +142,7 @@ const EX1_NODES: Node<WorkflowNodeData>[] = [
         waNumber: "+91 98100 12345 · PiCommerce",
         waMode: "template",
         waTemplate: "winback_v2 · Marketing",
+        chatAgent: "pi_concierge",
         waVarMap: [
           { v: "{{1}}", def: "contact.first_name" },
           { v: "{{2}}", def: "favorite_category" },
@@ -257,6 +259,7 @@ const EX2_NODES: Node<WorkflowNodeData>[] = [
         waNumber: "+91 98100 12345 · PiCommerce",
         waMode: "template",
         waTemplate: "10248301338871",
+        chatAgent: "l1_support",
         waVarMap: [
           { v: "{{1}}", def: "contact.first_name" },
           { v: "{{2}}", def: "last_item" },
@@ -279,6 +282,7 @@ const EX2_NODES: Node<WorkflowNodeData>[] = [
         waNumber: "+91 98100 12345 · PiCommerce",
         waMode: "template",
         waTemplate: "reorder_v1 · Marketing",
+        chatAgent: "l1_support",
         waVarMap: [
           { v: "{{1}}", def: "contact.first_name" },
           { v: "{{2}}", def: "last_item" },
@@ -328,6 +332,7 @@ const EX2_NODES: Node<WorkflowNodeData>[] = [
         waNumber: "+91 98100 12345 · PiCommerce",
         waMode: "template",
         waTemplate: "winback_v2 · Marketing",
+        chatAgent: "pricing_qa",
         waVarMap: [
           { v: "{{1}}", def: "contact.first_name" },
         ],
@@ -343,6 +348,7 @@ const EX2_NODES: Node<WorkflowNodeData>[] = [
         waNumber: "+91 98100 12345 · PiCommerce",
         waMode: "template",
         waTemplate: "onboarding_v1 · Utility",
+        chatAgent: "kyc_helper",
         waVarMap: [
           { v: "{{1}}", def: "contact.first_name" },
           { v: "{{2}}", def: "last_item" },
