@@ -109,6 +109,9 @@ const STATUS_BY_KIND: Record<SankeyNodeKind, LeadStatus[]> = {
   // Aligned to the Meta delivery callback set (clicked/replied are interaction
   // events, not delivery statuses, so they're excluded here).
   whatsapp: ["sent", "delivered", "read", "failed"],
+  // Freeform Workflow lifecycle: the lead is either inside an active session,
+  // finished it (completed), let it time out, or hit an error mid-session.
+  whatsappFreeform: ["running", "completed", "failed"],
   // Dev team's current voice-call lifecycle statuses.
   voice: ["pending", "running", "completed", "failed"],
   // Aligned to the SMS node's three delivery outcomes, plus the transient

@@ -31,7 +31,7 @@ import {
   Megaphone, Flag, ChevronDown, ChevronRight, PhoneMissed, PhoneCall, Play,
 } from "lucide-react";
 
-export const Route = createFileRoute("/leads/$id")({
+export const Route = createFileRoute("/inbox/$id")({
   component: LeadDetail,
   head: () => ({ meta: [{ title: "Lead · Pi Commerce Enterprise" }] }),
 });
@@ -68,7 +68,7 @@ function LeadDetail() {
       <AppShell>
         <div className="rounded-xl border border-border bg-card px-6 py-12 text-center">
           <p className="text-sm text-muted-foreground">Lead not found.</p>
-          <Button size="sm" variant="outline" className="mt-4" onClick={() => navigate({ to: "/leads" })}>
+          <Button size="sm" variant="outline" className="mt-4" onClick={() => navigate({ to: "/inbox" })}>
             Back to leads
           </Button>
         </div>
@@ -80,7 +80,7 @@ function LeadDetail() {
     <AppShell>
       {/* Back link */}
       <div className="mb-4">
-        <Link to="/leads" className="inline-flex items-center gap-1 text-[12px] text-muted-foreground hover:text-foreground">
+        <Link to="/inbox" className="inline-flex items-center gap-1 text-[12px] text-muted-foreground hover:text-foreground">
           <ArrowLeft className="h-3.5 w-3.5" /> All leads
         </Link>
       </div>

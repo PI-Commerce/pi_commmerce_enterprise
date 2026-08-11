@@ -27,6 +27,7 @@ export type SankeyNodeKind =
   | "apiToolCall"
   | "abSplit"
   | "whatsapp"
+  | "whatsappFreeform"
   | "voice"
   | "sms"
   | "rcs"
@@ -107,6 +108,7 @@ const KIND_TO_SANKEY: Record<NodeKind, SankeyNodeKind> = {
   delay: "delay",
   voiceCall: "voice",
   whatsapp: "whatsapp",
+  whatsappFreeform: "whatsappFreeform",
   sms: "sms",
   rcs: "rcs",
   adsCampaign: "ads",
@@ -129,6 +131,11 @@ const PASS_RATE: Record<SankeyNodeKind, number> = {
   end: 1,
   voice: 0.72,
   whatsapp: 0.82,
+  // Freeform sessions are opened only after the lead engaged with a WhatsApp
+  // Template (either replied or tapped a button), so the drop-off from
+  // freeform-entry to freeform-exit is moderate: most complete, some time out,
+  // a few fail. Slightly higher retention than the send-first Template node.
+  whatsappFreeform: 0.86,
   sms: 0.9,
   rcs: 0.88,
   ads: 0.95,
@@ -240,6 +247,19 @@ function rcsHandleBaseWeight(handle: string): number {
   return 1;
 }
 
+/**
+ * Semantic base weight for a WhatsApp Freeform Workflow outcome handle. The
+ * three exits are `completed` / `timed_out` / `failed` (see `freeformOutputs`
+ * in wa-outputs). Most sessions complete since the lead already opted in by
+ * replying to the Template; timeouts are common on longer flows, failures rare.
+ */
+function ffHandleBaseWeight(handle: string): number {
+  if (handle === "completed") return 7.5;
+  if (handle === "timed_out") return 2.0;
+  if (handle === "failed") return 0.5;
+  return 1;
+}
+
 /** Propagate `base` leads through an example graph into a consistent run. */
 function deriveRun(
   ex: ExampleCampaign,
@@ -323,7 +343,9 @@ function deriveRun(
           ? smsHandleBaseWeight
           : kind === "rcs"
             ? rcsHandleBaseWeight
-            : null;
+            : kind === "whatsappFreeform"
+              ? ffHandleBaseWeight
+              : null;
     const waWeights =
       baseWeight && !equal
         ? handleIds.map(

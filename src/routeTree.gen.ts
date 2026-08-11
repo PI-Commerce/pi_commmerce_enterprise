@@ -16,12 +16,12 @@ import { Route as CampaignsRouteImport } from './routes/campaigns'
 import { Route as AnalyticsRouteImport } from './routes/analytics'
 import { Route as AgentsRouteImport } from './routes/agents'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as LeadsIndexRouteImport } from './routes/leads.index'
 import { Route as IntegrationsIndexRouteImport } from './routes/integrations.index'
+import { Route as InboxIndexRouteImport } from './routes/inbox.index'
 import { Route as ChannelsIndexRouteImport } from './routes/channels.index'
 import { Route as CampaignsIndexRouteImport } from './routes/campaigns.index'
 import { Route as AgentsIndexRouteImport } from './routes/agents.index'
-import { Route as LeadsIdRouteImport } from './routes/leads.$id'
+import { Route as InboxIdRouteImport } from './routes/inbox.$id'
 import { Route as ChannelsWhatsappRouteImport } from './routes/channels.whatsapp'
 import { Route as ChannelsSmsRouteImport } from './routes/channels.sms'
 import { Route as ChannelsRcsRouteImport } from './routes/channels.rcs'
@@ -30,6 +30,7 @@ import { Route as AgentsNewRouteImport } from './routes/agents.new'
 import { Route as AgentsIdRouteImport } from './routes/agents.$id'
 import { Route as CampaignsVersionsIdRouteImport } from './routes/campaigns.versions.$id'
 import { Route as AgentsToolsNewRouteImport } from './routes/agents.tools.new'
+import { Route as ChannelsWhatsappFreeformIdRouteImport } from './routes/channels.whatsapp_.freeform.$id'
 
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
@@ -66,15 +67,15 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const LeadsIndexRoute = LeadsIndexRouteImport.update({
-  id: '/leads/',
-  path: '/leads/',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const IntegrationsIndexRoute = IntegrationsIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => IntegrationsRoute,
+} as any)
+const InboxIndexRoute = InboxIndexRouteImport.update({
+  id: '/inbox/',
+  path: '/inbox/',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const ChannelsIndexRoute = ChannelsIndexRouteImport.update({
   id: '/',
@@ -91,9 +92,9 @@ const AgentsIndexRoute = AgentsIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AgentsRoute,
 } as any)
-const LeadsIdRoute = LeadsIdRouteImport.update({
-  id: '/leads/$id',
-  path: '/leads/$id',
+const InboxIdRoute = InboxIdRouteImport.update({
+  id: '/inbox/$id',
+  path: '/inbox/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ChannelsWhatsappRoute = ChannelsWhatsappRouteImport.update({
@@ -136,6 +137,12 @@ const AgentsToolsNewRoute = AgentsToolsNewRouteImport.update({
   path: '/tools/new',
   getParentRoute: () => AgentsRoute,
 } as any)
+const ChannelsWhatsappFreeformIdRoute =
+  ChannelsWhatsappFreeformIdRouteImport.update({
+    id: '/whatsapp_/freeform/$id',
+    path: '/whatsapp/freeform/$id',
+    getParentRoute: () => ChannelsRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -151,14 +158,15 @@ export interface FileRoutesByFullPath {
   '/channels/rcs': typeof ChannelsRcsRoute
   '/channels/sms': typeof ChannelsSmsRoute
   '/channels/whatsapp': typeof ChannelsWhatsappRoute
-  '/leads/$id': typeof LeadsIdRoute
+  '/inbox/$id': typeof InboxIdRoute
   '/agents/': typeof AgentsIndexRoute
   '/campaigns/': typeof CampaignsIndexRoute
   '/channels/': typeof ChannelsIndexRoute
+  '/inbox/': typeof InboxIndexRoute
   '/integrations/': typeof IntegrationsIndexRoute
-  '/leads/': typeof LeadsIndexRoute
   '/agents/tools/new': typeof AgentsToolsNewRoute
   '/campaigns/versions/$id': typeof CampaignsVersionsIdRoute
+  '/channels/whatsapp/freeform/$id': typeof ChannelsWhatsappFreeformIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -170,14 +178,15 @@ export interface FileRoutesByTo {
   '/channels/rcs': typeof ChannelsRcsRoute
   '/channels/sms': typeof ChannelsSmsRoute
   '/channels/whatsapp': typeof ChannelsWhatsappRoute
-  '/leads/$id': typeof LeadsIdRoute
+  '/inbox/$id': typeof InboxIdRoute
   '/agents': typeof AgentsIndexRoute
   '/campaigns': typeof CampaignsIndexRoute
   '/channels': typeof ChannelsIndexRoute
+  '/inbox': typeof InboxIndexRoute
   '/integrations': typeof IntegrationsIndexRoute
-  '/leads': typeof LeadsIndexRoute
   '/agents/tools/new': typeof AgentsToolsNewRoute
   '/campaigns/versions/$id': typeof CampaignsVersionsIdRoute
+  '/channels/whatsapp/freeform/$id': typeof ChannelsWhatsappFreeformIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -194,14 +203,15 @@ export interface FileRoutesById {
   '/channels/rcs': typeof ChannelsRcsRoute
   '/channels/sms': typeof ChannelsSmsRoute
   '/channels/whatsapp': typeof ChannelsWhatsappRoute
-  '/leads/$id': typeof LeadsIdRoute
+  '/inbox/$id': typeof InboxIdRoute
   '/agents/': typeof AgentsIndexRoute
   '/campaigns/': typeof CampaignsIndexRoute
   '/channels/': typeof ChannelsIndexRoute
+  '/inbox/': typeof InboxIndexRoute
   '/integrations/': typeof IntegrationsIndexRoute
-  '/leads/': typeof LeadsIndexRoute
   '/agents/tools/new': typeof AgentsToolsNewRoute
   '/campaigns/versions/$id': typeof CampaignsVersionsIdRoute
+  '/channels/whatsapp_/freeform/$id': typeof ChannelsWhatsappFreeformIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -219,14 +229,15 @@ export interface FileRouteTypes {
     | '/channels/rcs'
     | '/channels/sms'
     | '/channels/whatsapp'
-    | '/leads/$id'
+    | '/inbox/$id'
     | '/agents/'
     | '/campaigns/'
     | '/channels/'
+    | '/inbox/'
     | '/integrations/'
-    | '/leads/'
     | '/agents/tools/new'
     | '/campaigns/versions/$id'
+    | '/channels/whatsapp/freeform/$id'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -238,14 +249,15 @@ export interface FileRouteTypes {
     | '/channels/rcs'
     | '/channels/sms'
     | '/channels/whatsapp'
-    | '/leads/$id'
+    | '/inbox/$id'
     | '/agents'
     | '/campaigns'
     | '/channels'
+    | '/inbox'
     | '/integrations'
-    | '/leads'
     | '/agents/tools/new'
     | '/campaigns/versions/$id'
+    | '/channels/whatsapp/freeform/$id'
   id:
     | '__root__'
     | '/'
@@ -261,14 +273,15 @@ export interface FileRouteTypes {
     | '/channels/rcs'
     | '/channels/sms'
     | '/channels/whatsapp'
-    | '/leads/$id'
+    | '/inbox/$id'
     | '/agents/'
     | '/campaigns/'
     | '/channels/'
+    | '/inbox/'
     | '/integrations/'
-    | '/leads/'
     | '/agents/tools/new'
     | '/campaigns/versions/$id'
+    | '/channels/whatsapp_/freeform/$id'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -279,8 +292,8 @@ export interface RootRouteChildren {
   ChannelsRoute: typeof ChannelsRouteWithChildren
   IntegrationsRoute: typeof IntegrationsRouteWithChildren
   SettingsRoute: typeof SettingsRoute
-  LeadsIdRoute: typeof LeadsIdRoute
-  LeadsIndexRoute: typeof LeadsIndexRoute
+  InboxIdRoute: typeof InboxIdRoute
+  InboxIndexRoute: typeof InboxIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -334,19 +347,19 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/leads/': {
-      id: '/leads/'
-      path: '/leads'
-      fullPath: '/leads/'
-      preLoaderRoute: typeof LeadsIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/integrations/': {
       id: '/integrations/'
       path: '/'
       fullPath: '/integrations/'
       preLoaderRoute: typeof IntegrationsIndexRouteImport
       parentRoute: typeof IntegrationsRoute
+    }
+    '/inbox/': {
+      id: '/inbox/'
+      path: '/inbox'
+      fullPath: '/inbox/'
+      preLoaderRoute: typeof InboxIndexRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/channels/': {
       id: '/channels/'
@@ -369,11 +382,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AgentsIndexRouteImport
       parentRoute: typeof AgentsRoute
     }
-    '/leads/$id': {
-      id: '/leads/$id'
-      path: '/leads/$id'
-      fullPath: '/leads/$id'
-      preLoaderRoute: typeof LeadsIdRouteImport
+    '/inbox/$id': {
+      id: '/inbox/$id'
+      path: '/inbox/$id'
+      fullPath: '/inbox/$id'
+      preLoaderRoute: typeof InboxIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/channels/whatsapp': {
@@ -432,6 +445,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AgentsToolsNewRouteImport
       parentRoute: typeof AgentsRoute
     }
+    '/channels/whatsapp_/freeform/$id': {
+      id: '/channels/whatsapp_/freeform/$id'
+      path: '/whatsapp/freeform/$id'
+      fullPath: '/channels/whatsapp/freeform/$id'
+      preLoaderRoute: typeof ChannelsWhatsappFreeformIdRouteImport
+      parentRoute: typeof ChannelsRoute
+    }
   }
 }
 
@@ -473,6 +493,7 @@ interface ChannelsRouteChildren {
   ChannelsSmsRoute: typeof ChannelsSmsRoute
   ChannelsWhatsappRoute: typeof ChannelsWhatsappRoute
   ChannelsIndexRoute: typeof ChannelsIndexRoute
+  ChannelsWhatsappFreeformIdRoute: typeof ChannelsWhatsappFreeformIdRoute
 }
 
 const ChannelsRouteChildren: ChannelsRouteChildren = {
@@ -480,6 +501,7 @@ const ChannelsRouteChildren: ChannelsRouteChildren = {
   ChannelsSmsRoute: ChannelsSmsRoute,
   ChannelsWhatsappRoute: ChannelsWhatsappRoute,
   ChannelsIndexRoute: ChannelsIndexRoute,
+  ChannelsWhatsappFreeformIdRoute: ChannelsWhatsappFreeformIdRoute,
 }
 
 const ChannelsRouteWithChildren = ChannelsRoute._addFileChildren(
@@ -506,8 +528,8 @@ const rootRouteChildren: RootRouteChildren = {
   ChannelsRoute: ChannelsRouteWithChildren,
   IntegrationsRoute: IntegrationsRouteWithChildren,
   SettingsRoute: SettingsRoute,
-  LeadsIdRoute: LeadsIdRoute,
-  LeadsIndexRoute: LeadsIndexRoute,
+  InboxIdRoute: InboxIdRoute,
+  InboxIndexRoute: InboxIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

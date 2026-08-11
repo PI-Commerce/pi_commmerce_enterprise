@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { createContext, useEffect, useMemo, useState, useContext } from "react";
 import ReactFlow, {
   Background,
   BackgroundVariant,
@@ -6,10 +6,12 @@ import ReactFlow, {
   type Edge,
   type Node,
   type NodeMouseHandler,
+  type NodeProps,
 } from "reactflow";
 import "reactflow/dist/style.css";
-import { nodeTypes } from "@/components/workflow/nodes";
+import { nodeTypes as builderNodeTypes, WorkflowNode } from "@/components/workflow/nodes";
 import { edgeTypes } from "@/components/workflow/edges";
+import { Eye } from "lucide-react";
 import type { WorkflowNodeData, NodeKind } from "@/lib/campaign-types";
 import type { RunRow, SankeyNode, SankeyNodeKind } from "@/lib/analytics-data";
 import { elkLayout } from "@/lib/flow-layout";
@@ -22,6 +24,7 @@ const KIND_MAP: Record<SankeyNodeKind, NodeKind> = {
   apiToolCall: "apiToolCall",
   abSplit: "abSplit",
   whatsapp: "whatsapp",
+  whatsappFreeform: "whatsappFreeform",
   voice: "voiceCall",
   sms: "sms",
   rcs: "rcs",
@@ -33,12 +36,48 @@ const KIND_MAP: Record<SankeyNodeKind, NodeKind> = {
   needsReview: "needsReview",
 };
 
+/** Context carries the analytics-only "expand freeform" handler down to the
+ *  wrapped node component so freeform nodes can render an eye button that fires
+ *  the expansion overlay directly (bypassing the drawer). */
+const FreeformExpandContext = createContext<((n: SankeyNode) => void) | null>(null);
+
+/** Wrapped WorkflowNode used only in the analytics view. Adds a small eye
+ *  button in the node card's top-right corner, but ONLY for freeform kinds. */
+function AnalyticsWorkflowNode(props: NodeProps<WorkflowNodeData & { __sankey?: SankeyNode }>) {
+  const onExpand = useContext(FreeformExpandContext);
+  const sankey = props.data.__sankey;
+  const isFreeform = props.data.kind === "whatsappFreeform";
+  return (
+    <div className="relative">
+      <WorkflowNode {...props} />
+      {isFreeform && sankey && onExpand && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onExpand(sankey);
+          }}
+          className="pointer-events-auto absolute right-2 top-2 z-10 grid h-6 w-6 place-items-center rounded-md border border-border bg-background/95 text-muted-foreground shadow-sm hover:bg-accent hover:text-foreground"
+          title="Expand freeform workflow"
+        >
+          <Eye className="h-3 w-3" />
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** Analytics-scoped node types map. Overrides the builder's `workflow` entry so
+ *  freeform nodes pick up the eye-button decoration. */
+const nodeTypes = { ...builderNodeTypes, workflow: AnalyticsWorkflowNode };
+
 export function CampaignFlowView({
   run,
   onNodeClick,
+  onExpandFreeform,
 }: {
   run: RunRow;
   onNodeClick: (n: SankeyNode) => void;
+  onExpandFreeform?: (n: SankeyNode) => void;
 }) {
   // Build the positionless graph (matching the campaign builder visuals), then
   // lay it out with the async ELK layout at render-time.
@@ -134,7 +173,10 @@ export function CampaignFlowView({
           metrics: showMetrics
             ? { entered: n.entered, exited: n.exited, dropoffPct }
             : undefined,
-        },
+          // Attach the original Sankey node so the analytics wrapper can pass
+          // it up when the user clicks the freeform eye button.
+          __sankey: n,
+        } as WorkflowNodeData & { __sankey: SankeyNode },
       };
     });
 
@@ -195,26 +237,28 @@ export function CampaignFlowView({
   if (!layout) return <div className="h-full w-full" />;
 
   return (
-    <ReactFlow
-      nodes={layout.nodes}
-      edges={layout.edges}
-      nodeTypes={nodeTypes}
-      edgeTypes={edgeTypes}
-      onNodeClick={handleNodeClick}
-      fitView
-      fitViewOptions={{ padding: 0.18 }}
-      nodesDraggable={false}
-      nodesConnectable={false}
-      elementsSelectable={false}
-      panOnDrag
-      zoomOnScroll
-      minZoom={0.3}
-      maxZoom={1.5}
-      proOptions={{ hideAttribution: true }}
-      defaultEdgeOptions={{ type: "routed" }}
-    >
-      <Background variant={BackgroundVariant.Dots} gap={20} size={1} />
-      <Controls showInteractive={false} className="!shadow-none" />
-    </ReactFlow>
+    <FreeformExpandContext.Provider value={onExpandFreeform ?? null}>
+      <ReactFlow
+        nodes={layout.nodes}
+        edges={layout.edges}
+        nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
+        onNodeClick={handleNodeClick}
+        fitView
+        fitViewOptions={{ padding: 0.18 }}
+        nodesDraggable={false}
+        nodesConnectable={false}
+        elementsSelectable={false}
+        panOnDrag
+        zoomOnScroll
+        minZoom={0.3}
+        maxZoom={1.5}
+        proOptions={{ hideAttribution: true }}
+        defaultEdgeOptions={{ type: "routed" }}
+      >
+        <Background variant={BackgroundVariant.Dots} gap={20} size={1} />
+        <Controls showInteractive={false} className="!shadow-none" />
+      </ReactFlow>
+    </FreeformExpandContext.Provider>
   );
 }

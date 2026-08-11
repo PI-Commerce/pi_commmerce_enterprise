@@ -26,7 +26,8 @@ import {
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { STATUS_TONE, type CampaignStatus } from "@/lib/campaign-types";
-import { EXAMPLE_CAMPAIGN_NAMES } from "@/lib/campaign-examples";
+import { EXAMPLE_CAMPAIGN_NAMES, EXAMPLE_CAMPAIGNS } from "@/lib/campaign-examples";
+import { lockFreeformWorkflow } from "@/lib/freeform-types";
 import { CreateRunDialog, type CampaignOption, type CreateRunPayload } from "@/components/workflow/CreateRunDialog";
 import { CSV_LIBRARY, makeCsvAsset, type CsvAsset } from "@/lib/data-library";
 
@@ -258,6 +259,22 @@ function CampaignList() {
     setCreateRunOpen(false);
     setRunFor(null);
     toast.success("Run started", { description: `${payload.runName} · ${payload.triggerMode === "api" ? "API trigger activated" : "running now"}` });
+    // Freeform workflow edit-lock. On run creation, freeze every workflow this
+    // campaign's graph references so its analytics stays pinned to a stable
+    // graph and no in-flight edits can shift the meaning of collected data.
+    // Only wired for example (seeded) campaigns today — user-built campaign
+    // graphs aren't persisted in this demo, so we can't scan those.
+    const example = EXAMPLE_CAMPAIGNS[payload.campaignId];
+    if (example) {
+      const refs = new Set<string>();
+      for (const n of example.nodes) {
+        if (n.data?.kind === "whatsappFreeform") {
+          const wf = n.data.config?.ffWorkflowId as string | undefined;
+          if (wf) refs.add(wf);
+        }
+      }
+      for (const id of refs) lockFreeformWorkflow(id);
+    }
     if (payload.audienceSource === "api") {
       const runId = `run_${Date.now().toString(36)}`;
       setEndpointInfo({ runName: payload.runName, endpoint: `https://api.picommerce.io/v1/runs/trigger/${runId}` });

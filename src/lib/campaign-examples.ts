@@ -108,6 +108,28 @@ const EX1_NODES: Node<WorkflowNodeData>[] = [
     },
   },
   {
+    id: "chatFreeform", type: "workflow", position: { x: 720, y: 440 },
+    data: {
+      kind: "whatsappFreeform", title: "Freeform · Test-drive slot", subtitle: "Freeform workflow · slot picker", valid: true, preset: true,
+      outputs: [
+        { id: "completed", label: "Success", kind: "outcome" },
+        { id: "timed_out", label: "Timeout", kind: "outcome" },
+        { id: "failed", label: "Failed", kind: "outcome" },
+      ],
+      config: {
+        ffWorkflowId: "ff_pre_book_test_drive",
+        ffTimerMode: "absolute",
+        ffTimerMinutes: 60,
+        ffVarMap: [
+          { v: "{{name}}", def: "contact.first_name" },
+          { v: "{{model}}", def: "favorite_category" },
+          { v: "{{dealership}}", def: "contact.city" },
+          { v: "{{preferred_date}}", def: "tomorrow" },
+        ],
+      },
+    },
+  },
+  {
     id: "delay5", type: "workflow", position: { x: 640, y: 600 },
     data: {
       kind: "delay", title: "Delay · 5 days", subtitle: "Wait 5 days", valid: true, preset: true,
@@ -162,7 +184,12 @@ const EX1_EDGES: Edge[] = [
   { id: "ex1-e4", source: "tier", sourceHandle: "mid_ltv", target: "chatMid", type: EDGE },
   { id: "ex1-e5", source: "chat", sourceHandle: "btn_0", target: "end", type: EDGE },
   { id: "ex1-e6", source: "chat", sourceHandle: "no_response", target: "voice", type: EDGE },
-  { id: "ex1-e7", source: "chat", sourceHandle: "reply_received", target: "delay5", type: EDGE },
+  // Reply-received traffic feeds a freeform workflow (test-drive slot picker),
+  // whose completion / timeout paths converge on the same 5-day delay downstream.
+  { id: "ex1-e7", source: "chat", sourceHandle: "reply_received", target: "chatFreeform", type: EDGE },
+  { id: "ex1-ff1", source: "chatFreeform", sourceHandle: "completed", target: "delay5", type: EDGE },
+  { id: "ex1-ff2", source: "chatFreeform", sourceHandle: "timed_out", target: "delay5", type: EDGE },
+  { id: "ex1-ff3", source: "chatFreeform", sourceHandle: "failed", target: "end", type: EDGE },
   { id: "ex1-e5b", source: "chat", sourceHandle: "btn_1", target: "delay5", type: EDGE },
   { id: "ex1-e8", source: "delay5", target: "voice", type: EDGE },
   { id: "ex1-e9", source: "voice", target: "end", type: EDGE },

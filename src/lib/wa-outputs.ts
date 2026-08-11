@@ -17,6 +17,7 @@ import { resolveSmsTemplate } from "./sms-store";
 import { smsPlaceholders } from "./sms-templates";
 import { resolveRcsTemplate } from "./rcs-store";
 import { templateButtons, templatePlaceholders, type RcsTemplate } from "./rcs-templates";
+import { getFreeformWorkflow, getFreeformCampaignOutputs } from "./freeform-types";
 
 /**
  * Whether a template button produces a usable inbound signal we can branch on.
@@ -96,6 +97,23 @@ export function whatsappOutputs(template?: WaTemplate): NodeOutput[] {
  * exported list) so existing runs / analytics that reference it don't break;
  * new campaigns always wire from `success` or `failure`.
  */
+/**
+ * WhatsApp Freeform Workflow outputs — three fixed branches surfacing how
+ * the freeform session ended:
+ *   - `completed`  — lead reached the End node inside the freeform workflow.
+ *   - `timed_out`  — the configured absolute/inactivity timer fired first.
+ *   - `failed`     — the workflow errored (Meta send failure on any message
+ *                    node, session already closed, etc.).
+ * Authors wire each to whatever next step the campaign wants.
+ */
+export function freeformOutputs(): NodeOutput[] {
+  return [
+    { id: "completed", label: "Success", kind: "outcome" },
+    { id: "timed_out", label: "Timeout", kind: "outcome" },
+    { id: "failed", label: "Failed", kind: "outcome" },
+  ];
+}
+
 export function completedOutput(): NodeOutput[] {
   return [
     { id: "success", label: "Success", kind: "outcome" },
@@ -268,6 +286,14 @@ export function deriveNodeOutcomeVariables(
       // downstream, namespaced by the node serial (e.g. `api_1.college_name`).
       const tool = config?.apiTool ? getTool(config.apiTool) : undefined;
       if (tool) for (const o of tool.outputs) vars.push({ key: `${ns}.${o.varName}`, source });
+    } else if (kind === "whatsappFreeform") {
+      // The freeform workflow exposes a completion status + its own internal
+      // dispositions (button clicks, list selections, per-node reply flags),
+      // all namespaced by THIS node's serial so multiple freeform nodes in the
+      // same campaign never collide.
+      const wf = config?.ffWorkflowId ? getFreeformWorkflow(config.ffWorkflowId) : undefined;
+      const outs = wf ? getFreeformCampaignOutputs(ns, wf.nodes) : [{ key: `${ns}.status`, source }];
+      for (const o of outs) vars.push({ key: o.key, source });
     }
   }
   // Dedupe by key (defensive — duplicates only if two nodes share a serial).

@@ -10,7 +10,7 @@ import { nodeTypes } from "./nodes";
 import { edgeTypes } from "./edges";
 import type { WorkflowNodeData, NodeKind, CampaignStatus } from "@/lib/campaign-types";
 import { NODE_LABELS, SERIAL_PREFIX } from "@/lib/campaign-types";
-import { whatsappOutputs, completedOutput, smsOutputs, rcsOutputs, apiOutcomeOutputs, deriveNodeOutcomeVariables } from "@/lib/wa-outputs";
+import { whatsappOutputs, freeformOutputs, completedOutput, smsOutputs, rcsOutputs, apiOutcomeOutputs, deriveNodeOutcomeVariables } from "@/lib/wa-outputs";
 import { EXAMPLE_CAMPAIGNS } from "@/lib/campaign-examples";
 import { elkLayout, type Point } from "@/lib/flow-layout";
 import { useRegion, localizeTzAbbrev, localizeCurrency } from "@/lib/region";
@@ -58,7 +58,8 @@ const DEFAULT_NODE_DATA: Record<NodeKind, Partial<WorkflowNodeData>> = {
   abSplit: { subtitle: "Split traffic", valid: false, error: "Set split %" },
   delay: { subtitle: "Wait", valid: false, error: "Set duration" },
   voiceCall: { subtitle: "AI voice outreach", valid: false, error: "Select agent", outputs: completedOutput() },
-  whatsapp: { subtitle: "Send WhatsApp message", valid: false, error: "Pick template", outputs: whatsappOutputs(undefined) },
+  whatsapp: { subtitle: "Send WhatsApp template", valid: false, error: "Pick template", outputs: whatsappOutputs(undefined) },
+  whatsappFreeform: { subtitle: "Run a freeform workflow", valid: false, error: "Pick a workflow", outputs: freeformOutputs() },
   sms: { subtitle: "Send SMS", valid: false, error: "Select a DLT template", outputs: smsOutputs() },
   rcs: { subtitle: "Send RCS message", valid: false, error: "Select a template", outputs: rcsOutputs() },
   aiTransform: { subtitle: "Derive AI variables", valid: true },
@@ -224,6 +225,60 @@ export function WorkflowCanvas({
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [waButtonWiringSig, editable, setNodes]);
+
+  /**
+   * WhatsApp Freeform Workflow can ONLY start after a WA Template opens the
+   * 24-hour customer-service window, so its incoming edge must come from a WA
+   * Template node's `reply_received` output OR any of its trackable button
+   * outputs (`btn_*`). Any other wiring (or none) flips the node invalid with
+   * a targeted error, giving the author a clear next step.
+   *
+   * Signature is derived from node kinds + edges (not from valid/error) so the
+   * effect's own writes don't retrigger it.
+   */
+  const freeformIncomingSig = useMemo(() => {
+    const ffPart = nodes.filter((n) => n.data.kind === "whatsappFreeform").map((n) => n.id).join(",");
+    const waPart = nodes.filter((n) => n.data.kind === "whatsapp").map((n) => n.id).join(",");
+    const edgePart = edges.map((e) => `${e.source}(${e.sourceHandle ?? ""})>${e.target}`).join("|");
+    return `${ffPart}#${waPart}#${edgePart}`;
+  }, [nodes, edges]);
+
+  useEffect(() => {
+    if (!editable) return;
+    setNodes((nds) => {
+      const waIds = new Set(nds.filter((n) => n.data.kind === "whatsapp").map((n) => n.id));
+      let changed = false;
+      const next = nds.map((n) => {
+        if (n.data.kind !== "whatsappFreeform") return n;
+        const incoming = edges.filter((e) => e.target === n.id);
+        // Reject if not wired at all, or wired from a non-WA source, or wired
+        // from a WA output that isn't `reply_received` / `btn_*`.
+        const ok = incoming.some((e) => {
+          if (!waIds.has(e.source)) return false;
+          const handle = e.sourceHandle ?? "";
+          return handle === "reply_received" || handle.startsWith("btn_");
+        });
+        // Preserve any config-level error (e.g. "Pick a workflow") — the wiring
+        // error should not overwrite an actionable config error.
+        const wiringError = "Wire from a WhatsApp Template's Reply Received or a button output";
+        const hadWiringError = n.data.error === wiringError;
+        if (!ok) {
+          const cfgHasError = n.data.error && !hadWiringError;
+          if (cfgHasError) return n;
+          if (n.data.valid === false && n.data.error === wiringError) return n;
+          changed = true;
+          return { ...n, data: { ...n.data, valid: false, error: wiringError } };
+        }
+        if (hadWiringError) {
+          changed = true;
+          return { ...n, data: { ...n.data, valid: true, error: undefined } };
+        }
+        return n;
+      });
+      return changed ? next : nds;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [freeformIncomingSig, editable, setNodes]);
 
   const outcomeVariables = useMemo(() => deriveNodeOutcomeVariables(nodes), [nodes]);
 

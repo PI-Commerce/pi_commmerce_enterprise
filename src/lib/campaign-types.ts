@@ -19,6 +19,7 @@ export type NodeKind =
   // action
   | "voiceCall"
   | "whatsapp"
+  | "whatsappFreeform"
   | "sms"
   | "rcs"
   // ai
@@ -187,6 +188,17 @@ export type PresetConfig = {
   waBody?: string;
   /** Whole hours (1–24) the node waits for a reply before taking the "Timeout" path. */
   waTimeoutHours?: number;
+  // ---- WhatsApp Freeform Workflow core ----
+  /** Selected Freeform Workflow id (only "ready"-state workflows are pickable). */
+  ffWorkflowId?: string;
+  /** Maps each `{{var}}` in the selected workflow to an upstream variable or literal. */
+  ffVarMap?: PresetVarMap[];
+  /** Session-close mode: `absolute` runs the timer from freeform-entry; `inactivity`
+   *  runs it from the lead's last interaction. Whichever fires (or reaching End)
+   *  first, the lead exits back to the campaign. Only one mode can be active. */
+  ffTimerMode?: "absolute" | "inactivity";
+  /** Timer duration in minutes. Capped at 1440 (Meta's 24-hour freeform window). */
+  ffTimerMinutes?: number;
   // ---- SMS core ----
   /** DLT Template ID from the SMS registry — the node's primary selection. */
   smsTemplateId?: string;
@@ -307,6 +319,7 @@ export const NODE_GROUPS: Record<NodeKind, NodeGroup> = {
   delay: "logic",
   voiceCall: "action",
   whatsapp: "action",
+  whatsappFreeform: "action",
   sms: "action",
   rcs: "action",
   aiTransform: "ai",
@@ -323,7 +336,8 @@ export const NODE_LABELS: Record<NodeKind, string> = {
   abSplit: "A/B Split",
   delay: "Delay",
   voiceCall: "Voice Call",
-  whatsapp: "WhatsApp",
+  whatsapp: "WhatsApp Template",
+  whatsappFreeform: "WhatsApp Freeform Workflow",
   sms: "SMS",
   rcs: "RCS",
   aiTransform: "AI Transformation",
@@ -347,6 +361,7 @@ export const SERIAL_PREFIX: Record<NodeKind, string> = {
   delay: "delay",
   voiceCall: "voice",
   whatsapp: "whatsapp",
+  whatsappFreeform: "ffw",
   sms: "sms",
   rcs: "rcs",
   aiTransform: "ait",

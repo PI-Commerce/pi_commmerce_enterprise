@@ -1,11 +1,11 @@
-import { useState, useEffect, useRef, useMemo, createContext, useContext } from "react";
+import { useState, useEffect, useRef, useMemo, useSyncExternalStore, createContext, useContext } from "react";
 import { Link } from "@tanstack/react-router";
 import { webhooksOfType, activeCountForType } from "@/lib/webhooks-store";
 import { AUTO_INCLUDED_FIELDS } from "@/lib/webhooks-data";
 import {
   X, Copy, Trash2, AlertCircle, CheckCircle2, Plus, GripVertical, ChevronDown, Variable,
   Sparkles, GitBranch, FlaskConical, ArrowUp, ArrowDown, ArrowRight, ArrowLeftRight,
-  FileSpreadsheet, Loader2, Clock, Hash, Info, Pencil,
+  FileSpreadsheet, Loader2, Clock, Hash, Info, Pencil, Eye, Workflow,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useRegion, localizeCurrency } from "@/lib/region";
@@ -33,6 +33,15 @@ import {
   smsOutputs, SMS_DLR_WINDOWS, DEFAULT_SMS_DLR_WINDOW,
   rcsOutputs, RCS_DLR_WINDOWS, DEFAULT_RCS_DLR_WINDOW,
 } from "@/lib/wa-outputs";
+import {
+  getFreeformWorkflows, getFreeformPlaceholders, getFreeformCampaignOutputs,
+  subscribeFreeformWorkflows,
+  type FreeformWorkflowRow, type FreeformPlaceholder,
+} from "@/lib/freeform-types";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+} from "@/components/ui/dialog";
+import { FreeformCanvas } from "@/components/workflow/FreeformCanvas";
 import { useSmsConfig, useSmsTemplates, resolveSmsTemplate } from "@/lib/sms-store";
 import { sendersForCategory } from "@/lib/sms-config";
 import {
@@ -60,11 +69,21 @@ const VOICE_AGENTS = voiceAgents();
  *  action nodes present in the flow — merged into the Conditional variable picker. */
 const ExtraVariablesContext = createContext<{ key: string; source: string }[]>([]);
 
+/** Suppresses the static `contact.*` sample fallback when true. Freeform
+ *  workflows have no Audience node, so exposing "sample" audience variables
+ *  there would let authors branch on data that never exists at runtime. */
+const SuppressSampleVariablesContext = createContext(false);
+
 /** Merge flow-derived variables (from the live nodes) with the static sample set.
  *  Dedupes by key (derived wins). When the Audience node has contributed real
  *  `contact.*` fields from its edited schema, the static `contact.*` samples are
  *  dropped so the picker reflects the actual schema, not the demo defaults. */
-function mergeVariables(extra: { key: string; source: string }[]) {
+function mergeVariables(extra: { key: string; source: string }[], suppressSamples = false) {
+  if (suppressSamples) {
+    // Still dedupe by key so callers that pass their own duplicates are safe.
+    const seen = new Set<string>();
+    return extra.filter((v) => (seen.has(v.key) ? false : (seen.add(v.key), true)));
+  }
   const hasDerivedContact = extra.some((v) => v.key.startsWith("contact."));
   const sample = hasDerivedContact
     ? SAMPLE_WORKFLOW_VARIABLES.filter((v) => !v.key.startsWith("contact."))
@@ -131,6 +150,11 @@ type Props = {
   onDuplicate: () => void;
   /** Outcome variables exposed by other action nodes in the flow (for the Conditional picker). */
   extraVariables?: { key: string; source: string }[];
+  /** When true, do NOT merge the demo `contact.*` fallback samples into the
+   *  variable picker. Used by surfaces (like Freeform Workflows) that have no
+   *  Audience node, so those variables never exist at runtime and would be a
+   *  footgun for authors to branch on. */
+  suppressSampleVariables?: boolean;
 };
 
 const MIN_PANEL_W = 360;
@@ -199,7 +223,7 @@ function ResizablePanel({ children }: { children: React.ReactNode }) {
 // silently disconnect the example graph's edges mid-demo).
 const NOOP_CHANGE = (_patch: Partial<WorkflowNodeData>) => undefined;
 
-export function ConfigPanel({ node, readOnly, onClose, onChange, onDelete, onDuplicate, extraVariables }: Props) {
+export function ConfigPanel({ node, readOnly, onClose, onChange, onDelete, onDuplicate, extraVariables, suppressSampleVariables }: Props) {
   if (!node) return null;
   const { data } = node;
   const valid = data.valid !== false;
@@ -216,6 +240,7 @@ export function ConfigPanel({ node, readOnly, onClose, onChange, onDelete, onDup
 
   return (
     <ExtraVariablesContext.Provider value={extraVariables ?? []}>
+    <SuppressSampleVariablesContext.Provider value={!!suppressSampleVariables}>
     <ResizablePanel>
         <div className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
           <div className="min-w-0">
@@ -297,6 +322,7 @@ export function ConfigPanel({ node, readOnly, onClose, onChange, onDelete, onDup
           </div>
         )}
     </ResizablePanel>
+    </SuppressSampleVariablesContext.Provider>
     </ExtraVariablesContext.Provider>
   );
 }
@@ -402,6 +428,9 @@ function KindFields({
 
     case "whatsapp":
       return <WhatsAppFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
+
+    case "whatsappFreeform":
+      return <WhatsAppFreeformFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
 
     case "sms":
       return <SmsFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
@@ -1189,7 +1218,8 @@ function ToolInputMapPicker({
   const [m, setM] = useState<"variable" | "constant">(mode);
   useEffect(() => { setM(mode); }, [mode]);
   const extraVariables = useContext(ExtraVariablesContext);
-  const allVariables = mergeVariables(extraVariables);
+  const suppressSamples = useContext(SuppressSampleVariablesContext);
+  const allVariables = mergeVariables(extraVariables, suppressSamples);
   const isCustom = v !== "__llm__" && !!v && !allVariables.some((s) => s.key === v);
   const grouped = groupVariablesBySource(allVariables);
 
@@ -1553,6 +1583,315 @@ function WhatsAppCore({
       <ActionAdvanceBanner kind="whatsapp" type1={isType1} timeoutHours={timeoutHours} />
     </>
   );
+}
+
+/* --------------------------- WhatsApp Freeform Workflow --------------------------- */
+
+/**
+ * WhatsApp Freeform Workflow. The campaign-side node that embeds a reusable
+ * freeform flow inside the 24-hour service window. Config is small and opinionated:
+ *
+ *   1) Pick a workflow (Ready-state only, from Channels → WhatsApp → Freeform
+ *      Workflows). Eye button opens a static preview modal (pan + zoom only).
+ *   2) Map each `{{var}}` the workflow references — grouped by variable name,
+ *      with all locations (which node / which part of that node) listed under
+ *      the picker so the author knows exactly where each mapping lands.
+ *   3) Session-close: `absolute` (from freeform-entry) OR `inactivity` (from
+ *      last lead interaction), whichever fires (or the lead reaching End)
+ *      first. Duration capped at 1440 min (Meta's 24-hour window).
+ *
+ * Outputs — Completed / Timed out / Failed — are seeded once at add time and
+ * never change based on config, so authors can pre-wire them.
+ */
+const FF_TIMER_MIN = 1;
+const FF_TIMER_MAX = 1440; // 24 hours
+
+function WhatsAppFreeformFields({
+  config, readOnly, mark, onChange,
+}: {
+  config?: PresetConfig;
+  readOnly?: boolean;
+  mark: (v: boolean, e?: string) => void;
+  onChange: (patch: Partial<WorkflowNodeData>) => void;
+}) {
+  // Subscribe to the freeform store so a Ready state flipping (e.g. author fixes
+  // an invalid workflow in the builder) live-updates the dropdown here.
+  const workflows = useSyncExternalStore(subscribeFreeformWorkflows, getFreeformWorkflows, getFreeformWorkflows);
+  const readyWorkflows = useMemo(() => workflows.filter((w) => w.status === "ready"), [workflows]);
+
+  const selectedId = config?.ffWorkflowId ?? "";
+  const selected = useMemo(() => workflows.find((w) => w.id === selectedId), [workflows, selectedId]);
+
+  const placeholders = useMemo<FreeformPlaceholder[]>(
+    () => (selected ? getFreeformPlaceholders(selected.nodes) : []),
+    [selected],
+  );
+
+  const timerMode = config?.ffTimerMode ?? "absolute";
+  const timerMinutes = config?.ffTimerMinutes ?? 60;
+  // Stable references so the validity useEffect below doesn't loop — a fresh
+  // `[]` fallback would re-trigger the effect (which calls `mark`, which
+  // updates the node, which re-renders us) every tick.
+  const varMap = useMemo(() => config?.ffVarMap ?? [], [config?.ffVarMap]);
+
+  const [previewOpen, setPreviewOpen] = useState(false);
+
+  // Publish current validity + persist a completed varMap shape as the user
+  // fills the fields. `mark` is unstable (recreated each render by KindFields)
+  // so we store it in a ref and gate the actual call on real result changes —
+  // otherwise the effect loops indefinitely.
+  const markRef = useRef(mark);
+  markRef.current = mark;
+  const prevResultRef = useRef<{ valid: boolean; error?: string }>({ valid: false, error: "Pick a workflow" });
+  useEffect(() => {
+    let result: { valid: boolean; error?: string };
+    if (!selected) result = { valid: false, error: "Pick a workflow" };
+    else if (selected.status !== "ready") result = { valid: false, error: "Selected workflow is not Ready" };
+    else if (timerMinutes < FF_TIMER_MIN || timerMinutes > FF_TIMER_MAX) result = { valid: false, error: `Session timer must be between ${FF_TIMER_MIN} and ${FF_TIMER_MAX} minutes` };
+    else {
+      const missing = placeholders.find((p) => !varMap.find((m) => m.v === `{{${p.key}}}` && m.def?.trim()));
+      if (missing) result = { valid: false, error: `Map variable {{${missing.key}}}` };
+      else result = { valid: true };
+    }
+    const prev = prevResultRef.current;
+    if (prev.valid === result.valid && prev.error === result.error) return;
+    prevResultRef.current = result;
+    markRef.current(result.valid, result.error);
+  }, [selected, placeholders, timerMinutes, varMap]);
+
+  const patchConfig = (p: Partial<PresetConfig>) => onChange({ config: { ...config, ...p } });
+
+  const setMapping = (key: string, def: string, mode?: "variable" | "constant") => {
+    const v = `{{${key}}}`;
+    const next = (config?.ffVarMap ?? []).filter((m) => m.v !== v);
+    next.push({ v, def, mode });
+    patchConfig({ ffVarMap: next });
+  };
+
+  return (
+    <>
+      <Section title="Workflow">
+        <div className="rounded-xl border border-border bg-card/50 p-4 space-y-4">
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <StepChip n={1} done={!!selected} />
+              <Label className="flex items-center gap-1 text-[12px] font-medium text-foreground">
+                Freeform workflow <span className="text-destructive">*</span>
+              </Label>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <div className="min-w-0 flex-1">
+                <SelectLike
+                  disabled={readOnly}
+                  options={readyWorkflows.map((w) => w.id)}
+                  optionLabel={(id) => readyWorkflows.find((w) => w.id === id)?.name ?? id}
+                  defaultValue={selectedId || undefined}
+                  onPick={(v) => patchConfig({ ffWorkflowId: v, ffVarMap: [] })}
+                  placeholder={readyWorkflows.length ? "Select a workflow…" : "No Ready workflows yet"}
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => selected && setPreviewOpen(true)}
+                disabled={!selected}
+                className={cn(
+                  "grid h-9 w-9 shrink-0 place-items-center rounded-md border border-border text-muted-foreground transition-colors",
+                  selected ? "hover:bg-accent hover:text-foreground" : "cursor-not-allowed opacity-40",
+                )}
+                title={selected ? "Preview workflow" : "Pick a workflow to preview"}
+              >
+                <Eye className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            {readyWorkflows.length === 0 && (
+              <p className="text-[11px] text-muted-foreground">
+                Author + set to Ready first from{" "}
+                <Link to="/channels/whatsapp" className="underline hover:text-foreground">
+                  Channels → WhatsApp → Freeform Workflows
+                </Link>
+                .
+              </p>
+            )}
+          </div>
+
+          <div className="border-t border-border/60" />
+
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <StepChip n={2} muted={!selected} done={selected && placeholders.every((p) => varMap.find((m) => m.v === `{{${p.key}}}` && m.def?.trim())) ? true : undefined} />
+              <Label className="text-[12px] font-medium text-foreground">Variable mapping</Label>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Map each <span className="font-mono">{"{{var}}"}</span> placeholder found in the workflow to an upstream variable or literal.
+            </p>
+            {!selected ? (
+              <div className="rounded-md border border-dashed border-border bg-muted/30 px-3 py-3 text-[11.5px] text-muted-foreground">
+                Pick a workflow above to see its variables.
+              </div>
+            ) : placeholders.length === 0 ? (
+              <div className="rounded-md border border-dashed border-border bg-muted/30 px-3 py-3 text-[11.5px] text-muted-foreground">
+                This workflow has no <span className="font-mono">{"{{var}}"}</span> placeholders.
+              </div>
+            ) : (
+              <div className="space-y-3 pt-1">
+                {placeholders.map((p) => {
+                  const v = `{{${p.key}}}`;
+                  const saved = varMap.find((m) => m.v === v);
+                  return (
+                    <div key={p.key} className="space-y-1.5">
+                      <div className="flex items-baseline justify-between gap-2">
+                        <span className="font-mono text-[12px] text-foreground">{v}</span>
+                        <span className="text-[10.5px] text-muted-foreground">{p.locations.length} location{p.locations.length === 1 ? "" : "s"}</span>
+                      </div>
+                      <VariablePicker
+                        defaultValue={saved?.def}
+                        disabled={readOnly}
+                        allowConstant
+                        mode={saved?.mode}
+                        onChange={(val, mode) => setMapping(p.key, val, mode)}
+                      />
+                      <ul className="space-y-0.5 pl-1">
+                        {p.locations.map((loc, i) => (
+                          <li key={i} className="text-[10.5px] leading-tight text-muted-foreground">
+                            <span className="font-mono text-foreground/70">{loc.nodeSerial}</span>
+                            <span className="text-muted-foreground/70"> · {loc.part}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      </Section>
+
+      <Section title="Session closure">
+        <div className="rounded-xl border border-border bg-card/50 p-4 space-y-4">
+          <p className="text-[11px] text-muted-foreground">
+            The lead exits the WhatsApp Freeform workflow when they reach its End node <span className="italic">or</span> when the timer below fires, whichever comes first.
+          </p>
+          <div className="space-y-2">
+            <Label className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+              Timer <span className="text-destructive">*</span>
+            </Label>
+            <div className="grid grid-cols-2 gap-1.5">
+              <TimerTile
+                active={timerMode === "absolute"}
+                onClick={() => patchConfig({ ffTimerMode: "absolute" })}
+                label="Absolute"
+                hint="From workflow entry"
+                disabled={readOnly}
+              />
+              <TimerTile
+                active={timerMode === "inactivity"}
+                onClick={() => patchConfig({ ffTimerMode: "inactivity" })}
+                label="Inactivity"
+                hint="From last lead action"
+                disabled={readOnly}
+              />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+              Duration <span className="text-destructive">*</span>
+            </Label>
+            <div className="flex items-center gap-2">
+              <Input
+                type="number"
+                min={FF_TIMER_MIN}
+                max={FF_TIMER_MAX}
+                value={timerMinutes}
+                disabled={readOnly}
+                onChange={(e) => {
+                  const raw = Number(e.target.value);
+                  if (Number.isNaN(raw)) return;
+                  const clamped = Math.max(FF_TIMER_MIN, Math.min(FF_TIMER_MAX, Math.round(raw)));
+                  patchConfig({ ffTimerMinutes: clamped });
+                }}
+                className="h-9 w-28 text-sm"
+              />
+              <span className="text-[12px] text-muted-foreground">minutes ({fmtMinutes(timerMinutes)})</span>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Max 24 hours. Meta closes the customer-service window automatically after that.
+            </p>
+          </div>
+        </div>
+      </Section>
+
+      {selected && (
+        <Section title="Available output variables">
+          <div className="rounded-xl border border-border bg-card/50 p-4">
+            <p className="text-[11px] text-muted-foreground">
+              Downstream nodes can branch on these once the workflow ends. Namespaced by this node.
+            </p>
+            <ul className="mt-2 space-y-1">
+              {getFreeformCampaignOutputs("<this-node>", selected.nodes).map((v) => (
+                <li key={v.key} className="font-mono text-[11.5px] text-foreground/80">{v.key}</li>
+              ))}
+            </ul>
+          </div>
+        </Section>
+      )}
+
+      {/* Preview modal. Read-only FreeformCanvas (pan + zoom only). */}
+      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+        <DialogContent className="max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>{selected?.name ?? "Workflow preview"}</DialogTitle>
+            <DialogDescription>
+              Read-only view. Pan and zoom to inspect; nothing here is editable.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="h-[70vh] overflow-hidden rounded-lg border border-border bg-background">
+            {selected && (
+              <FreeformCanvas
+                initialNodes={selected.nodes}
+                initialEdges={selected.edges}
+                previewOnly
+              />
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+function TimerTile({
+  active, onClick, label, hint, disabled,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+  hint: string;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={cn(
+        "flex flex-col items-start gap-0.5 rounded-md border px-2.5 py-2 text-left transition-colors",
+        active ? "border-foreground bg-accent/40" : "border-border hover:bg-accent/30",
+        disabled && "cursor-not-allowed opacity-50",
+      )}
+    >
+      <span className="text-[12px] font-medium">{label}</span>
+      <span className="text-[10.5px] text-muted-foreground">{hint}</span>
+    </button>
+  );
+}
+
+function fmtMinutes(m: number): string {
+  if (m < 60) return `${m} min`;
+  const h = Math.floor(m / 60);
+  const r = m - h * 60;
+  if (r === 0) return `${h}h`;
+  return `${h}h ${r}m`;
 }
 
 /* --------------------------- SMS --------------------------- */
@@ -2265,7 +2604,8 @@ function PayloadExtrasPicker({
 }: { fields: string[]; readOnly?: boolean; onChange: (f: string[]) => void }) {
   const [open, setOpen] = useState(false);
   const extraVariables = useContext(ExtraVariablesContext);
-  const allVariables = useMemo(() => mergeVariables(extraVariables), [extraVariables]);
+  const suppressSamples = useContext(SuppressSampleVariablesContext);
+  const allVariables = useMemo(() => mergeVariables(extraVariables, suppressSamples), [extraVariables, suppressSamples]);
   const grouped = useMemo(() => groupVariablesBySource(allVariables), [allVariables]);
 
   const toggle = (key: string) => {
@@ -2369,17 +2709,30 @@ function Field({ label, required, children }: { label: string; required?: boolea
 }
 
 function SelectLike({
-  options, placeholder, defaultValue, disabled, onPick,
-}: { options: string[]; placeholder?: string; defaultValue?: string; disabled?: boolean; onPick: (v: string) => void }) {
+  options, placeholder, defaultValue, disabled, onPick, optionLabel,
+}: {
+  options: string[];
+  placeholder?: string;
+  defaultValue?: string;
+  disabled?: boolean;
+  onPick: (v: string) => void;
+  /** When the option `value` and display label differ (e.g. option is an id but
+   *  the user reads a human name), return the display label here. */
+  optionLabel?: (v: string) => string;
+}) {
   const [value, setValue] = useState(defaultValue ?? "");
   return (
     <Select value={value || undefined} disabled={disabled} onValueChange={(v) => { setValue(v); onPick(v); }}>
       <SelectTrigger className="h-9 text-sm">
-        <SelectValue placeholder={placeholder ?? "Select…"} />
+        {value ? (
+          <span className="truncate">{optionLabel ? optionLabel(value) : value}</span>
+        ) : (
+          <SelectValue placeholder={placeholder ?? "Select…"} />
+        )}
       </SelectTrigger>
       <SelectContent>
         {options.map((o) => (
-          <SelectItem key={o} value={o}>{o}</SelectItem>
+          <SelectItem key={o} value={o}>{optionLabel ? optionLabel(o) : o}</SelectItem>
         ))}
       </SelectContent>
     </Select>
@@ -2402,7 +2755,8 @@ function VariablePicker({
   useEffect(() => { setM(mode); }, [mode]);
   // Outcome variables from other action nodes in the flow (e.g. `whatsapp_1.button`).
   const extraVariables = useContext(ExtraVariablesContext);
-  const allVariables = mergeVariables(extraVariables);
+  const suppressSamples = useContext(SuppressSampleVariablesContext);
+  const allVariables = mergeVariables(extraVariables, suppressSamples);
   // Preset/upstream variables (e.g. lifetime_order_value, call_disposition) aren't in
   // the sample list — surface the current value as its own option so it still renders.
   const isCustom = !!v && !allVariables.some((s) => s.key === v);

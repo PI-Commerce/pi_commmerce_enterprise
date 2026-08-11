@@ -67,6 +67,9 @@ import {
   stageLabelFor,
   type Lead,
 } from "@/lib/analytics-leads";
+import { FreeformCanvas } from "@/components/workflow/FreeformCanvas";
+import { getFreeformWorkflow, type FreeformNodeConfig } from "@/lib/freeform-types";
+import { X as CloseIcon, Minimize2 } from "lucide-react";
 import { resolveWaTemplate, isBranchableButton } from "@/lib/wa-outputs";
 import { resolveSmsTemplate } from "@/lib/sms-store";
 import { smsOutcomeTotals } from "@/lib/analytics-sms";
@@ -129,6 +132,9 @@ const NODE_COLOR: Record<SankeyNodeKind, string> = {
   apiToolCall: "#0ea5e9",
   abSplit: "#64748b",
   whatsapp: "#22c55e",
+  // Freeform workflow renders in the same WhatsApp green family but a shade
+  // darker so the two WhatsApp-kind nodes remain distinguishable on the graph.
+  whatsappFreeform: "#15803d",
   voice: "#a78bfa",
   sms: "#f59e0b",
   rcs: "#6366f1",
@@ -144,7 +150,8 @@ const NODE_TYPE_LABEL: Record<SankeyNodeKind, string> = {
   audience: "Audience",
   apiToolCall: "Tool",
   abSplit: "A/B Split",
-  whatsapp: "WhatsApp",
+  whatsapp: "WhatsApp Template",
+  whatsappFreeform: "WhatsApp Freeform Workflow",
   voice: "Voice Call",
   sms: "SMS",
   rcs: "RCS",
@@ -418,6 +425,10 @@ function CampaignAnalytics({
     visibleRuns[0] ??
     campaign.runs[0];
   const [openNode, setOpenNode] = useState<SankeyNode | null>(null);
+  // The Sankey node currently being drilled into as an expanded freeform
+  // workflow overlay. `null` = campaign canvas is showing normally.
+  const [expandedFreeform, setExpandedFreeform] =
+    useState<SankeyNode | null>(null);
 
   return (
     <>
@@ -535,7 +546,11 @@ function CampaignAnalytics({
           </div>
         </div>
         <div className="h-[520px]">
-          <CampaignFlowView run={run} onNodeClick={(n) => setOpenNode(n)} />
+          <CampaignFlowView
+            run={run}
+            onNodeClick={(n) => setOpenNode(n)}
+            onExpandFreeform={(n) => setExpandedFreeform(n)}
+          />
         </div>
       </div>
 
@@ -546,8 +561,12 @@ function CampaignAnalytics({
         run={run}
         onClose={() => setOpenNode(null)}
         onOpenChannelAnalytics={(n) => {
+          // Freeform nodes are a WhatsApp thing but not a ChannelKind, so route
+          // them to the WhatsApp channel view. Everything else uses its own kind.
+          const kind: ChannelKind =
+            n.kind === "whatsappFreeform" ? "whatsapp" : (n.kind as ChannelKind);
           goToChannel({
-            kind: n.kind as ChannelKind,
+            kind,
             campaignId,
             runId: run.id,
             nodeId: n.id,
@@ -555,6 +574,14 @@ function CampaignAnalytics({
           setOpenNode(null);
         }}
       />
+
+      {expandedFreeform && (
+        <FreeformExpansionOverlay
+          node={expandedFreeform}
+          run={run}
+          onClose={() => setExpandedFreeform(null)}
+        />
+      )}
     </>
   );
 }
@@ -974,6 +1001,183 @@ function buildNodeMetrics(
   return [];
 }
 
+/**
+ * Full-screen overlay showing the freeform workflow's own graph on top of the
+ * campaign canvas. Everything underneath dims via the black scrim. The graph
+ * itself renders via `FreeformCanvas` in `previewOnly` mode (no dragging, no
+ * palette, no click-to-open-config panel). Internal edges are decorated with
+ * lead-count labels sourced from the freeform's own seeded metrics, weighted
+ * against the parent freeform node's total entries so the numbers add up.
+ */
+function FreeformExpansionOverlay({
+  node,
+  run,
+  onClose,
+}: {
+  node: SankeyNode;
+  run: RunRow;
+  onClose: () => void;
+}) {
+  // Look up the referenced workflow by id from the campaign node config so the
+  // overlay always mirrors what the campaign author actually selected.
+  const workflowId = (node.config?.ffWorkflowId as string | undefined) ?? "";
+  const workflow = useMemo(() => getFreeformWorkflow(workflowId), [workflowId]);
+  // Enter/exit counts on the parent freeform node in the campaign flow.
+  const entered = node.entered;
+
+  /**
+   * Percentage-annotated copy of the workflow graph. Every button / list row /
+   * conditional branch label gets ` · N%` appended so it reads exactly like the
+   * campaign-flow output labels (`Complete purchase · 24%`). Percentages are
+   * relative to the source node's total outflow, derived by propagating leads
+   * top-down with a small per-hop drop-off, then normalising against the
+   * source's total.
+   */
+  const nodesWithPct = useMemo(() => {
+    if (!workflow) return undefined;
+    // ---- 1. Propagate leads through the graph. Same as before. ----
+    const outs = new Map<string, string[]>();
+    for (const e of workflow.edges) {
+      const arr = outs.get(e.source) ?? [];
+      arr.push(e.id);
+      outs.set(e.source, arr);
+    }
+    const seed = `${run.id}:${node.id}`;
+    const perEdge = new Map<string, number>();
+    const inflow = new Map<string, number>();
+    inflow.set("start", entered);
+    for (const rec of workflow.nodes) {
+      const src = rec.id;
+      const incoming = inflow.get(src) ?? 0;
+      const arr = outs.get(src) ?? [];
+      if (arr.length === 0) continue;
+      const dropWobble = ((hashSeed(seed + ":" + src) % 5) + 2) / 100;
+      const passed = Math.round(incoming * (1 - dropWobble));
+      const per = Math.max(0, Math.round(passed / arr.length));
+      for (const eid of arr) {
+        perEdge.set(eid, per);
+        const e = workflow.edges.find((x) => x.id === eid)!;
+        inflow.set(e.target, (inflow.get(e.target) ?? 0) + per);
+      }
+    }
+    // ---- 2. Map each source-handle (button / row id) to its share-% of the
+    //         source node's outflow. ----
+    const handlePct = new Map<string, number>();
+    for (const [srcNodeId, edgeIds] of outs.entries()) {
+      const total = edgeIds.reduce((s, id) => s + (perEdge.get(id) ?? 0), 0);
+      if (total === 0) continue;
+      for (const eid of edgeIds) {
+        const edge = workflow.edges.find((x) => x.id === eid)!;
+        const c = perEdge.get(eid) ?? 0;
+        const pct = Math.round((c / total) * 100);
+        // Buttons use handle id `btn_<id>`, list rows use `row_<id>`. Store the
+        // raw button/row id (drop the prefix) since that's what's on cfg.
+        if (edge.sourceHandle?.startsWith("btn_")) {
+          handlePct.set(`${srcNodeId}:btn:${edge.sourceHandle.slice(4)}`, pct);
+        } else if (edge.sourceHandle?.startsWith("row_")) {
+          handlePct.set(`${srcNodeId}:row:${edge.sourceHandle.slice(4)}`, pct);
+        }
+      }
+    }
+    // ---- 3. Return a copy of the nodes with labels decorated. ----
+    return workflow.nodes.map((n) => {
+      const cfg = (n.data.config as FreeformNodeConfig | undefined) ?? undefined;
+      if (!cfg) return n;
+      let nextCfg: FreeformNodeConfig = cfg;
+      // List rows.
+      if (cfg.rows?.length) {
+        nextCfg = {
+          ...nextCfg,
+          rows: cfg.rows.map((r) => {
+            const pct = handlePct.get(`${n.id}:row:${r.id}`);
+            return pct !== undefined ? { ...r, title: `${r.title} · ${pct}%` } : r;
+          }),
+        };
+      }
+      // Buttons.
+      if (cfg.buttonsBlock?.mode === "quick_reply") {
+        nextCfg = {
+          ...nextCfg,
+          buttonsBlock: {
+            mode: "quick_reply",
+            buttons: cfg.buttonsBlock.buttons.map((b) => {
+              const pct = handlePct.get(`${n.id}:btn:${b.id}`);
+              return pct !== undefined ? { ...b, label: `${b.label} · ${pct}%` } : b;
+            }),
+          },
+        };
+      } else if (cfg.buttonsBlock?.mode === "cta_url") {
+        const b = cfg.buttonsBlock.button;
+        const pct = handlePct.get(`${n.id}:btn:${b.id}`);
+        if (pct !== undefined) {
+          nextCfg = {
+            ...nextCfg,
+            buttonsBlock: {
+              mode: "cta_url",
+              button: { ...b, label: `${b.label} · ${pct}%` },
+            },
+          };
+        }
+      }
+      return { ...n, data: { ...n.data, config: nextCfg } };
+    });
+  }, [workflow, entered, run.id, node.id]);
+
+  return (
+    <div className="fixed inset-0 z-[70] flex flex-col bg-black/60 backdrop-blur-sm">
+      {/* Header bar */}
+      <div className="flex items-center justify-between border-b border-white/10 bg-background/95 px-5 py-3 shadow-lg">
+        <div className="min-w-0">
+          <p className="text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Freeform Workflow · Expanded view
+          </p>
+          <h2 className="mt-0.5 truncate text-sm font-semibold">
+            {workflow?.name ?? "Workflow"}
+            <span className="ml-2 font-normal text-muted-foreground">
+              {entered.toLocaleString()} leads entered
+            </span>
+          </h2>
+        </div>
+        <button
+          onClick={onClose}
+          className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-1 text-[11.5px] font-medium hover:bg-accent"
+        >
+          <Minimize2 className="h-3 w-3" />
+          Collapse
+          <CloseIcon className="h-3 w-3 opacity-60" />
+        </button>
+      </div>
+
+      {/* Dashed group container with the workflow's graph */}
+      <div className="relative flex-1 p-6">
+        <div className="relative h-full w-full overflow-hidden rounded-2xl border-2 border-dashed border-foreground/25 bg-background/70">
+          {workflow ? (
+            <FreeformCanvas
+              initialNodes={nodesWithPct ?? workflow.nodes}
+              initialEdges={workflow.edges}
+              previewOnly
+            />
+          ) : (
+            <div className="grid h-full place-items-center text-[13px] text-muted-foreground">
+              Workflow no longer exists. Nothing to display.
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Cheap deterministic string hash for the overlay's per-node variance. */
+function hashSeed(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return Math.abs(h);
+}
+
 function NodeDrawer({
   node,
   run,
@@ -988,6 +1192,7 @@ function NodeDrawer({
   const open = !!node;
   const kind = node?.kind;
   const isChannel = !!kind && CHANNEL_KINDS.has(kind);
+  const isFreeform = kind === "whatsappFreeform";
   const isTerminal = kind === "start" || kind === "end";
   const config = node && !isTerminal ? nodeConfigSnapshot(node) : [];
   const dropPct =
@@ -1019,10 +1224,14 @@ function NodeDrawer({
     });
   }, [node, kind, run]);
 
-  // Outcome distribution for WhatsApp nodes that expose ≥2 handles (button
-  // templates, or Type-1 nodes with the split toggle on). Grouped by handle.
+  // Outcome distribution for WhatsApp Template nodes that expose ≥2 handles
+  // (button templates, or Type-1 nodes with the split toggle on) AND for
+  // WhatsApp Freeform Workflow nodes (Success / Timeout / Failed). Grouped by
+  // handle. Both share the same list surface downstream — the section title
+  // adapts to the node kind.
   const waOutcomeDist = useMemo(() => {
-    if (!node || kind !== "whatsapp") return [];
+    if (!node) return [];
+    if (kind !== "whatsapp" && kind !== "whatsappFreeform") return [];
     const out = run.sankey.edges.filter((e) => e.source === node.id);
     const byHandle = new Map<
       string,
@@ -1040,9 +1249,15 @@ function NodeDrawer({
             ? "Session expired"
             : h === "reply_received"
               ? "Text Reply Received"
-              : h === "advance" || h === "__advance__"
-                ? "Continue"
-                : h);
+              : h === "completed"
+                ? "Success"
+                : h === "timed_out"
+                  ? "Timeout"
+                  : h === "failed"
+                    ? "Failed"
+                    : h === "advance" || h === "__advance__"
+                      ? "Continue"
+                      : h);
       if (prev) prev.value += e.value;
       else
         byHandle.set(h, {
@@ -1071,12 +1286,14 @@ function NodeDrawer({
           <SheetDescription className="text-[11px]">
             {kind ? NODE_TYPE_LABEL[kind] : ""} node
           </SheetDescription>
-          {isChannel && node && (
+          {(isChannel || isFreeform) && node && (
             <button
               onClick={() => onOpenChannelAnalytics(node)}
               className="mt-2 inline-flex items-center gap-1.5 self-start rounded-md border border-border bg-secondary/50 px-2.5 py-1 text-[11px] font-medium text-foreground hover:bg-secondary"
             >
-              {CHANNEL_CTA_LABEL[kind as ChannelKind]}
+              {isFreeform
+                ? "View detailed WhatsApp analytics"
+                : CHANNEL_CTA_LABEL[kind as ChannelKind]}
               <ExternalLink className="h-3 w-3" />
             </button>
           )}
