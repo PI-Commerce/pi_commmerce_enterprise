@@ -33,7 +33,7 @@ function WhatsAppManage() {
   const [tab, setTab] = useState<Tab>("overview");
   const [signupOpen, setSignupOpen] = useState(false);
 
-  // Adding, reconnecting and disconnecting a WABA is `waba_management` — an Admin
+  // Adding, reconnecting and disconnecting a WABA is `waba_management` — an Org Owner
   // capability. Members can build on top of a connected WABA but cannot change
   // which Meta assets this tenant is bound to.
   const mayManageWaba = can(role, "waba_management");
@@ -148,8 +148,8 @@ function NotConnected({
             <div className="mx-auto mt-4 flex max-w-sm items-start gap-2 rounded-lg border border-dashed border-warning/40 bg-warning/5 px-3 py-2.5 text-left text-[11.5px] leading-relaxed text-muted-foreground">
               <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
               <p>
-                Binding this workspace to a Meta business asset is an Admin capability —{" "}
-                {ROLE_LABEL[role]} cannot add, reconnect or disconnect a WABA. Ask an Admin in your
+                Binding this workspace to a Meta business asset is an Org Owner capability —{" "}
+                {ROLE_LABEL[role]} cannot add, reconnect or disconnect a WABA. Ask an Org Owner in your
                 workspace to connect it; you will be able to build and run templates on it right after.
               </p>
             </div>

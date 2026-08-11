@@ -45,7 +45,7 @@ function UsersPage() {
   const [page, setPage] = useState(0);
   const [inviting, setInviting] = useState(false);
 
-  // The scope is not a filter the user can widen — it is the query.
+  // The scope is not a filter the user can widen, it is the query.
   const scoped = useMemo(
     () => allUsers.filter((u) => u.tenantId === session.tenantId),
     [allUsers, session.tenantId],
@@ -94,7 +94,7 @@ function UsersPage() {
       <div className="flex h-full flex-col px-8 pb-6 pt-6">
         <PageHeader
           title="Users"
-          description={`Members of ${tenant?.name ?? "your workspace"}. Scoped to this tenant — there is no wider view from here.`}
+          description={`Members of ${tenant?.name ?? "your workspace"}. Scoped to this tenant, there is no wider view from here.`}
           actions={
             <Button
               size="sm"
@@ -103,7 +103,7 @@ function UsersPage() {
               title={mayManage ? undefined : `${ROLE_LABEL[role]} cannot invite members`}
               onClick={() => setInviting(true)}
             >
-              <UserPlus className="h-4 w-4" /> Invite member
+              <UserPlus className="h-4 w-4" /> Create User
             </Button>
           }
         />
@@ -228,7 +228,7 @@ function UsersPage() {
         <div className="mt-3 grid gap-3 lg:grid-cols-2">
           <Callout>
             This list is filtered at the database, not in the browser. Even a crafted request for
-            another tenant's members returns nothing — the row-level security policy never sees them.
+            another tenant's members returns nothing, the row-level security policy never sees them.
           </Callout>
           <RoleHint role={role} />
         </div>
@@ -240,12 +240,12 @@ function UsersPage() {
 }
 
 function RoleHint({ role }: { role: AnyRole }) {
-  if (role === "ADMIN") {
+  if (role === "ORG_OWNER") {
     return (
       <Callout>
-        You are an Admin: you can invite members, change their role up to Admin, and manage WABA
-        accounts. You cannot reach trunks, other tenants, or provider accounts — those live on the
-        control plane.
+        You are an Org Owner: you can invite members, change their role up to Org Owner, and manage
+        WABA accounts. You cannot reach trunks, other tenants, or provider accounts, those live on
+        the control plane.
       </Callout>
     );
   }
@@ -253,8 +253,8 @@ function RoleHint({ role }: { role: AnyRole }) {
     <div className="flex items-start gap-2 rounded-lg border border-dashed border-warning/40 bg-warning/5 px-3 py-2.5 text-[11.5px] leading-relaxed text-muted-foreground">
       <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
       <p>
-        {ROLE_LABEL[role]} is a read-only view of this list. Inviting and role changes are an Admin
-        capability — ask an Admin in your workspace.
+        {ROLE_LABEL[role]} is a read-only view of this list. Inviting and role changes are an Org
+        Owner capability, ask an Org Owner in your workspace.
       </p>
     </div>
   );
@@ -278,26 +278,37 @@ function InviteDialog({
 }) {
   const options = assignableRoles(granter) as TenantRole[];
   const tenant = tenantById(tenantId);
-  const [name, setName] = useState("");
+  const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [role, setRole] = useState<TenantRole>("MEMBER");
 
-  const valid = name.trim().length > 1 && email.includes("@") && options.includes(role);
+  const valid =
+    username.trim().length > 1 &&
+    email.includes("@") &&
+    password.length >= 8 &&
+    options.includes(role);
+
+  function reset() {
+    setUsername(""); setEmail(""); setPassword(""); setRole("MEMBER");
+  }
 
   function submit() {
     const u: TenantUser = {
       id: `tu_${Date.now().toString(36)}`,
-      name: name.trim(),
+      name: username.trim(),
       email: email.trim().toLowerCase(),
       tenantId,
       role,
-      status: "Invited",
-      lastSeen: "—",
+      // The creator provisions the credentials directly, so the member is
+      // active immediately, there is no separate accept step.
+      status: "Active",
+      lastSeen: "-",
     };
     addTenantUser(u);
-    toast.success(`Invited ${u.email}`, { description: `Joins as ${ROLE_LABEL[role]} once they accept.` });
+    toast.success(`Added ${u.email}`, { description: `Signs in as ${ROLE_LABEL[role]}.` });
     onOpenChange(false);
-    setName(""); setEmail(""); setRole("MEMBER");
+    reset();
   }
 
   if (options.length === 0) {
@@ -305,11 +316,11 @@ function InviteDialog({
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Invite a member</DialogTitle>
+            <DialogTitle>Create User</DialogTitle>
           </DialogHeader>
           <NoAccess
-            title="You can't invite members"
-            reason={`${ROLE_LABEL[granter]} does not hold member management. Ask an Admin in your workspace.`}
+            title="You can't create users"
+            reason={`${ROLE_LABEL[granter]} does not hold member management. Ask an Org Owner in your workspace.`}
           />
         </DialogContent>
       </Dialog>
@@ -324,46 +335,47 @@ function InviteDialog({
             <span className="grid h-7 w-7 place-items-center rounded-md bg-secondary">
               <Mail className="h-4 w-4" />
             </span>
-            Invite a member
+            Create User
           </DialogTitle>
           <DialogDescription>
-            They join <strong>{tenant?.name ?? "your workspace"}</strong> and nothing else. There is no
-            workspace picker here — the tenant comes from your session.
+            Add a teammate to <strong>{tenant?.name ?? "your workspace"}</strong>.
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-3">
-          <Field label="Full name">
-            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Priya Nair" className="h-9" />
-          </Field>
-          <Field label="Work email">
-            <Input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="priya@voltmoney.in" className="h-9" />
-          </Field>
-          <Field label="Role">
-            <Select value={role} onValueChange={(v) => setRole(v as TenantRole)}>
-              <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {options.map((r) => <SelectItem key={r} value={r}>{ROLE_LABEL[r]}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            <span className="text-[10.5px] leading-snug text-muted-foreground">{ROLE_BLURB[role]}</span>
-          </Field>
-
-          <div className="rounded-lg border border-border bg-secondary/30 p-3">
-            <p className="text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground">
-              What changed from the old modal
-            </p>
-            <ul className="mt-1.5 space-y-1 text-[11px] text-muted-foreground">
-              <li>· The client selector is gone — the tenant is implicit in your session.</li>
-              <li>· Provider roles and ROOT_USER never appear in this list.</li>
-              <li>· Members and Viewers cannot open this dialog at all.</li>
-            </ul>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Username">
+              <Input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="priya.nair" className="h-9" />
+            </Field>
+            <Field label="Email">
+              <Input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="priya@voltmoney.in" className="h-9" />
+            </Field>
           </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Password">
+              <Input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="At least 8 characters"
+                className="h-9"
+              />
+            </Field>
+            <Field label="Role">
+              <Select value={role} onValueChange={(v) => setRole(v as TenantRole)}>
+                <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {options.map((r) => <SelectItem key={r} value={r}>{ROLE_LABEL[r]}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </Field>
+          </div>
+          <span className="block text-[10.5px] leading-snug text-muted-foreground">{ROLE_BLURB[role]}</span>
         </div>
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button disabled={!valid} onClick={submit}>Send invite</Button>
+          <Button disabled={!valid} onClick={submit}>Create user</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

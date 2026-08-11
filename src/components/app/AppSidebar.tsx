@@ -43,13 +43,13 @@ const tenantSecondary: NavItem[] = [
 
 const providerPrimary: NavItem[] = [
   { to: "/admin", label: "Overview", icon: LayoutDashboard, exact: true },
-  { to: "/admin/tenants", label: "Tenants", icon: Building2 },
+  { to: "/admin/tenants", label: "Merchants", icon: Building2 },
   { to: "/admin/trunks", label: "Trunk Configuration", icon: Cable },
 ];
 
 const providerPeople: NavItem[] = [
   { to: "/admin/provider-users", label: "Provider Users", icon: ShieldCheck },
-  { to: "/admin/tenant-users", label: "Tenant Users", icon: UsersRound },
+  { to: "/admin/tenant-users", label: "Merchant Users", icon: UsersRound },
   { to: "/admin/roles", label: "Roles & Access", icon: KeyRound },
 ];
 
@@ -121,7 +121,7 @@ export function AppSidebar() {
 
       {provider && !collapsed && (
         <div className="mx-3 mb-1 rounded-md border border-ai/25 bg-ai/10 px-2 py-1 text-[9.5px] font-medium uppercase tracking-wide text-ai">
-          Cross-tenant access
+          Cross-merchant access
         </div>
       )}
 

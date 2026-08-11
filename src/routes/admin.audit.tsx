@@ -25,9 +25,9 @@ export const Route = createFileRoute("/admin/audit")({
 const GRID = "grid-cols-[1.1fr_1.5fr_1.2fr_2.4fr_1fr_0.9fr]";
 
 const ACTION_META: Record<AuditAction, { label: string; icon: React.ComponentType<{ className?: string }>; tone: string }> = {
-  "tenant.create": { label: "Tenant created", icon: Building2, tone: "bg-success/10 text-success" },
-  "tenant.update": { label: "Tenant updated", icon: Building2, tone: "bg-secondary text-muted-foreground" },
-  "tenant.suspend": { label: "Tenant suspended", icon: Ban, tone: "bg-destructive/10 text-destructive" },
+  "tenant.create": { label: "Merchant created", icon: Building2, tone: "bg-success/10 text-success" },
+  "tenant.update": { label: "Merchant updated", icon: Building2, tone: "bg-secondary text-muted-foreground" },
+  "tenant.suspend": { label: "Merchant suspended", icon: Ban, tone: "bg-destructive/10 text-destructive" },
   "trunk.create": { label: "Trunk provisioned", icon: Cable, tone: "bg-success/10 text-success" },
   "trunk.update": { label: "Trunk updated", icon: Cable, tone: "bg-warning/10 text-warning" },
   "user.create": { label: "User created", icon: UserPlus, tone: "bg-success/10 text-success" },
@@ -51,7 +51,7 @@ function AuditPage() {
   const [onlyImpersonated, setOnlyImpersonated] = useState(false);
   const [page, setPage] = useState(0);
 
-  const nameOf = (id?: string) => (id ? tenants.find((t) => t.id === id)?.name ?? id : "—");
+  const nameOf = (id?: string) => (id ? tenants.find((t) => t.id === id)?.name ?? id : "-");
 
   const rows = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -75,7 +75,7 @@ function AuditPage() {
           size="sm"
           variant="outline"
           className="gap-1.5"
-          onClick={() => toast.success(`Exported ${rows.length} events`, { description: "CSV queued — arrives by email." })}
+          onClick={() => toast.success(`Exported ${rows.length} events`, { description: "CSV queued, arrives by email." })}
         >
           <Download className="h-4 w-4" /> Export
         </Button>
@@ -102,11 +102,11 @@ function AuditPage() {
             </SelectContent>
           </Select>
         </Field>
-        <Field label="Tenant">
+        <Field label="Merchant">
           <Select value={tenantId} onValueChange={(v) => { setTenantId(v); setPage(0); }}>
             <SelectTrigger className="h-9 w-[200px]"><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All tenants</SelectItem>
+              <SelectItem value="all">All merchants</SelectItem>
               {tenants.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
             </SelectContent>
           </Select>
@@ -132,7 +132,7 @@ function AuditPage() {
           <span>Actor</span>
           <span>Action</span>
           <span>Summary</span>
-          <span>Tenant</span>
+          <span>Merchant</span>
           <span>Source IP</span>
         </HeadRow>
 
@@ -176,7 +176,7 @@ function AuditPage() {
 
       <div className="mt-3 grid gap-3 lg:grid-cols-[1fr_1fr]">
         <Callout>
-          Rows are written by the API, not by the client, and the table has no UPDATE or DELETE grant —
+          Rows are written by the API, not by the client, and the table has no UPDATE or DELETE grant -
           not even for a Global Admin. Correcting a mistake means appending the correction.
         </Callout>
         <Callout>

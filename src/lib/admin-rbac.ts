@@ -4,7 +4,7 @@
  * This file is the **single source of truth** the PRD asks for: capabilities as
  * rows, roles as columns. A new role is a new column; a new capability is a new
  * row. In production this same table is mirrored by the `ProviderRole` /
- * `TenantRole` server contract and the Supabase RLS policy — the UI gate here is
+ * `TenantRole` server contract and the Supabase RLS policy, the UI gate here is
  * the *last* layer, never the enforcement boundary.
  *
  *   Provider plane (Paytm-internal, Google SSO only) → control plane
@@ -16,11 +16,11 @@
 export type Plane = "provider" | "tenant";
 
 export type ProviderRole = "GLOBAL_ADMIN" | "WORKSPACE_ADMIN" | "SUPPORT";
-export type TenantRole = "ADMIN" | "MEMBER" | "VIEWER";
+export type TenantRole = "ORG_OWNER" | "MEMBER" | "VIEWER";
 export type AnyRole = ProviderRole | TenantRole;
 
 export const PROVIDER_ROLES: ProviderRole[] = ["GLOBAL_ADMIN", "WORKSPACE_ADMIN", "SUPPORT"];
-export const TENANT_ROLES: TenantRole[] = ["ADMIN", "MEMBER", "VIEWER"];
+export const TENANT_ROLES: TenantRole[] = ["ORG_OWNER", "MEMBER", "VIEWER"];
 
 /** Which plane a role belongs to. No role ever spans both. */
 export function planeOf(role: AnyRole): Plane {
@@ -35,7 +35,7 @@ export const ROLE_RANK: Record<AnyRole, number> = {
   GLOBAL_ADMIN: 3,
   WORKSPACE_ADMIN: 2,
   SUPPORT: 1,
-  ADMIN: 3,
+  ORG_OWNER: 3,
   MEMBER: 2,
   VIEWER: 1,
 };
@@ -44,7 +44,7 @@ export const ROLE_LABEL: Record<AnyRole, string> = {
   GLOBAL_ADMIN: "Global Admin",
   WORKSPACE_ADMIN: "Workspace Admin",
   SUPPORT: "Support",
-  ADMIN: "Admin",
+  ORG_OWNER: "Org Owner",
   MEMBER: "Member",
   VIEWER: "Viewer",
 };
@@ -52,9 +52,9 @@ export const ROLE_LABEL: Record<AnyRole, string> = {
 /** One-line description shown in role pickers and the matrix legend. */
 export const ROLE_BLURB: Record<AnyRole, string> = {
   GLOBAL_ADMIN: "Break-glass. Everything, cross-tenant, incl. provider users. MFA + fully audited.",
-  WORKSPACE_ADMIN: "Onboard tenants, provision trunks, mint a tenant's first Admin.",
+  WORKSPACE_ADMIN: "Onboard tenants, provision trunks, mint a tenant's first Org Owner.",
   SUPPORT: "Cross-tenant read + time-boxed impersonation. The day-to-day dev/debug role.",
-  ADMIN: "Everything a Member can, plus manage members and WABA accounts.",
+  ORG_OWNER: "Everything a Member can, plus manage members and WABA accounts.",
   MEMBER: "Create, edit and run campaigns, agents and channels. View everything.",
   VIEWER: "Read-only: dashboard, analytics and history.",
 };
@@ -75,7 +75,7 @@ export type Capability =
 export type CapabilityMeta = {
   key: Capability;
   label: string;
-  /** Shown under the label in the matrix — why this row exists. */
+  /** Shown under the label in the matrix, why this row exists. */
   note: string;
 };
 
@@ -84,7 +84,7 @@ export const CAPABILITIES: CapabilityMeta[] = [
   { key: "waba_management", label: "WABA management", note: "Add and manage WhatsApp Business accounts" },
   { key: "member_management", label: "Member management", note: "Create / view / edit members of one tenant" },
   { key: "build_content", label: "Build campaigns / agents / channels", note: "Author and run tenant content" },
-  { key: "provisioning", label: "Trunk & tenant provisioning", note: "Onboard a tenant, provision trunks, mint its first Admin" },
+  { key: "provisioning", label: "Trunk & tenant provisioning", note: "Onboard a tenant, provision trunks, mint its first Org Owner" },
   { key: "provider_user_management", label: "Provider-user management", note: "Create / manage provider accounts" },
   { key: "own_workspace", label: "Own workspace", note: "Access the customer-facing Tenant Workspace" },
   { key: "provider_console", label: "Provider Console", note: "Reach the Paytm-internal control plane" },
@@ -98,44 +98,44 @@ export const CAPABILITIES: CapabilityMeta[] = [
  * Note the two deliberate holes the PRD calls out:
  *  - Provider roles never hold `own_workspace` or `build_content`. They write to
  *    tenant data only *inside* an impersonation session, which is a transient
- *    session capability, not a standing grant — so it isn't ticked here.
+ *    session capability, not a standing grant, so it isn't ticked here.
  *  - `VIEWER` holds `own_workspace` read-only; every mutating capability is false.
  */
 const MATRIX: Record<Capability, Record<AnyRole, boolean>> = {
   waba_management: {
-    ADMIN: true, MEMBER: false, VIEWER: false,
+    ORG_OWNER: true, MEMBER: false, VIEWER: false,
     GLOBAL_ADMIN: false, WORKSPACE_ADMIN: false, SUPPORT: false,
   },
   member_management: {
-    ADMIN: true, MEMBER: false, VIEWER: false,
+    ORG_OWNER: true, MEMBER: false, VIEWER: false,
     GLOBAL_ADMIN: false, WORKSPACE_ADMIN: false, SUPPORT: false,
   },
   build_content: {
-    ADMIN: true, MEMBER: true, VIEWER: false,
+    ORG_OWNER: true, MEMBER: true, VIEWER: false,
     GLOBAL_ADMIN: false, WORKSPACE_ADMIN: false, SUPPORT: false,
   },
   provisioning: {
-    ADMIN: false, MEMBER: false, VIEWER: false,
+    ORG_OWNER: false, MEMBER: false, VIEWER: false,
     GLOBAL_ADMIN: true, WORKSPACE_ADMIN: true, SUPPORT: false,
   },
   provider_user_management: {
-    ADMIN: false, MEMBER: false, VIEWER: false,
+    ORG_OWNER: false, MEMBER: false, VIEWER: false,
     GLOBAL_ADMIN: true, WORKSPACE_ADMIN: false, SUPPORT: false,
   },
   own_workspace: {
-    ADMIN: true, MEMBER: true, VIEWER: true,
+    ORG_OWNER: true, MEMBER: true, VIEWER: true,
     GLOBAL_ADMIN: false, WORKSPACE_ADMIN: false, SUPPORT: false,
   },
   provider_console: {
-    ADMIN: false, MEMBER: false, VIEWER: false,
+    ORG_OWNER: false, MEMBER: false, VIEWER: false,
     GLOBAL_ADMIN: true, WORKSPACE_ADMIN: true, SUPPORT: true,
   },
   cross_tenant_read: {
-    ADMIN: false, MEMBER: false, VIEWER: false,
+    ORG_OWNER: false, MEMBER: false, VIEWER: false,
     GLOBAL_ADMIN: true, WORKSPACE_ADMIN: true, SUPPORT: true,
   },
   impersonation: {
-    ADMIN: false, MEMBER: false, VIEWER: false,
+    ORG_OWNER: false, MEMBER: false, VIEWER: false,
     GLOBAL_ADMIN: true, WORKSPACE_ADMIN: false, SUPPORT: true,
   },
 };
@@ -145,7 +145,7 @@ export function can(role: AnyRole, cap: Capability): boolean {
   return MATRIX[cap][role];
 }
 
-/** Every capability held by a role — used by the role picker summary. */
+/** Every capability held by a role, used by the role picker summary. */
 export function capabilitiesOf(role: AnyRole): CapabilityMeta[] {
   return CAPABILITIES.filter((c) => can(role, c.key));
 }
@@ -190,7 +190,7 @@ export function assignableRoles(granter: AnyRole): AnyRole[] {
 export const ROLE_MIGRATION: { from: string; to: string; note: string }[] = [
   {
     from: "ADMIN held by a customer",
-    to: "ADMIN (tenant plane)",
+    to: "ORG_OWNER (tenant plane)",
     note: "Scoped to one tenant. Loses cross-tenant access, provisioning, and trunk edits.",
   },
   {

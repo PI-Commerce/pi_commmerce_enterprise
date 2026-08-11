@@ -2,7 +2,7 @@
  * Shared primitives for the Admin Panel surfaces.
  *
  * Everything here is presentational and matches the design language already
- * used by the campaign/template tables — frozen header row, 13px body rows,
+ * used by the campaign/template tables, frozen header row, 13px body rows,
  * pill-shaped status chips, dashed info callouts. Pulled out so the six console
  * pages don't drift from each other.
  */
@@ -29,7 +29,7 @@ export function Pill({
   tone?: Tone;
   children: React.ReactNode;
   className?: string;
-  /** Native tooltip — used to explain *why* a capability pill is showing. */
+  /** Native tooltip, used to explain *why* a capability pill is showing. */
   title?: string;
 }) {
   return (
@@ -270,7 +270,7 @@ export function StatCard({
  *
  * Worth being explicit about in a mock that developers will read: this screen is
  * a courtesy, not a control. The real rejection happens at the API and in the
- * RLS policy — if this component is the only thing standing between a role and
+ * RLS policy, if this component is the only thing standing between a role and
  * the data, the feature is not secure.
  */
 export function NoAccess({

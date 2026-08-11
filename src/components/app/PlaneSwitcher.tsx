@@ -2,7 +2,7 @@
  * The bottom-left plane switcher.
  *
  * **Demo device only.** In production the two planes ship as two deploys behind
- * two auth boundaries — the Provider Console on an internal subdomain gated by
+ * two auth boundaries, the Provider Console on an internal subdomain gated by
  * Google SSO + Workspace-group allowlist, the Tenant Workspace on the customer
  * domain. A single bundle that can render both is exactly the tenant-isolation
  * break the PRD is fixing. This control exists so the mock can be walked
@@ -64,7 +64,7 @@ export function PlaneSwitcher({ collapsed }: { collapsed: boolean }) {
 
   return (
     <div className="space-y-2">
-      {/* Segmented plane control — the headline switch. */}
+      {/* Segmented plane control, the headline switch. */}
       <div
         className={cn(
           "grid grid-cols-2 gap-1 rounded-lg border border-border bg-secondary/60 p-1",

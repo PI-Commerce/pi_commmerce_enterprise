@@ -16,10 +16,10 @@ export const Route = createFileRoute("/admin/impersonate")({
 });
 
 const RULES = [
-  { icon: Clock, title: "Hard expiry", body: `Every session dies after ${IMPERSONATION_MINUTES} minutes. There is no renew button — a longer investigation needs a new session and a new ticket.` },
-  { icon: ScrollText, title: "Attributed to you", body: "Writes made inside the session are recorded against your Paytm identity, not the tenant user's, and flagged as impersonated." },
-  { icon: Eye, title: "Visible, not silent", body: "A banner sits above every page for the whole session and the tenant's own audit view shows the entry." },
-  { icon: Ban, title: "Scoped to one tenant", body: "The session is bound to the tenant you pick here. Cross-tenant reach does not survive the switch." },
+  { icon: Clock, title: "Hard expiry", body: `Every session dies after ${IMPERSONATION_MINUTES} minutes. There is no renew button, a longer investigation needs a new session and a new ticket.` },
+  { icon: ScrollText, title: "Attributed to you", body: "Writes made inside the session are recorded against your Paytm identity, not the merchant user's, and flagged as impersonated." },
+  { icon: Eye, title: "Visible, not silent", body: "A banner sits above every page for the whole session and the merchant's own audit view shows the entry." },
+  { icon: Ban, title: "Scoped to one merchant", body: "The session is bound to the merchant you pick here. Cross-merchant reach does not survive the switch." },
 ];
 
 function ImpersonatePage() {
@@ -39,7 +39,7 @@ function ImpersonatePage() {
   }, [tenants, q]);
 
   const tenant = tenants.find((t) => t.id === picked) ?? null;
-  const admins = tenant ? tenantUsers.filter((u) => u.tenantId === tenant.id && u.role === "ADMIN") : [];
+  const admins = tenant ? tenantUsers.filter((u) => u.tenantId === tenant.id && u.role === "ORG_OWNER") : [];
   const valid = !!tenant && /^[A-Z]{3,8}-\d{2,6}$/i.test(ticket.trim()) && tenant.status !== "Suspended";
 
   function begin() {
@@ -53,14 +53,14 @@ function ImpersonatePage() {
 
   return (
     <ProviderPage
-      title="Impersonate a tenant"
+      title="Impersonate a merchant"
       description="The supported way to see what a customer sees. Time-boxed, attributed, and impossible to do quietly."
       capability="impersonation"
     >
       <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[1.25fr_1fr]">
-        {/* Tenant picker */}
+        {/* Merchant picker */}
         <div className="flex min-h-0 flex-col">
-          <Field label="Find a tenant">
+          <Field label="Find a merchant">
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input
@@ -110,7 +110,7 @@ function ImpersonatePage() {
               );
             })}
             {rows.length === 0 && (
-              <p className="py-10 text-center text-[13px] text-muted-foreground">No tenant matches that search.</p>
+              <p className="py-10 text-center text-[13px] text-muted-foreground">No merchant matches that search.</p>
             )}
           </div>
         </div>
@@ -119,14 +119,14 @@ function ImpersonatePage() {
         <div className="min-h-0 space-y-4 overflow-y-auto">
           <Card title="Open a session" description="Both fields are required before the session can start.">
             <div className="space-y-3">
-              <Field label="Tenant">
+              <Field label="Merchant">
                 <div
                   className={cn(
                     "flex h-9 items-center rounded-md border px-3 text-[12.5px]",
                     tenant ? "border-ai/30 bg-ai/[0.06]" : "border-dashed border-border text-muted-foreground",
                   )}
                 >
-                  {tenant ? `${tenant.name} · merchant ${tenant.id}` : "Pick a tenant from the list"}
+                  {tenant ? `${tenant.name} · merchant ${tenant.id}` : "Pick a merchant from the list"}
                 </div>
               </Field>
 
@@ -166,7 +166,7 @@ function ImpersonatePage() {
               <p className="text-[11px] text-muted-foreground">
                 You will enter as{" "}
                 <span className="font-medium text-foreground">{ROLE_LABEL[session.providerRole]}</span>, viewing
-                the workspace with tenant Admin visibility.
+                the workspace with tenant Org Owner visibility.
               </p>
             </div>
           </Card>
@@ -199,7 +199,7 @@ function ImpersonatePage() {
               ))}
             </ul>
             <Callout className="mt-3">
-              The countdown in the banner is a courtesy. The ticket itself expires server-side — a
+              The countdown in the banner is a courtesy. The ticket itself expires server-side, a
               stolen tab cannot outlive it.
             </Callout>
           </Card>

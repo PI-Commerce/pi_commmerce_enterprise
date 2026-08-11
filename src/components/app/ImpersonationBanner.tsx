@@ -4,7 +4,7 @@
  * The PRD's rule: an operator inside a tenant workspace must *never* be able to
  * forget it. So the banner is not dismissible, sits above every page, counts
  * down in real time, and hard-exits at zero without a renew affordance. The
- * countdown is cosmetic — the server-side ticket expiry is the real boundary —
+ * countdown is cosmetic, the server-side ticket expiry is the real boundary -
  * but it makes the guarantee legible.
  */
 

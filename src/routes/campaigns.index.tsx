@@ -29,6 +29,8 @@ import { STATUS_TONE, type CampaignStatus } from "@/lib/campaign-types";
 import { EXAMPLE_CAMPAIGN_NAMES } from "@/lib/campaign-examples";
 import { CreateRunDialog, type CampaignOption, type CreateRunPayload } from "@/components/workflow/CreateRunDialog";
 import { CSV_LIBRARY, makeCsvAsset, type CsvAsset } from "@/lib/data-library";
+import { useEffectiveRole } from "@/lib/admin-store";
+import { can } from "@/lib/admin-rbac";
 
 
 export const Route = createFileRoute("/campaigns/")({
@@ -146,6 +148,10 @@ type Tab = "data" | "campaigns" | "runs";
 
 function CampaignList() {
   const navigate = useNavigate();
+  const role = useEffectiveRole();
+  // Building campaigns/agents/channels is the `build_content` capability.
+  // Org Owner and Member hold it; Viewer (read-only) does not.
+  const mayBuild = can(role, "build_content");
   const [tab, setTab] = useState<Tab>("campaigns");
   const [rows] = useState<CampaignRow[]>(INITIAL);
 
@@ -274,15 +280,33 @@ function CampaignList() {
         description="Design and orchestrate every customer journey across channels."
         actions={
           tab === "data" ? (
-            <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={() => fileRef.current?.click()}>
+            <Button
+              size="sm"
+              disabled={!mayBuild}
+              title={mayBuild ? undefined : "Viewer is read-only"}
+              className="h-8 gap-1.5 text-xs"
+              onClick={() => fileRef.current?.click()}
+            >
               <Upload className="h-3.5 w-3.5" /> Upload CSV
             </Button>
           ) : tab === "campaigns" ? (
-            <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={() => setCreateOpen(true)}>
+            <Button
+              size="sm"
+              disabled={!mayBuild}
+              title={mayBuild ? undefined : "Viewer is read-only"}
+              className="h-8 gap-1.5 text-xs"
+              onClick={() => setCreateOpen(true)}
+            >
               <Plus className="h-3.5 w-3.5" /> Create campaign
             </Button>
           ) : (
-            <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={() => setCreateRunOpen(true)}>
+            <Button
+              size="sm"
+              disabled={!mayBuild}
+              title={mayBuild ? undefined : "Viewer is read-only"}
+              className="h-8 gap-1.5 text-xs"
+              onClick={() => setCreateRunOpen(true)}
+            >
               <Plus className="h-3.5 w-3.5" /> Run Campaign
             </Button>
           )
@@ -333,7 +357,7 @@ function CampaignList() {
           </div>
 
           {!hasAny ? (
-            <EmptyState onCreate={() => setCreateOpen(true)} />
+            <EmptyState onCreate={() => setCreateOpen(true)} canCreate={mayBuild} />
           ) : filtered.length === 0 ? (
             <div className="rounded-xl border border-dashed border-border bg-card/40 px-6 py-16 text-center">
               <p className="text-sm text-muted-foreground">No campaigns match these filters.</p>
@@ -413,6 +437,8 @@ function CampaignList() {
                           {c.state === "ready" && (
                             <Button
                               size="sm"
+                              disabled={!mayBuild}
+                              title={mayBuild ? undefined : "Viewer is read-only"}
                               className="h-7 gap-1 px-2 text-xs"
                               onClick={() => setRunFor(c)}
                             >
@@ -843,7 +869,7 @@ function FilterSelect({
   );
 }
 
-function EmptyState({ onCreate }: { onCreate: () => void }) {
+function EmptyState({ onCreate, canCreate }: { onCreate: () => void; canCreate: boolean }) {
   return (
     <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border bg-card/40 px-6 py-20 text-center">
       <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl border border-border bg-secondary">
@@ -853,7 +879,13 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
       <p className="mt-1 max-w-sm text-sm text-muted-foreground">
         Create your first campaign to start orchestrating customer journeys across channels.
       </p>
-      <Button size="sm" className="mt-5 h-8 gap-1.5 text-xs" onClick={onCreate}>
+      <Button
+        size="sm"
+        disabled={!canCreate}
+        title={canCreate ? undefined : "Viewer is read-only"}
+        className="mt-5 h-8 gap-1.5 text-xs"
+        onClick={onCreate}
+      >
         <Plus className="h-3.5 w-3.5" /> Create campaign
       </Button>
     </div>

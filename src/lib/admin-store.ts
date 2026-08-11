@@ -7,7 +7,7 @@
  * The **session** is the demo device the PRD's two-app split doesn't have in
  * production: a single bundle that can render either plane so the mock can be
  * walked end-to-end without two deploys. Real build ships the Provider Console
- * on its own internal subdomain behind SSO — see `PlaneSwitcher` for the note
+ * on its own internal subdomain behind SSO, see `PlaneSwitcher` for the note
  * shown to anyone reading the demo.
  *
  * In-memory only; the *session* (plane + roles) persists to localStorage so a
@@ -39,7 +39,7 @@ export type Session = {
   plane: Plane;
   providerRole: ProviderRole;
   tenantRole: TenantRole;
-  /** Tenant the tenant-plane view is scoped to. Implicit — never a picker. */
+  /** Tenant the tenant-plane view is scoped to. Implicit, never a picker. */
   tenantId: string;
   impersonation: Impersonation | null;
 };
@@ -50,7 +50,7 @@ export const IMPERSONATION_MINUTES = 30;
 const DEFAULT_SESSION: Session = {
   plane: "tenant",
   providerRole: "GLOBAL_ADMIN",
-  tenantRole: "ADMIN",
+  tenantRole: "ORG_OWNER",
   tenantId: DEMO_TENANT_ID,
   impersonation: null,
 };
@@ -66,7 +66,7 @@ function loadSession(): Session {
     return {
       ...DEFAULT_SESSION,
       ...parsed,
-      // An impersonation session never survives a reload — it would outlive its
+      // An impersonation session never survives a reload, it would outlive its
       // own expiry guarantee.
       impersonation: null,
     };
@@ -124,11 +124,11 @@ export function getSession(): Session { return session; }
  * The role actually in force right now.
  *
  * Inside an impersonation session the operator sees the tenant workspace as a
- * tenant ADMIN would — that is the point of impersonation — but every write is
+ * tenant ORG_OWNER would, that is the point of impersonation, but every write is
  * still attributed to the real provider principal in the audit log.
  */
 export function effectiveRole(s: Session = session): AnyRole {
-  if (s.impersonation) return "ADMIN";
+  if (s.impersonation) return "ORG_OWNER";
   return s.plane === "provider" ? s.providerRole : s.tenantRole;
 }
 
@@ -248,10 +248,10 @@ export function setProviderUserRole(id: string, role: ProviderRole) {
 export function revokeProviderUser(id: string) {
   const u = providerUsers.find((x) => x.id === id);
   if (!u) return;
-  providerUsers = providerUsers.map((x) => (x.id === id ? { ...x, status: "Revoked", group: "—" } : x));
+  providerUsers = providerUsers.map((x) => (x.id === id ? { ...x, status: "Revoked", group: "-" } : x));
   logAudit({
     action: "auth.access_revoked",
-    summary: `${u.email} removed from the Workspace group — Provider Console access revoked`,
+    summary: `${u.email} removed from the Workspace group, Provider Console access revoked`,
   });
 }
 
@@ -284,6 +284,24 @@ export function setTenantUserStatus(id: string, status: TenantUser["status"]) {
   });
 }
 
+/**
+ * Remove a tenant member outright. This is the provider-plane bootstrap
+ * exception in reverse: a Global/Workspace Admin can pull a member off a
+ * tenant's roster (e.g. a mis-provisioned first Org Owner) without entering an
+ * impersonation session. It only ever deletes a tenant-plane row, never a
+ * provider one.
+ */
+export function removeTenantUser(id: string) {
+  const u = tenantUsers.find((x) => x.id === id);
+  if (!u) return;
+  tenantUsers = tenantUsers.filter((x) => x.id !== id);
+  logAudit({
+    action: "user.disable",
+    tenantId: u.tenantId,
+    summary: `Removed ${u.name} (${u.email}) from tenant ${u.tenantId}`,
+  });
+}
+
 /* ----------------------------- Impersonation ----------------------------- */
 
 /**
@@ -312,7 +330,7 @@ export function startImpersonation(opts: { tenantId: string; ticket: string }) {
     tenantId: opts.tenantId,
     actor,
     actorRole,
-    summary: `Started ${IMPERSONATION_MINUTES}-minute impersonation of ${t?.name ?? opts.tenantId} — ticket ${opts.ticket}`,
+    summary: `Started ${IMPERSONATION_MINUTES}-minute impersonation of ${t?.name ?? opts.tenantId}, ticket ${opts.ticket}`,
   });
 }
 
@@ -336,7 +354,7 @@ export function endImpersonation(reason: "manual" | "expired" = "manual") {
   emit();
 }
 
-/** Reset the whole mock to seed state — handy mid-demo. */
+/** Reset the whole mock to seed state, handy mid-demo. */
 export function resetAdminMock() {
   tenants = SEED_TENANTS;
   trunks = SEED_TRUNKS;

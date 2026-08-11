@@ -20,7 +20,7 @@ import {
 import {
   useSession, useProviderUsers, addProviderUser, setProviderUserRole, revokeProviderUser,
 } from "@/lib/admin-store";
-import { PROVIDER_SSO_GROUP, todayLabel, type ProviderUser } from "@/lib/admin-data";
+import { PROVIDER_SSO_GROUP, type ProviderUser } from "@/lib/admin-data";
 import {
   can, canGrant, assignableRoles, ROLE_BLURB, ROLE_LABEL, PROVIDER_ROLES, type ProviderRole,
 } from "@/lib/admin-rbac";
@@ -176,10 +176,10 @@ function ProviderUsersPage() {
         <Callout>
           There is no password here. Console access is derived from membership of{" "}
           <code className="font-mono">{PROVIDER_SSO_GROUP}</code>. Offboarding through Workspace is the
-          revocation — this table only ever narrows what a member can do, never who can log in.
+          revocation, this table only ever narrows what a member can do, never who can log in.
         </Callout>
         <Callout>
-          No principal may grant a role above its own rank, and no provider role can mint a tenant
+          No principal may grant a role above its own rank, and no provider role can mint a merchant
           role. Both rules are enforced server-side; the greyed-out menu items above are the same
           rules rendered early.
         </Callout>
@@ -207,10 +207,12 @@ function CreateProviderUserDialog({ open, onOpenChange }: { open: boolean; onOpe
       role,
       group: PROVIDER_SSO_GROUP,
       status: "Active",
-      lastSeen: `${todayLabel()}, invited`,
+      lastSeen: "Awaiting first sign-in",
     };
     addProviderUser(u);
-    toast.success(`${u.name} added as ${ROLE_LABEL[role]}`);
+    toast.success(`${u.name} added as ${ROLE_LABEL[role]}`, {
+      description: "Share the console URL. They sign in with Google.",
+    });
     onOpenChange(false);
     setName(""); setEmail("");
   }
@@ -226,8 +228,9 @@ function CreateProviderUserDialog({ open, onOpenChange }: { open: boolean; onOpe
             Add a provider user
           </DialogTitle>
           <DialogDescription>
-            The account must already exist in Google Workspace and sit inside{" "}
-            <code className="font-mono text-[11.5px]">{PROVIDER_SSO_GROUP}</code>.
+            Assign a console role to a Paytm identity, then share the console URL so they can sign in
+            with Google. There is no password. Logging in also requires membership of{" "}
+            <code className="font-mono text-[11.5px]">{PROVIDER_SSO_GROUP}</code>, managed in Workspace.
           </DialogDescription>
         </DialogHeader>
 
@@ -258,7 +261,7 @@ function CreateProviderUserDialog({ open, onOpenChange }: { open: boolean; onOpe
             <span className="text-[10.5px] leading-snug text-muted-foreground">{ROLE_BLURB[role]}</span>
           </Field>
           <Callout>
-            Only the roles you are permitted to grant appear in this list — the picker is built from
+            Only the roles you are permitted to grant appear in this list, the picker is built from
             the same rank comparison the API runs.
           </Callout>
         </div>

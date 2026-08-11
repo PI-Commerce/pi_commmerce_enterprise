@@ -54,7 +54,7 @@ function TrunksPage() {
   return (
     <ProviderPage
       title="Trunk Configuration"
-      description="Voice capacity, provisioned per tenant. No tenant role can reach this screen — that is the point."
+      description="Voice capacity, provisioned per merchant. No merchant role can reach this screen, that is the point."
       actions={
         <Button
           size="sm"
@@ -74,16 +74,16 @@ function TrunksPage() {
             <Input
               value={q}
               onChange={(e) => { setQ(e.target.value); setPage(0); }}
-              placeholder="Trunk or tenant name"
+              placeholder="Trunk or merchant name"
               className="h-9 w-[260px] pl-9"
             />
           </div>
         </Field>
-        <Field label="Tenant">
+        <Field label="Merchant">
           <Select value={tenantId} onValueChange={(v) => { setTenantId(v); setPage(0); }}>
             <SelectTrigger className="h-9 w-[220px]"><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All tenants</SelectItem>
+              <SelectItem value="all">All merchants</SelectItem>
               {tenants.map((t) => (
                 <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
               ))}
@@ -101,7 +101,7 @@ function TrunksPage() {
       <TableShell>
         <HeadRow grid={GRID}>
           <span>Trunk</span>
-          <span>Tenant</span>
+          <span>Merchant</span>
           <span>Concurrency</span>
           <span>Status</span>
           <span>SIP host</span>
@@ -146,9 +146,9 @@ function TrunksPage() {
       </TableShell>
 
       <Callout className="mt-3">
-        Trunk edits are the sharpest privilege on the platform — raising concurrency changes what a
-        tenant is billed and what the carrier will carry. Reserved to Workspace Admin and above, and
-        never delegated into a tenant.
+        Trunk edits are the sharpest privilege on the platform, raising concurrency changes what a
+        merchant is billed and what the carrier will carry. Reserved to Workspace Admin and above, and
+        never delegated into a merchant.
       </Callout>
 
       <TrunkDialog
@@ -212,7 +212,7 @@ function TrunkDialog({
           <DialogDescription>
             {trunk
               ? "Changes take effect on the next call leg and are written to the audit log."
-              : "A new SIP trunk for one tenant. Capacity is billed on concurrency, not on usage."}
+              : "A new SIP trunk for one merchant. Capacity is billed on concurrency, not on usage."}
           </DialogDescription>
         </DialogHeader>
 
@@ -221,7 +221,7 @@ function TrunkDialog({
             <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="volt-money-trunk-2" className="h-9 font-mono text-[12.5px]" />
           </Field>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Tenant">
+            <Field label="Merchant">
               <Select value={tenantId} onValueChange={setTenantId}>
                 <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
                 <SelectContent>

@@ -4,7 +4,7 @@
  * Does two jobs the individual pages shouldn't repeat:
  *  1. **Plane check.** A tenant-plane session that lands on `/admin/*` sees a
  *     dead end, not the console. In production this URL wouldn't resolve at all
- *     — it lives on a different deploy behind a different auth boundary — so
+ *    , it lives on a different deploy behind a different auth boundary, so
  *     the mock renders the closest honest equivalent.
  *  2. **Capability check.** Within the provider plane, roles still differ:
  *     SUPPORT can read every tenant but cannot provision a trunk, and only
@@ -46,7 +46,7 @@ export function ProviderPage({
             </div>
             <h2 className="text-lg font-semibold">The Provider Console isn't part of your workspace</h2>
             <p className="mx-auto mt-1.5 text-[13px] text-muted-foreground">
-              Tenant sessions never reach the control plane. In production this address
+              Merchant sessions never reach the control plane. In production this address
               resolves on a separate internal deploy that only a Paytm Google account
               can authenticate against.
             </p>

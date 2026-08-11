@@ -3,7 +3,7 @@
  *
  * Shapes mirror what the real panel shows today (merchant ids, trunk names,
  * user rows), so the demo reads as the actual product rather than lorem. Mock
- * only — no backend, no persistence beyond the in-memory store.
+ * only, no backend, no persistence beyond the in-memory store.
  */
 
 import type { ProviderRole, TenantRole } from "@/lib/admin-rbac";
@@ -119,7 +119,7 @@ export const SEED_TRUNKS: Trunk[] = [
 export type ProviderUser = {
   id: string;
   name: string;
-  /** Google Workspace identity — the only way into the Provider Console. */
+  /** Google Workspace identity, the only way into the Provider Console. */
   email: string;
   role: ProviderRole;
   /** Workspace group membership that derives access. */
@@ -137,7 +137,7 @@ export const SEED_PROVIDER_USERS: ProviderUser[] = [
   { id: "pu_3", name: "Hafeez Ahmed", email: "hafeez.ahmed@paytm.com", role: "WORKSPACE_ADMIN", group: PROVIDER_SSO_GROUP, status: "Active", lastSeen: "6 Aug 2026, 6:05 pm" },
   { id: "pu_4", name: "Mukul Upadhyay", email: "mukul.upadhyay@paytm.com", role: "SUPPORT", group: PROVIDER_SSO_GROUP, status: "Active", lastSeen: "7 Aug 2026, 9:58 am" },
   { id: "pu_5", name: "Divyanshu Rai", email: "divyanshu.rai@paytm.com", role: "SUPPORT", group: PROVIDER_SSO_GROUP, status: "Active", lastSeen: "5 Aug 2026, 4:22 pm" },
-  { id: "pu_6", name: "Spencer Fernandes", email: "spencer.f@paytm.com", role: "SUPPORT", group: "—", status: "Revoked", lastSeen: "22 Jul 2026, 3:11 pm" },
+  { id: "pu_6", name: "Spencer Fernandes", email: "spencer.f@paytm.com", role: "SUPPORT", group: "-", status: "Revoked", lastSeen: "22 Jul 2026, 3:11 pm" },
 ];
 
 /* =============================== Tenant users =============================== */
@@ -153,21 +153,21 @@ export type TenantUser = {
 };
 
 export const SEED_TENANT_USERS: TenantUser[] = [
-  // Volt Money — the tenant the demo signs into.
-  { id: "tu_1", name: "Rohit Menon", email: "rohit.menon@voltmoney.in", tenantId: "411", role: "ADMIN", status: "Active", lastSeen: "7 Aug 2026, 12:31 pm" },
+  // Volt Money, the tenant the demo signs into.
+  { id: "tu_1", name: "Rohit Menon", email: "rohit.menon@voltmoney.in", tenantId: "411", role: "ORG_OWNER", status: "Active", lastSeen: "7 Aug 2026, 12:31 pm" },
   { id: "tu_2", name: "Priya Nair", email: "priya.nair@voltmoney.in", tenantId: "411", role: "MEMBER", status: "Active", lastSeen: "7 Aug 2026, 10:04 am" },
   { id: "tu_3", name: "Karan Shah", email: "karan.shah@voltmoney.in", tenantId: "411", role: "MEMBER", status: "Active", lastSeen: "6 Aug 2026, 7:45 pm" },
   { id: "tu_4", name: "Ananya Iyer", email: "ananya.iyer@voltmoney.in", tenantId: "411", role: "VIEWER", status: "Active", lastSeen: "5 Aug 2026, 2:18 pm" },
-  { id: "tu_5", name: "Vikram Desai", email: "vikram.desai@voltmoney.in", tenantId: "411", role: "VIEWER", status: "Invited", lastSeen: "—" },
+  { id: "tu_5", name: "Vikram Desai", email: "vikram.desai@voltmoney.in", tenantId: "411", role: "VIEWER", status: "Invited", lastSeen: "-" },
   { id: "tu_6", name: "Neha Kulkarni", email: "neha.k@voltmoney.in", tenantId: "411", role: "MEMBER", status: "Disabled", lastSeen: "12 Jul 2026, 11:02 am" },
-  // Other tenants — only ever visible from the Provider Console.
-  { id: "tu_7", name: "Abhimanyu Rao", email: "abhimanyu@bharatnxt.com", tenantId: "410", role: "ADMIN", status: "Active", lastSeen: "6 Aug 2026, 5:30 pm" },
+  // Other tenants, only ever visible from the Provider Console.
+  { id: "tu_7", name: "Abhimanyu Rao", email: "abhimanyu@bharatnxt.com", tenantId: "410", role: "ORG_OWNER", status: "Active", lastSeen: "6 Aug 2026, 5:30 pm" },
   { id: "tu_8", name: "Sneha Pillai", email: "sneha@bharatnxt.com", tenantId: "410", role: "MEMBER", status: "Active", lastSeen: "4 Aug 2026, 9:12 am" },
-  { id: "tu_9", name: "Deepak Sharma", email: "deepak@fabhotels.com", tenantId: "658", role: "ADMIN", status: "Active", lastSeen: "7 Aug 2026, 8:47 am" },
+  { id: "tu_9", name: "Deepak Sharma", email: "deepak@fabhotels.com", tenantId: "658", role: "ORG_OWNER", status: "Active", lastSeen: "7 Aug 2026, 8:47 am" },
   { id: "tu_10", name: "Ritu Malhotra", email: "ritu@fabhotels.com", tenantId: "658", role: "MEMBER", status: "Active", lastSeen: "6 Aug 2026, 1:23 pm" },
-  { id: "tu_11", name: "Saptarnav Ghosh", email: "saptarnav.ghosh@suryodaybank.com", tenantId: "1099", role: "ADMIN", status: "Active", lastSeen: "7 Aug 2026, 10:55 am" },
+  { id: "tu_11", name: "Saptarnav Ghosh", email: "saptarnav.ghosh@suryodaybank.com", tenantId: "1099", role: "ORG_OWNER", status: "Active", lastSeen: "7 Aug 2026, 10:55 am" },
   { id: "tu_12", name: "Meera Joshi", email: "meera.joshi@suryodaybank.com", tenantId: "1099", role: "VIEWER", status: "Active", lastSeen: "3 Aug 2026, 4:40 pm" },
-  { id: "tu_13", name: "Arjun Reddy", email: "arjun@instamoney.app", tenantId: "2330", role: "ADMIN", status: "Active", lastSeen: "5 Aug 2026, 6:19 pm" },
+  { id: "tu_13", name: "Arjun Reddy", email: "arjun@instamoney.app", tenantId: "2330", role: "ORG_OWNER", status: "Active", lastSeen: "5 Aug 2026, 6:19 pm" },
   { id: "tu_14", name: "Dev User 2660", email: "dev.user1.2660@example.com", tenantId: "2660", role: "MEMBER", status: "Active", lastSeen: "1 Aug 2026, 3:02 pm" },
 ];
 
@@ -183,7 +183,7 @@ export type AuditAction =
 export type AuditEvent = {
   id: string;
   at: string;
-  /** The real principal — never the impersonated tenant. */
+  /** The real principal, never the impersonated tenant. */
   actor: string;
   actorRole: ProviderRole | TenantRole;
   action: AuditAction;
@@ -199,16 +199,16 @@ export const SEED_AUDIT: AuditEvent[] = [
   { id: "ae_20", at: "7 Aug 2026, 1:12:04 pm", actor: "aniket.jha@paytm.com", actorRole: "GLOBAL_ADMIN", action: "auth.sso_login", summary: "SSO login via picommerce-ops@paytm.com", ip: "10.42.7.19" },
   { id: "ae_19", at: "7 Aug 2026, 12:58:41 pm", actor: "mukul.upadhyay@paytm.com", actorRole: "SUPPORT", action: "impersonation.end", tenantId: "411", summary: "Impersonation session ended (expired after 30:00)", ip: "10.42.9.4" },
   { id: "ae_18", at: "7 Aug 2026, 12:41:07 pm", actor: "mukul.upadhyay@paytm.com", actorRole: "SUPPORT", action: "user.role_change", tenantId: "411", summary: "Changed Ananya Iyer from MEMBER to VIEWER", viaImpersonation: true, ip: "10.42.9.4" },
-  { id: "ae_17", at: "7 Aug 2026, 12:28:41 pm", actor: "mukul.upadhyay@paytm.com", actorRole: "SUPPORT", action: "impersonation.start", tenantId: "411", summary: "Started 30-minute impersonation of Volt Money — ticket PICOM-5120", ip: "10.42.9.4" },
+  { id: "ae_17", at: "7 Aug 2026, 12:28:41 pm", actor: "mukul.upadhyay@paytm.com", actorRole: "SUPPORT", action: "impersonation.start", tenantId: "411", summary: "Started 30-minute impersonation of Volt Money, ticket PICOM-5120", ip: "10.42.9.4" },
   { id: "ae_16", at: "7 Aug 2026, 11:40:22 am", actor: "sanskar.shrivastava@paytm.com", actorRole: "WORKSPACE_ADMIN", action: "auth.sso_login", summary: "SSO login via picommerce-ops@paytm.com", ip: "10.42.7.31" },
   { id: "ae_15", at: "6 Aug 2026, 6:12:55 pm", actor: "sanskar.shrivastava@paytm.com", actorRole: "WORKSPACE_ADMIN", action: "trunk.update", tenantId: "1099", summary: "Raised trunk_suryoday_bank_post_poc concurrency 10 → 30", ip: "10.42.7.31" },
   { id: "ae_14", at: "6 Aug 2026, 5:02:13 pm", actor: "hafeez.ahmed@paytm.com", actorRole: "WORKSPACE_ADMIN", action: "user.create", tenantId: "658", summary: "Created first tenant Admin deepak@fabhotels.com", ip: "10.42.7.77" },
-  { id: "ae_13", at: "5 Aug 2026, 4:31:09 pm", actor: "aniket.jha@paytm.com", actorRole: "GLOBAL_ADMIN", action: "tenant.suspend", tenantId: "2664", summary: "Suspended PICOM_CLIENT_5 — non-payment", ip: "10.42.7.19" },
+  { id: "ae_13", at: "5 Aug 2026, 4:31:09 pm", actor: "aniket.jha@paytm.com", actorRole: "GLOBAL_ADMIN", action: "tenant.suspend", tenantId: "2664", summary: "Suspended PICOM_CLIENT_5, non-payment", ip: "10.42.7.19" },
   { id: "ae_12", at: "5 Aug 2026, 4:22:44 pm", actor: "divyanshu.rai@paytm.com", actorRole: "SUPPORT", action: "auth.sso_login", summary: "SSO login via picommerce-ops@paytm.com", ip: "10.42.9.18" },
-  { id: "ae_11", at: "3 Aug 2026, 10:14:02 am", actor: "rohit.menon@voltmoney.in", actorRole: "ADMIN", action: "user.create", tenantId: "411", summary: "Invited vikram.desai@voltmoney.in as VIEWER", ip: "49.36.180.12" },
+  { id: "ae_11", at: "3 Aug 2026, 10:14:02 am", actor: "rohit.menon@voltmoney.in", actorRole: "ORG_OWNER", action: "user.create", tenantId: "411", summary: "Invited vikram.desai@voltmoney.in as VIEWER", ip: "49.36.180.12" },
   { id: "ae_10", at: "1 Aug 2026, 2:45:38 pm", actor: "aniket.jha@paytm.com", actorRole: "GLOBAL_ADMIN", action: "user.create", summary: "Created provider user divyanshu.rai@paytm.com as SUPPORT", ip: "10.42.7.19" },
   { id: "ae_9", at: "28 Jul 2026, 4:39:05 pm", actor: "sanskar.shrivastava@paytm.com", actorRole: "WORKSPACE_ADMIN", action: "tenant.create", tenantId: "2664", summary: "Onboarded PICOM_CLIENT_5", ip: "10.42.7.31" },
-  { id: "ae_8", at: "22 Jul 2026, 3:15:20 pm", actor: "system", actorRole: "GLOBAL_ADMIN", action: "auth.access_revoked", summary: "spencer.f@paytm.com removed from picommerce-ops@paytm.com — Provider Console access revoked", ip: "—" },
+  { id: "ae_8", at: "22 Jul 2026, 3:15:20 pm", actor: "system", actorRole: "GLOBAL_ADMIN", action: "auth.access_revoked", summary: "spencer.f@paytm.com removed from picommerce-ops@paytm.com, Provider Console access revoked", ip: "-" },
   { id: "ae_7", at: "14 Jul 2026, 3:09:14 pm", actor: "sanskar.shrivastava@paytm.com", actorRole: "WORKSPACE_ADMIN", action: "trunk.update", tenantId: "411", summary: "Raised volt-money-poc-trunk concurrency 30 → 100", ip: "10.42.7.31" },
 ];
 
@@ -216,13 +216,13 @@ export const SEED_AUDIT: AuditEvent[] = [
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-/** "7 Aug 2026" — the panel's display date format. */
+/** "7 Aug 2026", the panel's display date format. */
 export function todayLabel(): string {
   const d = new Date();
   return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
 }
 
-/** "7 Aug 2026, 1:12:04 pm" — the audit log's timestamp format. */
+/** "7 Aug 2026, 1:12:04 pm", the audit log's timestamp format. */
 export function nowStamp(): string {
   const d = new Date();
   const h = d.getHours() % 12 || 12;
