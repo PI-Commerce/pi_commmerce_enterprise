@@ -806,24 +806,10 @@ function callTranscript(call: Call): Turn[] {
   });
 }
 
-/** Flatten the transcript to one CSV cell: "[m:ss] Agent: …" lines, newline-joined. */
-function transcriptText(call: Call): string {
-  return callTranscript(call)
-    .map((t) => `[${t.at}] ${t.role === "agent" ? "Agent" : "Customer"}: ${t.text}`)
-    .join("\n");
-}
-
-/** Observability recording URL. Only a completed call has a recording to link. */
-function recordingUrl(call: Call): string {
-  return call.status === "Completed"
-    ? `https://recordings.picom.ai/voice/${call.id}.mp3`
-    : "";
-}
-
-// The export mirrors the observability data surfaced when a call tray is opened.
-// Beyond the row attributes, that means the two observability outputs: the
-// recording URL and the full transcript. Both are present only for completed
-// calls (others never produced a recording/transcript).
+// The export mirrors the observability attributes surfaced in the calls table:
+// the row's core fields plus the enum observability outputs (intent, sentiment,
+// social mention, DND request). Recording URL and transcript are intentionally
+// excluded from the export.
 function callsToCsv(calls: Call[]): string {
   const head = [
     "scheduled_at",
@@ -836,8 +822,6 @@ function callsToCsv(calls: Call[]): string {
     "sentiment",
     "social_media_mention",
     "dnd_request",
-    "recording_url",
-    "transcript",
   ];
   const rows = calls.map((c) => [
     c.scheduledAt,
@@ -850,8 +834,6 @@ function callsToCsv(calls: Call[]): string {
     c.sentiment ?? "",
     c.socialMention ?? "",
     c.dndRequest ?? "",
-    recordingUrl(c),
-    c.status === "Completed" ? transcriptText(c) : "",
   ]);
   return [head, ...rows]
     .map((r) =>
@@ -1005,6 +987,7 @@ function FacetFilterMenu({
 function CallsTable({ refs }: { refs: VoiceRef[] }) {
   const [q, setQ] = useState("");
   const [durF, setDurF] = useState("any");
+  const [statusF, setStatusF] = useState<"any" | VoiceStatus>("any");
   const [open, setOpen] = useState<Call | null>(null);
 
   // Faceted multi-select: each facet holds a list of checked values. Within a
@@ -1046,6 +1029,7 @@ function CallsTable({ refs }: { refs: VoiceRef[] }) {
           const d = c.duration ?? -1;
           if (!(d >= f.lo && d < f.hi)) return false;
         }
+        if (statusF !== "any" && c.status !== statusF) return false;
         for (const f of ATTR_FILTERS) {
           const picked = facets[f.key];
           if (!picked || picked.length === 0) continue; // facet unconstrained
@@ -1054,7 +1038,7 @@ function CallsTable({ refs }: { refs: VoiceRef[] }) {
         }
         return true;
       }),
-    [calls, q, durF, facets],
+    [calls, q, durF, statusF, facets],
   );
 
   // Export is scoped to the current filter selection (search, duration and the
@@ -1098,6 +1082,24 @@ function CallsTable({ refs }: { refs: VoiceRef[] }) {
                   {d.label}
                 </SelectItem>
               ))}
+            </SelectContent>
+          </Select>
+
+          {/* Status is a standalone filter (Completed / Failed), kept separate
+              from the observability facets since it describes the call's own
+              lifecycle rather than an agent-emitted attribute. */}
+          <Select
+            value={statusF}
+            onValueChange={(v) => setStatusF(v as "any" | VoiceStatus)}
+          >
+            <SelectTrigger className="h-8 w-[140px] text-xs">
+              <SelectValue placeholder="Any status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="any">Any status</SelectItem>
+              <SelectItem value="Running">RUNNING</SelectItem>
+              <SelectItem value="Completed">COMPLETED</SelectItem>
+              <SelectItem value="Failed">FAILED</SelectItem>
             </SelectContent>
           </Select>
 
