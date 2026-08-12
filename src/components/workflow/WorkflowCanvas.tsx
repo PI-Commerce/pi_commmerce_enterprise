@@ -6,7 +6,12 @@ import ReactFlow, {
   type ReactFlowInstance,
 } from "reactflow";
 import { Wand2 } from "lucide-react";
-import { nodeTypes } from "./nodes";
+import { nodeTypes, FreeformNodePreviewContext } from "./nodes";
+import { FreeformCanvas } from "./FreeformCanvas";
+import { getFreeformWorkflow } from "@/lib/freeform-types";
+import {
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
 import { edgeTypes } from "./edges";
 import type { WorkflowNodeData, NodeKind, CampaignStatus } from "@/lib/campaign-types";
 import { NODE_LABELS, SERIAL_PREFIX } from "@/lib/campaign-types";
@@ -424,7 +429,21 @@ export function WorkflowCanvas({
     setTimeout(() => rfRef.current?.fitView({ padding: 0.2, duration: 400 }), 60);
   }, [setNodes, setEdges, onDirty]);
 
+  // Preview modal for the WhatsApp Freeform Workflow node's eye button.
+  // Reuses the same read-only FreeformCanvas that lives inside the config
+  // panel's Preview action, so both entry points look identical.
+  const [freeformPreview, setFreeformPreview] = useState<{ id?: string } | null>(null);
+  const previewedWorkflow = useMemo(
+    () => (freeformPreview?.id ? getFreeformWorkflow(freeformPreview.id) : undefined),
+    [freeformPreview],
+  );
+  const handleFreeformPreview = useCallback((data: WorkflowNodeData) => {
+    const wfId = data.config?.ffWorkflowId as string | undefined;
+    setFreeformPreview({ id: wfId });
+  }, []);
+
   return (
+    <FreeformNodePreviewContext.Provider value={editable ? handleFreeformPreview : null}>
     <div className="relative h-full w-full">
       {layingOut && <div className="absolute inset-0" aria-hidden />}
       {!layingOut && (
@@ -493,6 +512,34 @@ export function WorkflowCanvas({
           return !selected || !v.key.startsWith(`${ns}.`);
         })}
       />
+
+      <Dialog
+        open={!!freeformPreview}
+        onOpenChange={(o) => { if (!o) setFreeformPreview(null); }}
+      >
+        <DialogContent className="max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>{previewedWorkflow?.name ?? "Workflow preview"}</DialogTitle>
+            <DialogDescription>
+              Read-only view. Pan and zoom to inspect; nothing here is editable.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="h-[70vh] overflow-hidden rounded-lg border border-border bg-background">
+            {previewedWorkflow ? (
+              <FreeformCanvas
+                initialNodes={previewedWorkflow.nodes}
+                initialEdges={previewedWorkflow.edges}
+                previewOnly
+              />
+            ) : (
+              <div className="grid h-full place-items-center text-[13px] text-muted-foreground">
+                Pick a workflow first, then click the eye to preview it.
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
+    </FreeformNodePreviewContext.Provider>
   );
 }

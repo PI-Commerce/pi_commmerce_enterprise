@@ -35,6 +35,38 @@ export type LeadCampaignEntry = {
 /** Discriminator for channel — matches SankeyNodeKind action-node names sans "voiceCall". */
 export type LeadChannel = "wa" | "sms" | "rcs" | "voice";
 
+/**
+ * Per-message delivery status, roughly Meta's WhatsApp DLR states plus a
+ * `pending` sender-side placeholder and a `no_dlr` bucket for SMS/RCS routes
+ * where the provider does not surface a receipt.
+ */
+export type MessageDeliveryStatus =
+  | "pending"
+  | "sent"
+  | "delivered"
+  | "read"
+  | "failed"
+  | "no_dlr";
+
+/**
+ * Full WhatsApp template preview payload. Renders the header (text or media),
+ * body (variable-substituted), optional footer, and buttons (quick reply / URL
+ * / phone). Only used when a template message is sent — plain freeform text
+ * uses `body` on LeadChatMessage.
+ */
+export type WaTemplatePreview = {
+  header?:
+    | { kind: "text"; text: string }
+    | { kind: "image" | "video" | "document"; url: string; fileName?: string };
+  body: string;
+  footer?: string;
+  buttons?: Array<
+    | { kind: "quick_reply"; label: string }
+    | { kind: "url"; label: string; url: string }
+    | { kind: "phone"; label: string; phone: string }
+  >;
+};
+
 /** A regular chat-style message (WhatsApp / SMS / RCS). */
 export type LeadChatMessage = {
   id: string;
@@ -47,6 +79,14 @@ export type LeadChatMessage = {
   runId: string;
   /** Optional CTA label — renders as an inline chip on outbound messages. */
   linkLabel?: string;
+  /** DLR state — outbound only. Inbound messages leave this unset. */
+  deliveryStatus?: MessageDeliveryStatus;
+  /** Human-readable failure reason when deliveryStatus is `failed`. */
+  failureReason?: string;
+  /** When set, renders as a full WhatsApp template preview (header + body + buttons). */
+  template?: WaTemplatePreview;
+  /** Inbound only — the customer tapped a button on a prior template. */
+  buttonReply?: { buttonLabel: string };
 };
 
 /** A completed voice call with its inline transcript. */
@@ -277,6 +317,101 @@ function buildTranscript(campaignName: string, firstName: string, rng: () => num
  *  Message stream builder — cross-channel, cross-campaign
  * -------------------------------------------------------------------------- */
 
+/**
+ * Pick a plausible outbound DLR state. In the field ~90% of WA outbounds land as
+ * delivered/read; a small tail fails on carrier or spam. SMS/RCS don't always
+ * surface receipts so they get `no_dlr` a chunk of the time.
+ */
+function pickDeliveryStatus(
+  channel: "wa" | "sms" | "rcs",
+  rng: () => number,
+): { status: MessageDeliveryStatus; reason?: string } {
+  const roll = rng();
+  if (channel === "wa") {
+    if (roll < 0.55) return { status: "read" };
+    if (roll < 0.88) return { status: "delivered" };
+    if (roll < 0.95) return { status: "sent" };
+    return {
+      status: "failed",
+      reason: roll < 0.98 ? "Recipient not on WhatsApp" : "24-hour session expired",
+    };
+  }
+  if (channel === "sms") {
+    if (roll < 0.55) return { status: "delivered" };
+    if (roll < 0.75) return { status: "sent" };
+    if (roll < 0.95) return { status: "no_dlr" };
+    return { status: "failed", reason: "Carrier rejected" };
+  }
+  // rcs
+  if (roll < 0.5) return { status: "read" };
+  if (roll < 0.8) return { status: "delivered" };
+  if (roll < 0.92) return { status: "sent" };
+  if (roll < 0.97) return { status: "no_dlr" };
+  return { status: "failed", reason: "Recipient not RCS-capable" };
+}
+
+/** Occasional full WhatsApp template payload. About 25% of outbound WA. */
+function maybeTemplateFor(
+  campaignName: string,
+  firstName: string,
+  body: string,
+  linkLabel: string | undefined,
+  rng: () => number,
+): WaTemplatePreview | undefined {
+  if (rng() > 0.25) return undefined;
+  if (campaignName.includes("Cart Abandonment")) {
+    return {
+      header: { kind: "text", text: "Your cart is waiting" },
+      body,
+      footer: "Reply STOP to unsubscribe",
+      buttons: [
+        { kind: "url", label: "Resume checkout", url: "https://picomm.in/cart" },
+        { kind: "quick_reply", label: "Not now" },
+      ],
+    };
+  }
+  if (campaignName.includes("Loyalty")) {
+    return {
+      header: {
+        kind: "image",
+        url: "https://images.unsplash.com/photo-1607082349566-187342175e2f?w=600",
+      },
+      body,
+      footer: "PICOMM Loyalty",
+      buttons: [
+        { kind: "quick_reply", label: "Redeem" },
+        { kind: "quick_reply", label: "See rewards" },
+      ],
+    };
+  }
+  if (campaignName.includes("Seasonal") || campaignName.includes("Price Drop")) {
+    return {
+      header: { kind: "text", text: `Hi ${firstName}` },
+      body,
+      buttons: [
+        { kind: "url", label: linkLabel ?? "Shop now", url: "https://picomm.in/sale" },
+        { kind: "phone", label: "Call support", phone: "+911800123456" },
+      ],
+    };
+  }
+  if (campaignName.includes("handoff")) {
+    return {
+      body,
+      buttons: [
+        { kind: "quick_reply", label: "Track order" },
+        { kind: "quick_reply", label: "Talk to human" },
+      ],
+    };
+  }
+  return undefined;
+}
+
+/** Pull a button label off a template so the follow-up inbound tap looks natural. */
+function firstButtonLabel(t: WaTemplatePreview | undefined): string | undefined {
+  if (!t?.buttons?.length) return undefined;
+  return t.buttons[0].label;
+}
+
 function buildMessages(
   entries: LeadCampaignEntry[],
   firstName: string,
@@ -288,6 +423,8 @@ function buildMessages(
     const enteredMs = Date.parse(c.enteredAt);
     // Every campaign always includes at least a WhatsApp touch.
     const wa = waBodyFor(c.campaignName, firstName);
+    const waDlr = pickDeliveryStatus("wa", rng);
+    const waTemplate = maybeTemplateFor(c.campaignName, firstName, wa.body, wa.linkLabel, rng);
     out.push({
       id: `m_${c.runId}_${idx++}`,
       channel: "wa",
@@ -295,19 +432,27 @@ function buildMessages(
       at: new Date(enteredMs).toISOString(),
       body: wa.body,
       linkLabel: wa.linkLabel,
+      template: waTemplate,
+      deliveryStatus: waDlr.status,
+      failureReason: waDlr.reason,
       campaignId: c.campaignId,
       campaignName: c.campaignName,
       runId: c.runId,
     });
-    // ~55% probability of an inbound reply within a few hours.
+    // ~55% probability of an inbound reply within a few hours. If the outbound
+    // was a template with buttons, ~60% of those replies come back as a
+    // button-tap reply carrying the label; the rest are free text.
     if (rng() < 0.55) {
       const replyDelayMin = 5 + Math.floor(rng() * 240);
+      const buttonLabel = firstButtonLabel(waTemplate);
+      const asButtonTap = buttonLabel && rng() < 0.6;
       out.push({
         id: `m_${c.runId}_${idx++}`,
         channel: "wa",
         direction: "in",
         at: new Date(enteredMs + replyDelayMin * 60_000).toISOString(),
-        body: inboundReplyFor(c.campaignName, rng),
+        body: asButtonTap ? buttonLabel! : inboundReplyFor(c.campaignName, rng),
+        buttonReply: asButtonTap ? { buttonLabel: buttonLabel! } : undefined,
         campaignId: c.campaignId,
         campaignName: c.campaignName,
         runId: c.runId,
@@ -315,12 +460,15 @@ function buildMessages(
     }
     // ~50% chance of a following SMS the next day (transactional confirm / reminder).
     if (rng() < 0.5) {
+      const smsDlr = pickDeliveryStatus("sms", rng);
       out.push({
         id: `m_${c.runId}_${idx++}`,
         channel: "sms",
         direction: "out",
         at: new Date(enteredMs + 24 * 60 * 60_000).toISOString(),
         body: smsBodyFor(c.campaignName, firstName),
+        deliveryStatus: smsDlr.status,
+        failureReason: smsDlr.reason,
         campaignId: c.campaignId,
         campaignName: c.campaignName,
         runId: c.runId,
@@ -328,12 +476,15 @@ function buildMessages(
     }
     // ~30% chance of an RCS rich-card follow-up two days in.
     if (rng() < 0.3) {
+      const rcsDlr = pickDeliveryStatus("rcs", rng);
       out.push({
         id: `m_${c.runId}_${idx++}`,
         channel: "rcs",
         direction: "out",
         at: new Date(enteredMs + 2 * 24 * 60 * 60_000).toISOString(),
         body: rcsBodyFor(c.campaignName, firstName),
+        deliveryStatus: rcsDlr.status,
+        failureReason: rcsDlr.reason,
         campaignId: c.campaignId,
         campaignName: c.campaignName,
         runId: c.runId,

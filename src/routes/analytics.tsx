@@ -1839,28 +1839,6 @@ function ChannelAnalytics({
     });
   }, [selection.campaignId, selection.versionId]);
 
-  // Asset-mode: list of (campaign, run) pairs touching the picked asset, for
-  // the "Narrow campaigns" nested-tree filter.
-  const assetCampaignTree = useMemo(() => {
-    if (mode !== "asset" || !selection.assetId)
-      return [] as { campaign: CampaignAnalyticsData; runs: RunRow[] }[];
-    const byCampaign = new Map<string, Set<string>>();
-    for (const r of allRefs) {
-      if (refAssetId(r) !== selection.assetId) continue;
-      let s = byCampaign.get(r.campaignId);
-      if (!s) {
-        s = new Set();
-        byCampaign.set(r.campaignId, s);
-      }
-      s.add(r.runId);
-    }
-    return CAMPAIGNS.filter((c) => byCampaign.has(c.id)).map((c) => ({
-      campaign: c,
-      runs: c.runs.filter((r) => byCampaign.get(c.id)!.has(r.id)),
-    }));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, selection.assetId, allRefs, kind]);
-
   // Date range visibility:
   //  • asset-mode → always shown (date is the primary control)
   //  • campaign-mode → shown only if the pinned run is always-on
@@ -1879,25 +1857,6 @@ function ChannelAnalytics({
     if (mode === "asset" && !dateRange) onDateRangeChange(defaultDateRange(7));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode]);
-
-  // Helpers for Asset-mode nested-tree toggles.
-  const excludedCampaigns = new Set(selection.excludedCampaignIds ?? []);
-  const excludedRuns = new Set(selection.excludedRunIds ?? []);
-  const toggleCampaign = (cid: string) => {
-    const next = new Set(excludedCampaigns);
-    if (next.has(cid)) next.delete(cid);
-    else next.add(cid);
-    onSelectionChange({
-      ...selection,
-      excludedCampaignIds: [...next],
-    });
-  };
-  const toggleRun = (rid: string) => {
-    const next = new Set(excludedRuns);
-    if (next.has(rid)) next.delete(rid);
-    else next.add(rid);
-    onSelectionChange({ ...selection, excludedRunIds: [...next] });
-  };
 
   return (
     <>
@@ -1988,15 +1947,6 @@ function ChannelAnalytics({
                 onChange={onDateRangeChange}
                 align="start"
                 className="w-full"
-              />
-            </FilterField>
-            <FilterField label="Narrow campaigns (optional)" className="sm:w-[300px]">
-              <CampaignTreeFilter
-                tree={assetCampaignTree}
-                excludedCampaigns={excludedCampaigns}
-                excludedRuns={excludedRuns}
-                onToggleCampaign={toggleCampaign}
-                onToggleRun={toggleRun}
               />
             </FilterField>
           </div>
@@ -2156,91 +2106,6 @@ function ChannelAnalytics({
         <ChannelDetail kind={kind} refs={selectedRefs} dateRange={dateRange} />
       )}
     </>
-  );
-}
-
-/** Asset-mode optional narrower: a popover that lists every (campaign → its
- *  runs) touched by the selected asset. Default = nothing excluded (all in
- *  scope). Top-level checkbox deselects a whole campaign; expand a campaign to
- *  deselect individual runs. */
-function CampaignTreeFilter({
-  tree,
-  excludedCampaigns,
-  excludedRuns,
-  onToggleCampaign,
-  onToggleRun,
-}: {
-  tree: { campaign: CampaignAnalyticsData; runs: RunRow[] }[];
-  excludedCampaigns: Set<string>;
-  excludedRuns: Set<string>;
-  onToggleCampaign: (id: string) => void;
-  onToggleRun: (id: string) => void;
-}) {
-  const totalRuns = tree.reduce((s, t) => s + t.runs.length, 0);
-  const activeCampaigns = tree.filter(
-    (t) => !excludedCampaigns.has(t.campaign.id),
-  ).length;
-  const activeRuns = tree.reduce((s, t) => {
-    if (excludedCampaigns.has(t.campaign.id)) return s;
-    return s + t.runs.filter((r) => !excludedRuns.has(r.id)).length;
-  }, 0);
-  const allOn = activeCampaigns === tree.length && activeRuns === totalRuns;
-  const display = allOn
-    ? `All ${tree.length} campaign${tree.length === 1 ? "" : "s"}`
-    : `${activeCampaigns}/${tree.length} campaigns · ${activeRuns}/${totalRuns} runs`;
-  return (
-    <details className="group relative">
-      <summary className="flex h-9 w-full cursor-pointer list-none items-center justify-between rounded-md border border-input bg-transparent px-3 py-2 text-xs shadow-sm">
-        <span className="truncate">{display}</span>
-        <span className="ml-2 text-muted-foreground">▾</span>
-      </summary>
-      <div className="absolute z-50 mt-1 max-h-[320px] w-[300px] overflow-auto rounded-md border border-border bg-popover p-2 shadow-md">
-        {tree.length === 0 ? (
-          <p className="px-2 py-3 text-center text-xs text-muted-foreground">
-            No campaigns
-          </p>
-        ) : (
-          tree.map(({ campaign, runs }) => {
-            const cExcluded = excludedCampaigns.has(campaign.id);
-            return (
-              <div key={campaign.id} className="mb-1">
-                <label className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent">
-                  <input
-                    type="checkbox"
-                    checked={!cExcluded}
-                    onChange={() => onToggleCampaign(campaign.id)}
-                  />
-                  <span className="truncate font-medium">{campaign.name}</span>
-                </label>
-                {!cExcluded && (
-                  <div className="ml-6 border-l border-border pl-2">
-                    {runs.map((r) => {
-                      const idx = campaign.runs.indexOf(r);
-                      const version = runVersionLabel(campaign, idx);
-                      return (
-                        <label
-                          key={r.id}
-                          className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1 text-[11px] hover:bg-accent"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={!excludedRuns.has(r.id)}
-                            onChange={() => onToggleRun(r.id)}
-                          />
-                          <span className="truncate text-muted-foreground">
-                            {version} · {r.name} · {r.code}
-                          </span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            );
-          })
-        )}
-      </div>
-    </details>
   );
 }
 

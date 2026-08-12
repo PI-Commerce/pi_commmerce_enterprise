@@ -6,13 +6,13 @@
  *
  *  - `[Campaign Name] · Run [id]` dividers between runs (the campaign name has
  *    its leading `Category · ` prefix stripped since the category was noise).
- *  - `Entered [Workflow]` / `Exited via [row]` inline dividers inside the
- *    WhatsApp thread when the lead was routed through a freeform workflow in
- *    that run. Synthesised deterministically for demo purposes until real
- *    freeform trace events land.
  *  - WhatsApp / SMS / RCS bubbles (out = right, in = left) with channel tint.
- *  - Voice: completed calls collapse to a transcript on click, missed dials
- *    render as a thin system row.
+ *    Outbound bubbles carry a small DLR footer (Sent / Delivered / Read /
+ *    Failed / No DLR). Outbound template messages render as a full template
+ *    preview (header + body + footer + buttons). Inbound button taps render as
+ *    a compact reply bubble.
+ *  - Voice: completed calls collapse to an expanded detail (AI summary +
+ *    insights + transcript) mirroring the CallDrawer layout used on Analytics.
  *
  * Default tab = the channel with the most recent message on this lead.
  */
@@ -20,13 +20,14 @@
 import { useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 import {
-  ChevronDown, ChevronRight, MessageCircle, MessageSquare, MessageSquareText,
-  Phone, PhoneCall, PhoneMissed, Play, Workflow,
+  Check, CheckCheck, ChevronDown, ChevronRight, CircleAlert, CircleDashed, CircleDot,
+  ExternalLink, FileText, MessageCircle, MessageSquare, MessageSquareText,
+  Phone, PhoneCall, PhoneMissed, Reply, Sparkles, Video,
 } from "lucide-react";
 import {
   formatIso,
   type LeadRecord, type LeadChatMessage, type LeadVoiceCall, type LeadVoiceAttempt,
-  type LeadMessage, type LeadChannel,
+  type LeadMessage, type LeadChannel, type MessageDeliveryStatus, type WaTemplatePreview,
 } from "@/lib/leads-data";
 
 /* ------------------------------ Public API ------------------------------ */
@@ -75,7 +76,7 @@ export function Conversations({ lead }: { lead: LeadRecord }) {
         voice: buckets.voice.length,
       }} />
       <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
-        <ChannelBody channel={tab} messages={buckets[tab]} lead={lead} />
+        <ChannelBody channel={tab} messages={buckets[tab]} />
       </div>
     </div>
   );
@@ -156,11 +157,10 @@ function ChannelTabs({
 /* -------------------------------- Body -------------------------------- */
 
 function ChannelBody({
-  channel, messages, lead,
+  channel, messages,
 }: {
   channel: LeadChannel;
   messages: LeadMessage[];
-  lead: LeadRecord;
 }) {
   if (messages.length === 0) {
     return (
@@ -175,39 +175,13 @@ function ChannelBody({
       {runs.map((r) => (
         <div key={r.key} className="space-y-2">
           <RunDivider label={r.label} />
-          <RunThread run={r} channel={channel} lead={lead} />
+          <div className="space-y-2">
+            {r.items.map((m) => (
+              <MessageRow key={m.id} msg={m} channel={channel} />
+            ))}
+          </div>
         </div>
       ))}
-    </div>
-  );
-}
-
-/** Renders a run's messages. For WhatsApp threads, weaves in freeform-workflow
- *  trace dividers when the lead was routed through a workflow in this run. */
-function RunThread({
-  run, channel, lead,
-}: {
-  run: RunGroup;
-  channel: LeadChannel;
-  lead: LeadRecord;
-}) {
-  const freeform = channel === "wa"
-    ? synthesiseFreeformTrace(lead, run.items as LeadChatMessage[])
-    : null;
-  const items = run.items;
-  return (
-    <div className="space-y-2">
-      {items.map((m, i) => (
-        <div key={m.id} className="space-y-2">
-          {freeform && i === freeform.beforeIdx && (
-            <FreeformTraceDivider tone="enter" label={freeform.enterLabel} />
-          )}
-          <MessageRow msg={m} channel={channel} />
-        </div>
-      ))}
-      {freeform && freeform.afterIdx >= items.length && (
-        <FreeformTraceDivider tone="exit" label={freeform.exitLabel} />
-      )}
     </div>
   );
 }
@@ -235,6 +209,39 @@ function ChatBubble({
     channel === "wa"  ? (isOut ? "bg-success/10" : "bg-secondary") :
     channel === "sms" ? (isOut ? "bg-warning/10" : "bg-secondary") :
                         (isOut ? "bg-ai/10"      : "bg-secondary");
+  // Full template preview replaces the plain body when set.
+  if (isOut && msg.template) {
+    return (
+      <div className="flex justify-end">
+        <div className={cn("max-w-[75%] overflow-hidden rounded-2xl text-[13px] shadow-sm", tint)}>
+          <TemplatePreview t={msg.template} />
+          <div className="flex items-center justify-end gap-1 px-3 py-1.5 text-[10px] text-muted-foreground">
+            <span>{formatIso(msg.at)}</span>
+            <DeliveryStatus status={msg.deliveryStatus} reason={msg.failureReason} />
+          </div>
+        </div>
+      </div>
+    );
+  }
+  // Inbound button-tap replies render with a small chip above the label so it
+  // reads as a tap, not a typed reply.
+  if (!isOut && msg.buttonReply) {
+    return (
+      <div className="flex justify-start">
+        <div className={cn("max-w-[75%] rounded-2xl px-3 py-2 text-[13px] shadow-sm", tint)}>
+          <div className="mb-1 inline-flex items-center gap-1 rounded-full border border-border bg-background/70 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+            <Reply className="h-2.5 w-2.5" /> Tapped button
+          </div>
+          <p className="whitespace-pre-wrap leading-snug text-foreground">
+            {msg.buttonReply.buttonLabel}
+          </p>
+          <div className="mt-1 flex items-center gap-1 text-[10px] text-muted-foreground">
+            <span>{formatIso(msg.at)}</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className={cn("flex", isOut ? "justify-end" : "justify-start")}>
       <div className={cn("max-w-[75%] rounded-2xl px-3 py-2 text-[13px] shadow-sm", tint)}>
@@ -244,17 +251,129 @@ function ChatBubble({
             {msg.linkLabel}
           </span>
         )}
-        <div className="mt-1 flex items-center gap-1 text-[10px] text-muted-foreground">
+        <div className="mt-1 flex items-center justify-end gap-1 text-[10px] text-muted-foreground">
           <span>{formatIso(msg.at)}</span>
+          {isOut && <DeliveryStatus status={msg.deliveryStatus} reason={msg.failureReason} />}
         </div>
       </div>
     </div>
   );
 }
 
+/* ---------------------------- Delivery status ---------------------------- */
+
+/** Small footer badge under outbound bubbles: icon + status label. Colour and
+ *  glyph mirror WhatsApp conventions where applicable. */
+function DeliveryStatus({
+  status, reason,
+}: {
+  status?: MessageDeliveryStatus;
+  reason?: string;
+}) {
+  if (!status) return null;
+  const spec = DLR_SPEC[status];
+  const Icon = spec.icon;
+  return (
+    <span
+      title={status === "failed" && reason ? `Failed · ${reason}` : spec.label}
+      className={cn("inline-flex items-center gap-0.5", spec.tone)}
+    >
+      <Icon className="h-3 w-3" />
+      <span className="text-[10px] font-medium">{spec.label}</span>
+    </span>
+  );
+}
+
+const DLR_SPEC: Record<MessageDeliveryStatus, { label: string; icon: typeof Check; tone: string }> = {
+  pending:   { label: "Pending",   icon: CircleDashed, tone: "text-muted-foreground" },
+  sent:      { label: "Sent",      icon: Check,        tone: "text-muted-foreground" },
+  delivered: { label: "Delivered", icon: CheckCheck,   tone: "text-muted-foreground" },
+  read:      { label: "Read",      icon: CheckCheck,   tone: "text-ai" },
+  failed:    { label: "Failed",    icon: CircleAlert,  tone: "text-destructive" },
+  no_dlr:    { label: "No DLR",    icon: CircleDot,    tone: "text-muted-foreground/70" },
+};
+
+/* --------------------------- Template preview --------------------------- */
+
+/** Full WhatsApp template bubble: header (text or media) + body + footer +
+ *  buttons. Renders inside an outbound chat bubble tint. */
+function TemplatePreview({ t }: { t: WaTemplatePreview }) {
+  return (
+    <div>
+      {t.header && <TemplateHeader header={t.header} />}
+      <div className="px-3 pt-2">
+        <p className="whitespace-pre-wrap text-[13px] leading-snug text-foreground">{t.body}</p>
+        {t.footer && (
+          <p className="mt-1 text-[10.5px] text-muted-foreground">{t.footer}</p>
+        )}
+      </div>
+      {t.buttons?.length ? (
+        <div className="mt-1.5 flex flex-col divide-y divide-border/70 border-t border-border/70">
+          {t.buttons.map((b, i) => (
+            <TemplateButton key={i} btn={b} />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function TemplateHeader({
+  header,
+}: {
+  header: NonNullable<WaTemplatePreview["header"]>;
+}) {
+  if (header.kind === "text") {
+    return (
+      <div className="border-b border-border/70 px-3 py-2 text-[13px] font-semibold text-foreground">
+        {header.text}
+      </div>
+    );
+  }
+  if (header.kind === "image") {
+    return (
+      <div className="aspect-[16/9] w-full overflow-hidden bg-secondary">
+        <img src={header.url} alt="" className="h-full w-full object-cover" />
+      </div>
+    );
+  }
+  if (header.kind === "video") {
+    return (
+      <div className="flex aspect-[16/9] w-full items-center justify-center bg-secondary text-muted-foreground">
+        <Video className="h-6 w-6" />
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-center gap-2 border-b border-border/70 px-3 py-2 text-[12.5px] text-foreground">
+      <FileText className="h-4 w-4 text-muted-foreground" />
+      <span className="truncate">{header.fileName ?? "Document"}</span>
+    </div>
+  );
+}
+
+function TemplateButton({
+  btn,
+}: {
+  btn: NonNullable<WaTemplatePreview["buttons"]>[number];
+}) {
+  const Icon = btn.kind === "quick_reply" ? Reply : btn.kind === "url" ? ExternalLink : Phone;
+  return (
+    <div className="flex items-center justify-center gap-1.5 px-3 py-2 text-[12.5px] font-medium text-ai">
+      <Icon className="h-3.5 w-3.5" />
+      <span className="truncate">{btn.label}</span>
+    </div>
+  );
+}
+
+/* ------------------------------ Voice rows ------------------------------ */
+
 function VoiceCallCard({ call }: { call: LeadVoiceCall }) {
   const [open, setOpen] = useState(false);
+  const [showTranscript, setShowTranscript] = useState(false);
   const toggle = () => setOpen((o) => !o);
+  const insights = useMemo(() => buildVoiceInsights(call), [call]);
+  const summary = useMemo(() => buildVoiceSummary(call), [call]);
   return (
     <div className="rounded-xl border border-border bg-secondary/30">
       <div
@@ -272,41 +391,161 @@ function VoiceCallCard({ call }: { call: LeadVoiceCall }) {
             {call.agentName ?? "Voice agent"} · {formatIso(call.at)}
           </p>
           <p className="mt-0.5 text-[11px] text-muted-foreground">
-            Completed · {fmtDuration(call.duration)} · {call.transcript.length} turns
+            {OUTCOME_LABEL[call.outcome]} · {fmtDuration(call.duration)} · {call.transcript.length} turns
           </p>
         </div>
-        <button
-          type="button"
-          onClick={(e) => { e.stopPropagation(); }}
-          className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2 py-1 text-[10.5px] text-muted-foreground hover:text-foreground"
-          title="Playback not wired in this demo"
-        >
-          <Play className="h-3 w-3" /> Play
-        </button>
         {open ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
       </div>
       {open && (
-        <div className="space-y-2 border-t border-border px-3 py-3">
-          {call.transcript.map((t, i) => {
-            const isAgent = t.role === "agent";
-            return (
-              <div key={i} className={cn("flex", isAgent ? "justify-start" : "justify-end")}>
-                <div className={cn(
-                  "max-w-[75%] rounded-2xl px-3 py-1.5 text-[12.5px] shadow-sm",
-                  isAgent ? "bg-secondary" : "bg-success/10",
-                )}>
-                  <p className="leading-snug text-foreground">{t.text}</p>
-                  <div className="mt-0.5 text-[10px] text-muted-foreground">
-                    {isAgent ? call.agentName ?? "Agent" : "Customer"} · {t.at}
-                  </div>
+        <div className="space-y-4 border-t border-border px-3 py-3">
+          {/* Identity + outcome strip */}
+          <div className="grid grid-cols-2 gap-2 text-[11.5px]">
+            <IdCell label="Agent" value={call.agentName ?? "Unassigned"} />
+            <IdCell label="Outcome" value={OUTCOME_LABEL[call.outcome]} />
+            <IdCell label="Duration" value={fmtDuration(call.duration)} />
+            <IdCell label="Turns" value={String(call.transcript.length)} />
+          </div>
+
+          {/* AI Summary */}
+          <div className="rounded-lg border border-border bg-card p-3">
+            <div className="mb-1 flex items-center gap-1.5 text-[10.5px] font-medium uppercase tracking-wider text-foreground">
+              <Sparkles className="h-3 w-3" /> AI Summary
+            </div>
+            <p className="text-[12.5px] leading-relaxed text-foreground">{summary}</p>
+          </div>
+
+          {/* Post-call analysis variables */}
+          <div>
+            <div className="mb-2 flex items-center justify-between">
+              <h4 className="text-[10.5px] font-medium uppercase tracking-wider text-muted-foreground">
+                Post-call analysis
+              </h4>
+              <span className="text-[10.5px] text-muted-foreground">{call.agentName ?? "Voice agent"}</span>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {insights.map((it) => (
+                <div key={it.label} className="rounded-lg border border-border bg-card px-3 py-2">
+                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{it.label}</p>
+                  <p className="mt-0.5 text-[12.5px] font-medium">{it.value}</p>
                 </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Transcript — collapsed by default */}
+          <div>
+            <button
+              onClick={() => setShowTranscript((v) => !v)}
+              className="mb-2 flex w-full items-center justify-between rounded-lg border border-border bg-card px-3 py-2 text-left hover:bg-secondary/40"
+            >
+              <span className="text-[10.5px] font-medium uppercase tracking-wider text-muted-foreground">
+                Transcript
+              </span>
+              <span className="flex items-center gap-1.5 text-[10.5px] text-muted-foreground">
+                {showTranscript ? "Click to collapse" : "Expand to load"}
+                <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", showTranscript && "rotate-180")} />
+              </span>
+            </button>
+            {showTranscript && (
+              <div className="space-y-2">
+                {call.transcript.map((t, i) => {
+                  const isAgent = t.role === "agent";
+                  return (
+                    <div key={i} className={cn("flex", isAgent ? "justify-start" : "justify-end")}>
+                      <div className={cn(
+                        "max-w-[75%] rounded-2xl px-3 py-1.5 text-[12.5px] shadow-sm",
+                        isAgent ? "bg-secondary" : "bg-success/10",
+                      )}>
+                        <div className="mb-0.5 flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground">
+                          <span>{isAgent ? "Agent" : "Customer"}</span>
+                          <span className="font-mono">{t.at}</span>
+                        </div>
+                        <p className="leading-snug text-foreground">{t.text}</p>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-            );
-          })}
+            )}
+          </div>
         </div>
       )}
     </div>
   );
+}
+
+function IdCell({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-border bg-card px-3 py-1.5">
+      <p className="text-[9.5px] uppercase tracking-wider text-muted-foreground">{label}</p>
+      <p className="mt-0.5 truncate text-[12.5px] font-medium">{value}</p>
+    </div>
+  );
+}
+
+const OUTCOME_LABEL: Record<LeadVoiceCall["outcome"], string> = {
+  completed: "Completed",
+  no_answer: "No answer",
+  busy: "Busy",
+  failed: "Failed",
+};
+
+/** Deterministic per-call insights. Real values come from the post-call
+ *  analysis run — this stands in for demo purposes. */
+function buildVoiceInsights(call: LeadVoiceCall): { label: string; value: string }[] {
+  const rng = seedFromId(call.id);
+  const p = (arr: string[]) => arr[Math.floor(rng() * arr.length)];
+  const campaign = call.campaignName.toLowerCase();
+  const dispositions = campaign.includes("handoff")
+    ? ["Resolved", "Escalated", "Follow-up"]
+    : campaign.includes("winback") || campaign.includes("cart") || campaign.includes("activation")
+      ? ["Interested", "Follow-up", "Not interested"]
+      : ["Informed", "Interested", "Not interested"];
+  return [
+    { label: "Disposition", value: p(dispositions) },
+    { label: "Sentiment",   value: p(["Positive", "Neutral", "Negative"]) },
+    { label: "Intent",      value: p(["High", "Medium", "Low"]) },
+    { label: "Callback",    value: p(["No", "Yes · tomorrow 11 am", "Yes · 6:30 pm"]) },
+  ];
+}
+
+/** Short AI summary keyed to campaign flavour. Deterministic per call. */
+function buildVoiceSummary(call: LeadVoiceCall): string {
+  const rng = seedFromId(call.id + "-summary");
+  const p = (arr: string[]) => arr[Math.floor(rng() * arr.length)];
+  const campaign = call.campaignName.toLowerCase();
+  if (campaign.includes("cart")) return p([
+    "Customer confirmed intent to complete the pending cart but wanted a discount before checkout.",
+    "Agent shared the 10% coupon and walked through checkout; customer will finish tonight.",
+  ]);
+  if (campaign.includes("loyalty") || campaign.includes("reward")) return p([
+    "Loyalty tier and reward balance explained. Customer agreed to redeem before expiry.",
+    "Customer accepted the tier upgrade offer and requested the terms on WhatsApp.",
+  ]);
+  if (campaign.includes("winback") || campaign.includes("activation")) return p([
+    "Customer had drifted over pricing and a competing app. Positive response to the offer; likely to re-engage.",
+    "Reactivation offer accepted with a callback requested for onboarding help.",
+  ]);
+  if (campaign.includes("handoff")) return p([
+    "Support query resolved on call. Customer thanked the agent and disconnected.",
+    "Issue partially resolved; ticket raised for finance team to complete refund.",
+  ]);
+  return p([
+    "Customer engaged with the offer and requested more details on WhatsApp.",
+    "Short informational call. Customer will decide and revert.",
+  ]);
+}
+
+function seedFromId(s: string): () => number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return () => {
+    h += 0x6D2B79F5;
+    let t = h;
+    t = Math.imul(t ^ t >>> 15, t | 1);
+    t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
 }
 
 function VoiceAttemptRow({ attempt }: { attempt: LeadVoiceAttempt }) {
@@ -328,7 +567,7 @@ function fmtDuration(seconds: number): string {
   return m > 0 ? `${m}m ${s}s` : `${s}s`;
 }
 
-/* --------------------------- Run + trace dividers --------------------------- */
+/* --------------------------- Run dividers --------------------------- */
 
 /** `[Category] · [Campaign Name]` becomes `[Campaign Name]`. Multi-segment
  *  names (e.g. "Retail · Activation · Loyalty") drop only the first segment. */
@@ -373,65 +612,3 @@ function RunDivider({ label }: { label: string }) {
   );
 }
 
-/** Freeform workflow entry / exit divider. Uses a subtle amber tint so it
- *  reads as a state change without competing with the run dividers. */
-function FreeformTraceDivider({
-  tone, label,
-}: {
-  tone: "enter" | "exit";
-  label: string;
-}) {
-  return (
-    <div className="flex items-center gap-2 px-1 py-0.5 text-[10.5px] text-warning">
-      <span className="h-px flex-1 bg-warning/30" />
-      <span className="inline-flex items-center gap-1 rounded-full border border-warning/40 bg-warning/10 px-2 py-0.5 text-[10.5px] font-medium">
-        <Workflow className="h-2.5 w-2.5" />
-        {tone === "enter" ? "Entered" : "Exited"}: {label}
-      </span>
-      <span className="h-px flex-1 bg-warning/30" />
-    </div>
-  );
-}
-
-/* ------------------------ Synthesised freeform trace ------------------------ */
-
-/**
- * Deterministically synthesise a freeform trace on a WhatsApp thread. Real
- * freeform trace events don't live in the current lead fixture, so we generate
- * plausible dividers for a subset of leads (id parity) with 3+ WhatsApp
- * messages in the same run. Once real trace events land the caller can pass
- * them straight through and drop this function.
- */
-function synthesiseFreeformTrace(
-  lead: LeadRecord,
-  runMessages: LeadChatMessage[],
-): { beforeIdx: number; afterIdx: number; enterLabel: string; exitLabel: string } | null {
-  if (runMessages.length < 2) return null;
-  // ~50% of leads show a trace, deterministically by id hash.
-  const seed = lead.id.split("").reduce((s, c) => s + c.charCodeAt(0), 0);
-  if (seed % 2 === 1) return null;
-  // Enter divider sits BEFORE the last message; exit divider AFTER. When there
-  // are only 2 messages that means enter goes between them and exit after the
-  // last, tracing "lead entered the workflow after the first template message".
-  const enterIdx = runMessages.length - 1;
-  const afterIdx = runMessages.length; // synthetic "past end" — rendered after the last bubble
-  const workflows = [
-    "Pre-book & Test Drive Interest",
-    "Callback Slot Picker",
-    "KYC Document Upload",
-  ];
-  const exits = [
-    "10 AM to 12 PM",
-    "12 PM to 2 PM",
-    "Timeout (60 min inactivity)",
-    "Tomorrow morning",
-  ];
-  const wf = workflows[seed % workflows.length];
-  const ex = exits[Math.floor(seed / 3) % exits.length];
-  return {
-    beforeIdx: enterIdx,
-    afterIdx,
-    enterLabel: wf,
-    exitLabel: ex,
-  };
-}

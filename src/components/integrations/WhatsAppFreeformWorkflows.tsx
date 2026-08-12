@@ -10,7 +10,19 @@ import {
   CheckCircle2,
   CircleDashed,
   Lock,
+  Trash2,
 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -27,6 +39,8 @@ import {
   getFreeformWorkflows,
   subscribeFreeformWorkflows,
   createFreeformWorkflow,
+  saveFreeformWorkflow,
+  deleteFreeformWorkflow,
   type FreeformWorkflowRow,
   type FreeformStatus,
 } from "@/lib/freeform-types";
@@ -116,7 +130,7 @@ export function WhatsAppFreeformWorkflows() {
             <span>Last modified</span>
             <span>Created</span>
             <span>Used in campaigns</span>
-            <span className="w-16 text-right">Actions</span>
+            <span className="w-24 text-right">Actions</span>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto">
             {filtered.length === 0 ? (
@@ -157,15 +171,22 @@ export function WhatsAppFreeformWorkflows() {
                       `${w.usedInCampaigns} campaign${w.usedInCampaigns === 1 ? "" : "s"}`
                     )}
                   </span>
-                  <span className="flex w-16 items-center justify-end gap-1">
+                  <span className="flex w-24 items-center justify-end gap-1">
                     <span
                       role="button"
                       tabIndex={0}
                       onClick={(e) => {
                         e.stopPropagation();
+                        // v1 rule: Duplicate copies the source workflow's graph
+                        // and config into a fresh Draft — same behaviour as
+                        // "Duplicate to edit" on a Locked workflow.
                         const copy = createFreeformWorkflow({
                           name: `${w.name} (copy)`,
                           description: w.description,
+                        });
+                        saveFreeformWorkflow(copy.id, {
+                          nodes: w.nodes,
+                          edges: w.edges,
                         });
                         handleCreated(copy);
                       }}
@@ -175,6 +196,14 @@ export function WhatsAppFreeformWorkflows() {
                     >
                       <Copy className="h-3.5 w-3.5" />
                     </span>
+                    {/* Delete: v1 rule only Draft workflows can be deleted.
+                        Ready and Locked have no delete affordance. */}
+                    {w.status === "draft" && !w.locked && (
+                      <ConfirmDeleteButton
+                        name={w.name}
+                        onConfirm={() => deleteFreeformWorkflow(w.id)}
+                      />
+                    )}
                     <span
                       role="button"
                       tabIndex={0}
@@ -263,6 +292,53 @@ function EmptyState({
         <Plus className="h-4 w-4" /> Create workflow
       </Button>
     </div>
+  );
+}
+
+/* --------------------------- Delete confirmation --------------------------- */
+
+function ConfirmDeleteButton({
+  name,
+  onConfirm,
+}: {
+  name: string;
+  onConfirm: () => void;
+}) {
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger asChild>
+        <span
+          role="button"
+          tabIndex={0}
+          onClick={(e) => e.stopPropagation()}
+          className="grid h-7 w-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+          aria-label="Delete"
+          title="Delete"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </span>
+      </AlertDialogTrigger>
+      <AlertDialogContent onClick={(e) => e.stopPropagation()}>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete workflow?</AlertDialogTitle>
+          <AlertDialogDescription>
+            This deletes{" "}
+            <span className="font-medium text-foreground">{name}</span>.
+            Draft workflows have never been referenced by a campaign run, so
+            nothing downstream breaks. This action cannot be undone.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={onConfirm}
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+          >
+            Delete workflow
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
 

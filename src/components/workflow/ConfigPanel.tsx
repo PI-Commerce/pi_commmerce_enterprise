@@ -3,7 +3,7 @@ import { Link } from "@tanstack/react-router";
 import { webhooksOfType, activeCountForType } from "@/lib/webhooks-store";
 import { AUTO_INCLUDED_FIELDS } from "@/lib/webhooks-data";
 import {
-  X, Copy, Trash2, AlertCircle, CheckCircle2, Plus, GripVertical, ChevronDown, Variable,
+  X, Copy, Trash2, AlertCircle, CheckCircle2, Plus, GripVertical, ChevronDown, ChevronRight, Variable,
   Sparkles, GitBranch, FlaskConical, ArrowUp, ArrowDown, ArrowRight, ArrowLeftRight,
   FileSpreadsheet, Loader2, Clock, Hash, Info, Pencil, Eye, Workflow,
 } from "lucide-react";
@@ -36,7 +36,7 @@ import {
 import {
   getFreeformWorkflows, getFreeformPlaceholders, getFreeformCampaignOutputs,
   subscribeFreeformWorkflows,
-  type FreeformWorkflowRow, type FreeformPlaceholder,
+  type FreeformPlaceholder, type FreeformNodeRecord,
 } from "@/lib/freeform-types";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
@@ -392,12 +392,12 @@ function DescriptionField({
 function NodeFields({
   data, readOnly, onChange,
 }: { data: WorkflowNodeData; readOnly?: boolean; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
-  return <KindFields kind={data.kind} config={data.config} readOnly={readOnly} onChange={onChange} />;
+  return <KindFields kind={data.kind} config={data.config} serial={data.serial} readOnly={readOnly} onChange={onChange} />;
 }
 
 function KindFields({
-  kind, config, readOnly, onChange,
-}: { kind: NodeKind; config?: PresetConfig; readOnly?: boolean; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
+  kind, config, serial, readOnly, onChange,
+}: { kind: NodeKind; config?: PresetConfig; serial?: string; readOnly?: boolean; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
   const mark = (valid: boolean, error?: string) => onChange({ valid, error });
 
   switch (kind) {
@@ -430,7 +430,7 @@ function KindFields({
       return <WhatsAppFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
 
     case "whatsappFreeform":
-      return <WhatsAppFreeformFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
+      return <WhatsAppFreeformFields config={config} serial={serial} readOnly={readOnly} mark={mark} onChange={onChange} />;
 
     case "sms":
       return <SmsFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
@@ -1607,9 +1607,12 @@ const FF_TIMER_MIN = 1;
 const FF_TIMER_MAX = 1440; // 24 hours
 
 function WhatsAppFreeformFields({
-  config, readOnly, mark, onChange,
+  config, serial, readOnly, mark, onChange,
 }: {
   config?: PresetConfig;
+  /** This node's per-kind serial (e.g. `ffw_1`). Used to render the output
+   *  variables list with the real namespace, not a `<this-node>` placeholder. */
+  serial?: string;
   readOnly?: boolean;
   mark: (v: boolean, e?: string) => void;
   onChange: (patch: Partial<WorkflowNodeData>) => void;
@@ -1797,23 +1800,11 @@ function WhatsAppFreeformFields({
             <Label className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
               Duration <span className="text-destructive">*</span>
             </Label>
-            <div className="flex items-center gap-2">
-              <Input
-                type="number"
-                min={FF_TIMER_MIN}
-                max={FF_TIMER_MAX}
-                value={timerMinutes}
-                disabled={readOnly}
-                onChange={(e) => {
-                  const raw = Number(e.target.value);
-                  if (Number.isNaN(raw)) return;
-                  const clamped = Math.max(FF_TIMER_MIN, Math.min(FF_TIMER_MAX, Math.round(raw)));
-                  patchConfig({ ffTimerMinutes: clamped });
-                }}
-                className="h-9 w-28 text-sm"
-              />
-              <span className="text-[12px] text-muted-foreground">minutes ({fmtMinutes(timerMinutes)})</span>
-            </div>
+            <TimerDurationPicker
+              minutes={timerMinutes}
+              disabled={readOnly}
+              onChange={(m) => patchConfig({ ffTimerMinutes: m })}
+            />
             <p className="text-[11px] text-muted-foreground">
               Max 24 hours. Meta closes the customer-service window automatically after that.
             </p>
@@ -1822,18 +1813,10 @@ function WhatsAppFreeformFields({
       </Section>
 
       {selected && (
-        <Section title="Available output variables">
-          <div className="rounded-xl border border-border bg-card/50 p-4">
-            <p className="text-[11px] text-muted-foreground">
-              Downstream nodes can branch on these once the workflow ends. Namespaced by this node.
-            </p>
-            <ul className="mt-2 space-y-1">
-              {getFreeformCampaignOutputs("<this-node>", selected.nodes).map((v) => (
-                <li key={v.key} className="font-mono text-[11.5px] text-foreground/80">{v.key}</li>
-              ))}
-            </ul>
-          </div>
-        </Section>
+        <FreeformOutputVarsSection
+          serial={serial ?? "ffw"}
+          selectedNodes={selected.nodes}
+        />
       )}
 
       {/* Preview modal. Read-only FreeformCanvas (pan + zoom only). */}
@@ -1892,6 +1875,109 @@ function fmtMinutes(m: number): string {
   const r = m - h * 60;
   if (r === 0) return `${h}h`;
   return `${h}h ${r}m`;
+}
+
+/**
+ * Value + unit picker for the freeform session timer. Value is a number input,
+ * unit is a dropdown (Minutes / Hours). Value is stored on the config as
+ * minutes; the picker converts on read + write. Clamp lives at the number-input
+ * level so the underlying `ffTimerMinutes` never exceeds Meta's 24-hour window.
+ */
+function TimerDurationPicker({
+  minutes, disabled, onChange,
+}: {
+  minutes: number;
+  disabled?: boolean;
+  onChange: (m: number) => void;
+}) {
+  // Prefer Hours when the current value is a whole-hour multiple; otherwise
+  // fall back to Minutes so the author isn't tricked by rounding.
+  const [unit, setUnit] = useState<"m" | "h">(
+    minutes % 60 === 0 && minutes >= 60 ? "h" : "m",
+  );
+  const displayValue = unit === "h" ? Math.round(minutes / 60) : minutes;
+  const stepMax = unit === "h" ? Math.floor(FF_TIMER_MAX / 60) : FF_TIMER_MAX;
+  return (
+    <div className="flex items-center gap-2">
+      <Input
+        type="number"
+        min={1}
+        max={stepMax}
+        value={displayValue}
+        disabled={disabled}
+        onChange={(e) => {
+          const raw = Number(e.target.value);
+          if (Number.isNaN(raw)) return;
+          const asMinutes = unit === "h" ? raw * 60 : raw;
+          const clamped = Math.max(FF_TIMER_MIN, Math.min(FF_TIMER_MAX, Math.round(asMinutes)));
+          onChange(clamped);
+        }}
+        className="h-9 w-24 text-sm"
+      />
+      <Select
+        value={unit}
+        disabled={disabled}
+        onValueChange={(next) => {
+          const u = next as "m" | "h";
+          setUnit(u);
+          // Re-clamp when switching units so we never exceed the window.
+          if (u === "h" && minutes > 24 * 60) onChange(24 * 60);
+        }}
+      >
+        <SelectTrigger className="h-9 w-[110px] text-sm">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="m">Minutes</SelectItem>
+          <SelectItem value="h">Hours</SelectItem>
+        </SelectContent>
+      </Select>
+      <span className="text-[12px] text-muted-foreground">({fmtMinutes(minutes)})</span>
+    </div>
+  );
+}
+
+/**
+ * Collapsible "Available output variables" section for the freeform campaign
+ * node. Hidden by default per v1 spec (uncommon field, adds noise). Each var
+ * key is namespaced by the node's real serial (e.g. `ffw_1.status`,
+ * `ffw_1.list_1.selected`) so downstream authors know the exact key to copy.
+ */
+function FreeformOutputVarsSection({
+  serial,
+  selectedNodes,
+}: {
+  serial: string;
+  selectedNodes: FreeformNodeRecord[];
+}) {
+  const [open, setOpen] = useState(false);
+  const outputs = useMemo(
+    () => getFreeformCampaignOutputs(serial, selectedNodes),
+    [serial, selectedNodes],
+  );
+  return (
+    <Section title="Available output variables">
+      <div className="rounded-xl border border-border bg-card/50">
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          className="flex w-full items-center justify-between px-4 py-3 text-left text-[11.5px] text-muted-foreground hover:bg-accent/30"
+        >
+          <span>{outputs.length} variable{outputs.length === 1 ? "" : "s"} downstream nodes can branch on</span>
+          {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+        </button>
+        {open && (
+          <div className="border-t border-border px-4 py-3">
+            <ul className="space-y-1">
+              {outputs.map((v) => (
+                <li key={v.key} className="font-mono text-[11.5px] text-foreground/80">{v.key}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    </Section>
+  );
 }
 
 /* --------------------------- SMS --------------------------- */

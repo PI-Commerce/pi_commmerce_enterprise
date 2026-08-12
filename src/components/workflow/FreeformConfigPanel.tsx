@@ -333,7 +333,11 @@ function MediaFields({
   config: FreeformNodeConfig;
   onConfigChange: (p: Partial<FreeformNodeConfig>) => void;
 }) {
-  const source = config.mediaSource;
+  // v1: URL only. Force the mediaSource to url so downstream validation +
+  // preview render the URL input. Upload is deferred (needs backend storage).
+  if (config.mediaSource !== "url") {
+    onConfigChange({ mediaSource: "url" });
+  }
   return (
     <>
       <Section
@@ -341,86 +345,20 @@ function MediaFields({
           kind === "image" ? "Image" : kind === "video" ? "Video" : "Document"
         }
       >
-        {/* Source toggle  -  URL or Upload */}
-        <div className="space-y-1.5">
-          <Label className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-            Source <span className="text-destructive">*</span>
-          </Label>
-          <div className="grid grid-cols-2 gap-1.5">
-            <SourceTile
-              active={source === "url"}
-              onClick={() => onConfigChange({ mediaSource: "url" })}
-              label="From URL"
-              hint="Paste a public link"
-              icon={<ExternalLink className="h-3.5 w-3.5" />}
-            />
-            <SourceTile
-              active={source === "upload"}
-              onClick={() => onConfigChange({ mediaSource: "upload" })}
-              label="Upload"
-              hint="Pick a file"
-              icon={<UploadCloud className="h-3.5 w-3.5" />}
-            />
-          </div>
-        </div>
-
-        {source === "url" && (
-          <Field label="Media URL" required>
-            <Input
-              value={config.mediaUrl ?? ""}
-              onChange={(e) => onConfigChange({ mediaUrl: e.target.value })}
-              placeholder={
-                kind === "image"
-                  ? "https://…/image.jpg"
-                  : kind === "video"
-                    ? "https://…/video.mp4"
-                    : "https://…/file.pdf"
-              }
-              className="h-9"
-            />
-          </Field>
-        )}
-
-        {source === "upload" && (
-          <Field label={kind === "document" ? "File" : "Media"} required>
-            <label className="flex h-20 cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border bg-muted/30 text-center text-xs text-muted-foreground hover:bg-muted/60">
-              <input
-                type="file"
-                accept={
-                  kind === "image"
-                    ? "image/*"
-                    : kind === "video"
-                      ? "video/*"
-                      : undefined
-                }
-                className="hidden"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (!file) {
-                    onConfigChange({
-                      mediaFileName: "",
-                      mediaBlobUrl: undefined,
-                    });
-                    return;
-                  }
-                  // Object URL is transient (dies on reload), but that's fine  -  it
-                  // just powers the on-canvas preview in the mock demo.
-                  const blobUrl = URL.createObjectURL(file);
-                  onConfigChange({
-                    mediaFileName: file.name,
-                    mediaBlobUrl: blobUrl,
-                  });
-                }}
-              />
-              <UploadCloud className="h-5 w-5" />
-              <span>
-                {config.mediaFileName
-                  ? config.mediaFileName
-                  : "Click to upload"}
-              </span>
-            </label>
-          </Field>
-        )}
+        <Field label="Media URL" required>
+          <Input
+            value={config.mediaUrl ?? ""}
+            onChange={(e) => onConfigChange({ mediaUrl: e.target.value })}
+            placeholder={
+              kind === "image"
+                ? "https://…/image.jpg"
+                : kind === "video"
+                  ? "https://…/video.mp4"
+                  : "https://…/file.pdf"
+            }
+            className="h-9"
+          />
+        </Field>
 
         <CharField
           label="Caption"

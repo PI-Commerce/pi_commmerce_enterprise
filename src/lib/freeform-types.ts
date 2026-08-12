@@ -396,6 +396,18 @@ export function saveFreeformWorkflow(
 }
 
 /**
+ * Delete a workflow. v1 rule: only Draft workflows can be deleted. Ready and
+ * Locked rows show no delete affordance in the table, but we still guard here
+ * so a rogue caller can't wipe protected data.
+ */
+export function deleteFreeformWorkflow(id: string): void {
+  const target = workflows.find((w) => w.id === id);
+  if (!target || target.status !== "draft" || target.locked) return;
+  workflows = workflows.filter((w) => w.id !== id);
+  listeners.forEach((l) => l());
+}
+
+/**
  * Freeze a workflow. Called by campaign Run creation when the campaign version
  * references this workflow. Idempotent: locking an already-locked workflow is
  * a no-op (preserves the original `lockedAt` timestamp).
@@ -600,7 +612,11 @@ export type FreeformPlaceholder = {
   locations: FreeformPlaceholderLocation[];
 };
 
-const PLACEHOLDER_RE = /\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/g;
+// v1: variables inside `{{}}` are letters + underscore only. Tighter than the
+// broader `[a-zA-Z0-9_.]+` we started with; dot-notation and digits inside
+// placeholders are deferred. Digits still land in internal disposition names
+// (e.g. `text_1.button`) but those don't sit inside `{{}}` placeholders.
+const PLACEHOLDER_RE = /\{\{\s*([a-zA-Z_]+)\s*\}\}/g;
 
 function scanText(
   text: string | undefined,
