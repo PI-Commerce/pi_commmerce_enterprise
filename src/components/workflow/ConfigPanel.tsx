@@ -1783,14 +1783,14 @@ function WhatsAppFreeformFields({
               <TimerTile
                 active={timerMode === "absolute"}
                 onClick={() => patchConfig({ ffTimerMode: "absolute" })}
-                label="Absolute"
+                label="Total Session Time"
                 hint="From workflow entry"
                 disabled={readOnly}
               />
               <TimerTile
                 active={timerMode === "inactivity"}
                 onClick={() => patchConfig({ ffTimerMode: "inactivity" })}
-                label="Inactivity"
+                label="User Inactivity Time"
                 hint="From last lead action"
                 disabled={readOnly}
               />
