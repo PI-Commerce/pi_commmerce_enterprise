@@ -5,7 +5,7 @@ import { AUTO_INCLUDED_FIELDS } from "@/lib/webhooks-data";
 import {
   X, Copy, Trash2, AlertCircle, CheckCircle2, Plus, GripVertical, ChevronDown, Variable,
   Sparkles, GitBranch, FlaskConical, ArrowUp, ArrowDown, ArrowRight, ArrowLeftRight,
-  FileSpreadsheet, Loader2, Clock, Hash, Info, Pencil,
+  FileSpreadsheet, Loader2, Clock, Hash, Info, Pencil, Megaphone,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useRegion, localizeCurrency } from "@/lib/region";
@@ -51,6 +51,12 @@ import {
   transformError, transformsError,
   sanitizeOutputName, conversationContextVariables,
 } from "@/lib/ai-transformations";
+import { useCtwaAds } from "@/lib/ctwa-store";
+import { useAdConnection } from "@/lib/ctwa-connection-store";
+import {
+  validateAd, AD_STATUS_LABELS, OBJECTIVE_LABELS, GOAL_LABELS, type CtwaAd,
+} from "@/lib/ctwa-types";
+import { StatusPill } from "@/components/ads/ui";
 import { PromptEditor } from "@/components/workflow/PromptEditor";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
@@ -410,7 +416,7 @@ function KindFields({
       return <RcsFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
 
     case "adsCampaign":
-      return <AdsCampaignFields readOnly={readOnly} mark={mark} />;
+      return <AdsCampaignFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
 
     case "needsReview":
       return <NeedsReviewFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
@@ -1976,9 +1982,59 @@ function RcsCore({ config, readOnly, mark, onChange }: {
 
 /* --------------------------- Ads Campaign --------------------------- */
 
-function AdsCampaignFields({ readOnly, mark }: { readOnly?: boolean; mark: (v: boolean, e?: string) => void }) {
-  const [audienceMode, setAudienceMode] = useState<"meta" | "upload">("meta");
+/**
+ * Ads Campaign node — the CTWA entry point of a flow.
+ *
+ * The node does NOT author an ad. Creative, budget, targeting and objective are
+ * owned by Channels → Meta Ads, and this panel only picks one of those ads and
+ * says when a conversation it produced should enter the flow. One owner per fact:
+ * editing the ad in two places is how budgets and objectives drift apart.
+ */
+function AdsCampaignFields({
+  config, readOnly, mark, onChange,
+}: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
   const { symbol } = useRegion();
+  const connection = useAdConnection();
+  const ads = useCtwaAds();
+  const adId = config?.adId;
+  const ad = ads.find((a) => a.id === adId);
+  const entryStage = config?.adEntryStage ?? "conversation_started";
+
+  const patch = (next: Partial<PresetConfig>) => {
+    if (readOnly) return;
+    onChange({ config: { ...(config ?? {}), ...next } });
+  };
+
+  // The node is run-ready once it names an ad on a linked account. A paused or
+  // rejected ad is still a legal selection — it just isn't delivering yet, which
+  // the summary says out loud rather than blocking the campaign from publishing.
+  useEffect(() => {
+    if (!connection) { mark(false, "Connect a Meta ad account"); return; }
+    if (!ad) { mark(false, "Select an ad"); return; }
+    mark(true);
+  }, [connection, ad?.id]);
+
+  if (!connection) {
+    return (
+      <Section title="Meta ad account">
+        <div className="rounded-lg border border-dashed border-border bg-muted/30 px-4 py-6 text-center">
+          <Megaphone className="mx-auto h-6 w-6 text-muted-foreground" />
+          <p className="mt-2 text-[12.5px] font-medium">No ad account linked</p>
+          <p className="mx-auto mt-1 max-w-[240px] text-[11.5px] text-muted-foreground">
+            Click-to-WhatsApp ads run from a connected Meta ad account. Link one, then pick the ad
+            that feeds this flow.
+          </p>
+          <Link
+            to="/channels/meta-ads"
+            className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-background px-3 text-[12px] font-medium hover:bg-accent"
+          >
+            Open Meta Ads <ArrowRight className="h-3 w-3" />
+          </Link>
+        </div>
+      </Section>
+    );
+  }
+
   return (
     <>
       <Section title="Platform">
@@ -1988,81 +2044,140 @@ function AdsCampaignFields({ readOnly, mark }: { readOnly?: boolean; mark: (v: b
           <PlatformChip disabled>Instagram</PlatformChip>
           <PlatformChip disabled>Google</PlatformChip>
         </div>
-        <p className="text-[11px] text-muted-foreground">Currently supports WhatsApp Click-to-WhatsApp Ads. More platforms coming soon.</p>
+        <p className="text-[11px] text-muted-foreground">
+          Taps on the ad open a WhatsApp thread on {connection.wabaPhoneNumber}. More platforms coming soon.
+        </p>
       </Section>
 
-      <Section title="Account & Objective">
-        <Field label="Meta ad account" required>
-          <SelectLike disabled={readOnly} options={["act_12345 · Pi Commerce Main", "act_67890 · Pi Commerce Test"]} onPick={() => mark(true)} placeholder="Select account…" />
+      <Section title="Source ad">
+        <Field label="Click-to-WhatsApp ad" required>
+          <Select
+            value={adId}
+            disabled={readOnly}
+            onValueChange={(v) => patch({ adId: v })}
+          >
+            <SelectTrigger className="h-9 text-sm">
+              <SelectValue placeholder={ads.length ? "Select an ad…" : "No ads yet"} />
+            </SelectTrigger>
+            <SelectContent>
+              {ads.map((a) => (
+                <SelectItem key={a.id} value={a.id}>
+                  {a.name} <span className="text-muted-foreground">· {AD_STATUS_LABELS[a.status]}</span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </Field>
-        <Field label="Campaign objective" required>
-          <SelectLike disabled={readOnly} options={["Engagement", "Leads", "Messages", "Sales"]} onPick={() => mark(true)} defaultValue="Messages" />
-        </Field>
+        <p className="text-[11px] text-muted-foreground">
+          Creative, budget and targeting live with the ad.{" "}
+          <Link to="/channels/meta-ads" className="text-foreground underline underline-offset-2">
+            Edit in Meta Ads
+          </Link>
+          .
+        </p>
+
+        {ad && <AdSummary ad={ad} symbol={symbol} />}
       </Section>
 
-      <Section title="Audience">
-        <div className="grid grid-cols-2 gap-2">
-          <SegmentBtn active={audienceMode === "meta"} onClick={() => setAudienceMode("meta")} disabled={readOnly}>Meta audience filters</SegmentBtn>
-          <SegmentBtn active={audienceMode === "upload"} onClick={() => setAudienceMode("upload")} disabled={readOnly}>Customer upload</SegmentBtn>
-        </div>
-        {audienceMode === "meta" ? (
-          <>
-            <Field label="Locations"><Input disabled={readOnly} placeholder="India, UAE" className="h-9" /></Field>
+      {ad && (
+        <Section title="Entry condition">
+          <Field label="Admit the lead when">
             <div className="grid grid-cols-2 gap-2">
-              <Field label="Age min"><Input disabled={readOnly} type="number" defaultValue={25} className="h-9" /></Field>
-              <Field label="Age max"><Input disabled={readOnly} type="number" defaultValue={55} className="h-9" /></Field>
+              <SegmentBtn
+                active={entryStage === "conversation_started"}
+                disabled={readOnly}
+                onClick={() => patch({ adEntryStage: "conversation_started" })}
+              >
+                Conversation starts
+              </SegmentBtn>
+              <SegmentBtn
+                active={entryStage === "qualified"}
+                disabled={readOnly}
+                onClick={() => patch({ adEntryStage: "qualified" })}
+              >
+                Lead qualifies
+              </SegmentBtn>
             </div>
-            <Field label="Interests"><Input disabled={readOnly} placeholder="Investing, stocks, mutual funds" className="h-9" /></Field>
-          </>
-        ) : (
-          <>
-            <Field label="Upload customer CSV" required>
-              <label className="flex h-16 cursor-pointer items-center justify-center rounded-lg border border-dashed border-border bg-muted/30 text-xs text-muted-foreground hover:bg-muted/60">
-                <input type="file" accept=".csv" className="hidden" disabled={readOnly} />
-                Upload customer list (phone/email hashed)
-              </label>
-            </Field>
-            <Field label="Audience type">
-              <SelectLike disabled={readOnly} options={["Custom audience", "Lookalike audience"]} onPick={() => undefined} defaultValue="Custom audience" />
-            </Field>
-          </>
-        )}
-      </Section>
+          </Field>
+          <p className="text-[11px] text-muted-foreground">
+            {entryStage === "conversation_started"
+              ? "Every inbound tap enters the flow, including tyre-kickers. Highest volume, lowest intent."
+              : "The thread has to show intent first. Fewer leads, but each one is worth a follow-up."}
+          </p>
+        </Section>
+      )}
 
-      <Section title="Budget & Schedule">
-        <div className="grid grid-cols-2 gap-2">
-          <Field label={`Daily budget (${symbol.trim()})`} required><Input disabled={readOnly} type="number" placeholder="5000" className="h-9" onChange={() => mark(true)} /></Field>
-          <Field label="Bid strategy"><SelectLike disabled={readOnly} options={["Lowest cost", "Cost cap", "Bid cap"]} onPick={() => undefined} defaultValue="Lowest cost" /></Field>
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <Field label="Start"><Input disabled={readOnly} type="date" className="h-9" /></Field>
-          <Field label="End"><Input disabled={readOnly} type="date" className="h-9" /></Field>
-        </div>
-      </Section>
-
-      <Section title="Creative">
-        <Field label="Creative source" required>
-          <SelectLike disabled={readOnly} options={["Upload new creative", "Select from Asset Library"]} onPick={() => mark(true)} />
-        </Field>
-        <div className="grid grid-cols-3 gap-1.5">
-          {["Creative A", "Creative B", "Creative C"].map((c) => (
-            <div key={c} className="aspect-square rounded-md border border-border bg-muted/40 p-1.5 text-[10px] text-muted-foreground">
-              <div className="flex h-full w-full items-end rounded bg-gradient-to-br from-muted to-muted-foreground/20 p-1">{c}</div>
+      {ad && (
+        <Section title="Attribution carried downstream">
+          <div className="space-y-1.5 rounded-lg border border-border bg-muted/20 p-3">
+            <p className="text-[11.5px] text-muted-foreground">
+              Every lead entering here carries these variables. <code className="font-mono text-foreground">ctwa_clid</code>{" "}
+              is the only key that ties the thread back to Meta — a conversion can't be reported without it.
+            </p>
+            <div className="flex flex-wrap gap-1">
+              {["ctwa_clid", "ad_name", "ad_headline", "first_response_latency_ms", "outcome_stage"].map((v) => (
+                <span key={v} className="rounded bg-background px-1.5 py-0.5 font-mono text-[10.5px] text-muted-foreground ring-1 ring-border">
+                  {v}
+                </span>
+              ))}
             </div>
-          ))}
-        </div>
-        <p className="text-[11px] text-muted-foreground">Only approved creatives are selectable.</p>
-      </Section>
-
-      <Section title="WhatsApp behaviour">
-        <Field label="Click-to-WhatsApp template">
-          <SelectLike disabled={readOnly} options={["welcome_intro_v1", "lead_qualify_v2"]} onPick={() => undefined} />
-        </Field>
-        <Field label="Welcome message">
-          <Textarea disabled={readOnly} placeholder="Hey! Thanks for reaching out. How can we help you today?" className="min-h-16 resize-none text-sm" />
-        </Field>
-      </Section>
+          </div>
+        </Section>
+      )}
     </>
+  );
+}
+
+/** Read-only mirror of the selected ad, so the flow author sees what they wired up
+ *  without leaving the canvas. Warnings come from the same `validateAd` the composer uses. */
+function AdSummary({ ad, symbol }: { ad: CtwaAd; symbol: string }) {
+  const warnings = validateAd(ad).warnings;
+  const rows: [string, string][] = [
+    ["Objective", `${OBJECTIVE_LABELS[ad.objective]} → ${GOAL_LABELS[ad.optimizationGoal]}`],
+    ["Daily budget", `${symbol.trim()}${ad.dailyBudget.toLocaleString("en-IN")}`],
+    ["Destination", ad.wabaPhoneNumber],
+    ["Conversion points", ad.conversionPoints.length ? `${ad.conversionPoints.length} configured` : "None"],
+  ];
+
+  return (
+    <div className="space-y-2.5 rounded-lg border border-border bg-card p-3">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="truncate text-[12.5px] font-medium">{ad.headline}</p>
+          <p className="truncate text-[11px] text-muted-foreground">{ad.metaCampaignName} · {ad.adSetName}</p>
+        </div>
+        <StatusPill status={ad.status} />
+      </div>
+
+      <dl className="space-y-1">
+        {rows.map(([k, v]) => (
+          <div key={k} className="flex items-baseline justify-between gap-3 text-[11.5px]">
+            <dt className="shrink-0 text-muted-foreground">{k}</dt>
+            <dd className="truncate text-right">{v}</dd>
+          </div>
+        ))}
+      </dl>
+
+      <div className="rounded-md bg-muted/40 p-2">
+        <p className="text-[10.5px] font-medium uppercase tracking-wider text-muted-foreground">Opens with</p>
+        <p className="mt-0.5 text-[11.5px] italic">“{ad.prefilledMessage}”</p>
+      </div>
+
+      {ad.status !== "active" && (
+        <p className="flex items-start gap-1.5 text-[11px] text-muted-foreground">
+          <Info className="mt-px h-3 w-3 shrink-0" />
+          {ad.status === "rejected"
+            ? `Meta rejected this ad — ${(ad.rejectionReason ?? "no reason given").replace(/\.$/, "")}. It won't deliver until it's fixed and resubmitted.`
+            : "This ad isn't delivering yet, so no leads will enter until it goes live."}
+        </p>
+      )}
+
+      {warnings.map((w) => (
+        <p key={w} className="flex items-start gap-1.5 text-[11px] text-warning">
+          <AlertCircle className="mt-px h-3 w-3 shrink-0" /> {w}
+        </p>
+      ))}
+    </div>
   );
 }
 

@@ -257,6 +257,19 @@ export type PresetConfig = {
    * this node fires.
    */
   notifyPayloadExtras?: string[];
+  // ---- Ads Campaign (CTWA entry) ----
+  /**
+   * {@link file://./ctwa-types.ts CtwaAd} id this node listens to. The ad itself is
+   * authored in Channels → Meta Ads; the node only references it, so creative, budget
+   * and objective keep exactly one owner.
+   */
+  adId?: string;
+  /**
+   * How far a CTWA conversation must progress before the lead enters this flow.
+   * `conversation_started` admits every inbound tap; `qualified` waits for the thread
+   * to show intent first. An {@link file://./ctwa-types.ts OutcomeStage}.
+   */
+  adEntryStage?: "conversation_started" | "qualified";
 
   // Legacy fields — kept in the type so pre-registry example configs still
   // parse. Never read by the new UI; the router ignores them.

@@ -268,6 +268,15 @@ export function deriveNodeOutcomeVariables(
       // downstream, namespaced by the node serial (e.g. `api_1.college_name`).
       const tool = config?.apiTool ? getTool(config.apiTool) : undefined;
       if (tool) for (const o of tool.outputs) vars.push({ key: `${ns}.${o.varName}`, source });
+    } else if (kind === "adsCampaign") {
+      // Attribution facts the inbound CTWA webhook carries. `ctwa_clid` is the only
+      // join key back to Meta, so it travels with the lead for the whole flow — a
+      // downstream node that fires a conversion needs it to reach the Conversions API.
+      vars.push({ key: `${ns}.ctwa_clid`, source });
+      vars.push({ key: `${ns}.ad_name`, source });
+      vars.push({ key: `${ns}.ad_headline`, source });
+      vars.push({ key: `${ns}.first_response_latency_ms`, source });
+      vars.push({ key: `${ns}.outcome_stage`, source });
     }
   }
   // Dedupe by key (defensive — duplicates only if two nodes share a serial).

@@ -62,7 +62,7 @@ const DEFAULT_NODE_DATA: Record<NodeKind, Partial<WorkflowNodeData>> = {
   sms: { subtitle: "Send SMS", valid: false, error: "Select a DLT template", outputs: smsOutputs() },
   rcs: { subtitle: "Send RCS message", valid: false, error: "Select a template", outputs: rcsOutputs() },
   aiTransform: { subtitle: "Derive AI variables", valid: true },
-  adsCampaign: { subtitle: "WhatsApp CTWA ad", valid: false, error: "Complete setup" },
+  adsCampaign: { subtitle: "CTWA ad entry", valid: false, error: "Select an ad" },
   // Terminal — flags the lead as Human Escalation and exits to End (auto-wired on drop).
   needsReview: { subtitle: "Flag & optionally notify", valid: true },
 };
