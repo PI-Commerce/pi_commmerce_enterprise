@@ -6,6 +6,7 @@ import { AppShell } from "@/components/app/AppShell";
 import { PageTabs } from "@/components/app/Tabs";
 import { Button } from "@/components/ui/button";
 import { AdComposer } from "@/components/ads/AdComposer";
+import { AdsClosedLoop } from "@/components/ads/AdsClosedLoop";
 import { AdsConnectDialog } from "@/components/ads/AdsConnectDialog";
 import { AdsList } from "@/components/ads/AdsList";
 import { AdsOverview } from "@/components/ads/AdsOverview";
@@ -20,7 +21,7 @@ export const Route = createFileRoute("/channels/meta-ads")({
   head: () => ({ meta: [{ title: "Meta Ads · Pi Commerce Enterprise" }] }),
 });
 
-type Tab = "overview" | "ads";
+type Tab = "overview" | "ads" | "loop";
 
 /** How long the mock Meta review takes before a verdict lands. */
 const REVIEW_MS = 3200;
@@ -63,6 +64,17 @@ function MetaAdsManage() {
     }, REVIEW_MS);
   };
 
+  // An outcome audience is only worth building if something can be run against
+  // it, so retargeting opens the composer on a fresh ad already targeting it
+  // rather than telling the merchant where to find it.
+  const retarget = (audienceId: string) => {
+    const draft = newAdDraft();
+    setEditing({
+      ...draft,
+      targeting: { ...draft.targeting, customAudienceIds: [audienceId] },
+    });
+  };
+
   return (
     <AppShell bare>
       <div className="flex h-full flex-col">
@@ -100,6 +112,7 @@ function MetaAdsManage() {
                 tabs={[
                   { id: "overview", label: "Overview" },
                   { id: "ads", label: "Ads" },
+                  { id: "loop", label: "Closed loop" },
                 ]}
               />
             </div>
@@ -110,8 +123,10 @@ function MetaAdsManage() {
           {connection ? (
             tab === "overview" ? (
               <AdsOverview connection={connection} />
-            ) : (
+            ) : tab === "ads" ? (
               <AdsList onEdit={setEditing} onCreate={() => setEditing(newAdDraft())} />
+            ) : (
+              <AdsClosedLoop onRetarget={retarget} />
             )
           ) : (
             <div className="h-full overflow-y-auto">

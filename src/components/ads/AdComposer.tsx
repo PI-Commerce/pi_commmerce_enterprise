@@ -32,6 +32,7 @@ import { cn } from "@/lib/utils";
 import { useRegion } from "@/lib/region";
 import { CreativeTile, money } from "@/components/ads/ui";
 import { generateCreatives, type CreativeVariant } from "@/lib/ctwa-creative";
+import { useOutcomeAudiences } from "@/lib/ctwa-store";
 import { AD_DESTINATION_NUMBERS } from "@/lib/ctwa-onboarding";
 import {
   CUSTOM_AUDIENCES, GEO_OPTIONS, INTEREST_OPTIONS, LOOKALIKE_SOURCES,
@@ -76,6 +77,7 @@ export function AdComposer({
 }) {
   const { symbol } = useRegion();
   const isNew = !initial.submittedAt && initial.name === "";
+  const outcomeAudiences = useOutcomeAudiences();
 
   const [name, setName] = useState(initial.name);
   const [headline, setHeadline] = useState(initial.headline);
@@ -354,7 +356,10 @@ export function AdComposer({
                 </div>
                 <FormField label="Custom audiences" hint="Outcome audiences you build from conversations appear here too.">
                   <MultiSelect
-                    options={CUSTOM_AUDIENCES.map((a) => ({ value: a.id, label: a.name }))}
+                    options={[
+                      ...outcomeAudiences.map((a) => ({ value: a.id, label: `${a.name} · outcome` })),
+                      ...CUSTOM_AUDIENCES.map((a) => ({ value: a.id, label: a.name })),
+                    ]}
                     value={audienceIds}
                     onChange={setAudienceIds}
                     placeholder="No custom audience"

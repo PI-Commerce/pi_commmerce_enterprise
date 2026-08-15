@@ -2052,7 +2052,7 @@ function AdsCampaignFields({
       <Section title="Source ad">
         <Field label="Click-to-WhatsApp ad" required>
           <Select
-            value={adId}
+            value={adId ?? ""}
             disabled={readOnly}
             onValueChange={(v) => patch({ adId: v })}
           >
