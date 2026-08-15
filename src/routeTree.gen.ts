@@ -25,6 +25,7 @@ import { Route as LeadsIdRouteImport } from './routes/leads.$id'
 import { Route as ChannelsWhatsappRouteImport } from './routes/channels.whatsapp'
 import { Route as ChannelsSmsRouteImport } from './routes/channels.sms'
 import { Route as ChannelsRcsRouteImport } from './routes/channels.rcs'
+import { Route as ChannelsMetaAdsRouteImport } from './routes/channels.meta-ads'
 import { Route as CampaignsIdRouteImport } from './routes/campaigns.$id'
 import { Route as AgentsNewRouteImport } from './routes/agents.new'
 import { Route as AgentsIdRouteImport } from './routes/agents.$id'
@@ -111,6 +112,11 @@ const ChannelsRcsRoute = ChannelsRcsRouteImport.update({
   path: '/rcs',
   getParentRoute: () => ChannelsRoute,
 } as any)
+const ChannelsMetaAdsRoute = ChannelsMetaAdsRouteImport.update({
+  id: '/meta-ads',
+  path: '/meta-ads',
+  getParentRoute: () => ChannelsRoute,
+} as any)
 const CampaignsIdRoute = CampaignsIdRouteImport.update({
   id: '/$id',
   path: '/$id',
@@ -148,6 +154,7 @@ export interface FileRoutesByFullPath {
   '/agents/$id': typeof AgentsIdRoute
   '/agents/new': typeof AgentsNewRoute
   '/campaigns/$id': typeof CampaignsIdRoute
+  '/channels/meta-ads': typeof ChannelsMetaAdsRoute
   '/channels/rcs': typeof ChannelsRcsRoute
   '/channels/sms': typeof ChannelsSmsRoute
   '/channels/whatsapp': typeof ChannelsWhatsappRoute
@@ -167,6 +174,7 @@ export interface FileRoutesByTo {
   '/agents/$id': typeof AgentsIdRoute
   '/agents/new': typeof AgentsNewRoute
   '/campaigns/$id': typeof CampaignsIdRoute
+  '/channels/meta-ads': typeof ChannelsMetaAdsRoute
   '/channels/rcs': typeof ChannelsRcsRoute
   '/channels/sms': typeof ChannelsSmsRoute
   '/channels/whatsapp': typeof ChannelsWhatsappRoute
@@ -191,6 +199,7 @@ export interface FileRoutesById {
   '/agents/$id': typeof AgentsIdRoute
   '/agents/new': typeof AgentsNewRoute
   '/campaigns/$id': typeof CampaignsIdRoute
+  '/channels/meta-ads': typeof ChannelsMetaAdsRoute
   '/channels/rcs': typeof ChannelsRcsRoute
   '/channels/sms': typeof ChannelsSmsRoute
   '/channels/whatsapp': typeof ChannelsWhatsappRoute
@@ -216,6 +225,7 @@ export interface FileRouteTypes {
     | '/agents/$id'
     | '/agents/new'
     | '/campaigns/$id'
+    | '/channels/meta-ads'
     | '/channels/rcs'
     | '/channels/sms'
     | '/channels/whatsapp'
@@ -235,6 +245,7 @@ export interface FileRouteTypes {
     | '/agents/$id'
     | '/agents/new'
     | '/campaigns/$id'
+    | '/channels/meta-ads'
     | '/channels/rcs'
     | '/channels/sms'
     | '/channels/whatsapp'
@@ -258,6 +269,7 @@ export interface FileRouteTypes {
     | '/agents/$id'
     | '/agents/new'
     | '/campaigns/$id'
+    | '/channels/meta-ads'
     | '/channels/rcs'
     | '/channels/sms'
     | '/channels/whatsapp'
@@ -397,6 +409,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ChannelsRcsRouteImport
       parentRoute: typeof ChannelsRoute
     }
+    '/channels/meta-ads': {
+      id: '/channels/meta-ads'
+      path: '/meta-ads'
+      fullPath: '/channels/meta-ads'
+      preLoaderRoute: typeof ChannelsMetaAdsRouteImport
+      parentRoute: typeof ChannelsRoute
+    }
     '/campaigns/$id': {
       id: '/campaigns/$id'
       path: '/$id'
@@ -469,6 +488,7 @@ const CampaignsRouteWithChildren = CampaignsRoute._addFileChildren(
 )
 
 interface ChannelsRouteChildren {
+  ChannelsMetaAdsRoute: typeof ChannelsMetaAdsRoute
   ChannelsRcsRoute: typeof ChannelsRcsRoute
   ChannelsSmsRoute: typeof ChannelsSmsRoute
   ChannelsWhatsappRoute: typeof ChannelsWhatsappRoute
@@ -476,6 +496,7 @@ interface ChannelsRouteChildren {
 }
 
 const ChannelsRouteChildren: ChannelsRouteChildren = {
+  ChannelsMetaAdsRoute: ChannelsMetaAdsRoute,
   ChannelsRcsRoute: ChannelsRcsRoute,
   ChannelsSmsRoute: ChannelsSmsRoute,
   ChannelsWhatsappRoute: ChannelsWhatsappRoute,

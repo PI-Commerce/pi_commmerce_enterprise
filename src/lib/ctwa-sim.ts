@@ -382,6 +382,39 @@ export function createMockFeed(ads: CtwaAd[], currency = "INR"): CtwaFeed {
   };
 }
 
+/* ─────────────────────────── Mock ad review ─────────────────────────── */
+
+/**
+ * Meta's advertising policies, reduced to the handful of claims that actually
+ * get CTWA finance creatives rejected. Checking real text rather than flipping a
+ * coin means the seeded rejected ad has a reason a reviewer would recognise, and
+ * a merchant who writes the same claim gets the same answer.
+ *
+ * BACKEND: delete this. Real review verdicts arrive on the ad-review webhook.
+ */
+const POLICY_CHECKS: { pattern: RegExp; reason: string }[] = [
+  {
+    pattern: /\bguarantee(d|s)?\b/i,
+    reason:
+      "Misleading claim — an unqualified guarantee cannot be substantiated. Remove the guarantee or add qualifying terms to the creative.",
+  },
+  {
+    pattern: /\b(100%|instant approval|no rejection|zero risk)\b/i,
+    reason:
+      "Absolute financial claim — approval, risk or outcome cannot be promised without conditions. Reword with qualifying terms.",
+  },
+  {
+    pattern: /\b(free money|double your|get rich)\b/i,
+    reason: "Unrealistic financial outcome — this claim is not permitted for financial products.",
+  },
+];
+
+export function reviewAd(ad: CtwaAd): { approved: boolean; reason?: string } {
+  const text = `${ad.headline} ${ad.caption}`;
+  const hit = POLICY_CHECKS.find((c) => c.pattern.test(text));
+  return hit ? { approved: false, reason: hit.reason } : { approved: true };
+}
+
 /* ─────────────────────────── Performance rollup ─────────────────────────── */
 
 type Bucket = {
