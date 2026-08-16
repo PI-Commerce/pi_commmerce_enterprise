@@ -22,6 +22,9 @@
 import { LEAD_RECORDS } from "@/lib/leads-data";
 import {
   CAPI_WINDOW_MS,
+  OUTCOME_STAGE_LABELS,
+  OUTCOME_STAGE_ORDER,
+  stageAtLeast,
   type AdPerformance,
   type CapiEvent,
   type CapiEventStatus,
@@ -284,6 +287,10 @@ function materialize(plan: TapPlan, nowMs: number): CtwaConversation | null {
     stageAtMs = at;
   }
 
+  // Recorded before the drop check below rewrites `stage`: the funnel needs to
+  // know a tap opened WhatsApp even after it is written off.
+  const reachedStage = stage;
+
   // A tap that was never going to produce a message, and has had long enough to
   // do so, is a genuine drop-off. Conversations that stalled mid-funnel keep
   // their furthest stage — that stall is exactly what outcome audiences target.
@@ -313,6 +320,7 @@ function materialize(plan: TapPlan, nowMs: number): CtwaConversation | null {
     firstResponseLatencyMs:
       responded && startedAtMs !== undefined ? plan.firstResponseAtMs! - startedAtMs : undefined,
     outcomeStage: stage,
+    reachedStage,
     stageAtMs,
     conversionEvent: converted ? plan.conversion!.event : undefined,
     conversionValue: converted ? plan.conversion!.value : undefined,
@@ -516,4 +524,62 @@ export function rollUpPerformance(
       avgFirstResponseLatencyMs: Math.round(ratio(b.latencySum, b.latencyCount)),
     }))
     .sort((a, b) => b.spend - a.spend);
+}
+
+/* ─────────────────────────── Funnel rollup ─────────────────────────── */
+
+export type FunnelStep = {
+  key: "impressions" | OutcomeStage;
+  label: string;
+  count: number;
+  /** Share of the step immediately above — where the leak actually is. */
+  stepRate: number;
+  /** Share of impressions. */
+  overallRate: number;
+};
+
+/**
+ * Impressions → clicks → opened WhatsApp → conversation started → qualified →
+ * converted, optionally narrowed to one ad.
+ *
+ * Counts are cumulative over {@link OUTCOME_STAGE_ORDER} and read `reachedStage`
+ * rather than `outcomeStage`, so a thread that opened WhatsApp and was later
+ * written off still counts at the step it genuinely reached. Impressions are
+ * derived from the click count through each ad's CTR, the same way
+ * {@link rollUpPerformance} derives them, so the two never disagree.
+ */
+export function rollUpFunnel(
+  ads: CtwaAd[],
+  conversations: CtwaConversation[],
+  adId?: string,
+): FunnelStep[] {
+  const adById = new Map(ads.map((a) => [a.id, a]));
+  const counts = new Map<OutcomeStage, number>();
+  let impressions = 0;
+
+  for (const c of conversations) {
+    if (adId && c.sourceId !== adId) continue;
+    const ad = adById.get(c.sourceId);
+    if (!ad) continue;
+    impressions += 1 / tuningFor(ad.id).ctr;
+    for (const s of OUTCOME_STAGE_ORDER) {
+      if (stageAtLeast(c.reachedStage, s)) counts.set(s, (counts.get(s) ?? 0) + 1);
+    }
+  }
+
+  const rows = [
+    { key: "impressions" as const, label: "Impressions", count: Math.round(impressions) },
+    ...OUTCOME_STAGE_ORDER.map((s) => ({
+      key: s,
+      label: OUTCOME_STAGE_LABELS[s],
+      count: counts.get(s) ?? 0,
+    })),
+  ];
+
+  const top = rows[0].count;
+  return rows.map((r, i) => ({
+    ...r,
+    stepRate: i === 0 ? 1 : ratio(r.count, rows[i - 1].count),
+    overallRate: ratio(r.count, top),
+  }));
 }

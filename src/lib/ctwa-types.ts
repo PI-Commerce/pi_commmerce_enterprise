@@ -199,6 +199,13 @@ export type CtwaConversation = {
   firstResponseAt?: string;
   firstResponseLatencyMs?: number;
   outcomeStage: OutcomeStage;
+  /**
+   * Furthest stage actually attained, kept separately because `outcomeStage`
+   * flips to `dropped` once a thread is written off and would otherwise erase
+   * the fact that it opened WhatsApp first. The funnel counts this; audiences
+   * and cost metrics read `outcomeStage`, which is the current truth.
+   */
+  reachedStage: OutcomeStage;
   /** When the conversation last advanced — the clock the audience rules read. */
   stageAtMs: number;
   /** Set once a conversion point is hit. */

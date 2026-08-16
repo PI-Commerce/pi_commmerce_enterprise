@@ -6,6 +6,7 @@ import { AppShell } from "@/components/app/AppShell";
 import { PageTabs } from "@/components/app/Tabs";
 import { Button } from "@/components/ui/button";
 import { AdComposer } from "@/components/ads/AdComposer";
+import { AdsAnalytics } from "@/components/ads/AdsAnalytics";
 import { AdsClosedLoop } from "@/components/ads/AdsClosedLoop";
 import { AdsConnectDialog } from "@/components/ads/AdsConnectDialog";
 import { AdsList } from "@/components/ads/AdsList";
@@ -14,14 +15,14 @@ import { SimClock } from "@/components/ads/SimClock";
 import { setAdConnection, useAdConnection } from "@/lib/ctwa-connection-store";
 import { getCtwaAd, newAdDraft, setAdStatus, upsertCtwaAd } from "@/lib/ctwa-store";
 import { reviewAd } from "@/lib/ctwa-sim";
-import type { CtwaAd } from "@/lib/ctwa-types";
+import type { AdAccountConnection, CtwaAd } from "@/lib/ctwa-types";
 
 export const Route = createFileRoute("/channels/meta-ads")({
   component: MetaAdsManage,
   head: () => ({ meta: [{ title: "Meta Ads · Pi Commerce Enterprise" }] }),
 });
 
-type Tab = "overview" | "ads" | "loop";
+type Tab = "overview" | "ads" | "analytics" | "loop";
 
 /** How long the mock Meta review takes before a verdict lands. */
 const REVIEW_MS = 3200;
@@ -75,6 +76,27 @@ function MetaAdsManage() {
     });
   };
 
+  // A recommendation nobody can act on is a complaint, so the analytics panel
+  // hands its findings back here: advice about an ad opens that ad, advice about
+  // the loop lands on the tab that owns it.
+  const editAd = (adId: string) => {
+    const ad = getCtwaAd(adId);
+    if (ad) setEditing(ad);
+  };
+
+  const tabContent = (conn: AdAccountConnection) => {
+    switch (tab) {
+      case "overview":
+        return <AdsOverview connection={conn} />;
+      case "ads":
+        return <AdsList onEdit={setEditing} onCreate={() => setEditing(newAdDraft())} />;
+      case "analytics":
+        return <AdsAnalytics onEditAd={editAd} onOpenLoop={() => setTab("loop")} />;
+      case "loop":
+        return <AdsClosedLoop onRetarget={retarget} />;
+    }
+  };
+
   return (
     <AppShell bare>
       <div className="flex h-full flex-col">
@@ -112,6 +134,7 @@ function MetaAdsManage() {
                 tabs={[
                   { id: "overview", label: "Overview" },
                   { id: "ads", label: "Ads" },
+                  { id: "analytics", label: "Analytics" },
                   { id: "loop", label: "Closed loop" },
                 ]}
               />
@@ -121,13 +144,7 @@ function MetaAdsManage() {
 
         <div className="min-h-0 flex-1">
           {connection ? (
-            tab === "overview" ? (
-              <AdsOverview connection={connection} />
-            ) : tab === "ads" ? (
-              <AdsList onEdit={setEditing} onCreate={() => setEditing(newAdDraft())} />
-            ) : (
-              <AdsClosedLoop onRetarget={retarget} />
-            )
+            tabContent(connection)
           ) : (
             <div className="h-full overflow-y-auto">
               <div className="px-8 pb-8 pt-6">
