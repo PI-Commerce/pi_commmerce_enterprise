@@ -111,6 +111,10 @@ const STATUS_BY_KIND: Record<SankeyNodeKind, LeadStatus[]> = {
   whatsapp: ["sent", "delivered", "read", "failed"],
   // Dev team's current voice-call lifecycle statuses.
   voice: ["pending", "running", "completed", "failed"],
+  // AI Chat lifecycle: a lead is running while the conversation is open, has
+  // replied once the customer engages, completed on a disposition close, failed
+  // when the Agentic handover breaks.
+  chat: ["running", "replied", "completed", "failed"],
   // Aligned to the SMS node's three delivery outcomes, plus the transient
   // `sent` state a lead occupies while the DLR window is still open.
   sms: ["sent", "delivered", "failed", "no_dlr"],

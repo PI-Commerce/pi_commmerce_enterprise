@@ -23,6 +23,7 @@ const KIND_MAP: Record<SankeyNodeKind, NodeKind> = {
   abSplit: "abSplit",
   whatsapp: "whatsapp",
   voice: "voiceCall",
+  chat: "aiChat",
   sms: "sms",
   rcs: "rcs",
   ads: "adsCampaign",

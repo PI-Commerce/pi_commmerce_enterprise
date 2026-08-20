@@ -28,6 +28,7 @@ export type SankeyNodeKind =
   | "abSplit"
   | "whatsapp"
   | "voice"
+  | "chat"
   | "sms"
   | "rcs"
   | "ads"
@@ -107,6 +108,7 @@ const KIND_TO_SANKEY: Record<NodeKind, SankeyNodeKind> = {
   delay: "delay",
   voiceCall: "voice",
   whatsapp: "whatsapp",
+  aiChat: "chat",
   sms: "sms",
   rcs: "rcs",
   adsCampaign: "ads",
@@ -129,6 +131,7 @@ const PASS_RATE: Record<SankeyNodeKind, number> = {
   end: 1,
   voice: 0.72,
   whatsapp: 0.82,
+  chat: 0.8,
   sms: 0.9,
   rcs: 0.88,
   ads: 0.95,
