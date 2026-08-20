@@ -19,7 +19,7 @@
  * conversation store and delete `advanceSim` / `resetSim`. Every read below
  * keeps working.
  */
-import { useSyncExternalStore } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 import { SEED_ADS } from "@/lib/ctwa-seed";
 import { SIM_EPOCH_MS, createMockFeed, type CtwaFeed } from "@/lib/ctwa-sim";
 import {
@@ -181,6 +181,18 @@ export function useCtwaConversations(): CtwaConversation[] {
 /** Ad-sourced conversations for a lead — powers the attribution block on Lead detail. */
 export function getConversationsForLead(leadId: string): CtwaConversation[] {
   return conversations.filter((c) => c.leadId === leadId);
+}
+
+/**
+ * Reactive form of {@link getConversationsForLead}.
+ *
+ * Filters downstream of `useCtwaConversations` rather than inside a snapshot:
+ * `getSnapshot` must return a referentially stable value, and a fresh `filter()`
+ * on every call would loop forever.
+ */
+export function useConversationsForLead(leadId: string): CtwaConversation[] {
+  const all = useCtwaConversations();
+  return useMemo(() => all.filter((c) => c.leadId === leadId), [all, leadId]);
 }
 
 /* --------------------------- CAPI --------------------------- */

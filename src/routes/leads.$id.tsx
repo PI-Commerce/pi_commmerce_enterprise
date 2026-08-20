@@ -20,6 +20,7 @@ import { useMemo, useState } from "react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { AppShell } from "@/components/app/AppShell";
 import { Button } from "@/components/ui/button";
+import { LeadAdSource } from "@/components/ads/LeadAdSource";
 import { cn } from "@/lib/utils";
 import {
   LEAD_RECORDS, formatIso, formatDate, formatDateTime,
@@ -115,6 +116,9 @@ function LeadDetail() {
           <MetaCell icon={Calendar} label="Last interaction" value={formatIso(lead.lastInteractionAt)} />
         </div>
       </div>
+
+      {/* Ad attribution. Renders only for leads that arrived through a CTWA ad. */}
+      <LeadAdSource leadId={lead.id} />
 
       {/* Tabs */}
       <div className="mb-4 flex items-center gap-1 border-b border-border">
