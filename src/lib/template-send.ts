@@ -55,7 +55,7 @@ export const SENDER_META: Record<
     field: "from",
     label: "Send from",
     hint: "A WABA can hold several numbers, so the API needs an explicit one.",
-    placeholder: "PHONE_NUMBER_ID",
+    placeholder: "YOUR_WHATSAPP_NUMBER",
     empty: "No WhatsApp number connected — add one in Channels → WhatsApp.",
   },
   sms: {
@@ -74,10 +74,15 @@ export const SENDER_META: Record<
   },
 };
 
-/** Merchant's WhatsApp numbers (a WABA can hold more than one). */
+/**
+ * Merchant's WhatsApp numbers (a WABA can hold more than one). The `id` is the
+ * E.164 number the caller puts in `from` — human-readable and consistent with
+ * SMS/RCS, which also expose a friendly sender. The platform resolves it to
+ * Meta's phone_number_id server-side; the opaque id is never in the payload.
+ */
 const WHATSAPP_SENDERS: Sender[] = [
-  { id: "10934471290017", label: "+91 98100 12345", meta: "Paytm Commerce · verified" },
-  { id: "10918822450091", label: "+91 90045 88210", meta: "Paytm Offers · verified" },
+  { id: "+919810012345", label: "+91 98100 12345", meta: "Paytm Commerce · verified" },
+  { id: "+919004588210", label: "+91 90045 88210", meta: "Paytm Offers · verified" },
 ];
 
 /** Merchant's DLT-registered headers. */
