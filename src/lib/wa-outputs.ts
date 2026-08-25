@@ -9,7 +9,7 @@
  *
  * SMS is the deliberate exception — see {@link smsOutputs}.
  */
-import type { NodeKind, NodeOutput, WorkflowNodeData } from "./campaign-types";
+import { CTWA_SCHEMA_FIELDS, type NodeKind, type NodeOutput, type WorkflowNodeData } from "./campaign-types";
 import { SEED_TEMPLATES, type TemplateButton, type WaTemplate } from "./waba-templates";
 import { resolveAgent } from "./agent-data";
 import { getTool } from "./tool-registry";
@@ -289,12 +289,20 @@ export function deriveNodeOutcomeVariables(
         for (const p of templatePlaceholders(template)) vars.push({ key: `${ns}.var.${p}`, source });
       }
     } else if (kind === "audience") {
-      // Contact fields the audience's *actual edited schema* exposes downstream as
-      // `contact.<key>` — CSV column keys, or API payload field names.
-      const keys = config?.audienceMode === "api"
-        ? (config?.fields ?? []).map((f) => f.name)
-        : (config?.csvKeys ?? []);
-      for (const k of keys) if (k?.trim()) vars.push({ key: `contact.${k.trim()}`, source });
+      if (config?.audienceMode === "ctwa") {
+        // Click-to-WhatsApp source: the schema is FIXED (Meta-defined), a structural
+        // superset of a CSV/API lead. Every field lands in the same `contact.*` namespace
+        // — matching how the platform delivers the lead — so existing downstream mappings
+        // resolve unchanged. Keys already carry their namespace, so emit them verbatim.
+        for (const f of CTWA_SCHEMA_FIELDS) vars.push({ key: f.key, source });
+      } else {
+        // Contact fields the audience's *actual edited schema* exposes downstream as
+        // `contact.<key>` — CSV column keys, or API payload field names.
+        const keys = config?.audienceMode === "api"
+          ? (config?.fields ?? []).map((f) => f.name)
+          : (config?.csvKeys ?? []);
+        for (const k of keys) if (k?.trim()) vars.push({ key: `contact.${k.trim()}`, source });
+      }
     } else if (kind === "apiToolCall") {
       // A direct API Tool Call exposes the selected tool's response fields
       // downstream, namespaced by the node serial (e.g. `api_1.college_name`).

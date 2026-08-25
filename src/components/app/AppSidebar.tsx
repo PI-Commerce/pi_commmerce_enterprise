@@ -19,9 +19,9 @@ const primary = [
 type ChannelChild = { label: string; icon: React.ComponentType<{ className?: string }>; to?: string };
 const channelChildren: ChannelChild[] = [
   { to: "/channels/whatsapp", label: "WhatsApp", icon: MessageCircle },
-  { to: "/channels/meta-ads", label: "Meta Ads", icon: Megaphone },
   { to: "/channels/sms", label: "SMS", icon: MessageSquare },
   { to: "/channels/rcs", label: "RCS", icon: MessageSquareText },
+  { to: "/channels/meta-ads", label: "Ads", icon: Megaphone },
 ];
 
 const secondary = [

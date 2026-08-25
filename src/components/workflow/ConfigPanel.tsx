@@ -24,8 +24,8 @@ import {
   AlertDialogFooter, AlertDialogTitle, AlertDialogDescription, AlertDialogAction, AlertDialogCancel,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
-import type { WorkflowNodeData, NodeKind, PresetConfig, PresetBranch, PresetCondition, PresetVarMap, PresetValueRemap, NodeOutput } from "@/lib/campaign-types";
-import { NODE_LABELS, SAMPLE_WORKFLOW_VARIABLES, branchConditions } from "@/lib/campaign-types";
+import type { WorkflowNodeData, NodeKind, PresetConfig, PresetBranch, PresetCondition, PresetVarMap, PresetValueRemap, NodeOutput, CtwaFieldGroup } from "@/lib/campaign-types";
+import { NODE_LABELS, SAMPLE_WORKFLOW_VARIABLES, CTWA_SCHEMA_FIELDS, branchConditions } from "@/lib/campaign-types";
 import { SEED_TEMPLATES, MEDIA_HINTS, validateMediaUrl, type TemplateFormat } from "@/lib/waba-templates";
 import {
   whatsappOutputs, resolveWaTemplate, completedOutput, isBranchableButton,
@@ -388,7 +388,7 @@ function KindFields({
       return null;
 
     case "audience":
-      return <AudienceFields config={config} readOnly={readOnly} mark={mark} />;
+      return <AudienceFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
 
     case "apiToolCall":
       return <ApiToolCallFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
@@ -430,13 +430,66 @@ function KindFields({
 
 /* --------------------------- Audience --------------------------- */
 
-// Audience node (v1 redesign — scope B1–B6): exactly two configurable sections,
-// Schema + Phone Number Selection (the node Name is the panel-top field). The schema
-// is derived from a *sample* CSV (column headers + count only — rows are never parsed
-// or stored) OR defined manually as typed fields. No source-type modes, primary key,
-// duplicate validation, row-level phone validation, filtering, or runtime endpoint —
-// runtime data delivery now lives in the Run modal + Data tab.
-function AudienceFields({ config, readOnly, mark }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void }) {
+// The Audience node is the flow's single schema contract. It has two *sources*:
+//  • Contacts (CSV / API) — a hand-authored schema, exposed downstream as `contact.*`.
+//  • Click-to-WhatsApp    — a FIXED, Meta-defined schema, also exposed downstream as
+//    `contact.*` (a structural superset), but the lead enters on an ad tap not an upload.
+// Downstream nodes (Voice, WhatsApp, AI Chat…) are coupled to whichever schema this node
+// exposes, which is why CTWA lives here as a source rather than as a separate entry node.
+function AudienceFields({
+  config, readOnly, mark, onChange,
+}: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
+  const source: "contacts" | "ctwa" = config?.audienceMode === "ctwa" ? "ctwa" : "contacts";
+
+  const patch = (next: Partial<PresetConfig>) => {
+    if (readOnly) return;
+    onChange({ config: { ...(config ?? {}), ...next } });
+  };
+
+  const setSource = (s: "contacts" | "ctwa") => {
+    if (readOnly || s === source) return;
+    // Contacts keeps whatever csv/api sub-mode was set (default csv); CTWA is its own mode.
+    // Switching source also re-labels the node on the canvas so the subtitle reflects the
+    // active source (CTWA panel refines it further to the bound ad / catch-all).
+    if (s === "ctwa") {
+      onChange({ config: { ...(config ?? {}), audienceMode: "ctwa" }, subtitle: "Click-to-WhatsApp" });
+    } else {
+      const mode = config?.audienceMode === "api" ? "api" : "csv";
+      onChange({ config: { ...(config ?? {}), audienceMode: mode }, subtitle: mode === "api" ? "Runtime API" : "Drop a CSV" });
+    }
+  };
+
+  return (
+    <>
+      <Section title="Source">
+        <div className="grid grid-cols-2 gap-2">
+          <SegmentBtn active={source === "contacts"} disabled={readOnly} onClick={() => setSource("contacts")}>
+            Contact list
+          </SegmentBtn>
+          <SegmentBtn active={source === "ctwa"} disabled={readOnly} onClick={() => setSource("ctwa")}>
+            Click-to-WhatsApp
+          </SegmentBtn>
+        </div>
+        <p className="text-[11px] text-muted-foreground">
+          {source === "contacts"
+            ? "Leads come from a CSV upload or a runtime API. You define the schema; it's exposed downstream as contact.*"
+            : "Leads enter when a Click-to-WhatsApp ad is tapped. The schema is fixed by Meta and exposed downstream as contact.*"}
+        </p>
+      </Section>
+
+      {source === "ctwa"
+        ? <CtwaAudiencePanel config={config} readOnly={readOnly} mark={mark} patch={patch} onChange={onChange} />
+        : <ContactsAudienceFields config={config} readOnly={readOnly} mark={mark} />}
+    </>
+  );
+}
+
+// Contacts source (the v1 redesign — scope B1–B6): exactly two configurable sections,
+// Schema + Phone Number Selection. The schema is derived from a *sample* CSV (column
+// headers + count only — rows are never parsed or stored) OR defined manually as typed
+// fields. No primary key, duplicate validation, row-level phone validation, filtering,
+// or runtime endpoint — runtime data delivery lives in the Run modal + Data tab.
+function ContactsAudienceFields({ config, readOnly, mark }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void }) {
   // Schema is *always* hand-editable as key → data-type rows. A CSV drop is purely a
   // convenience: it merges its column headers into those same rows (new names appended,
   // existing names left untouched), and the user can keep editing afterward.
@@ -545,6 +598,142 @@ function AudienceFields({ config, readOnly, mark }: { config?: PresetConfig; rea
 
 /* Fallback column keys for the sample-CSV demo (only the header row is read). */
 const CSV_KEYS = ["customer_id", "phone", "first_name", "last_name", "city", "tier", "loan_amount"];
+
+/**
+ * Click-to-WhatsApp source panel for the Audience node (CTWA PRD §4.2).
+ *
+ * The node does NOT author an ad — creative, budget and targeting are owned in Meta and
+ * synced via the API. This is a *binding* step, not a mapping step: the author binds a
+ * source ad (or a catch-all on the WABA number) and sees a read-only preview of the fixed
+ * schema Meta delivers. Every field lands in the `contact.*` namespace — the same one a
+ * CSV/API audience uses and the same one the platform delivers a CTWA lead in — so every
+ * downstream mapping resolves unchanged. There is deliberately no phone-field selector:
+ * `contact.phone` is pre-bound to the WhatsApp `wa_id`, so that validation cannot fire.
+ */
+function CtwaAudiencePanel({
+  config, readOnly, mark, patch, onChange,
+}: {
+  config?: PresetConfig;
+  readOnly?: boolean;
+  mark: (v: boolean, e?: string) => void;
+  patch: (next: Partial<PresetConfig>) => void;
+  onChange: (patch: Partial<WorkflowNodeData>) => void;
+}) {
+  const { symbol } = useRegion();
+  const connection = useAdConnection();
+  const ads = useCtwaAds();
+  const adId = config?.adId;
+  const ad = adId ? ads.find((a) => a.id === adId) : undefined;
+
+  // Run-ready once an ad account is linked. The source-ad binding is optional (blank = a
+  // catch-all on the WABA number), so a missing/paused ad never blocks publishing — the
+  // fixed CTWA schema is available regardless.
+  useEffect(() => {
+    if (!connection) { mark(false, "Connect a Meta ad account"); return; }
+    mark(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connection]);
+
+  // Keep the on-canvas subtitle in step with the binding: the bound ad's name when one is
+  // selected, otherwise the catch-all on the WABA number. Falls back to a plain label
+  // before a connection exists so the node never reverts to "Drop a CSV" under CTWA.
+  const subtitle = ad
+    ? ad.name
+    : connection
+      ? `Any click → ${connection.wabaPhoneNumber}`
+      : "Click-to-WhatsApp";
+  useEffect(() => {
+    if (readOnly) return;
+    onChange({ subtitle });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subtitle, readOnly]);
+
+  if (!connection) {
+    return (
+      <Section title="Meta ad account">
+        <div className="rounded-lg border border-dashed border-border bg-muted/30 px-4 py-6 text-center">
+          <Megaphone className="mx-auto h-6 w-6 text-muted-foreground" />
+          <p className="mt-2 text-[12.5px] font-medium">No ad account linked</p>
+          <p className="mx-auto mt-1 max-w-[240px] text-[11.5px] text-muted-foreground">
+            Click-to-WhatsApp ads run from a connected Meta ad account. Link one, then this node
+            can ingest leads the moment an ad is tapped.
+          </p>
+          <Link
+            to="/channels/meta-ads"
+            className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-background px-3 text-[12px] font-medium hover:bg-accent"
+          >
+            Open Meta Ads <ArrowRight className="h-3 w-3" />
+          </Link>
+        </div>
+      </Section>
+    );
+  }
+
+  return (
+    <>
+      <Section title="Source ad">
+        <Field label="Bind clicks from">
+          <Select
+            value={adId ?? "__all__"}
+            disabled={readOnly}
+            onValueChange={(v) => patch({ adId: v === "__all__" ? undefined : v })}
+          >
+            <SelectTrigger className="h-9 text-sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all__">Any CTWA click to {connection.wabaPhoneNumber}</SelectItem>
+              {ads.filter((a) => a.status === "active").map((a) => (
+                <SelectItem key={a.id} value={a.id}>
+                  {a.name} <span className="text-muted-foreground">· {AD_STATUS_LABELS[a.status]}</span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+        <p className="text-[11px] text-muted-foreground">
+          Bind one ad, or leave it as a catch-all for every Click-to-WhatsApp tap that opens a thread on{" "}
+          {connection.wabaPhoneNumber}. An ad can only be bound to one campaign.
+        </p>
+
+        {ad && <AdSummary ad={ad} symbol={symbol} />}
+      </Section>
+
+      <Section title="Schema">
+        <div className="mt-2 overflow-hidden rounded-lg border border-border bg-muted/20">
+          <CtwaSchemaGroup label="Contact fields" group="contract" />
+          <div className="border-t border-border/60" />
+          <CtwaSchemaGroup label="Attribution" group="attribution" />
+        </div>
+
+        <p className="mt-2 text-[11px] text-muted-foreground">
+          <code className="font-mono text-foreground">contact.ctwa_clid</code> is the CTWA click id — the only key
+          that ties the thread back to Meta. A conversion can't be reported to the Conversions API without it, so it
+          travels with the lead for the whole flow. <span className="text-foreground">contact.phone</span> is
+          pre-bound to the WhatsApp number, so no phone-field selection is needed.
+        </p>
+      </Section>
+    </>
+  );
+}
+
+/** One labelled group of the read-only CTWA schema preview — key, Meta source, label. */
+function CtwaSchemaGroup({ label, group }: { label: string; group: CtwaFieldGroup }) {
+  const fields = CTWA_SCHEMA_FIELDS.filter((f) => f.group === group);
+  return (
+    <div className="px-3 py-2.5">
+      <p className="mb-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/80">{label}</p>
+      <div className="space-y-1.5">
+        {fields.map((f) => (
+          <div key={f.key} className="flex items-baseline justify-between gap-3 text-[11.5px]">
+            <span className="font-mono text-foreground">{f.key}</span>
+            <span className="truncate text-right text-muted-foreground" title={`Meta: ${f.source}`}>{f.label}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 function StatusBanner({ ok, title, detail }: { ok: boolean; title: string; detail?: string }) {
   return (

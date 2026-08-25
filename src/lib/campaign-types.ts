@@ -141,7 +141,12 @@ export type PresetVarMap = { v: string; def: string; mode?: "variable" | "consta
 
 export type PresetConfig = {
   // ---- Audience ----
-  audienceMode?: "csv" | "api";
+  /**
+   * The audience source. `csv`/`api` populate a hand-authored `contact.*` schema;
+   * `ctwa` (Click-to-WhatsApp) is a fixed, Meta-defined schema emitted under `ctwa.*`
+   * — the lead enters the flow when a CTWA ad is tapped rather than from an upload.
+   */
+  audienceMode?: "csv" | "api" | "ctwa";
   // CSV
   fileName?: string;
   primaryKey?: string;
@@ -401,4 +406,41 @@ export const SAMPLE_WORKFLOW_VARIABLES: { key: string; source: string }[] = [
   { key: "contact.last_name", source: "Audience" },
   { key: "contact.email", source: "Audience" },
   { key: "contact.tier", source: "Audience" },
+];
+
+/**
+ * Canonical Click-to-WhatsApp schema — FIXED and Meta-defined, not user-authored.
+ *
+ * When the Audience node's source is `ctwa`, the lead enters the flow on an ad tap and
+ * Meta hands us these fields off the referral payload. Per the CTWA PRD (§4.1) the mode
+ * emits a *structural superset* of a normal CSV/API lead: every field lands in the same
+ * `contact.*` namespace a CSV/API audience uses — matching how the platform actually
+ * delivers a CTWA lead (`contact.phone`, `contact.ctwa_clid`, …) — so every existing
+ * downstream mapping resolves unchanged. This is why CTWA is a *source* on the Audience
+ * node rather than a parallel entry node.
+ *
+ * `group` is a display-only split for the read-only preview (contact attributes vs the
+ * attribution/creative fields only conversion- and reporting-aware nodes read); it does
+ * NOT change the namespace. `contact.ctwa_clid` is the CTWA click id — the join key for
+ * Meta CAPI outcome reporting — and must never be modified. `source` records where Meta
+ * sources each field, also shown in the preview. {@link file://./wa-outputs.ts} emits
+ * every `key` verbatim.
+ */
+export type CtwaFieldGroup = "contract" | "attribution";
+export const CTWA_SCHEMA_FIELDS: {
+  key: string;
+  label: string;
+  group: CtwaFieldGroup;
+  source: string;
+}[] = [
+  { key: "contact.phone", label: "Phone number", group: "contract", source: "contacts.wa_id" },
+  { key: "contact.name", label: "WhatsApp profile name", group: "contract", source: "contacts.profile.name" },
+  { key: "contact.first_message_text", label: "Opening message", group: "contract", source: "messages[0].text" },
+  { key: "contact.ctwa_clid", label: "CTWA click id", group: "attribution", source: "referral.ctwa_clid" },
+  { key: "contact.source_ad_id", label: "Source ad id", group: "attribution", source: "referral.source_id" },
+  { key: "contact.source_url", label: "Source URL", group: "attribution", source: "referral.source_url" },
+  { key: "contact.ad_headline", label: "Ad headline", group: "attribution", source: "referral.headline" },
+  { key: "contact.ad_body", label: "Ad body", group: "attribution", source: "referral.body" },
+  { key: "contact.ad_media", label: "Ad media", group: "attribution", source: "referral.image_url" },
+  { key: "contact.click_timestamp", label: "Click timestamp", group: "attribution", source: "messages[0].timestamp" },
 ];

@@ -370,11 +370,6 @@ export function validateAd(ad: CtwaAd): AdValidation {
     );
   }
 
-  if (ad.objective === "OUTCOME_LEADS") {
-    warnings.push(
-      "Leads can only optimise for Conversations — Meta will buy people who open a chat, not people who buy. To optimise for buyers, switch to Sales + Conversions and feed conversion points back through CAPI.",
-    );
-  }
   if (ad.optimizationGoal === "OFFSITE_CONVERSIONS" && ad.conversionPoints.length === 0) {
     warnings.push(
       "Optimising for Conversions with no conversion points defined — Meta has no signal to learn from. Add at least one.",

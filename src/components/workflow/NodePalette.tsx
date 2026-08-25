@@ -26,12 +26,16 @@ const ICONS: Partial<Record<NodeKind, LucideIcon>> = {
 
 // Audience is omitted: every canvas already ships with exactly one (non-deletable)
 // Audience node as the single contact entry point, so it's never addable here.
+//
+// `adsCampaign` is deprecated and intentionally omitted: Click-to-WhatsApp is now a
+// *source* on the Audience node (so it shares the flow's schema contract), not a
+// standalone entry node. The kind is kept registered for back-compat with any saved
+// flows, but it can no longer be added to a canvas.
 const SECTIONS: Array<{ label: string; nodes: NodeKind[] }> = [
   { label: "Data Nodes", nodes: ["apiToolCall"] },
   { label: "Logic Nodes", nodes: ["conditional", "abSplit", "delay"] },
   { label: "AI Nodes", nodes: ["aiTransform"] },
   { label: "Action Nodes", nodes: ["voiceCall", "whatsapp", "aiChat", "sms", "rcs", "needsReview"] },
-  { label: "Ads Nodes", nodes: ["adsCampaign"] },
 ];
 
 export function NodePalette({
