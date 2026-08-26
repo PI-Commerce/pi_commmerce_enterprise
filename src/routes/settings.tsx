@@ -1,45 +1,46 @@
 /**
  * Settings surface.
  *
- * v1 ships one active tab: Developer (API keys). The rest of the tabs
- * (Team, Billing, Notifications, Security) render as disabled placeholders
- * with a Soon chip, so the eventual admin surface has visible headroom
- * without shipping the actual functionality yet.
+ * Workspace administration only. Developer surfaces (API keys, webhooks, etc.)
+ * moved to /developer. Both tabs render as disabled placeholders until we
+ * ship the underlying admin functionality.
  */
 
 import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { AppShell, PageHeader } from "@/components/app/AppShell";
 import { PageTabs } from "@/components/app/Tabs";
-import { DeveloperApiKeys } from "@/components/settings/DeveloperApiKeys";
 
 export const Route = createFileRoute("/settings")({
   component: Settings,
   head: () => ({ meta: [{ title: "Settings · Pi Commerce Enterprise" }] }),
 });
 
-type Tab = "developer" | "team" | "billing" | "notifications" | "security";
+type Tab = "usage-billing" | "team";
 
 function Settings() {
-  const [tab, setTab] = useState<Tab>("developer");
+  const [tab, setTab] = useState<Tab>("usage-billing");
   return (
     <AppShell>
       <PageHeader
         title="Settings"
-        description="Developer surfaces for your engineering team, plus workspace administration."
+        description="Workspace administration: usage, billing and team management."
       />
       <PageTabs<Tab>
         value={tab}
         onChange={setTab}
         tabs={[
-          { id: "developer",     label: "Developer" },
-          { id: "team",          label: "Team",          disabled: true },
-          { id: "billing",       label: "Billing",       disabled: true },
-          { id: "notifications", label: "Notifications", disabled: true },
-          { id: "security",      label: "Security",      disabled: true },
+          { id: "usage-billing", label: "Usage & Billing", disabled: true },
+          { id: "team",          label: "Team",            disabled: true },
         ]}
       />
-      {tab === "developer" && <DeveloperApiKeys />}
+      <div className="rounded-xl border border-dashed border-border bg-card/40 px-6 py-14 text-center">
+        <p className="text-[13px] font-medium">Workspace settings coming soon</p>
+        <p className="mx-auto mt-1 max-w-md text-[12px] text-muted-foreground">
+          Usage &amp; Billing and Team management will land here. For API keys
+          and webhooks, head to Developer.
+        </p>
+      </div>
     </AppShell>
   );
 }

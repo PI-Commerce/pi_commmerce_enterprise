@@ -3,7 +3,7 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import {
   LayoutDashboard, Megaphone, Bot, BarChart3, Plug, Settings, Command,
   PanelLeftClose, PanelLeftOpen, Radio, ChevronRight, MessageCircle, MessageSquare, MessageSquareText,
-  Inbox,
+  Inbox, Code2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useRegion } from "@/lib/region";
@@ -25,6 +25,7 @@ const channelChildren: ChannelChild[] = [
 ];
 
 const secondary = [
+  { to: "/developer", label: "Developer", icon: Code2 },
   { to: "/integrations", label: "Integrations", icon: Plug },
   { to: "/settings", label: "Settings", icon: Settings },
 ] as const;
@@ -65,11 +66,13 @@ export function AppSidebar() {
         )}
       </div>
 
-      <nav className="flex-1 px-2 py-2">
+      <nav className="flex flex-1 flex-col px-2 py-2">
         <NavSection items={primary} isActive={isActive} collapsed={collapsed} />
         <ChannelsNav path={path} isActive={isActive} collapsed={collapsed} />
-        <div className="my-3 h-px bg-border" />
-        <NavSection items={secondary} isActive={isActive} collapsed={collapsed} />
+        <div className="mt-auto">
+          <div className="my-3 h-px bg-border" />
+          <NavSection items={secondary} isActive={isActive} collapsed={collapsed} />
+        </div>
       </nav>
 
       <div className={cn("border-t border-border p-2", collapsed && "flex justify-center")}>
