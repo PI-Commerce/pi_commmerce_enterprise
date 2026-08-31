@@ -23,6 +23,13 @@ export type BroadcastRow = {
   channel: BroadcastChannel;
   /** Template name displayed inline in the runs table. */
   assetName: string;
+  /**
+   * Underlying template id. Broadcasts are a UI wrapper over a template send,
+   * so "View by Broadcast" in Channel Analytics resolves through this id to the
+   * same asset-mode template analytics used by workflow runs. Kept private to
+   * the analytics wiring; not surfaced on the Broadcasts table.
+   */
+  templateId: string;
   csvName: string;
   status: BroadcastStatus;
   startedAt: string;
@@ -54,10 +61,13 @@ export function kpisForRow(r: BroadcastRow): BroadcastKPIs {
 }
 
 export const SEED_BROADCASTS: BroadcastRow[] = [
-  { id: "bc_5011", name: "Diwali flash sale · TIER-1",   channel: "whatsapp", assetName: "festive_cashback_diwali", csvName: "tier1_active_50k.csv",     status: "running",    startedAt: "Today, 12:12 PM",     completedAt: "ongoing",             sent: 18200, total: 50000 },
-  { id: "bc_5010", name: "Delivery OTP burst",           channel: "sms",      assetName: "delivery_otp",            csvName: "otp_batch_aug27.csv",      status: "paused",     startedAt: "Today, 12:05 PM",     completedAt: "ongoing",             sent: 3400,  total: 9200 },
-  { id: "bc_5008", name: "Order shipped notice",         channel: "rcs",      assetName: "order_shipped_card",      csvName: "shipped_orders_aug27.csv", status: "completed",  startedAt: "Today, 09:00 AM",     completedAt: "Today, 09:14 AM",     sent: 4200,  total: 4200 },
-  { id: "bc_5007", name: "Payment reminder blast",       channel: "sms",      assetName: "payment_failed_txn",      csvName: "pending_pay_aug26.csv",    status: "completed",  startedAt: "Yesterday, 04:00 PM", completedAt: "Yesterday, 04:23 PM", sent: 8600,  total: 8600 },
-  { id: "bc_5006", name: "Cart recovery WA",             channel: "whatsapp", assetName: "abandoned_cart_offer",    csvName: "cart_abandon_aug25.csv",   status: "terminated", startedAt: "Yesterday, 01:15 PM", completedAt: "Yesterday, 01:22 PM", sent: 120,   total: 3400 },
-  { id: "bc_5005", name: "Renewal reminder promo",       channel: "sms",      assetName: "renewal_reminder_promo",  csvName: "renewals_aug26.csv",       status: "completed",  startedAt: "Yesterday, 10:15 AM", completedAt: "Yesterday, 10:38 AM", sent: 2100,  total: 2100 },
+  // bc_5011 uses payment_reminder (10248301338871) because that template lives
+  // in the workflow-run analytics dataset, so "View by Broadcast" here renders
+  // real Channel Analytics numbers instead of the empty-scope state.
+  { id: "bc_5011", name: "Payment reminder blast · TIER-1", channel: "whatsapp", assetName: "payment_reminder",       templateId: "10248301338871",      csvName: "tier1_pending_50k.csv",    status: "running",    startedAt: "Today, 12:12 PM",     completedAt: "ongoing",             sent: 18200, total: 50000 },
+  { id: "bc_5010", name: "Delivery OTP burst",           channel: "sms",      assetName: "delivery_otp",            templateId: "1107168421004829376", csvName: "otp_batch_aug27.csv",      status: "paused",     startedAt: "Today, 12:05 PM",     completedAt: "ongoing",             sent: 3400,  total: 9200 },
+  { id: "bc_5008", name: "Order shipped notice",         channel: "rcs",      assetName: "order_shipped_card",      templateId: "rcs_tpl_order_shipped", csvName: "shipped_orders_aug27.csv", status: "completed",  startedAt: "Today, 09:00 AM",     completedAt: "Today, 09:14 AM",     sent: 4200,  total: 4200 },
+  { id: "bc_5007", name: "Payment reminder blast",       channel: "sms",      assetName: "payment_failed_txn",      templateId: "1107168421220847665", csvName: "pending_pay_aug26.csv",    status: "completed",  startedAt: "Yesterday, 04:00 PM", completedAt: "Yesterday, 04:23 PM", sent: 8600,  total: 8600 },
+  { id: "bc_5006", name: "Cart recovery WA",             channel: "whatsapp", assetName: "abandoned_cart_offer",    templateId: "10248300981244",      csvName: "cart_abandon_aug25.csv",   status: "terminated", startedAt: "Yesterday, 01:15 PM", completedAt: "Yesterday, 01:22 PM", sent: 120,   total: 3400 },
+  { id: "bc_5005", name: "Renewal reminder promo",       channel: "sms",      assetName: "renewal_reminder_promo",  templateId: "1107168421118290043", csvName: "renewals_aug26.csv",       status: "completed",  startedAt: "Yesterday, 10:15 AM", completedAt: "Yesterday, 10:38 AM", sent: 2100,  total: 2100 },
 ];

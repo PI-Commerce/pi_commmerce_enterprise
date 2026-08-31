@@ -12,10 +12,10 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  Plus, Search, MoreHorizontal, Send, Upload, Play, Pause, Square, Copy, Check,
+  Plus, Search, MoreHorizontal, Send, Upload, Play, Pause, Square, Check,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -64,7 +64,6 @@ function BroadcastsPage() {
   const [fChannel, setFChannel] = useState<"all" | Channel>("all");
   const [fStatus, setFStatus] = useState<"all" | BroadcastStatus>("all");
   const [createOpen, setCreateOpen] = useState(false);
-  const [copiedId, setCopiedId] = useState<string | null>(null);
 
   // Prefill state — the create-modal reads these on open. Populated from
   // ?channel + ?templateId (deep-link from a template row's "Send broadcast").
@@ -87,18 +86,13 @@ function BroadcastsPage() {
     }
   }, []);
 
-  const copyId = (id: string) => {
-    navigator.clipboard?.writeText(id);
-    setCopiedId(id);
-    window.setTimeout(() => setCopiedId((cur) => (cur === id ? null : cur)), 1500);
-  };
-
   const filtered = rows.filter((r) => {
     if (fChannel !== "all" && r.channel !== fChannel) return false;
     if (fStatus !== "all" && r.status !== fStatus) return false;
     if (query) {
       const q = query.toLowerCase();
-      if (!r.name.toLowerCase().includes(q) && !r.id.toLowerCase().includes(q) && !r.assetName.toLowerCase().includes(q)) return false;
+      // Search over name + template (no run id surfaced to the user).
+      if (!r.name.toLowerCase().includes(q) && !r.assetName.toLowerCase().includes(q)) return false;
     }
     return true;
   });
@@ -215,19 +209,6 @@ function BroadcastsPage() {
                   <tr key={r.id} className="transition-colors hover:bg-accent/30">
                     <td className="px-4 py-3">
                       <div className="font-medium">{r.name}</div>
-                      <button
-                        type="button"
-                        onClick={() => copyId(r.id)}
-                        title="Copy broadcast ID"
-                        className="group/id flex items-center gap-1 font-mono text-[11px] text-muted-foreground transition-colors hover:text-foreground"
-                      >
-                        {r.id}
-                        {copiedId === r.id ? (
-                          <Check className="h-3 w-3 text-success" />
-                        ) : (
-                          <Copy className="h-3 w-3 opacity-0 transition-opacity group-hover/id:opacity-100" />
-                        )}
-                      </button>
                     </td>
                     <td className="px-4 py-3">
                       <span className="inline-flex items-center rounded-full border border-border bg-secondary px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
@@ -254,11 +235,9 @@ function BroadcastsPage() {
                     <td className="px-2 py-3 text-right">
                       <RowMenu
                         status={r.status}
-                        id={r.id}
                         onPause={() => setRowStatus(r.id, "paused", "Broadcast paused")}
                         onResume={() => setRowStatus(r.id, "running", "Broadcast resumed")}
                         onTerminate={() => setRowStatus(r.id, "terminated", "Broadcast terminated", true)}
-                        onCopyId={() => copyId(r.id)}
                       />
                     </td>
                   </tr>
@@ -301,19 +280,19 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
 }
 
 function RowMenu({
-  status, onPause, onResume, onTerminate, onCopyId,
+  status, onPause, onResume, onTerminate,
 }: {
   status: BroadcastStatus;
-  id: string;
   onPause: () => void;
   onResume: () => void;
   onTerminate: () => void;
-  onCopyId: () => void;
 }) {
   // Lifecycle:
   //   running → Pause, Terminate
   //   paused  → Resume, Terminate
-  //   completed / failed / terminated → no lifecycle actions
+  //   completed / failed / terminated → no actions (menu shows a placeholder).
+  // No run-id copy: direct-channel API sends share one run id per client, and
+  // the UI does not surface individual broadcast ids.
   const canPause = status === "running";
   const canResume = status === "paused";
   const canTerminate = status === "running" || status === "paused";
@@ -345,10 +324,11 @@ function RowMenu({
             <Square className="h-3.5 w-3.5" /> Terminate
           </DropdownMenuItem>
         )}
-        {hasLifecycle && <DropdownMenuSeparator />}
-        <DropdownMenuItem className="gap-2 text-xs" onClick={onCopyId}>
-          <Copy className="h-3.5 w-3.5" /> Copy run ID
-        </DropdownMenuItem>
+        {!hasLifecycle && (
+          <DropdownMenuItem disabled className="gap-2 text-xs">
+            No actions available
+          </DropdownMenuItem>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );

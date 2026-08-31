@@ -79,7 +79,6 @@ import { resolveAgent } from "@/lib/agent-data";
 import type { WaTemplate } from "@/lib/waba-templates";
 import {
   SEED_BROADCASTS,
-  kpisForRow,
   type BroadcastChannel,
 } from "@/lib/broadcasts-seed";
 import { cn } from "@/lib/utils";
@@ -1804,10 +1803,22 @@ function ChannelAnalytics({
     return undefined;
   };
 
+  // A broadcast is a template send, so "View by Broadcast" reuses "View by
+  // Template" analytics under the hood: resolve the picked broadcast to its
+  // underlying template id, and let asset-mode plumbing render everything.
+  const broadcastResolvedAssetId = useMemo(() => {
+    if (mode !== "broadcast" || !selection.broadcastId) return undefined;
+    const b = SEED_BROADCASTS.find((x) => x.id === selection.broadcastId);
+    return b?.templateId;
+  }, [mode, selection.broadcastId]);
+
+  const effectiveAssetId = mode === "broadcast" ? broadcastResolvedAssetId : selection.assetId;
+  const effectiveModeIsAsset = mode === "asset" || mode === "broadcast";
+
   // ── Mode-driven resolved refs ──────────────────────────────────────────────
   const selectedRefs = useMemo(() => {
-    if (mode === "asset") {
-      const assetId = selection.assetId;
+    if (effectiveModeIsAsset) {
+      const assetId = effectiveAssetId;
       const excludedCampaigns = new Set(selection.excludedCampaignIds ?? []);
       const excludedRuns = new Set(selection.excludedRunIds ?? []);
       return allRefs.filter((r) => {
@@ -1823,7 +1834,7 @@ function ChannelAnalytics({
         r.campaignId === selection.campaignId && r.runId === selection.runId,
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, selection, allRefs, kind]);
+  }, [mode, selection, allRefs, kind, effectiveAssetId]);
 
   // Campaign-mode option lists (single-select cascade).
   const campaignChoices = useMemo(() => {
@@ -1856,12 +1867,13 @@ function ChannelAnalytics({
         )
       : undefined;
   const showDateRange =
-    mode === "asset" ||
+    effectiveModeIsAsset ||
     (mode === "campaign" && pinnedRun?.runType === "always-on");
 
-  // Default the date window to "last 7 days" the first time we enter Asset-mode.
+  // Default the date window to "last 7 days" the first time we enter Asset-mode
+  // (or Broadcast, which reuses asset-mode plumbing).
   useEffect(() => {
-    if (mode === "asset" && !dateRange) onDateRangeChange(defaultDateRange(7));
+    if (effectiveModeIsAsset && !dateRange) onDateRangeChange(defaultDateRange(7));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode]);
 
@@ -1954,7 +1966,7 @@ function ChannelAnalytics({
                     <SelectItem key={b.id} value={b.id}>
                       <span className="flex items-center gap-2">
                         <span className="font-medium">{b.name}</span>
-                        <span className="text-muted-foreground">{b.id}</span>
+                        <span className="font-mono text-muted-foreground">{b.assetName}</span>
                       </span>
                     </SelectItem>
                   ))}
@@ -2101,9 +2113,7 @@ function ChannelAnalytics({
         )}
       </div>
 
-      {mode === "broadcast" ? (
-        <BroadcastAnalyticsPanel broadcastId={selection.broadcastId} />
-      ) : selectedRefs.length === 0 ? (
+      {selectedRefs.length === 0 ? (
         <div className="rounded-xl border border-border bg-card px-6 py-12 text-center text-sm text-muted-foreground">
           No {tabMeta.label} nodes found in scope.
         </div>
@@ -2119,7 +2129,7 @@ function ChannelAnalytics({
           return (
             <VoiceChannelView
               refs={vrefs}
-              agentExplicitlyOne={mode === "asset" && !!selection.assetId}
+              agentExplicitlyOne={effectiveModeIsAsset && !!effectiveAssetId}
             />
           );
         })()
@@ -2146,7 +2156,7 @@ function ChannelAnalytics({
           return (
             <RcsChannelView
               refs={rrefs}
-              templateLevel={mode === "asset" && !!selection.assetId}
+              templateLevel={effectiveModeIsAsset && !!effectiveAssetId}
             />
           );
         })()
@@ -2613,71 +2623,3 @@ function ChannelDetail({
   );
 }
 
-/**
- * Broadcast Analytics panel — the simple template-shaped view for a single
- * one-shot send. No flow (broadcasts have none), no time series (v1). Five
- * KPI cards plus a lightweight run-details strip. If Broadcasts grow richer
- * per-recipient DLR history, this is where the extra tiles land.
- */
-function BroadcastAnalyticsPanel({ broadcastId }: { broadcastId?: string }) {
-  const b = SEED_BROADCASTS.find((x) => x.id === broadcastId);
-  if (!b) {
-    return (
-      <div className="rounded-xl border border-border bg-card px-6 py-12 text-center text-sm text-muted-foreground">
-        Pick a broadcast to see its performance.
-      </div>
-    );
-  }
-  const k = kpisForRow(b);
-  const rate = (n: number) => (k.sent > 0 ? Math.round((n / k.sent) * 100) : 0);
-
-  return (
-    <div className="space-y-4">
-      {/* Header strip — reads like the top of the run-details drawer we'd
-          eventually deep-link to. */}
-      <div className="rounded-xl border border-border bg-card px-4 py-3">
-        <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
-          <span className="text-sm font-semibold">{b.name}</span>
-          <span className="font-mono text-[11px] text-muted-foreground">{b.id}</span>
-          <span className="text-[11px] text-muted-foreground">Template: <span className="font-mono">{b.assetName}</span></span>
-          <span className="text-[11px] text-muted-foreground">CSV: {b.csvName}</span>
-          <span className="ml-auto text-[11px] text-muted-foreground">Started {b.startedAt}</span>
-        </div>
-      </div>
-
-      {/* Five KPI cards. Rates are relative to Sent (industry convention). */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-        <KPICard label="Sent"      value={k.sent} />
-        <KPICard label="Delivered" value={k.delivered} subLabel={`${rate(k.delivered)}%`} />
-        <KPICard label="Read"      value={k.read}      subLabel={`${rate(k.read)}%`} />
-        <KPICard label="Replied"   value={k.replied}   subLabel={`${rate(k.replied)}%`} />
-        <KPICard label="Failed"    value={k.failed}    subLabel={`${rate(k.failed)}%`} tone="destructive" />
-      </div>
-
-      <p className="text-[11px] text-muted-foreground">
-        Broadcast analytics reflect delivery receipts (DLR) from the channel provider. Read and Replied are surfaced when supported by the channel and template kind.
-      </p>
-    </div>
-  );
-}
-
-function KPICard({
-  label, value, subLabel, tone,
-}: {
-  label: string;
-  value: number;
-  subLabel?: string;
-  tone?: "destructive";
-}) {
-  return (
-    <div className="rounded-lg border border-border bg-card px-4 py-3">
-      <p className="text-[10.5px] font-medium uppercase tracking-wider text-muted-foreground">{label}</p>
-      <p className={`mt-1 text-[22px] font-semibold tabular-nums ${tone === "destructive" ? "text-destructive" : "text-foreground"}`}>
-        {value.toLocaleString("en-IN")}
-      </p>
-      {subLabel && (
-        <p className="mt-0.5 text-[11px] text-muted-foreground">{subLabel} of sent</p>
-      )}
-    </div>
-  );
-}
