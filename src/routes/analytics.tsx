@@ -77,6 +77,11 @@ import { resolveRcsTemplate } from "@/lib/rcs-store";
 import { rcsOutcomeTotals } from "@/lib/analytics-rcs";
 import { resolveAgent } from "@/lib/agent-data";
 import type { WaTemplate } from "@/lib/waba-templates";
+import {
+  SEED_BROADCASTS,
+  kpisForRow,
+  type BroadcastChannel,
+} from "@/lib/broadcasts-seed";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/analytics")({
@@ -206,7 +211,7 @@ const CHANNEL_TABS: {
  *               channel kind within that one run.
  */
 
-type ChannelMode = "asset" | "campaign";
+type ChannelMode = "asset" | "campaign" | "broadcast";
 
 type ChannelSelection = {
   kind: ChannelKind;
@@ -221,6 +226,8 @@ type ChannelSelection = {
   campaignId?: string;
   versionId?: string;
   runId?: string;
+  /** Broadcast-mode: single broadcast id. */
+  broadcastId?: string;
 };
 
 /** Pre-select the "most recent" asset for asset-mode landing:
@@ -433,7 +440,7 @@ function CampaignAnalytics({
   return (
     <>
       <div className="mb-4 flex flex-wrap items-end gap-2">
-        <FilterField label="Campaign">
+        <FilterField label="Workflow">
           <Select
             value={campaignId}
             onValueChange={(v) => {
@@ -444,7 +451,7 @@ function CampaignAnalytics({
             }}
           >
             <SelectTrigger className="h-9 w-[280px] text-xs">
-              <SelectValue placeholder="Campaign" />
+              <SelectValue placeholder="Workflow" />
             </SelectTrigger>
             <SelectContent>
               {CAMPAIGNS.map((c) => (
@@ -538,7 +545,7 @@ function CampaignAnalytics({
       <div className="mt-4 rounded-xl border border-border bg-card">
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <div>
-            <h3 className="text-sm font-semibold">Campaign Flow</h3>
+            <h3 className="text-sm font-semibold">Workflow</h3>
             <p className="text-[11px] text-muted-foreground">
               Each node shows Entered, Exited and Drop-off %. Click a node for
               details.
@@ -1899,6 +1906,11 @@ function ChannelAnalytics({
                 const assetId =
                   selection.assetId ?? pickDefaultAsset(kind) ?? "";
                 onSelectionChange({ kind, mode: "asset", assetId });
+              } else if (m === "broadcast") {
+                // Broadcast mode is only meaningful for messaging channels
+                // (WA / SMS / RCS). Pick the first broadcast on this channel.
+                const first = SEED_BROADCASTS.find((b) => b.channel === (kind as BroadcastChannel));
+                onSelectionChange({ kind, mode: "broadcast", broadcastId: first?.id });
               } else {
                 const t = pickDefaultCampaignTriple(kind);
                 onSelectionChange({ kind, mode: "campaign", ...t });
@@ -1910,13 +1922,47 @@ function ChannelAnalytics({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="asset">{tabMeta.assetLabel}</SelectItem>
-              <SelectItem value="campaign">Campaign run</SelectItem>
+              <SelectItem value="campaign">Workflow run</SelectItem>
+              {/* Broadcast mode: only for messaging channels. Voice broadcasts
+                  aren't in scope yet. */}
+              {kind !== "voice" && (
+                <SelectItem value="broadcast">Broadcast</SelectItem>
+              )}
             </SelectContent>
           </Select>
         </FilterField>
 
         {/* Mode-driven filter row */}
-        {mode === "asset" ? (
+        {mode === "broadcast" ? (
+          <div className="flex flex-1 flex-col gap-2 sm:flex-row sm:items-end">
+            <FilterField label="Broadcast" className="sm:w-[360px]">
+              <Select
+                value={selection.broadcastId ?? ""}
+                onValueChange={(v) =>
+                  onSelectionChange({
+                    kind,
+                    mode: "broadcast",
+                    broadcastId: v,
+                  })
+                }
+              >
+                <SelectTrigger className="h-9 w-full text-xs">
+                  <SelectValue placeholder="Pick a broadcast" />
+                </SelectTrigger>
+                <SelectContent>
+                  {SEED_BROADCASTS.filter((b) => b.channel === (kind as BroadcastChannel)).map((b) => (
+                    <SelectItem key={b.id} value={b.id}>
+                      <span className="flex items-center gap-2">
+                        <span className="font-medium">{b.name}</span>
+                        <span className="text-muted-foreground">{b.id}</span>
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </FilterField>
+          </div>
+        ) : mode === "asset" ? (
           <div className="flex flex-1 flex-col gap-2 sm:flex-row sm:items-end">
             <FilterField label={tabMeta.assetLabel} className="sm:w-[280px]">
               <Select
@@ -2055,7 +2101,9 @@ function ChannelAnalytics({
         )}
       </div>
 
-      {selectedRefs.length === 0 ? (
+      {mode === "broadcast" ? (
+        <BroadcastAnalyticsPanel broadcastId={selection.broadcastId} />
+      ) : selectedRefs.length === 0 ? (
         <div className="rounded-xl border border-border bg-card px-6 py-12 text-center text-sm text-muted-foreground">
           No {tabMeta.label} nodes found in scope.
         </div>
@@ -2562,5 +2610,74 @@ function ChannelDetail({
         </>
       )}
     </>
+  );
+}
+
+/**
+ * Broadcast Analytics panel — the simple template-shaped view for a single
+ * one-shot send. No flow (broadcasts have none), no time series (v1). Five
+ * KPI cards plus a lightweight run-details strip. If Broadcasts grow richer
+ * per-recipient DLR history, this is where the extra tiles land.
+ */
+function BroadcastAnalyticsPanel({ broadcastId }: { broadcastId?: string }) {
+  const b = SEED_BROADCASTS.find((x) => x.id === broadcastId);
+  if (!b) {
+    return (
+      <div className="rounded-xl border border-border bg-card px-6 py-12 text-center text-sm text-muted-foreground">
+        Pick a broadcast to see its performance.
+      </div>
+    );
+  }
+  const k = kpisForRow(b);
+  const rate = (n: number) => (k.sent > 0 ? Math.round((n / k.sent) * 100) : 0);
+
+  return (
+    <div className="space-y-4">
+      {/* Header strip — reads like the top of the run-details drawer we'd
+          eventually deep-link to. */}
+      <div className="rounded-xl border border-border bg-card px-4 py-3">
+        <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+          <span className="text-sm font-semibold">{b.name}</span>
+          <span className="font-mono text-[11px] text-muted-foreground">{b.id}</span>
+          <span className="text-[11px] text-muted-foreground">Template: <span className="font-mono">{b.assetName}</span></span>
+          <span className="text-[11px] text-muted-foreground">CSV: {b.csvName}</span>
+          <span className="ml-auto text-[11px] text-muted-foreground">Started {b.startedAt}</span>
+        </div>
+      </div>
+
+      {/* Five KPI cards. Rates are relative to Sent (industry convention). */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+        <KPICard label="Sent"      value={k.sent} />
+        <KPICard label="Delivered" value={k.delivered} subLabel={`${rate(k.delivered)}%`} />
+        <KPICard label="Read"      value={k.read}      subLabel={`${rate(k.read)}%`} />
+        <KPICard label="Replied"   value={k.replied}   subLabel={`${rate(k.replied)}%`} />
+        <KPICard label="Failed"    value={k.failed}    subLabel={`${rate(k.failed)}%`} tone="destructive" />
+      </div>
+
+      <p className="text-[11px] text-muted-foreground">
+        Broadcast analytics reflect delivery receipts (DLR) from the channel provider. Read and Replied are surfaced when supported by the channel and template kind.
+      </p>
+    </div>
+  );
+}
+
+function KPICard({
+  label, value, subLabel, tone,
+}: {
+  label: string;
+  value: number;
+  subLabel?: string;
+  tone?: "destructive";
+}) {
+  return (
+    <div className="rounded-lg border border-border bg-card px-4 py-3">
+      <p className="text-[10.5px] font-medium uppercase tracking-wider text-muted-foreground">{label}</p>
+      <p className={`mt-1 text-[22px] font-semibold tabular-nums ${tone === "destructive" ? "text-destructive" : "text-foreground"}`}>
+        {value.toLocaleString("en-IN")}
+      </p>
+      {subLabel && (
+        <p className="mt-0.5 text-[11px] text-muted-foreground">{subLabel} of sent</p>
+      )}
+    </div>
   );
 }
