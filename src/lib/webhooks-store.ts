@@ -36,8 +36,10 @@ export function toggleWebhook(id: string): void {
   webhooks = webhooks.map((w) => w.id === id ? { ...w, status: w.status === "active" ? "paused" : "active" } : w);
   notify();
 }
-export function rotateSecret(id: string, nextSecret: string): void {
-  webhooks = webhooks.map((w) => w.id === id ? { ...w, signingSecret: nextSecret } : w);
+/** Retained for API compatibility with earlier callers. Rotation is no longer
+ *  surfaced in the UI on the channel webhooks first cut. */
+export function rotateSecret(id: string, nextToken: string): void {
+  webhooks = webhooks.map((w) => w.id === id ? { ...w, authToken: nextToken } : w);
   notify();
 }
 

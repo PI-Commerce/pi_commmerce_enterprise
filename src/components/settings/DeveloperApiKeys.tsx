@@ -30,6 +30,7 @@ import { toast } from "sonner";
 import {
   useApiKeys, upsertApiKey, revokeApiKey, removeApiKey, generateApiKey,
 } from "@/lib/api-keys-data";
+import { NAME_HINT, NAME_REGEX, sanitizeName } from "@/components/developer/ApisAndWebhooks";
 
 export function DeveloperApiKeys() {
   const keys = useApiKeys();
@@ -69,7 +70,7 @@ export function DeveloperApiKeys() {
             <tbody>
               {keys.map((k) => (
                 <tr key={k.id} className="border-t border-border/60">
-                  <td className="px-4 py-3 font-medium">{k.name}</td>
+                  <td className="px-4 py-3 font-mono text-[12px]">{k.name}</td>
                   <td className="px-4 py-3 text-[11.5px] text-muted-foreground">{formatIso(k.createdAt)}</td>
                   <td className="px-4 py-3">
                     <span className={cn(
@@ -165,12 +166,18 @@ function CreateApiKeyDialog({
         </DialogHeader>
         <div className="space-y-1.5">
           <Label className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Name</Label>
-          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Warehouse ingest" className="h-9 text-[13px]" />
-          <p className="text-[11px] text-muted-foreground">A label for your reference.</p>
+          <Input
+            value={name}
+            onChange={(e) => setName(sanitizeName(e.target.value))}
+            placeholder="warehouse-ingest"
+            className={cn("h-9 text-[13px] font-mono", name && !NAME_REGEX.test(name) && "border-destructive focus-visible:ring-destructive")}
+            maxLength={40}
+          />
+          <p className="text-[11px] text-muted-foreground">{NAME_HINT}</p>
         </div>
         <DialogFooter>
           <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button size="sm" disabled={!name.trim()} onClick={() => { onCreate(name.trim()); onOpenChange(false); }}>
+          <Button size="sm" disabled={!NAME_REGEX.test(name)} onClick={() => { onCreate(name); onOpenChange(false); }}>
             Create key
           </Button>
         </DialogFooter>

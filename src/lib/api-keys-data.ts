@@ -37,7 +37,7 @@ function isoHoursAgo(hours: number): string {
 export const SEED_API_KEYS: ApiKey[] = [
   {
     id: "ak_prod_ingest",
-    name: "Warehouse ingest",
+    name: "warehouse-ingest",
     keyPrefix: "pi_live_wa9k",
     keyFull: "",
     createdAt: isoDaysAgo(120, 11, 15),
@@ -46,7 +46,7 @@ export const SEED_API_KEYS: ApiKey[] = [
   },
   {
     id: "ak_ops_scripts",
-    name: "Ops scripts",
+    name: "ops-scripts",
     keyPrefix: "pi_live_op5t",
     keyFull: "",
     createdAt: isoDaysAgo(60, 14, 30),
@@ -55,7 +55,7 @@ export const SEED_API_KEYS: ApiKey[] = [
   },
   {
     id: "ak_legacy_import",
-    name: "Legacy CSV importer",
+    name: "legacy-csv-importer",
     keyPrefix: "pi_live_lgc4",
     keyFull: "",
     createdAt: isoDaysAgo(240, 9, 0),

@@ -32,14 +32,45 @@ export const WEBHOOK_TYPE_LABEL: Record<WebhookType, string> = {
 };
 
 /**
- * Only Human Escalation ships in v1. Channels + Campaign are declared in the
- * type system + surfaced in the picker (disabled) so the dev team knows what's
- * coming next. Flip these to `true` after payload alignment with backend.
+ * Human Escalation + Channels ship in the developer surface. Campaign is
+ * declared in the type system but not yet exposed in the create picker.
  */
 export const WEBHOOK_TYPE_ENABLED: Record<WebhookType, boolean> = {
-  channels:         false,
+  channels:         true,
   campaign:         false,
   human_escalation: true,
+};
+
+/* -------------------------------------------------------------------------- *
+ *  Channels sub-model
+ * -------------------------------------------------------------------------- */
+
+export type WebhookChannel = "whatsapp" | "sms" | "rcs";
+
+export const WEBHOOK_CHANNEL_LABEL: Record<WebhookChannel, string> = {
+  whatsapp: "WhatsApp",
+  sms:      "SMS",
+  rcs:      "RCS",
+};
+
+/**
+ * Event *buckets* per channel. v1 ships Delivery Status for all three
+ * channels, and Incoming Messages for WhatsApp + RCS. Bodies mirror the
+ * vendor's own webhook shape (Meta for WhatsApp, Jio for SMS, RBM for RCS).
+ * Templates bucket is planned for a follow-up.
+ */
+export const CHANNEL_EVENTS: Record<WebhookChannel, { id: string; label: string }[]> = {
+  whatsapp: [
+    { id: "delivery_status", label: "Delivery Status" },
+    { id: "incoming",        label: "Incoming Messages" },
+  ],
+  sms: [
+    { id: "delivery_status", label: "Delivery Status" },
+  ],
+  rcs: [
+    { id: "delivery_status", label: "Delivery Status" },
+    { id: "incoming",        label: "Incoming Messages" },
+  ],
 };
 
 export const WEBHOOK_TYPE_DESCRIPTION: Record<WebhookType, string> = {
@@ -83,13 +114,38 @@ export const PAYLOAD_EXAMPLE: Record<WebhookType, Record<string, string | number
 
 export type WebhookHeader = { key: string; value: string };
 
+/**
+ * Scope inside a channel. What is required depends on the channel:
+ *   whatsapp: wabaId + phoneNumberId (WABA + one of its numbers)
+ *   sms:      senderId              (DLT-registered sender header)
+ *   rcs:      agentId               (RBM agent under a brand)
+ * Only the fields relevant to the picked channel are populated.
+ */
+export type WebhookScope = {
+  wabaId?: string;
+  phoneNumberId?: string;
+  senderId?: string;
+  agentId?: string;
+};
+
 export type Webhook = {
   id: string;                  // wh_xxxxx
   name: string;
   type: WebhookType;
+  /** Only set when `type === "channels"`. Pins the webhook to one channel
+   *  so its event catalog is unambiguous. */
+  channel?: WebhookChannel;
+  /** Channel-local scope (see {@link WebhookScope}). */
+  scope?: WebhookScope;
+  /** Subscribed event bucket ids. For channels webhooks these come from
+   *  {@link CHANNEL_EVENTS}. Empty = subscribed to every bucket for this channel. */
+  events?: string[];
   endpointUrl: string;
-  /** whsec_… — HMAC-SHA256 sent on `X-Pi-Signature`. Rotatable. */
-  signingSecret: string;
+  /** Static bearer token sent on every webhook POST as
+   *  `Authorization: Bearer <token>`. Shown once at creation, not shown again.
+   *  Simplest possible receiver-side check: string compare against the value
+   *  the client saved on their side. */
+  authToken: string;
   headers: WebhookHeader[];
   status: "active" | "paused";
   createdAt: string;           // ISO
@@ -132,7 +188,7 @@ export const SEED_WEBHOOKS: Webhook[] = [
     name: "Client CRM · Escalations",
     type: "human_escalation",
     endpointUrl: "https://crm.acmecorp.internal/hooks/pi/escalations",
-    signingSecret: "whsec_1a2b3c4d5e6f7g8h9i0j1k2l3m4n5o6p",
+    authToken: "whsec_1a2b3c4d5e6f7g8h9i0j1k2l3m4n5o6p",
     headers: [{ key: "Authorization", value: "Bearer <acme-crm-token>" }],
     status: "active",
     createdAt: isoDaysAgo(42, 9, 12),
@@ -143,7 +199,7 @@ export const SEED_WEBHOOKS: Webhook[] = [
     name: "Ops Slack · Escalation queue",
     type: "human_escalation",
     endpointUrl: "https://hooks.slack.com/services/T00/B00/pi-esc-alerts",
-    signingSecret: "whsec_9z8y7x6w5v4u3t2s1r0q9p8o7n6m5l4k",
+    authToken: "whsec_9z8y7x6w5v4u3t2s1r0q9p8o7n6m5l4k",
     headers: [],
     status: "active",
     createdAt: isoDaysAgo(30, 15, 40),
@@ -151,21 +207,52 @@ export const SEED_WEBHOOKS: Webhook[] = [
   },
   {
     id: "wh_wa_events",
-    name: "WhatsApp · delivery events → warehouse",
+    name: "wa-delivery-events",
     type: "channels",
-    endpointUrl: "https://ingest.acmecorp.internal/pi/whatsapp",
-    signingSecret: "whsec_5m5m5m5m5m5m5m5m5m5m5m5m5m5m5m5m",
-    headers: [{ key: "X-Ingest-Key", value: "wh-ingest-2026" }],
+    channel: "whatsapp",
+    scope: { wabaId: "104882190034771", phoneNumberId: "10934471290017" },
+    events: ["delivery_status", "incoming"],
+    endpointUrl: "https://hooks.acmecorp.com/pi/whatsapp",
+    authToken: "pi_wh_5m5m5m5m5m5m5m5m5m5m5m5m5m5m5m5m",
+    headers: [],
     status: "active",
     createdAt: isoDaysAgo(60, 11, 5),
     lastDeliveryAt: isoHoursAgo(0, 8),
+  },
+  {
+    id: "wh_sms_dlr",
+    name: "sms-dlr-billing",
+    type: "channels",
+    channel: "sms",
+    scope: { senderId: "PICOMM" },
+    events: ["delivery_status"],
+    endpointUrl: "https://hooks.acmecorp.com/pi/sms/dlr",
+    authToken: "pi_wh_sms111sms222sms333sms444sms5555",
+    headers: [],
+    status: "active",
+    createdAt: isoDaysAgo(15, 12, 20),
+    lastDeliveryAt: isoHoursAgo(1, 30),
+  },
+  {
+    id: "wh_rcs_dlr",
+    name: "rcs-delivery-crm",
+    type: "channels",
+    channel: "rcs",
+    scope: { agentId: "acme_promo_bot" },
+    events: ["delivery_status"],
+    endpointUrl: "https://hooks.acmecorp.com/pi/rcs/dlr",
+    authToken: "pi_wh_rcsrcsrcsrcsrcsrcsrcsrcsrcsrcs00",
+    headers: [],
+    status: "active",
+    createdAt: isoDaysAgo(7, 10, 0),
+    lastDeliveryAt: isoHoursAgo(4, 5),
   },
   {
     id: "wh_campaign_lifecycle",
     name: "Campaign lifecycle → Ops dashboard",
     type: "campaign",
     endpointUrl: "https://ops.acmecorp.internal/pi/campaign-events",
-    signingSecret: "whsec_c4mp41gnli4ecycl3c4mp41gnli4ecyc",
+    authToken: "whsec_c4mp41gnli4ecycl3c4mp41gnli4ecyc",
     headers: [],
     status: "active",
     createdAt: isoDaysAgo(21, 8, 40),
@@ -176,7 +263,7 @@ export const SEED_WEBHOOKS: Webhook[] = [
     name: "Legacy sandbox (paused)",
     type: "human_escalation",
     endpointUrl: "https://old-sandbox.acmecorp.internal/pi-webhook",
-    signingSecret: "whsec_pauseddemosecretpauseddemosecret",
+    authToken: "whsec_pauseddemosecretpauseddemosecret",
     headers: [],
     status: "paused",
     createdAt: isoDaysAgo(120, 14, 30),
@@ -247,17 +334,24 @@ function buildDeliveries(): DeliveryAttempt[] {
 export const SEED_DELIVERIES: DeliveryAttempt[] = buildDeliveries();
 
 /* -------------------------------------------------------------------------- *
- *  Secret helpers
+ *  Auth helpers
  * -------------------------------------------------------------------------- */
 
-export function maskSecret(secret: string): string {
-  if (secret.length <= 8) return "•".repeat(secret.length);
-  return `${secret.slice(0, 6)}${"•".repeat(24)}${secret.slice(-4)}`;
+export function maskToken(token: string): string {
+  if (token.length <= 8) return "•".repeat(token.length);
+  return `${token.slice(0, 6)}${"•".repeat(24)}${token.slice(-4)}`;
 }
 
-export function generateSigningSecret(): string {
+/** Generate a fresh Bearer token. Same shape as our API keys (`pi_wh_…`). */
+export function generateAuthToken(): string {
   const alphabet = "0123456789abcdefghijklmnopqrstuvwxyz";
-  let out = "whsec_";
+  let out = "pi_wh_";
   for (let i = 0; i < 32; i++) out += alphabet[Math.floor(Math.random() * alphabet.length)];
   return out;
 }
+
+/** Back-compat re-exports so any callers that still import the old names
+ *  (Human Escalation node) keep compiling. Safe to remove after those
+ *  are migrated. */
+export const maskSecret = maskToken;
+export const generateSigningSecret = generateAuthToken;
