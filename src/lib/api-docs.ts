@@ -259,6 +259,53 @@ const RCS_REQUEST = `curl -X POST '${BASE_URL}/v1/messages/rcs/send' \\
         ]
       }'`;
 
+/* ------------------ SMS Template registry (single endpoint, array body) ------------------ */
+
+const SMS_TEMPLATE_REGISTER_HEADERS: Param[] = [
+  { name: "Content-Type", type: "string", required: true, description: "application/json" },
+  { name: "X-API-Key",    type: "string", required: true, description: "Your API key." },
+];
+
+const SMS_TEMPLATE_FIELDS: Param[] = [
+  { name: "sms_type",        type: "string", required: true, description: 'One of "Text", "Unicode", "Text-class 0", "Unicode-class 0". Drives encoding and message class.' },
+  { name: "pe_id",           type: "string", required: true, description: "DLT Principal Entity ID. 8 to 25 digits. Must be provisioned by ops." },
+  { name: "category",        type: "string", required: true, description: 'One of "Promotional" or "Transactional".' },
+  { name: "sender_id",       type: "string", required: true, description: "DLT sender ID. 3 to 11 alphanumeric characters. Must be approved for the given pe_id + category." },
+  { name: "template_name",   type: "string", required: true, description: "Pi Commerce label, 1 to 120 characters. Not sent to the operator." },
+  { name: "template_id",     type: "string", required: true, description: "DLT-approved template ID. 8 to 25 digits. Unique per client. Immutable after registration." },
+  { name: "message_content", type: "string", required: true, description: "Full DLT-approved copy, 1 to 1600 characters. Use {{variable}} for named placeholders." },
+];
+
+const SMS_TEMPLATE_REGISTER_REQUEST = `curl -X POST '${BASE_URL}/v1/channels/sms/templates' \\
+  -H 'Content-Type: application/json' \\
+  -H 'X-API-Key: pk_YOUR_API_KEY' \\
+  -d '[
+        { "sms_type": "Text", "pe_id": "1101473820000034521", "category": "Transactional",
+          "sender_id": "PICOMM", "template_name": "order_confirm_txn",
+          "template_id": "1107168420993847112",
+          "message_content": "Hi {{name}}, your order {{order_id}} is confirmed. - PICOMM" },
+        { "sms_type": "Text", "pe_id": "1101473820000034521", "category": "Transactional",
+          "sender_id": "PICOMM", "template_name": "order_shipped_txn",
+          "template_id": "1107168420993847113",
+          "message_content": "Your order {{order_id}} has shipped. Track: {{link}} - PICOMM" }
+      ]'`;
+
+const SMS_TEMPLATE_REGISTER_OK = `{
+  "request_id": "req_8f14e45f",
+  "created": 1,
+  "duplicate": 1,
+  "failed": 0,
+  "results": [
+    { "index": 0, "status": "created",   "template_id": "1107168420993847112", "template_name": "order_confirm_txn",  "encoding": "GSM-7", "segments": 1, "variables": ["name", "order_id"] },
+    { "index": 1, "status": "duplicate", "template_id": "1107168420993847113", "template_name": "order_shipped_txn" }
+  ]
+}`;
+
+const SMS_TEMPLATE_REGISTER_ERROR = `{
+  "request_id": "req_8f14e45f",
+  "error_code": "batch_over_limit"
+}`;
+
 export const ENDPOINTS: Endpoint[] = [
   {
     id: "campaign-trigger-single",
@@ -343,6 +390,34 @@ export const ENDPOINTS: Endpoint[] = [
     notes: [
       'Variables use positional keys ("1", "2", ...) matching the DLT template.',
       "Sends are counted in Channel Analytics > SMS.",
+    ],
+  },
+  {
+    id: "channel-sms-templates-register",
+    method: "POST",
+    path: "/v1/channels/sms/templates",
+    title: "Register SMS Templates",
+    short: "Register one or many DLT-approved SMS templates on Pi Commerce.",
+    description:
+      "Registers DLT-approved SMS templates against a provisioned PE + Sender ID. Same seven fields as the Channels > SMS > Templates > Add template form. Body is a JSON array of 1 to 500 templates: send an array of one to register a single template, an array of many for a batch. Every row is validated on its own; one bad row never blocks the rest. Templates land active immediately (Pi Commerce mirrors DLT approval; there is no separate approval workflow here).",
+    auth: AUTH_LINE,
+    headers: SMS_TEMPLATE_REGISTER_HEADERS,
+    pathParams: [],
+    bodyRoot: { type: "array", fields: SMS_TEMPLATE_FIELDS },
+    requestExample: SMS_TEMPLATE_REGISTER_REQUEST,
+    responseOkExample: SMS_TEMPLATE_REGISTER_OK,
+    responseErrorExample: SMS_TEMPLATE_REGISTER_ERROR,
+    rateLimits: [
+      "500 templates per call",
+      "60 calls per minute per client",
+      "4 MB body per call",
+    ],
+    notes: [
+      "The endpoint always accepts an array. For one template, send an array of one: [{...}].",
+      "Per-row semantics: results[] is same length and order as the input; each entry carries status ('created' | 'duplicate' | 'failed'). Failed rows carry a stable error_code (invalid_pe_id, invalid_sender_id, template_id_exists, sender_not_approved, template_id_duplicate_in_batch, ...).",
+      "Successful rows echo the derived fields: variables[] (extracted named placeholders), encoding (GSM-7 or UCS-2), segments (worst-case). Registered templates land active immediately.",
+      "template_id is unique per client and immutable after registration. A retry with the same template_id returns that row as 'duplicate' with the existing resource, so retries are safe.",
+      "Named placeholders use {{variable}} (DLT convention). Numbered placeholders like {{1}} are treated as literal text.",
     ],
   },
   {

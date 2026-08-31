@@ -393,7 +393,7 @@ function EndpointView({ endpoint }: { endpoint: Endpoint }) {
       <H2>Request body</H2>
       <P>
         {endpoint.bodyRoot.type === "array"
-          ? "A JSON array of records. Send an array with a single object when triggering with one record."
+          ? "A JSON array. Send an array with a single object for one, or many objects to submit in a batch. Every entry is validated on its own; one bad entry never blocks the rest. The fields below describe the shape of each array entry."
           : "A JSON object with the fields below."}
       </P>
       <ParamTable params={endpoint.bodyRoot.fields} />
