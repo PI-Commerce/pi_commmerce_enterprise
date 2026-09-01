@@ -272,6 +272,14 @@ export const SMS_BULK_HEADERS = [
   "Message Content",
 ] as const;
 
+/**
+ * Hard cap on rows accepted per bulk CSV upload. Same ceiling the API's
+ * batch register endpoint enforces, so bulk behaviour is symmetric across
+ * the UI and API paths. Files above the cap are rejected whole; per-row
+ * failures still work exactly as before under the cap.
+ */
+export const SMS_BULK_ROW_CAP = 500;
+
 /** A parsed CSV row that failed validation, reported back with its line number. */
 export type SmsBulkRowError = { row: number; errors: string[] };
 
@@ -370,6 +378,15 @@ export function parseSmsBulkCsv(text: string, existing: SmsTemplate[]): SmsBulkR
       valid: [],
       invalid: [],
       headerError: `Missing column${missing.length > 1 ? "s" : ""}: ${missing.join(", ")}. Download the sample CSV for the expected header row.`,
+    };
+  }
+
+  const dataRowCount = rows.length - 1;
+  if (dataRowCount > SMS_BULK_ROW_CAP) {
+    return {
+      valid: [],
+      invalid: [],
+      headerError: `This file has ${dataRowCount.toLocaleString()} rows. The upload limit is ${SMS_BULK_ROW_CAP} rows per file. Split the file and try again.`,
     };
   }
 

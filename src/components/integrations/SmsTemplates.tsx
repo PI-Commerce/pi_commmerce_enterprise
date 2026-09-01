@@ -23,7 +23,7 @@ import { toast } from "sonner";
 import type { SmsChannelConfig } from "@/lib/sms-config";
 import { sendersForEntityCategory } from "@/lib/sms-config";
 import {
-  SMS_TYPES, SMS_CATEGORIES, SMS_BULK_HEADERS,
+  SMS_TYPES, SMS_CATEGORIES, SMS_BULK_HEADERS, SMS_BULK_ROW_CAP,
   smsPlaceholders, smsSegments, templateSegments, isFlashType, isUnicodeType,
   validateSmsTemplate, parseSmsBulkCsv, sampleBulkCsv, downloadCsvFile,
   todayLabel, parseSmsCreated,
@@ -701,7 +701,7 @@ function BulkImportDialog({ open, onOpenChange, existing, onImport }: {
               </Button>
             </div>
             <p className="mt-2 text-[11px] text-muted-foreground">
-              Column order doesn't matter. Wrap message content in quotes if it contains commas.
+              Column order doesn't matter. Wrap message content in quotes if it contains commas. Up to {SMS_BULK_ROW_CAP} rows per file.
             </p>
           </div>
 
