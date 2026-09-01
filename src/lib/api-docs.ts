@@ -468,9 +468,21 @@ export const NAV_GROUPS: { title: string; items: NavSection[] }[] = [
       .map((e) => ({ kind: "endpoint" as const, id: e.id, title: e.title, method: e.method })),
   },
   {
-    title: "Channel APIs",
+    title: "WhatsApp APIs",
     items: ENDPOINTS
-      .filter((e) => e.id.startsWith("channel-"))
+      .filter((e) => e.id.startsWith("channel-whatsapp"))
+      .map((e) => ({ kind: "endpoint" as const, id: e.id, title: e.title, method: e.method })),
+  },
+  {
+    title: "SMS APIs",
+    items: ENDPOINTS
+      .filter((e) => e.id === "channel-sms" || e.id.startsWith("channel-sms-"))
+      .map((e) => ({ kind: "endpoint" as const, id: e.id, title: e.title, method: e.method })),
+  },
+  {
+    title: "RCS APIs",
+    items: ENDPOINTS
+      .filter((e) => e.id.startsWith("channel-rcs"))
       .map((e) => ({ kind: "endpoint" as const, id: e.id, title: e.title, method: e.method })),
   },
 ];
