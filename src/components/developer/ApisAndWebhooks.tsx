@@ -595,6 +595,9 @@ function WebhookDialog({
             {urlPrivate && (
               <p className="text-[10.5px] text-destructive">Private and internal hosts are not allowed. Use a public URL.</p>
             )}
+            <p className="text-[10.5px] text-muted-foreground">
+              Your endpoint should respond with a 2xx within <span className="font-medium text-foreground">10 seconds</span>. Repeated timeouts move the webhook to Error and auto-pause it.
+            </p>
           </div>
 
           {/* Auth affordance — same panel in create + edit, wording differs.
