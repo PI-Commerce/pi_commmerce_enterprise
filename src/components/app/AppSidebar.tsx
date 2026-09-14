@@ -3,7 +3,7 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import {
   LayoutDashboard, Megaphone, Bot, BarChart3, Plug, Settings, Command,
   PanelLeftClose, PanelLeftOpen, Radio, ChevronRight, MessageCircle, MessageSquare, MessageSquareText,
-  Inbox, Code2, Workflow, Send,
+  Inbox, Code2, Workflow, Send, FileText,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useRegion } from "@/lib/region";
@@ -22,6 +22,7 @@ const primaryBottom = [
   { to: "/agents", label: "Agents", icon: Bot },
   { to: "/inbox", label: "Inbox", icon: Inbox },
   { to: "/analytics", label: "Analytics", icon: BarChart3 },
+  { to: "/reports", label: "Reports", icon: FileText },
 ] as const;
 
 type ChannelChild = { label: string; icon: React.ComponentType<{ className?: string }>; to?: string };

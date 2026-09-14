@@ -82,6 +82,13 @@ import {
   type BroadcastChannel,
 } from "@/lib/broadcasts-seed";
 import { cn } from "@/lib/utils";
+import { ExportDialog, type ExportDialogMode } from "@/components/analytics/ExportDialog";
+import {
+  LARGE_EXPORT_MIN_RANGE_DAYS,
+  MAX_RANGE_DAYS,
+  type ReportChannel,
+} from "@/lib/reports";
+import { format as fmtDate } from "date-fns";
 
 export const Route = createFileRoute("/analytics")({
   component: Analytics,
@@ -632,12 +639,36 @@ function LeadsTable({
   restrictToNodeIds,
   title = "Lead Analytics",
   hideStage = false,
+  dateRange,
+  channelForExport,
 }: {
   run: RunRow;
   restrictToNodeIds?: string[];
   title?: string;
   hideStage?: boolean;
+  /** When provided together with channelForExport, the CSV button gates on
+   *  the 90-day cap and the 10 lac async threshold. */
+  dateRange?: DateRange;
+  channelForExport?: ReportChannel;
 }) {
+  const [exportMode, setExportMode] = useState<ExportDialogMode>(null);
+  const dayCount = rangeDays(dateRange);
+  const rangeStart = dateRange?.from ? fmtDate(dateRange.from, "yyyy-MM-dd") : "";
+  const rangeEnd = dateRange?.to ? fmtDate(dateRange.to, "yyyy-MM-dd") : "";
+
+  const handleExportClick = () => {
+    if (channelForExport && dateRange?.from && dateRange?.to) {
+      if (dayCount > MAX_RANGE_DAYS) {
+        setExportMode("blocked");
+        return;
+      }
+      if (dayCount >= LARGE_EXPORT_MIN_RANGE_DAYS) {
+        setExportMode("large");
+        return;
+      }
+    }
+    downloadCsv(`${run.id || "run"}_leads.csv`, leadsToCsv(filtered));
+  };
   const allLeads = useMemo(() => generateLeads(run, run.kpi.validLeads), [run]);
   const scoped = useMemo(
     () =>
@@ -771,14 +802,22 @@ function LeadsTable({
             variant="outline"
             size="sm"
             className="h-8 gap-1.5 text-xs"
-            onClick={() =>
-              downloadCsv(`${run.id || "run"}_leads.csv`, leadsToCsv(filtered))
-            }
+            onClick={handleExportClick}
           >
             <Download className="h-3.5 w-3.5" /> CSV
           </Button>
         </div>
       </div>
+      {channelForExport && (
+        <ExportDialog
+          mode={exportMode}
+          channel={channelForExport}
+          startDate={rangeStart}
+          endDate={rangeEnd}
+          rangeDays={dayCount}
+          onClose={() => setExportMode(null)}
+        />
+      )}
       <div className="max-h-[480px] overflow-auto">
         <table className="w-full text-sm">
           <thead className="sticky top-0 bg-card text-[11px] uppercase tracking-wider text-muted-foreground">
@@ -2616,6 +2655,8 @@ function ChannelDetail({
             restrictToNodeIds={logsNodeIds}
             title={logTitle}
             hideStage={kind === "whatsapp"}
+            dateRange={dateRange}
+            channelForExport={kind === "ads" ? undefined : (kind as ReportChannel)}
           />
         </>
       )}

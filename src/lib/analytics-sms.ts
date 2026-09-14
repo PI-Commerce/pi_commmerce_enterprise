@@ -14,7 +14,7 @@
 import { SMS_DELIVERY_RATES, type RunRow, type SankeyNode } from "@/lib/analytics-data";
 
 export { SMS_DELIVERY_RATES };
-import { generateLeads } from "@/lib/analytics-leads";
+import { generateLeads, phoneCsvCell } from "@/lib/analytics-leads";
 import { resolveSmsTemplate } from "@/lib/sms-store";
 import { templateSegments, type SmsTemplate } from "@/lib/sms-templates";
 
@@ -210,7 +210,7 @@ export function smsMessagesToCsv(rows: SmsMessage[]): string {
     "delivery_latency_sec",
   ];
   const body = rows.map((m) => [
-    m.phone,
+    phoneCsvCell(m.phone),
     m.customer,
     m.peId,
     m.senderId,
@@ -230,6 +230,7 @@ export function smsMessagesToCsv(rows: SmsMessage[]): string {
       row
         .map((v) => {
           const s = String(v ?? "");
+          if (/^="[^"\n]*"$/.test(s)) return s;
           return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
         })
         .join(","),

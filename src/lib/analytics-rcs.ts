@@ -13,7 +13,7 @@
 import { RCS_DELIVERY_RATES, type RunRow, type SankeyNode } from "@/lib/analytics-data";
 
 export { RCS_DELIVERY_RATES };
-import { generateLeads } from "@/lib/analytics-leads";
+import { generateLeads, phoneCsvCell } from "@/lib/analytics-leads";
 import { getRcsConfig, resolveRcsTemplate } from "@/lib/rcs-store";
 import { templateButtons, type RcsTemplate } from "@/lib/rcs-templates";
 import { agentById, providerForAgent, providerLabel } from "@/lib/rcs-config";
@@ -251,7 +251,7 @@ export function rcsMessagesToCsv(rows: RcsMessage[]): string {
     "delivery_latency_sec",
   ];
   const body = rows.map((m) => [
-    m.phone,
+    phoneCsvCell(m.phone),
     m.customer,
     m.agentName,
     m.provider,
@@ -272,6 +272,7 @@ export function rcsMessagesToCsv(rows: RcsMessage[]): string {
       row
         .map((v) => {
           const s = String(v ?? "");
+          if (/^="[^"\n]*"$/.test(s)) return s;
           return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
         })
         .join(","),

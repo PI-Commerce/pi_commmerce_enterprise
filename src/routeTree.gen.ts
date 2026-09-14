@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as ReportsRouteImport } from './routes/reports'
 import { Route as IntegrationsRouteImport } from './routes/integrations'
 import { Route as DeveloperRouteImport } from './routes/developer'
 import { Route as ChannelsRouteImport } from './routes/channels'
@@ -37,6 +38,11 @@ import { Route as ChannelsWhatsappFreeformIdRouteImport } from './routes/channel
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ReportsRoute = ReportsRouteImport.update({
+  id: '/reports',
+  path: '/reports',
   getParentRoute: () => rootRouteImport,
 } as any)
 const IntegrationsRoute = IntegrationsRouteImport.update({
@@ -165,6 +171,7 @@ export interface FileRoutesByFullPath {
   '/channels': typeof ChannelsRouteWithChildren
   '/developer': typeof DeveloperRoute
   '/integrations': typeof IntegrationsRouteWithChildren
+  '/reports': typeof ReportsRoute
   '/settings': typeof SettingsRoute
   '/agents/$id': typeof AgentsIdRoute
   '/agents/new': typeof AgentsNewRoute
@@ -187,6 +194,7 @@ export interface FileRoutesByTo {
   '/analytics': typeof AnalyticsRoute
   '/broadcasts': typeof BroadcastsRoute
   '/developer': typeof DeveloperRoute
+  '/reports': typeof ReportsRoute
   '/settings': typeof SettingsRoute
   '/agents/$id': typeof AgentsIdRoute
   '/agents/new': typeof AgentsNewRoute
@@ -214,6 +222,7 @@ export interface FileRoutesById {
   '/channels': typeof ChannelsRouteWithChildren
   '/developer': typeof DeveloperRoute
   '/integrations': typeof IntegrationsRouteWithChildren
+  '/reports': typeof ReportsRoute
   '/settings': typeof SettingsRoute
   '/agents/$id': typeof AgentsIdRoute
   '/agents/new': typeof AgentsNewRoute
@@ -242,6 +251,7 @@ export interface FileRouteTypes {
     | '/channels'
     | '/developer'
     | '/integrations'
+    | '/reports'
     | '/settings'
     | '/agents/$id'
     | '/agents/new'
@@ -264,6 +274,7 @@ export interface FileRouteTypes {
     | '/analytics'
     | '/broadcasts'
     | '/developer'
+    | '/reports'
     | '/settings'
     | '/agents/$id'
     | '/agents/new'
@@ -290,6 +301,7 @@ export interface FileRouteTypes {
     | '/channels'
     | '/developer'
     | '/integrations'
+    | '/reports'
     | '/settings'
     | '/agents/$id'
     | '/agents/new'
@@ -317,6 +329,7 @@ export interface RootRouteChildren {
   ChannelsRoute: typeof ChannelsRouteWithChildren
   DeveloperRoute: typeof DeveloperRoute
   IntegrationsRoute: typeof IntegrationsRouteWithChildren
+  ReportsRoute: typeof ReportsRoute
   SettingsRoute: typeof SettingsRoute
   InboxIdRoute: typeof InboxIdRoute
   InboxIndexRoute: typeof InboxIndexRoute
@@ -329,6 +342,13 @@ declare module '@tanstack/react-router' {
       path: '/settings'
       fullPath: '/settings'
       preLoaderRoute: typeof SettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reports': {
+      id: '/reports'
+      path: '/reports'
+      fullPath: '/reports'
+      preLoaderRoute: typeof ReportsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/integrations': {
@@ -569,6 +589,7 @@ const rootRouteChildren: RootRouteChildren = {
   ChannelsRoute: ChannelsRouteWithChildren,
   DeveloperRoute: DeveloperRoute,
   IntegrationsRoute: IntegrationsRouteWithChildren,
+  ReportsRoute: ReportsRoute,
   SettingsRoute: SettingsRoute,
   InboxIdRoute: InboxIdRoute,
   InboxIndexRoute: InboxIndexRoute,

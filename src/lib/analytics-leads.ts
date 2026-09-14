@@ -239,7 +239,7 @@ export function leadsToCsv(leads: Lead[]): string {
   const rows = leads.map((l) => [
     l.id,
     l.name,
-    l.phone,
+    phoneCsvCell(l.phone),
     l.email,
     l.stageLabel,
     l.channel ?? "",
@@ -254,6 +254,8 @@ export function leadsToCsv(leads: Lead[]): string {
       r
         .map((v) => {
           const s = String(v ?? "");
+          // Preserve pre-formatted CSV literals like ="+91..." from phoneCsvCell.
+          if (/^="[^"\n]*"$/.test(s)) return s;
           return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
         })
         .join(","),
@@ -261,8 +263,22 @@ export function leadsToCsv(leads: Lead[]): string {
     .join("\n");
 }
 
+/**
+ * Wraps phone-like values as ="+91..." so Excel does not strip the leading `+`
+ * or interpret the value as scientific notation. Google Sheets handles this too.
+ * Use this at the call site for any column that carries an MSISDN.
+ */
+export function phoneCsvCell(v: unknown): string {
+  const s = String(v ?? "").trim();
+  if (!s) return "";
+  // Escape any existing double quotes, then wrap.
+  return `="${s.replace(/"/g, '""')}"`;
+}
+
 export function downloadCsv(filename: string, csv: string) {
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  // Prepend UTF-8 BOM so Excel opens non-Latin characters correctly.
+  const BOM = "﻿";
+  const blob = new Blob([BOM + csv], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;

@@ -40,6 +40,7 @@ import {
 import {
   generateLeads,
   downloadCsv,
+  phoneCsvCell,
   type LeadStatus,
 } from "@/lib/analytics-leads";
 import type { RunRow, SankeyNode } from "@/lib/analytics-data";
@@ -693,7 +694,7 @@ function callsToCsv(calls: Call[]): string {
   ];
   const rows = calls.map((c) => [
     c.scheduledAt,
-    c.phone,
+    phoneCsvCell(c.phone),
     c.customer,
     c.duration ?? "",
     c.status,
@@ -705,6 +706,7 @@ function callsToCsv(calls: Call[]): string {
       r
         .map((v) => {
           const s = String(v ?? "");
+          if (/^="[^"\n]*"$/.test(s)) return s;
           return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
         })
         .join(","),
