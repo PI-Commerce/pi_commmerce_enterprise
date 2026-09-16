@@ -406,8 +406,8 @@ function WebhooksOverview() {
 
       <H2>What fires and what does not</H2>
       <ul className="mb-4 list-disc space-y-1 pl-5 text-[13.5px] leading-relaxed text-foreground/85">
-        <li><strong>Delivery Status</strong> fires only for messages you sent via the API. Messages sent from file-upload campaigns or the Broadcasts UI do not trigger callbacks in v1.</li>
-        <li><strong>Incoming Messages</strong> (WhatsApp only for now) fires for every inbound message on the phone number you subscribed the webhook against. Cold-start inbounds and replies both flow through.</li>
+        <li><strong>Delivery Status</strong> fires only for messages you sent via the API. Messages sent from file-upload campaigns or the Broadcasts UI do not trigger callbacks.</li>
+        <li><strong>Incoming Messages</strong> is currently available on WhatsApp only. It fires for every inbound message on the phone number you subscribed the webhook against. Cold-start inbounds and replies both flow through.</li>
       </ul>
     </div>
   );
@@ -419,7 +419,7 @@ function WebhooksRegister() {
       <SectionHeader
         eyebrow="Webhooks"
         title="Register a webhook"
-        lede="Create and manage your webhooks under Developer > APIs & Webhooks. Programmatic registration via API is planned as a follow-up."
+        lede="Create and manage your webhooks under Developer > APIs & Webhooks."
       />
       <H2>Register from the dashboard</H2>
       <ol className="mb-4 list-decimal space-y-1 pl-5 text-[13.5px] leading-relaxed text-foreground/85">
@@ -474,7 +474,7 @@ function WebhooksAuth() {
 
       <H2>Losing the token</H2>
       <P>
-        Full token is shown once at creation. It is never returned again by any list, get, or update response. If you lose it, delete the webhook and create a new one. There is no rotate endpoint in v1.
+        The full token is shown once at creation and is never returned again by any list, get, or update response. If you lose it, delete the webhook and create a new one with a fresh token.
       </P>
     </div>
   );
@@ -613,11 +613,6 @@ function WebhooksWA() {
         <li><Kbd>system</Kbd> — user changed number event</li>
         <li><Kbd>unsupported</Kbd> — Meta got something it cannot render, with a message-level <Kbd>errors</Kbd> array</li>
       </ul>
-
-      <H2>Fields we drop</H2>
-      <P>
-        Meta's <Kbd>pricing</Kbd> block is stripped before we forward. That block describes our upstream billing with Meta and is not relevant to your integration.
-      </P>
     </div>
   );
 }
@@ -651,10 +646,6 @@ function WebhooksSMS() {
         <li><Kbd>sender</Kbd> — the Sender ID header, matches what your webhook is scoped against.</li>
       </ul>
 
-      <H2>No incoming</H2>
-      <P>
-        SMS Incoming Messages events are not supported in v1. Only Delivery Status fires.
-      </P>
     </div>
   );
 }
@@ -716,9 +707,9 @@ function WebhooksRCS() {
         <li><Kbd>errors[]</Kbd> — present only when <Kbd>status: "failed"</Kbd>. Same shape as Meta's WhatsApp failed callback.</li>
       </ul>
 
-      <H2>No incoming, no vendor identity</H2>
+      <H2>What is not on the wire</H2>
       <P>
-        RCS Incoming Messages are not supported in v1. No <Kbd>vendor</Kbd>, <Kbd>nc_bot_id</Kbd>, <Kbd>entityType</Kbd>, or <Kbd>callbackdata</Kbd> field is present on the wire.
+        The payload never carries a vendor identifier. Fields specific to any upstream RCS provider (for example <Kbd>vendor</Kbd>, <Kbd>nc_bot_id</Kbd>, <Kbd>entityType</Kbd>, or <Kbd>callbackdata</Kbd>) are not present.
       </P>
     </div>
   );
