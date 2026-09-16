@@ -142,59 +142,67 @@ export function sanitizeName(s: string): string {
 /* -------------------------------------------------------------------------- *
  *  Test event picker (Stripe-style)
  *
- *  User picks one specific event type to fire as a test. Options come from
- *  the webhook's subscribed buckets — a webhook subscribed to WA Delivery
- *  Status + Incoming Messages shows all four options; a SMS-only webhook
- *  shows two. Each test POST carries realistic body shape + Pi envelope
- *  headers, marked with X-Pi-Test: true and a test_ record_id prefix.
+ *  User picks one subscribed bucket to fire as a test. Options come directly
+ *  from CHANNEL_EVENTS labels so the picker copy matches the events
+ *  checklist on the configuration modal (Delivery Status / Incoming
+ *  Messages, never per-status Delivered/Read/Failed).
+ *
+ *  If only one bucket is subscribed, the picker is skipped and the test
+ *  fires directly. Multi-bucket subscriptions show the picker.
+ *
+ *  Every test POST (real backend) carries a realistic body of the picked
+ *  bucket and the webhook's auth token. The X-Pi-Record-Id header value is
+ *  prefixed with test_ so a receiver can tell a synthetic event apart from
+ *  a real one and skip DB writes if it chooses.
  * -------------------------------------------------------------------------- */
-
-type TestEventOption = { id: string; label: string; description: string };
-
-const TEST_EVENT_OPTIONS: Record<WebhookChannel, Record<string, TestEventOption[]>> = {
-  whatsapp: {
-    delivery_status: [
-      { id: "wa_delivered", label: "Delivered",     description: "status: delivered" },
-      { id: "wa_read",      label: "Read",          description: "status: read" },
-      { id: "wa_failed",    label: "Failed",        description: "status: failed with error block" },
-    ],
-    incoming: [
-      { id: "wa_inbound_text", label: "Incoming text message", description: "type: text, dummy body" },
-    ],
-  },
-  sms: {
-    delivery_status: [
-      { id: "sms_delivered", label: "Delivered", description: "status: DELIVERED, code: 000" },
-      { id: "sms_failed",    label: "Failed",    description: "status: FAILED, code: 401" },
-    ],
-  },
-  rcs: {
-    delivery_status: [
-      { id: "rcs_delivered", label: "Delivered", description: "status: delivered" },
-      { id: "rcs_read",      label: "Read",      description: "status: read" },
-      { id: "rcs_failed",    label: "Failed",    description: "status: failed with error block" },
-    ],
-  },
-};
-
-/** Compute the flat list of options available to a webhook based on its
- *  channel + subscribed buckets. */
-function availableTestOptions(channel: WebhookChannel, subscribedBuckets: string[]): TestEventOption[] {
-  const byBucket = TEST_EVENT_OPTIONS[channel];
-  const out: TestEventOption[] = [];
-  for (const bucket of subscribedBuckets) {
-    const opts = byBucket[bucket];
-    if (opts) out.push(...opts);
-  }
-  return out;
-}
 
 type PickerContext = {
   webhookName: string;
   url: string;
   channel: WebhookChannel;
   subscribedBuckets: string[];
+  /** Called after the test completes with the mock response outcome. Lets
+   *  callers (e.g. the create dialog) unlock a "success" state and enable
+   *  downstream CTAs. */
+  onResult?: (ok: boolean) => void;
 };
+
+/** Simulates a test POST + toasts the result. Returns the outcome via the
+ *  onResult callback if provided. */
+function fireTestEvent(ctx: PickerContext, bucketLabel: string) {
+  toast.info(`Sending "${bucketLabel}" test event to ${ctx.url}`);
+  window.setTimeout(() => {
+    // Mock: 90% success, 10% simulated failure.
+    const ok = Math.random() > 0.1;
+    if (ok) toast.success(`Test "${bucketLabel}" delivered (200 OK)`);
+    else    toast.error(`Test "${bucketLabel}" failed (connection timeout)`);
+    ctx.onResult?.(ok);
+  }, 900);
+}
+
+/** Central helper: if the webhook subscribes to a single bucket, fire the
+ *  test directly with that bucket's label. If it subscribes to multiple,
+ *  open the picker so the user chooses. Every entry point (row menu,
+ *  create/edit dialog, reveal-token modal) uses this so behaviour stays
+ *  consistent. */
+function startTestFlow(ctx: PickerContext, openPicker: (ctx: PickerContext) => void) {
+  const opts = pickerOptionsFor(ctx);
+  if (opts.length === 1) {
+    fireTestEvent(ctx, opts[0].label);
+  } else if (opts.length > 1) {
+    openPicker(ctx);
+  }
+}
+
+/** Given a webhook's channel + subscribed buckets, resolve to the list of
+ *  picker options. Empty when no buckets, single-item when one, more when
+ *  the webhook subscribes to multiple. */
+function pickerOptionsFor(ctx: PickerContext): { id: string; label: string }[] {
+  const catalog = CHANNEL_EVENTS[ctx.channel];
+  return ctx.subscribedBuckets
+    .map((bucketId) => catalog.find((b) => b.id === bucketId))
+    .filter((b): b is { id: string; label: string } => !!b);
+}
 
 function TestEventPicker({
   open, ctx, onOpenChange,
@@ -203,25 +211,15 @@ function TestEventPicker({
   ctx: PickerContext | null;
   onOpenChange: (open: boolean) => void;
 }) {
-  const options = ctx ? availableTestOptions(ctx.channel, ctx.subscribedBuckets) : [];
+  const options = ctx ? pickerOptionsFor(ctx) : [];
   const [picked, setPicked] = useState<string>("");
-
-  // Reset on ctx change so the modal starts unselected each open
   const key = ctx ? `${ctx.webhookName}-${ctx.channel}-${ctx.subscribedBuckets.join(",")}` : "closed";
 
   const fire = () => {
     if (!picked || !ctx) return;
     const opt = options.find((o) => o.id === picked);
     if (!opt) return;
-    toast.info(`Sending "${opt.label}" test event to ${ctx.url}`);
-    window.setTimeout(() => {
-      // Mock: 90% success, 10% simulated failure. Real backend fires the
-      // POST from server-side with X-Pi-Test: true header + test_ record_id
-      // prefix. Client receiver can branch on the flag to skip DB writes.
-      const ok = Math.random() > 0.1;
-      if (ok) toast.success(`Test "${opt.label}" delivered (200 OK)`);
-      else    toast.error(`Test "${opt.label}" failed (connection timeout)`);
-    }, 900);
+    fireTestEvent(ctx, opt.label);
     onOpenChange(false);
     setPicked("");
   };
@@ -232,7 +230,7 @@ function TestEventPicker({
         <DialogHeader>
           <DialogTitle>Send test event</DialogTitle>
           <DialogDescription>
-            Pick which event you want to fire. Pi Commerce sends one POST to <span className="font-mono text-foreground">{ctx?.url}</span> with a realistic payload of the picked type, the auth token you saved, and an <span className="font-mono">X-Pi-Test: true</span> header. Test events do not retry on failure and do not auto-pause the webhook.
+            Pick which event you want to fire. Pi Commerce sends one POST to <span className="font-mono text-foreground">{ctx?.url}</span> with a realistic payload of the picked type and the webhook's auth token. The record id on this POST is prefixed with <span className="font-mono">test_</span> so your receiver can tell it apart from a real event. Test events do not retry on failure and do not affect the webhook's status.
           </DialogDescription>
         </DialogHeader>
 
@@ -246,15 +244,12 @@ function TestEventPicker({
               <label
                 key={opt.id}
                 className={cn(
-                  "flex cursor-pointer items-start gap-2.5 rounded-lg border border-border px-3 py-2 hover:bg-accent/40",
+                  "flex cursor-pointer items-center gap-2.5 rounded-lg border border-border px-3 py-2 hover:bg-accent/40",
                   picked === opt.id && "border-primary/40 bg-accent/30",
                 )}
               >
-                <RadioGroupItem value={opt.id} className="mt-0.5" />
-                <div className="min-w-0 flex-1">
-                  <div className="text-[12.5px] font-medium">{opt.label}</div>
-                  <div className="font-mono text-[11px] text-muted-foreground">{opt.description}</div>
-                </div>
+                <RadioGroupItem value={opt.id} />
+                <div className="text-[12.5px] font-medium">{opt.label}</div>
               </label>
             ))}
           </RadioGroup>
@@ -325,12 +320,15 @@ function ChannelWebhooks() {
                 row={w}
                 effective={deriveStatus(w, { wa, sms, rcs })}
                 onEdit={() => setEditing(w)}
-                onSendTest={() => setPicker({
-                  webhookName: w.name,
-                  url: w.endpointUrl,
-                  channel: w.channel ?? "whatsapp",
-                  subscribedBuckets: w.events ?? [],
-                })}
+                onSendTest={() => startTestFlow(
+                  {
+                    webhookName: w.name,
+                    url: w.endpointUrl,
+                    channel: w.channel ?? "whatsapp",
+                    subscribedBuckets: w.events ?? [],
+                  },
+                  setPicker,
+                )}
               />
             ))}
           </tbody>
@@ -360,7 +358,6 @@ function ChannelWebhooks() {
             },
           });
         }}
-        onOpenPicker={setPicker}
         wa={wa}
         sms={sms}
         rcs={rcs}
@@ -370,7 +367,7 @@ function ChannelWebhooks() {
         open={!!revealToken}
         onOpenChange={(o) => { if (!o) setRevealToken(null); }}
         value={revealToken}
-        onSendTest={(ctx) => setPicker(ctx)}
+        onSendTest={(ctx) => startTestFlow(ctx, setPicker)}
       />
 
       <TestEventPicker
@@ -506,13 +503,12 @@ function StatusPill({ effective }: { effective: EffectiveStatus }) {
  * -------------------------------------------------------------------------- */
 
 function WebhookDialog({
-  open, initial, onOpenChange, onSubmit, onOpenPicker, wa, sms, rcs,
+  open, initial, onOpenChange, onSubmit, wa, sms, rcs,
 }: {
   open: boolean;
   initial: WebhookRow | null;
   onOpenChange: (open: boolean) => void;
   onSubmit: (next: WebhookRow) => void;
-  onOpenPicker: (ctx: PickerContext) => void;
   wa: WaOption[];
   sms: SmsOption[];
   rcs: RcsOption[];
@@ -553,16 +549,6 @@ function WebhookDialog({
 
   const toggleEvent = (id: string) => {
     setEvents((prev) => prev.includes(id) ? prev.filter((e) => e !== id) : [...prev, id]);
-  };
-
-  const sendTest = () => {
-    if (!urlOk) return;
-    onOpenPicker({
-      webhookName: name || "New webhook",
-      url: url.trim(),
-      channel,
-      subscribedBuckets: events,
-    });
   };
 
   const submit = () => {
@@ -717,18 +703,7 @@ function WebhookDialog({
           )}
 
           <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <Label className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Endpoint URL</Label>
-              {urlOk && (
-                <button
-                  type="button"
-                  onClick={sendTest}
-                  className="text-[11px] text-muted-foreground hover:text-foreground underline underline-offset-2"
-                >
-                  Send test event
-                </button>
-              )}
-            </div>
+            <Label className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Endpoint URL</Label>
             <Input
               value={url}
               onChange={(e) => setUrl(e.target.value)}
@@ -742,7 +717,7 @@ function WebhookDialog({
               <p className="text-[10.5px] text-destructive">Private and internal hosts are not allowed. Use a public URL.</p>
             )}
             <p className="text-[10.5px] text-muted-foreground">
-              Your endpoint should respond with a 2xx within <span className="font-medium text-foreground">10 seconds</span>. Repeated timeouts move the webhook to Error and auto-pause it.
+              Your endpoint should respond with a 2xx within <span className="font-medium text-foreground">10 seconds</span>. Repeated timeouts move the webhook to Error and auto-pause it. You can send a test event from the next step (after your webhook is saved and the auth token is issued).
             </p>
           </div>
 
