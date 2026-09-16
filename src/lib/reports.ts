@@ -46,11 +46,11 @@ export type ReportRow = {
 };
 
 const CHANNEL_LABEL: Record<ReportChannel, string> = {
-  whatsapp: "WhatsApp delivery report",
-  sms: "SMS delivery report",
-  rcs: "RCS delivery report",
-  voice: "Voice delivery report",
-  campaign: "Campaign report",
+  whatsapp: "WhatsApp logs",
+  sms: "SMS logs",
+  rcs: "RCS logs",
+  voice: "Voice logs",
+  campaign: "Campaign leads",
 };
 
 export function channelLabel(c: ReportChannel): string {
@@ -180,10 +180,10 @@ const day = (offsetDays: number, h = 10, m = 0) => {
 type Listener = () => void;
 const dynamicReports: ReportRow[] = [];
 const listeners = new Set<Listener>();
-let nextSerial = 807;
+let nextSerial = 25;
 
 export function nextReportId(): string {
-  const id = `RPT-2026-${String(nextSerial).padStart(6, "0")}`;
+  const id = String(nextSerial);
   nextSerial += 1;
   return id;
 }
@@ -206,7 +206,7 @@ export function getDynamicReports(): ReportRow[] {
 
 export const SEED_REPORTS: ReportRow[] = [
   {
-    id: "RPT-2026-000806",
+    id: "806",
     requestedAt: day(1, 20, 30),
     channel: "campaign",
     title: formatReportTitle("campaign", "2026-06-20", "2026-06-26"),
@@ -217,7 +217,7 @@ export const SEED_REPORTS: ReportRow[] = [
     failureReason: "S3 upload failed. Provider timeout after 3 retries.",
   },
   {
-    id: "RPT-2026-000805",
+    id: "805",
     requestedAt: day(1, 20, 25),
     channel: "whatsapp",
     title: formatReportTitle("whatsapp", "2026-09-07", "2026-09-13"),
@@ -228,7 +228,7 @@ export const SEED_REPORTS: ReportRow[] = [
     failureReason: "Query timeout. Try a shorter date range or narrower filters.",
   },
   {
-    id: "RPT-2026-000804",
+    id: "804",
     requestedAt: day(3, 8, 28),
     channel: "whatsapp",
     title: formatReportTitle("whatsapp", "2026-09-05", "2026-09-11"),
@@ -238,7 +238,7 @@ export const SEED_REPORTS: ReportRow[] = [
     createdBy: "rahul.mehta@acme.com",
   },
   {
-    id: "RPT-2026-000803",
+    id: "803",
     requestedAt: day(3, 8, 19),
     channel: "whatsapp",
     title: formatReportTitle("whatsapp", "2026-09-05", "2026-09-11"),
@@ -248,7 +248,7 @@ export const SEED_REPORTS: ReportRow[] = [
     createdBy: "rahul.mehta@acme.com",
   },
   {
-    id: "RPT-2026-000801",
+    id: "801",
     requestedAt: day(6, 11, 0),
     channel: "campaign",
     title: formatReportTitle("campaign", "2026-08-25", "2026-08-31"),
@@ -261,7 +261,7 @@ export const SEED_REPORTS: ReportRow[] = [
     createdBy: "priya.sharma@acme.com",
   },
   {
-    id: "RPT-2026-000800",
+    id: "800",
     requestedAt: day(6, 10, 0),
     channel: "whatsapp",
     title: formatReportTitle("whatsapp", "2026-08-25", "2026-08-31"),
@@ -274,7 +274,7 @@ export const SEED_REPORTS: ReportRow[] = [
     createdBy: "priya.sharma@acme.com",
   },
   {
-    id: "RPT-2026-000799",
+    id: "799",
     requestedAt: day(7, 10, 0),
     channel: "rcs",
     title: formatReportTitle("rcs", "2026-08-25", "2026-08-31"),
@@ -287,7 +287,7 @@ export const SEED_REPORTS: ReportRow[] = [
     createdBy: "rahul.mehta@acme.com",
   },
   {
-    id: "RPT-2026-000798",
+    id: "798",
     requestedAt: day(8, 10, 0),
     channel: "rcs",
     title: formatReportTitle("rcs", "2026-08-25", "2026-08-31"),
@@ -298,7 +298,7 @@ export const SEED_REPORTS: ReportRow[] = [
     failureReason: "Provider returned partial data. Please retry.",
   },
   {
-    id: "RPT-2026-000797",
+    id: "797",
     requestedAt: day(10, 10, 0),
     channel: "sms",
     title: formatReportTitle("sms", "2026-08-18", "2026-08-24"),

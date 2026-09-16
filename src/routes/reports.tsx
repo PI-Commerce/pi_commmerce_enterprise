@@ -68,13 +68,12 @@ function Reports() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-[130px]">Report ID</TableHead>
+                <TableHead className="w-[90px]">Report ID</TableHead>
                 <TableHead className="w-[150px]">Requested</TableHead>
                 <TableHead>Report</TableHead>
                 <TableHead className="w-[120px]">Status</TableHead>
                 <TableHead className="w-[110px] text-right">Rows</TableHead>
                 <TableHead className="w-[110px] text-right">File size</TableHead>
-                <TableHead className="w-[180px]">Created by</TableHead>
                 <TableHead className="w-[140px]">Expires</TableHead>
                 <TableHead className="w-[110px] text-right">Action</TableHead>
               </TableRow>
@@ -93,7 +92,6 @@ function Reports() {
                   </TableCell>
                   <TableCell className="text-right font-mono text-[12.5px]">{formatRows(r.rows)}</TableCell>
                   <TableCell className="text-right font-mono text-[12.5px]">{formatBytes(r.fileSizeBytes)}</TableCell>
-                  <TableCell className="text-[12.5px] text-muted-foreground truncate">{r.createdBy}</TableCell>
                   <TableCell className="text-[12.5px] text-muted-foreground">{formatExpiry(r)}</TableCell>
                   <TableCell className="text-right">
                     <RowAction row={r} />
