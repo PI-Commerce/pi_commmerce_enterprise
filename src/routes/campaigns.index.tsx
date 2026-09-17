@@ -29,7 +29,8 @@ import { STATUS_TONE, type CampaignStatus } from "@/lib/campaign-types";
 import { EXAMPLE_CAMPAIGN_NAMES, EXAMPLE_CAMPAIGNS } from "@/lib/campaign-examples";
 import { lockFreeformWorkflow } from "@/lib/freeform-types";
 import { CreateRunDialog, type CampaignOption, type CreateRunPayload } from "@/components/workflow/CreateRunDialog";
-import { CSV_LIBRARY, makeCsvAsset, type CsvAsset } from "@/lib/data-library";
+import { CSV_LIBRARY, makeCsvAsset, generateCsvContent, type CsvAsset } from "@/lib/data-library";
+import { downloadCsv } from "@/lib/analytics-leads";
 
 
 export const Route = createFileRoute("/campaigns/")({
@@ -132,15 +133,15 @@ type RunRow = {
   leadsTotal?: number; // present when source is CSV
 };
 
-const RUNS: RunRow[] = [
-  { id: "\u200B", campaign: "BFSI · Lead Qualification", status: "running",    runType: "one-time",  triggerMode: "manual", startedAt: "Today, 12:04 PM",   completedAt: "ongoing",         leadsProcessed: 630,  leadsTotal: 1500 },
-  { id: "r_8420", campaign: "Retail · Activation",       status: "running",    runType: "recurring", triggerMode: "api",    startedAt: "Today, 11:50 AM",   completedAt: "ongoing",         leadsProcessed: 1200 },
-  { id: "r_8419", campaign: "BFSI · Collections",       status: "pending",    runType: "one-time",  triggerMode: "manual", startedAt: "Today, 11:48 AM",   completedAt: "ongoing",         leadsProcessed: 0,    leadsTotal: 820 },
-  { id: "r_8418", campaign: "Retail · Winback",         status: "paused",     runType: "one-time",  triggerMode: "manual", startedAt: "Today, 11:32 AM",   completedAt: "ongoing",         leadsProcessed: 412,  leadsTotal: 750 },
-  { id: "r_8417", campaign: "D2C · Cart Abandonment", status: "completed",  runType: "one-time",  triggerMode: "manual", startedAt: "Today, 10:00 AM",   completedAt: "Today, 11:14 AM", leadsProcessed: 1500, leadsTotal: 1500 },
-  { id: "r_8416", campaign: "Retail · Seasonal Sale",       status: "completed",  runType: "one-time",  triggerMode: "manual", startedAt: "Yesterday, 08:00 AM",completedAt: "Yesterday, 09:42 AM", leadsProcessed: 3200, leadsTotal: 3200 },
-  { id: "r_8415", campaign: "BFSI · Insurance Renewal",   status: "terminated", runType: "one-time",  triggerMode: "api",    startedAt: "Yesterday, 04:20 PM",completedAt: "Yesterday, 04:38 PM", leadsProcessed: 240 },
-  { id: "r_8414", campaign: "E-commerce · Price Drop",       status: "completed",  runType: "recurring", triggerMode: "api",    startedAt: "Yesterday, 09:00 AM",completedAt: "Yesterday, 10:12 AM", leadsProcessed: 980 },
+const INITIAL_RUNS: RunRow[] = [
+  { id: "r_9001", campaign: "B2B · Reactivate Paytm Soundbox Merchants", status: "running",   runType: "one-time",  triggerMode: "manual", startedAt: "Today, 12:04 PM",     completedAt: "ongoing",             leadsProcessed: 630,  leadsTotal: 1500 },
+  { id: "r_9002", campaign: "Retail · Loyalty Card Upsell",              status: "running",   runType: "recurring", triggerMode: "api",    startedAt: "Today, 11:50 AM",     completedAt: "ongoing",             leadsProcessed: 1200 },
+  { id: "r_9003", campaign: "D2C · Cart Abandonment",                    status: "running",   runType: "one-time",  triggerMode: "manual", startedAt: "Today, 11:32 AM",     completedAt: "ongoing",             leadsProcessed: 410,  leadsTotal: 900 },
+  { id: "r_9004", campaign: "BFSI · Insurance Renewal",                  status: "running",   runType: "one-time",  triggerMode: "manual", startedAt: "Today, 10:58 AM",     completedAt: "ongoing",             leadsProcessed: 220,  leadsTotal: 540 },
+  { id: "r_9005", campaign: "BFSI · PL DPD Collections",                 status: "running",   runType: "one-time",  triggerMode: "manual", startedAt: "Today, 10:20 AM",     completedAt: "ongoing",             leadsProcessed: 75,   leadsTotal: 300 },
+  { id: "r_8998", campaign: "BFSI · Insurance Renewal",                  status: "paused",    runType: "one-time",  triggerMode: "manual", startedAt: "Yesterday, 04:20 PM", completedAt: "ongoing",             leadsProcessed: 180,  leadsTotal: 540 },
+  { id: "r_8997", campaign: "D2C · Cart Abandonment",                    status: "completed", runType: "one-time",  triggerMode: "manual", startedAt: "Yesterday, 10:00 AM", completedAt: "Yesterday, 11:14 AM", leadsProcessed: 900, leadsTotal: 900 },
+  { id: "r_8996", campaign: "Retail · Loyalty Card Upsell",              status: "completed", runType: "recurring", triggerMode: "api",    startedAt: "Yesterday, 09:00 AM", completedAt: "Yesterday, 10:12 AM", leadsProcessed: 3200 },
 ];
 
 type Tab = "data" | "campaigns" | "runs";
@@ -149,6 +150,12 @@ function CampaignList() {
   const navigate = useNavigate();
   const [tab, setTab] = useState<Tab>("campaigns");
   const [rows] = useState<CampaignRow[]>(INITIAL);
+  // Runs are stateful — Pause / Resume / Terminate from the row menu mutate this
+  // list so the status pill, filter counts, and "running now" KPIs all update.
+  const [runs, setRuns] = useState<RunRow[]>(INITIAL_RUNS);
+  const changeRunStatus = (id: string, next: RunStatus) => {
+    setRuns((rs) => rs.map((r) => (r.id === id ? { ...r, status: next, ...(next === "completed" || next === "terminated" ? { completedAt: nowLabel() } : {}) } : r)));
+  };
 
   // Data library (CSV library tab — scope C1–C3). Shared source of truth with
   // the Run modal's "select previously uploaded CSV" dropdown (WS6).
@@ -233,7 +240,7 @@ function CampaignList() {
   const cRangeEnd = Math.min(cPageSafe * C_PAGE_SIZE, sorted.length);
 
 
-  const filteredRuns = RUNS.filter((r) => {
+  const filteredRuns = runs.filter((r) => {
     if (rStatus !== "all" && r.status !== rStatus) return false;
     if (rType !== "all" && r.runType !== rType) return false;
     if (rQuery) {
@@ -282,7 +289,7 @@ function CampaignList() {
   };
 
   const hasAny = rows.length > 0;
-  const runningCount = RUNS.filter((r) => r.status === "running").length;
+  const runningCount = runs.filter((r) => r.status === "running").length;
 
   return (
     <AppShell>
@@ -588,7 +595,7 @@ function CampaignList() {
                       </div>
                     </td>
                     <td className="px-2 py-3 text-right">
-                      <RunRowMenu status={r.status} runId={r.id} triggerMode={r.triggerMode} />
+                      <RunRowMenu status={r.status} runId={r.id} triggerMode={r.triggerMode} onStatusChange={(s) => changeRunStatus(r.id, s)} />
                     </td>
                   </tr>
                   );
@@ -733,7 +740,7 @@ function DataLibraryPanel({ assets, onUpload }: { assets: CsvAsset[]; onUpload: 
                   variant="ghost"
                   size="sm"
                   className="h-8 gap-1.5 text-xs"
-                  onClick={() => toast.success("Download started", { description: a.name })}
+                  onClick={() => { downloadCsv(a.name, generateCsvContent(a)); toast.success("Download started", { description: a.name }); }}
                 >
                   <Download className="h-3.5 w-3.5" /> Download
                 </Button>
@@ -748,6 +755,15 @@ function DataLibraryPanel({ assets, onUpload }: { assets: CsvAsset[]; onUpload: 
 
 function cap(s: string) { return s[0].toUpperCase() + s.slice(1); }
 
+function nowLabel() {
+  const d = new Date();
+  const hh = d.getHours();
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  const ampm = hh >= 12 ? "PM" : "AM";
+  const h12 = hh % 12 === 0 ? 12 : hh % 12;
+  return `Today, ${h12}:${mm} ${ampm}`;
+}
+
 function StateTag({ state }: { state: CampaignStatus }) {
   return (
     <span className={cn("inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium capitalize", STATUS_TONE[state])}>
@@ -757,7 +773,7 @@ function StateTag({ state }: { state: CampaignStatus }) {
   );
 }
 
-function RunRowMenu({ status, runId, triggerMode }: { status: RunStatus; runId: string; triggerMode: TriggerMode }) {
+function RunRowMenu({ status, runId, triggerMode, onStatusChange }: { status: RunStatus; runId: string; triggerMode: TriggerMode; onStatusChange: (s: RunStatus) => void }) {
   const canPause = status === "running";
   const canResume = status === "paused";
   // Pending (queued) and live (running/paused) runs can be terminated/cancelled.
@@ -787,13 +803,13 @@ function RunRowMenu({ status, runId, triggerMode }: { status: RunStatus; runId: 
         )}
         {isApi && hasLifecycle && <DropdownMenuSeparator />}
         {canPause && (
-          <DropdownMenuItem className="gap-2 text-xs" onClick={() => toast.success("Run paused", { description: runId })}><Pause className="h-3.5 w-3.5" /> Pause</DropdownMenuItem>
+          <DropdownMenuItem className="gap-2 text-xs" onClick={() => { onStatusChange("paused"); toast.success("Run paused", { description: runId }); }}><Pause className="h-3.5 w-3.5" /> Pause</DropdownMenuItem>
         )}
         {canResume && (
-          <DropdownMenuItem className="gap-2 text-xs" onClick={() => toast.success("Run resumed", { description: runId })}><Play className="h-3.5 w-3.5" /> Resume</DropdownMenuItem>
+          <DropdownMenuItem className="gap-2 text-xs" onClick={() => { onStatusChange("running"); toast.success("Run resumed", { description: runId }); }}><Play className="h-3.5 w-3.5" /> Resume</DropdownMenuItem>
         )}
         {canTerminate && (
-          <DropdownMenuItem className="gap-2 text-xs text-destructive focus:text-destructive" onClick={() => toast.error("Run terminated", { description: `${runId} · cannot be resumed` })}>
+          <DropdownMenuItem className="gap-2 text-xs text-destructive focus:text-destructive" onClick={() => { onStatusChange("terminated"); toast.error("Run terminated", { description: `${runId} · cannot be resumed` }); }}>
             <Square className="h-3.5 w-3.5" /> Terminate
           </DropdownMenuItem>
         )}
