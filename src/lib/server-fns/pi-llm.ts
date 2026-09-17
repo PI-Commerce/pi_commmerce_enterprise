@@ -396,10 +396,19 @@ export const askPi = createServerFn({ method: "POST" })
     if (!env.DB) {
       return { ok: false, error: "d1_not_bound: DB binding is missing on this worker. Provision D1 and uncomment the binding in wrangler.jsonc." };
     }
-    const key = env.TFY_API_KEY;
-    const base = env.TFY_BASE_URL;
-    if (!key || !base) return { ok: false, error: "TFY_API_KEY / TFY_BASE_URL not configured (set in .env or wrangler secrets)" };
-    const model = env.TFY_MODEL || "openai-main/anthropic/claude-sonnet-4-6";
+    // Prefer the current working gateway (PI_AGENT_*) — service account
+    // `foundary-ai-workflows` on `llm.tfy.pi.mypaytm.com/openai/v1`. Fall
+    // back to the legacy TFY_* names for older deployments; the legacy
+    // service account has been rotated out but leaving the fallback in
+    // place means an env with only TFY_* set surfaces a real 401 instead
+    // of a "not configured" error.
+    const key = env.PI_AGENT_API_KEY || env.TFY_API_KEY;
+    const base = env.PI_AGENT_BASE_URL || env.TFY_BASE_URL;
+    if (!key || !base) return { ok: false, error: "LLM gateway not configured — set PI_AGENT_API_KEY + PI_AGENT_BASE_URL in .env / wrangler secrets" };
+    const model =
+      env.PI_AGENT_MODEL ||
+      env.TFY_MODEL ||
+      "pi-agentic/global.anthropic.claude-sonnet-4-6";
 
     const systemContent =
       data.scope === "builder" ? SYSTEM_BUILDER

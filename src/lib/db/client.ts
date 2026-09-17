@@ -19,6 +19,16 @@ import type { D1Database, KVNamespace } from "@cloudflare/workers-types";
 export type Env = {
   DB: D1Database;
   KV: KVNamespace;
+  /**
+   * Ask Pi LLM gateway. The "PI_AGENT_*" trio is the current working
+   * gateway (`llm.tfy.pi.mypaytm.com/openai/v1`, service account
+   * `foundary-ai-workflows`). "TFY_*" is retained for backward-compat but
+   * the underlying service account has been rotated out — new deployments
+   * should populate PI_AGENT_*.
+   */
+  PI_AGENT_API_KEY?: string;
+  PI_AGENT_BASE_URL?: string;
+  PI_AGENT_MODEL?: string;
   TFY_API_KEY?: string;
   TFY_BASE_URL?: string;
   TFY_MODEL?: string;

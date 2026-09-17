@@ -15,7 +15,8 @@
 	// file-backed state under `.wrangler/state/v3/`.
 	//
 	"vars": {
-		"TFY_BASE_URL": "https://tfy.internal.ap-south-1.production.apps.pai.mypaytm.com/api/llm"
+		"PI_AGENT_BASE_URL": "https://llm.tfy.pi.mypaytm.com/openai/v1",
+		"PI_AGENT_MODEL": "pi-agentic/global.anthropic.claude-sonnet-4-6"
 	},
 	"d1_databases": [
 		{
