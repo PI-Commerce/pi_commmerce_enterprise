@@ -33,7 +33,7 @@ CREATE TABLE campaigns (
 
 CREATE TABLE campaign_nodes (
   id                TEXT NOT NULL,             -- unique within campaign, e.g. "apiTier"
-  campaign_id       TEXT NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  campaign_id       TEXT NOT NULL,
   kind              TEXT NOT NULL,             -- NodeKind: start | end | audience | apiToolCall | conditional | abSplit | delay | voiceCall | whatsapp | whatsappFreeform | sms | rcs | aiTransform
   title             TEXT NOT NULL,
   subtitle          TEXT,
@@ -49,7 +49,7 @@ CREATE INDEX idx_campaign_nodes_kind ON campaign_nodes(kind);
 
 CREATE TABLE campaign_edges (
   id                TEXT NOT NULL,             -- unique within campaign
-  campaign_id       TEXT NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  campaign_id       TEXT NOT NULL,
   source_id         TEXT NOT NULL,             -- source campaign_node id
   target_id         TEXT NOT NULL,             -- target campaign_node id
   source_handle     TEXT,                       -- e.g. "success", "vA", "gold" — null = default
@@ -61,7 +61,7 @@ CREATE INDEX idx_campaign_edges_campaign ON campaign_edges(campaign_id);
 -- One row per run of a campaign. `leads` gets the per-lead per-run snapshot.
 CREATE TABLE runs (
   id                TEXT PRIMARY KEY,          -- e.g. "r_9001"
-  campaign_id       TEXT NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  campaign_id       TEXT NOT NULL,
   code              TEXT NOT NULL,             -- "RUN-4201"
   name              TEXT NOT NULL,             -- "Run 1"
   status            TEXT NOT NULL,             -- pending | running | paused | completed | failed | terminated
@@ -81,7 +81,7 @@ CREATE INDEX idx_runs_status ON runs(status);
 
 -- Per-node aggregates. This is what Analytics dashboards read.
 CREATE TABLE run_node_metrics (
-  run_id            TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+  run_id            TEXT NOT NULL,
   node_id           TEXT NOT NULL,             -- campaign_nodes.id in this run's campaign
   entered           INTEGER NOT NULL DEFAULT 0,
   exited            INTEGER NOT NULL DEFAULT 0,
@@ -90,7 +90,7 @@ CREATE TABLE run_node_metrics (
 
 -- Per-edge flow volumes (for the Sankey diagram).
 CREATE TABLE run_edge_metrics (
-  run_id            TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+  run_id            TEXT NOT NULL,
   edge_id           TEXT NOT NULL,
   source_id         TEXT NOT NULL,
   target_id         TEXT NOT NULL,
@@ -101,8 +101,8 @@ CREATE TABLE run_edge_metrics (
 
 CREATE TABLE leads (
   id                TEXT PRIMARY KEY,          -- "L-10001"
-  run_id            TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
-  campaign_id       TEXT NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  run_id            TEXT NOT NULL,
+  campaign_id       TEXT NOT NULL,
   name              TEXT NOT NULL,
   phone             TEXT NOT NULL,
   email             TEXT,

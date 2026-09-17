@@ -10,6 +10,7 @@ import { Wrench, Search, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { TOOLS, STATUS_LABEL } from "@/lib/tool-registry";
+import { useAgents } from "@/lib/agent-store";
 
 export const Route = createFileRoute("/agents/")({
   component: Agents,
@@ -41,32 +42,17 @@ function Agents() {
             <div className="flex items-center gap-2">
               <Button
                 size="sm"
-                variant="outline"
                 className="h-8 gap-1.5 text-xs"
-                onClick={() => navigate({ to: "/agents/new", search: { type: "chat" } })}
+                onClick={() => navigate({ to: "/agents/new", search: {} })}
               >
-                <Plus className="h-3.5 w-3.5" /> New chat agent
-              </Button>
-              <Button
-                size="sm"
-                className="h-8 gap-1.5 text-xs"
-                onClick={() => navigate({ to: "/agents/new", search: { type: "voice" } })}
-              >
-                <Plus className="h-3.5 w-3.5" /> New voice agent
+                <Plus className="h-3.5 w-3.5" /> New agent
               </Button>
             </div>
           ) : undefined
         }
       />
 
-      <PageTabs<Tab>
-        value={tab}
-        onChange={setTab}
-        tabs={[
-          { id: "builder", label: "Builder", count: INITIAL_AGENTS.length },
-          { id: "tools", label: "Tools", count: TOOLS.length },
-        ]}
-      />
+      <BuilderTabsHeader tab={tab} setTab={setTab} />
 
       {tab === "builder" && <Builder />}
       {tab === "tools" && <Tools />}
@@ -74,26 +60,31 @@ function Agents() {
   );
 }
 
-type AgentType = "chat" | "voice";
 type AgentStatus = "live" | "draft" | "paused" | "archived";
 
-type Agent = { id: string; name: string; type: AgentType; status: AgentStatus; campaignNames: string[]; convs: string };
-
-const INITIAL_AGENTS: Agent[] = [
-  { id: "a_voice_react", name: "Reactivation Voice", type: "voice", status: "live", convs: "3.1K", campaignNames: ["Reactivate Paytm Soundbox Merchants", "Cart Abandonment"] },
-  { id: "a_renewal_voice", name: "Renewal Voice", type: "voice", status: "live", convs: "1.8K", campaignNames: ["Insurance Renewal"] },
-  { id: "a_collections_voice", name: "PL Collections Voice", type: "voice", status: "live", convs: "2.4K", campaignNames: ["PL DPD Collections"] },
-  { id: "a_winback", name: "Loyalty Voice", type: "voice", status: "live", convs: "986", campaignNames: ["Loyalty Card Upsell"] },
-];
-
 const AGENT_STATUSES: AgentStatus[] = ["live", "draft", "paused", "archived"];
+
+function BuilderTabsHeader({ tab, setTab }: { tab: Tab; setTab: (t: Tab) => void }) {
+  const agents = useAgents();
+  return (
+    <PageTabs<Tab>
+      value={tab}
+      onChange={setTab}
+      tabs={[
+        { id: "builder", label: "Builder", count: Object.keys(agents).length },
+        { id: "tools", label: "Tools", count: TOOLS.length },
+      ]}
+    />
+  );
+}
 
 function Builder() {
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
   const [fStatus, setFStatus] = useState<"all" | AgentStatus>("all");
+  const agents = useAgents();
 
-  const filtered = INITIAL_AGENTS.filter((a) => {
+  const filtered = Object.values(agents).filter((a) => {
     if (fStatus !== "all" && a.status !== fStatus) return false;
     if (query && !a.name.toLowerCase().includes(query.toLowerCase())) return false;
     return true;
@@ -155,7 +146,7 @@ function Builder() {
   );
 }
 
-function StatusTag({ status }: { status: AgentStatus }) {
+function StatusTag({ status }: { status: string }) {
   const tone =
     status === "live" ? "border-success/30 bg-success/10 text-success"
     : status === "draft" ? "border-warning/30 bg-warning/10 text-warning"

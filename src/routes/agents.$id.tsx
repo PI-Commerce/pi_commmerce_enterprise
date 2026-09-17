@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { AgentBuilder } from "@/components/agents/AgentBuilder";
-import { getAgentRecord, AGENT_RECORDS } from "@/lib/agent-data";
+import { useAgents } from "@/lib/agent-store";
 
 export const Route = createFileRoute("/agents/$id")({
   component: EditAgent,
@@ -11,6 +11,14 @@ export const Route = createFileRoute("/agents/$id")({
 
 function EditAgent() {
   const { id } = Route.useParams();
-  const record = getAgentRecord(id) ?? AGENT_RECORDS.a_voice_react;
-  return <AgentBuilder mode="edit" type={record.type} record={record} />;
+  const agents = useAgents();
+  const record = agents[id];
+  if (!record) {
+    return (
+      <div className="flex h-screen w-screen items-center justify-center bg-background text-sm text-muted-foreground">
+        Agent not found.
+      </div>
+    );
+  }
+  return <AgentBuilder mode="edit" type="voice" record={record} />;
 }
