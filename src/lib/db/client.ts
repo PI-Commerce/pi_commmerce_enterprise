@@ -38,7 +38,12 @@ export type Env = {
 
 let runtimeEnv: Env | null = null;
 
-/** Called by the worker's fetch entry once per request. */
+/**
+ * Called by the worker's fetch entry once per request. Nitro's cloudflare-module
+ * preset ALSO stashes env at `globalThis.__env__` — we prefer that when
+ * present because Nitro replaces our fetch handler and this manual path
+ * never fires on the deployed Worker.
+ */
 export function setRuntimeEnv(env: unknown): void {
   runtimeEnv = env as Env;
 }
@@ -46,18 +51,26 @@ export function setRuntimeEnv(env: unknown): void {
 /**
  * Return the current worker's env.
  *
- * Throws if the caller runs before `setRuntimeEnv` (which the fetch handler
- * always calls) — that's a bundle-order bug, not a runtime problem.
+ * Resolution order:
+ *   1. `globalThis.__env__` — Nitro's cloudflare-module preset sets this at
+ *      the top of every request (`dist/server/index.mjs`). This is what
+ *      the deployed Worker uses; our src/server.ts fetch handler doesn't
+ *      run in prod because Nitro swaps it for its own entry.
+ *   2. `runtimeEnv` — manually seeded via {@link setRuntimeEnv}. Used by
+ *      test harnesses / local dev paths that go through src/server.ts.
+ *
+ * Throws only if BOTH are missing — that's a bundle-order bug, not a
+ * runtime problem.
  */
 export function getEnv(): Env {
-  if (!runtimeEnv) {
-    throw new Error(
-      "getEnv() called before setRuntimeEnv. This module is server-only; " +
-      "the fetch handler in src/server.ts must call setRuntimeEnv(env) before " +
-      "any server function reaches DB / KV.",
-    );
-  }
-  return runtimeEnv;
+  const nitroEnv = (globalThis as { __env__?: Env }).__env__;
+  if (nitroEnv) return nitroEnv;
+  if (runtimeEnv) return runtimeEnv;
+  throw new Error(
+    "getEnv() called before Nitro populated globalThis.__env__ (and no manual " +
+    "setRuntimeEnv seed). This usually means the server fn ran outside a fetch " +
+    "handler.",
+  );
 }
 
 /** Convenience: `getDb()` for the D1 binding. */
