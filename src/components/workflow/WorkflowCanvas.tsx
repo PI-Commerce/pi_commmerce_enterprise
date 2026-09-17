@@ -13,6 +13,7 @@ import { NODE_LABELS } from "@/lib/campaign-types";
 import { whatsappOutputs, completedOutput, deriveNodeOutcomeVariables } from "@/lib/wa-outputs";
 import { EXAMPLE_CAMPAIGNS } from "@/lib/campaign-examples";
 import { getSuggestion } from "@/lib/pi-node-suggestions";
+import { applyPiToolCallsToGraph, type PiToolCallLog } from "@/lib/pi-canvas-apply";
 import { elkLayout, type Point } from "@/lib/flow-layout";
 import { useRegion, localizeTzAbbrev, localizeCurrency } from "@/lib/region";
 import { ConfigPanel } from "./ConfigPanel";
@@ -324,6 +325,24 @@ export function WorkflowCanvas({
     [nodes, edges, setNodes, setEdges, onDirty, refit],
   );
 
+  // Builder-scope Ask Pi tool calls landed. Fold each insert_node /
+  // connect_nodes / update_node into ReactFlow's live state so the graph
+  // updates the moment Pi's answer arrives — no refetch, no round-trip.
+  // The same tool calls also wrote to D1 server-side (via the askPi
+  // handler), so the change survives refresh.
+  const applyPiToolCalls = useCallback(
+    (toolCalls: PiToolCallLog[]) => {
+      const next = applyPiToolCallsToGraph(toolCalls, nodes, edges);
+      if (!next.changed) return;
+      setNodes(next.nodes);
+      setEdges(next.edges);
+      setSelected(null);
+      onDirty?.();
+      refit();
+    },
+    [nodes, edges, setNodes, setEdges, onDirty, refit],
+  );
+
   const deleteNode = useCallback(
     (id: string) => {
       const target = nodes.find((n) => n.id === id);
@@ -476,8 +495,10 @@ export function WorkflowCanvas({
           mode="wizard"
           nudge={{ label: "Ask Pi to build your campaign", active: autoStartAskPi }}
           autoOpenWizard={askPiOpen}
+          campaignId={campaignId}
           onBuildingChange={setAiBuilding}
           onApplySuggestion={applySuggestion}
+          onPiToolCalls={applyPiToolCalls}
           onWizardSkeleton={(skel) => {
             setSelected(null);
             setNodes(skel.nodes);

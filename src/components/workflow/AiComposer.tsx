@@ -3,6 +3,8 @@ import { Sparkles, X } from "lucide-react";
 import { AskPiWizardBody, type AskPiPlan, type WizardPhase } from "./AskPiWizard";
 import { CANVAS_CONTEXT, type PiResult } from "@/lib/ask-pi-context";
 import { getSuggestion } from "@/lib/pi-node-suggestions";
+import { askPi } from "@/lib/server-fns/pi-llm";
+import { summarizePiEdits, type PiToolCallLog } from "@/lib/pi-canvas-apply";
 import {
   PiPill,
   PiPanel,
@@ -28,6 +30,17 @@ export type AiComposerProps = {
   onBuildingChange?: (building: boolean) => void;
   /** I3 — confirm a node-level Pi suggestion; the canvas runs its real graph transform. */
   onApplySuggestion?: (s: { nodeId: string; suggestionId: string }) => void;
+  /**
+   * Builder scope — the current campaign id (needed by the askPi server fn
+   * so the LLM's mutation tools know which campaign to write to in D1).
+   */
+  campaignId?: string;
+  /**
+   * Builder scope — called with the LLM's `toolCalls` array after every
+   * successful answer. The canvas parses these and applies them to
+   * ReactFlow's node/edge state so the graph changes are visible immediately.
+   */
+  onPiToolCalls?: (toolCalls: PiToolCallLog[]) => void;
 };
 
 export function AiComposer({
@@ -38,6 +51,8 @@ export function AiComposer({
   onWizardBuild,
   onBuildingChange,
   onApplySuggestion,
+  campaignId,
+  onPiToolCalls,
 }: AiComposerProps = {}) {
   const [state, setState] = useState<State>("collapsed");
   const [value, setValue] = useState("");
@@ -46,6 +61,9 @@ export function AiComposer({
   const [pendingSuggestion, setPendingSuggestion] = useState<
     { nodeId: string; suggestionId: string; result: PiResult } | null
   >(null);
+  // Live LLM answer surfaced from askPi. When present, PiResultCard shows it
+  // (with a summary of any canvas edits Pi made) instead of the canned copy.
+  const [liveResult, setLiveResult] = useState<PiResult | null>(null);
   const [nudgeDismissed, setNudgeDismissed] = useState(false);
   const [hasEngaged, setHasEngaged] = useState(false);
   // The blank-canvas build wizard runs once. After it completes, Ask Pi becomes a chat composer.
@@ -117,15 +135,45 @@ export function AiComposer({
     }
   }, [state, wizardPhase]);
 
-  const submit = () => {
-    if (!value.trim()) return;
+  const submit = async () => {
+    const question = value.trim();
+    if (!question) return;
     setPendingSuggestion(null);
+    setLiveResult(null);
     setState("thinking");
-    setTimeout(() => setState("result"), 2200);
+    // Builder-scope call: LLM has read + mutate tools over D1's DSL. If the
+    // call fails (missing D1, missing TFY key, endpoint unreachable), we fall
+    // back to the canned CANVAS_CONTEXT.result so the demo never dead-ends.
+    try {
+      const r = await askPi({
+        data: {
+          scope: "builder",
+          question,
+          context: campaignId ? { campaignId, surface: "Campaign canvas" } : { surface: "Campaign canvas" },
+        },
+      });
+      if (r.ok) {
+        const toolCalls = r.toolCalls as PiToolCallLog[];
+        // Fire canvas mutations first so the graph visibly updates before the
+        // result panel renders — feels instant.
+        if (toolCalls.length > 0) onPiToolCalls?.(toolCalls);
+        const edits = summarizePiEdits(toolCalls);
+        setLiveResult({
+          text: r.answer,
+          diff: edits.length > 0 ? edits : undefined,
+          cta: edits.length > 0 ? "Got it" : "Got it",
+        });
+      }
+      // If !ok, liveResult stays null → PiResultCard shows CANVAS_CONTEXT.result.
+    } catch {
+      // Same fallback path.
+    }
+    setState("result");
   };
 
   const reset = () => {
     setPendingSuggestion(null);
+    setLiveResult(null);
     setValue("");
     setState("idle");
   };
@@ -254,6 +302,10 @@ export function AiComposer({
                   <PiThinking steps={CANVAS_CONTEXT.thinking} />
                 ) : pendingSuggestion ? (
                   <PiResultCard result={pendingSuggestion.result} onAccept={confirmSuggestion} onDismiss={reset} />
+                ) : liveResult ? (
+                  // Real LLM answer + summary of edits Pi just applied to the canvas.
+                  // Canvas is already mutated by this point (onPiToolCalls fired first).
+                  <PiResultCard result={liveResult} onAccept={reset} onDismiss={reset} />
                 ) : (
                   <PiResultCard result={CANVAS_CONTEXT.result} onAccept={reset} onDismiss={reset} />
                 )}
