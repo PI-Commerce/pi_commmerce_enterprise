@@ -37,10 +37,13 @@ export const CUSTOM_AI_ACTION = "Custom AI Action" as const;
  * -------------------------------------------------------------------------- */
 
 /** Returns a human-readable error string if the transform is misconfigured,
- *  else `undefined`. v1: only `prompt` + `output` are required. */
+ *  else `undefined`. v1: `output` is always required; `prompt` is only required
+ *  when the type is `Custom AI Action`. Preset formatter/parser types
+ *  (Currency Formatting, Translate, etc.) drive their behaviour from
+ *  type-specific fields and don't take a prompt. */
 export function transformError(t: PresetTransform): string | undefined {
   if (!t.output?.trim()) return "Output variable name required";
-  if (!t.prompt?.trim()) return "Prompt required";
+  if (t.type === CUSTOM_AI_ACTION && !t.prompt?.trim()) return "Prompt required";
   return undefined;
 }
 

@@ -387,13 +387,13 @@ const C_PL_COLLECT = buildCampaign("BFSI · PL DPD Collections", [
   sAiTransform("aitCollect", "Enrich borrower context", "2 AI-derived variables", [
     {
       id: "t1", type: "Custom AI Action",
-      label: "Format amount due", input: "", output: "amount_due_fmt",
-      prompt: "Format contact.amount_due as an INR currency string with correct separators (e.g. ₹18,450).",
+      label: "Format amount due", input: "contact.amount_due", output: "amount_due_fmt",
+      prompt: "Format contact.amount_due as an INR currency string with correct separators (e.g. 18450 → ₹18,450). Return the formatted string only, no leading text.",
     },
     {
       id: "t2", type: "Custom AI Action",
-      label: "Hindi greeting", input: "", output: "first_name_hi",
-      prompt: "Transliterate contact.first_name into the Devanagari script for use in a Hindi WhatsApp greeting when preferred_lang is 'hi'.",
+      label: "Hindi greeting", input: "contact.first_name", output: "first_name_hi",
+      prompt: "Transliterate contact.first_name into the Devanagari script for use in a Hindi WhatsApp greeting when contact.preferred_lang is 'hi'. Return only the transliterated name, no Latin fallback.",
     },
   ]),
   sCond("dpd", "DPD branch", "days_past_due", [
@@ -515,18 +515,18 @@ const C_CART = buildCampaign("D2C · Cart Abandonment", [
   sAiTransform("aitEnrich", "Enrich cart context", "3 AI-derived variables", [
     {
       id: "t1", type: "Custom AI Action",
-      label: "Normalize phone", input: "", output: "phone_e164",
-      prompt: "Normalize contact.phone to E.164 international format (e.g. +91XXXXXXXXXX).",
+      label: "Normalize phone", input: "contact.phone", output: "phone_e164",
+      prompt: "Normalize contact.phone to E.164 international format (e.g. 9810012345 → +919810012345). Assume Indian numbers when no country code is present. Return only the normalized number.",
     },
     {
       id: "t2", type: "Custom AI Action",
-      label: "Format cart value", input: "", output: "cart_value_fmt",
-      prompt: "Format contact.cart_value as an INR currency string with correct separators (e.g. ₹5,499).",
+      label: "Format cart value", input: "contact.cart_value", output: "cart_value_fmt",
+      prompt: "Format contact.cart_value as an INR currency string with correct separators for a WhatsApp cart-recovery message (e.g. 5499 → ₹5,499). Return only the formatted string.",
     },
     {
       id: "t3", type: "Custom AI Action",
-      label: "Greeting", input: "", output: "first_name_hi",
-      prompt: "Transliterate contact.first_name into the Devanagari script for use in a Hindi WhatsApp greeting.",
+      label: "Greeting", input: "contact.first_name", output: "first_name_hi",
+      prompt: "Transliterate contact.first_name into the Devanagari script for use in a Hindi WhatsApp greeting on the cart-abandonment message. Return only the transliterated name.",
     },
   ]),
   apiCart_cart,
@@ -874,8 +874,8 @@ const C_SOUNDBOX = buildCampaign("B2B · Reactivate Paytm Soundbox Merchants", [
   sAiTransform("aitEnrich", "Enrich merchant context", "3 AI-derived variables", [
     {
       id: "t1", type: "Custom AI Action",
-      label: "Normalize phone", input: "", output: "phone_e164",
-      prompt: "Normalize contact.phone to E.164 international format (e.g. +91XXXXXXXXXX).",
+      label: "Normalize phone", input: "contact.phone", output: "phone_e164",
+      prompt: "Normalize the merchant's contact.phone to E.164 international format (e.g. 9810012345 → +919810012345). Assume Indian numbers when no country code is present. Return only the normalized number.",
     },
     {
       id: "t2", type: "Custom AI Action",
@@ -884,8 +884,8 @@ const C_SOUNDBOX = buildCampaign("B2B · Reactivate Paytm Soundbox Merchants", [
     },
     {
       id: "t3", type: "Custom AI Action",
-      label: "Greeting", input: "", output: "first_name_hi",
-      prompt: "Transliterate contact.first_name into the Devanagari script for use in a Hindi WhatsApp greeting.",
+      label: "Greeting", input: "contact.first_name", output: "first_name_hi",
+      prompt: "Transliterate the merchant's contact.first_name into the Devanagari script so we can open the Soundbox reactivation message with a Hindi 'Namaste'. Return only the transliterated name.",
     },
   ]),
   sCond("dormancy", "Dormancy bucket", "last_txn_days", [

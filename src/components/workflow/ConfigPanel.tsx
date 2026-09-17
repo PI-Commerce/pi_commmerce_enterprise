@@ -3024,6 +3024,152 @@ function AiTransformFields({
 }
 
 /* ------------------------------------------------------------------------ *
+ *  TypedTransformFields — the schema-declared field(s) for a preset
+ *  transformation type (Translate, Currency Formatting, etc.). Rendered in
+ *  place of the Prompt textarea when the row's type isn't Custom AI Action.
+ *  Read-only for preset campaigns; the fields exist so hydrated rows show
+ *  their real configuration instead of an empty required Prompt.
+ * ------------------------------------------------------------------------ */
+
+const AI_LANGS: { value: string; label: string }[] = [
+  { value: "en", label: "English" },
+  { value: "hi", label: "Hindi" },
+  { value: "ta", label: "Tamil" },
+  { value: "te", label: "Telugu" },
+  { value: "mr", label: "Marathi" },
+  { value: "bn", label: "Bengali" },
+  { value: "gu", label: "Gujarati" },
+  { value: "kn", label: "Kannada" },
+  { value: "ml", label: "Malayalam" },
+  { value: "pa", label: "Punjabi" },
+];
+
+const AI_CURRENCIES: { value: string; label: string }[] = [
+  { value: "INR", label: "INR (₹)" },
+  { value: "USD", label: "USD ($)" },
+  { value: "EUR", label: "EUR (€)" },
+  { value: "GBP", label: "GBP (£)" },
+  { value: "AED", label: "AED (د.إ)" },
+];
+
+const AI_DATE_FORMATS: { value: string; label: string }[] = [
+  { value: "DD MMM YYYY", label: "DD MMM YYYY (24 Jul 2026)" },
+  { value: "DD/MM/YYYY", label: "DD/MM/YYYY (24/07/2026)" },
+  { value: "MM/DD/YYYY", label: "MM/DD/YYYY (07/24/2026)" },
+  { value: "YYYY-MM-DD", label: "YYYY-MM-DD (2026-07-24)" },
+];
+
+function LangSelect({
+  value, disabled, onChange, label, placeholder,
+}: { value?: string; disabled?: boolean; onChange: (v: string) => void; label: string; placeholder?: string }) {
+  return (
+    <Field label={label} required>
+      <Select value={value ?? ""} onValueChange={onChange} disabled={disabled}>
+        <SelectTrigger className="h-9 text-[12px]"><SelectValue placeholder={placeholder ?? "Select language…"} /></SelectTrigger>
+        <SelectContent>
+          {AI_LANGS.map((l) => <SelectItem key={l.value} value={l.value}>{l.label}</SelectItem>)}
+        </SelectContent>
+      </Select>
+    </Field>
+  );
+}
+
+function TypedTransformFields({
+  transform: a, readOnly, onPatch,
+}: {
+  transform: AiTransform;
+  readOnly?: boolean;
+  onPatch: (p: Partial<AiTransform>) => void;
+}) {
+  const t = a.type;
+  return (
+    <div className="space-y-2.5">
+      <div className="rounded-md border border-dashed border-border bg-muted/30 px-2.5 py-1.5 text-[11px] text-muted-foreground">
+        Transformation type: <span className="font-medium text-foreground">{t}</span>
+      </div>
+
+      {(t === "Translate" || t === "Transliterate") && (
+        <>
+          <LangSelect label="Input language" value={a.inputLang} disabled={readOnly}
+            onChange={(v) => onPatch({ inputLang: v })} />
+          <LangSelect label="Output language" value={a.outputLang} disabled={readOnly}
+            onChange={(v) => onPatch({ outputLang: v })} />
+        </>
+      )}
+
+      {t === "Numerical Parsing" && (
+        <LangSelect label="Input language" value={a.inputLang} disabled={readOnly}
+          onChange={(v) => onPatch({ inputLang: v })} />
+      )}
+
+      {t === "Numerical Transcription" && (
+        <LangSelect label="Output language" value={a.outputLang} disabled={readOnly}
+          onChange={(v) => onPatch({ outputLang: v })} />
+      )}
+
+      {t === "Currency Formatting" && (
+        <Field label="Output currency" required>
+          <Select value={a.outputCurrency ?? ""} onValueChange={(v) => onPatch({ outputCurrency: v })} disabled={readOnly}>
+            <SelectTrigger className="h-9 text-[12px]"><SelectValue placeholder="Select currency…" /></SelectTrigger>
+            <SelectContent>
+              {AI_CURRENCIES.map((c) => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </Field>
+      )}
+
+      {t === "Currency Transcription" && (
+        <>
+          <Field label="Output currency" required>
+            <Select value={a.outputCurrency ?? ""} onValueChange={(v) => onPatch({ outputCurrency: v })} disabled={readOnly}>
+              <SelectTrigger className="h-9 text-[12px]"><SelectValue placeholder="Select currency…" /></SelectTrigger>
+              <SelectContent>
+                {AI_CURRENCIES.map((c) => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </Field>
+          <LangSelect label="Output language" value={a.outputLang} disabled={readOnly}
+            onChange={(v) => onPatch({ outputLang: v })} />
+        </>
+      )}
+
+      {t === "Phone Number Normalization" && (
+        <Field label="Phone format" required>
+          <Select value={a.phoneFormat ?? ""} onValueChange={(v) => onPatch({ phoneFormat: v as "E164" | "domestic" })} disabled={readOnly}>
+            <SelectTrigger className="h-9 text-[12px]"><SelectValue placeholder="Select format…" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="E164">E.164 international (+91XXXXXXXXXX)</SelectItem>
+              <SelectItem value="domestic">Domestic (XXXXXXXXXX)</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+      )}
+
+      {t === "Date Formatting" && (
+        <>
+          <Field label="Date format" required>
+            <Select value={a.dateFormat ?? ""} onValueChange={(v) => onPatch({ dateFormat: v })} disabled={readOnly}>
+              <SelectTrigger className="h-9 text-[12px]"><SelectValue placeholder="Select format…" /></SelectTrigger>
+              <SelectContent>
+                {AI_DATE_FORMATS.map((f) => <SelectItem key={f.value} value={f.value}>{f.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </Field>
+          <LangSelect label="Output language" value={a.outputLang} disabled={readOnly}
+            onChange={(v) => onPatch({ outputLang: v })} />
+        </>
+      )}
+
+      {a.input?.trim() && (
+        <Field label="Input variable">
+          <Input value={a.input} disabled className="h-9 font-mono text-[12px]" />
+        </Field>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------------ *
  *  TransformRow — one row inside AiTransformationsSection.
  *
  *  v1 shape: no type picker (Custom AI Action is the only type), no input
@@ -3105,22 +3251,35 @@ function TransformRow({
           </CollapsibleTrigger>
         </div>
         <CollapsibleContent className="space-y-2.5 border-t border-border p-2.5">
-          {/* Prompt */}
-          <div className="space-y-1.5">
-            <Label className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-              Prompt <span className="text-destructive">*</span>
-            </Label>
-            <PromptEditor
-              value={a.prompt ?? ""}
-              disabled={readOnly}
-              placeholder="e.g. Summarize the customer's stated interest in savings products based on {{voice_1}} and {{whatsapp_2}}."
-              variables={promptVars}
-              onChange={(next) => onPatch({ prompt: next })}
-            />
-            <p className="text-[10.5px] text-muted-foreground">
-              Type <span className="font-mono">{"{{"}</span> to reference an upstream Voice or WhatsApp node — its transcript / chat history + eval outputs will be sent as context.
-            </p>
-          </div>
+          {/* Prompt — only meaningful for Custom AI Action. Every other preset
+              transform type is a deterministic formatter/parser and takes its
+              behaviour from the type-specific fields rendered below. */}
+          {a.type === CUSTOM_AI_ACTION && (
+            <div className="space-y-1.5">
+              <Label className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+                Prompt <span className="text-destructive">*</span>
+              </Label>
+              <PromptEditor
+                value={a.prompt ?? ""}
+                disabled={readOnly}
+                placeholder="e.g. Summarize the customer's stated interest in savings products based on {{voice_1}} and {{whatsapp_2}}."
+                variables={promptVars}
+                onChange={(next) => onPatch({ prompt: next })}
+              />
+              <p className="text-[10.5px] text-muted-foreground">
+                Type <span className="font-mono">{"{{"}</span> to reference an upstream Voice or WhatsApp node — its transcript / chat history + eval outputs will be sent as context.
+              </p>
+            </div>
+          )}
+
+          {/* Type-specific fields for preset transformation types. These are the
+              schema-declared fields on PresetTransform for each type — the runtime
+              side isn't built yet (see ai-transformations.ts), but they render so
+              preset campaigns hydrate coherently instead of showing an empty required
+              Prompt field for a Currency Formatting row. */}
+          {a.type !== CUSTOM_AI_ACTION && (
+            <TypedTransformFields transform={a} readOnly={readOnly} onPatch={onPatch} />
+          )}
 
           {/* Output variable name — sanitized to [a-z0-9_] on every keystroke */}
           <Field label="Output variable name" required>

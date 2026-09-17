@@ -91,6 +91,43 @@ import {
 } from "@/lib/reports";
 import { format as fmtDate } from "date-fns";
 
+/**
+ * Scale a run's KPIs and Sankey edge/node volumes to the fraction of the
+ * seeded 30-day window the picker covers. This is the transitional bridge
+ * until every widget reads from the D1 server functions
+ * (`getAnalyticsSummary` / `getAnalyticsLeads`) — until then, changing the
+ * range needs to visibly reshuffle the numbers on the whole page, not just
+ * the Logs table.
+ */
+function scaleRunToRange(run: RunRow, range: DateRange | undefined): RunRow {
+  const days = rangeDays(range);
+  if (!days || days >= 30) return run;
+  const ratio = Math.max(0.05, Math.min(1, days / 30));
+  const round = (n: number) => Math.max(0, Math.round(n * ratio));
+  const scaledNodes = run.sankey.nodes.map((n) => ({
+    ...n,
+    entered: round(n.entered),
+    exited: round(n.exited),
+  }));
+  const scaledEdges = run.sankey.edges.map((e) => ({
+    ...e,
+    value: round(e.value),
+  }));
+  return {
+    ...run,
+    audience: round(run.audience),
+    totalLeads: round(run.totalLeads),
+    leadsProcessed: round(run.leadsProcessed),
+    kpi: {
+      totalLeads: round(run.kpi.totalLeads),
+      validLeads: round(run.kpi.validLeads),
+      leadsProcessed: round(run.kpi.leadsProcessed),
+      successRate: run.kpi.successRate,
+    },
+    sankey: { nodes: scaledNodes, edges: scaledEdges },
+  };
+}
+
 export const Route = createFileRoute("/analytics")({
   component: Analytics,
   head: () => ({ meta: [{ title: "Analytics · Pi Commerce Enterprise" }] }),
@@ -425,10 +462,19 @@ function CampaignAnalytics({
           ),
     [campaign, version],
   );
-  const run =
+  const baseRun =
     visibleRuns.find((r) => r.id === runId) ??
     visibleRuns[0] ??
     campaign.runs[0];
+  // Range-scoped run — every KPI, funnel volume and Sankey edge is scaled
+  // proportionally to how many days the picker covers (out of the seeded
+  // 30-day window). This is the transition path: when the D1 server fn is
+  // wired the ratio-scaling goes away and the widgets read filtered
+  // aggregates directly.
+  const run = useMemo(
+    () => scaleRunToRange(baseRun, dateRange),
+    [baseRun, dateRange],
+  );
   const [openNode, setOpenNode] = useState<SankeyNode | null>(null);
   // The Sankey node currently being drilled into as an expanded freeform
   // workflow overlay. `null` = campaign canvas is showing normally.
@@ -514,12 +560,12 @@ function CampaignAnalytics({
             </SelectContent>
           </Select>
         </FilterField>
-        {/* Date range is meaningful only for Always-on runs; a Time-Scoped run is a fixed batch. */}
-        {run.runType === "always-on" && (
-          <FilterField label="Date range">
-            <DateRangePicker value={dateRange} onChange={onDateRangeChange} />
-          </FilterField>
-        )}
+        {/* Date range is always visible now — Time-Scoped runs also honor it,
+            since the picker scales every KPI / funnel / Sankey volume via
+            scaleRunToRange. */}
+        <FilterField label="Date range">
+          <DateRangePicker value={dateRange} onChange={onDateRangeChange} />
+        </FilterField>
       </div>
 
       <div className="grid grid-cols-3 gap-3">
@@ -2142,9 +2188,10 @@ function ChannelAnalytics({
       ) : kind === "voice" ? (
         (() => {
           const vrefs = selectedRefs.map((ref) => {
-            const run = CAMPAIGNS.find(
+            const baseRun = CAMPAIGNS.find(
               (c) => c.id === ref.campaignId,
             )!.runs.find((r) => r.id === ref.runId)!;
+            const run = scaleRunToRange(baseRun, dateRange);
             const node = run.sankey.nodes.find((n) => n.id === ref.nodeId)!;
             return { run, node };
           });
@@ -2158,9 +2205,10 @@ function ChannelAnalytics({
       ) : kind === "sms" ? (
         (() => {
           const srefs = selectedRefs.map((ref) => {
-            const run = CAMPAIGNS.find(
+            const baseRun = CAMPAIGNS.find(
               (c) => c.id === ref.campaignId,
             )!.runs.find((r) => r.id === ref.runId)!;
+            const run = scaleRunToRange(baseRun, dateRange);
             const node = run.sankey.nodes.find((n) => n.id === ref.nodeId)!;
             return { run, node };
           });
@@ -2169,9 +2217,10 @@ function ChannelAnalytics({
       ) : kind === "rcs" ? (
         (() => {
           const rrefs = selectedRefs.map((ref) => {
-            const run = CAMPAIGNS.find(
+            const baseRun = CAMPAIGNS.find(
               (c) => c.id === ref.campaignId,
             )!.runs.find((r) => r.id === ref.runId)!;
+            const run = scaleRunToRange(baseRun, dateRange);
             const node = run.sankey.nodes.find((n) => n.id === ref.nodeId)!;
             return { run, node };
           });

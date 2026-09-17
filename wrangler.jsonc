@@ -4,32 +4,29 @@
   "compatibility_date": "2025-09-24",
   "compatibility_flags": ["nodejs_compat"],
   "main": "src/server.ts",
-  // Phase 3 storage layer.
   //
-  // - D1 holds campaign DSL, runs, leads, per-node analytics, templates,
-  //   agents and tools. This is what Ask Pi's LLM tools read and write
-  //   through server functions.
-  // - KV holds small mutable state (workspace-level flags, active WABA
-  //   connection, freeform-workflow lock stamps) that doesn't need
-  //   relational shape.
+  // Phase 3 storage bindings are commented out until real Cloudflare
+  // resource ids exist. The `wrangler deploy` used by CI rejects a
+  // placeholder database_id, and we don't want to block prod deploys
+  // on that. Local dev uses `wrangler.dev.jsonc` instead (auto-selected
+  // by `wrangler dev`), which enables the bindings against local state
+  // under `.wrangler/state/v3/`.
   //
-  // For local dev wrangler auto-provisions .wrangler/state/v3/{d1,kv} on
-  // first `bun run dev`. Production ids get filled by `wrangler d1 create`
-  // and `wrangler kv namespace create` before the first prod deploy.
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "picom-vision",
-      "database_id": "00000000-0000-0000-0000-000000000000",
-      "migrations_dir": "migrations"
-    }
-  ],
-  "kv_namespaces": [
-    {
-      "binding": "KV",
-      "id": "00000000000000000000000000000000"
-    }
-  ],
+  // To enable on prod:
+  //   1. `wrangler d1 create picom-vision` → paste the returned uuid
+  //      into the `d1_databases[].database_id` block below and uncomment.
+  //   2. `wrangler kv namespace create picom-kv` → paste id into
+  //      `kv_namespaces[].id` and uncomment.
+  //   3. Push. CI's `wrangler deploy` will now bind DB and KV.
+  //
+  // "d1_databases": [
+  //   { "binding": "DB", "database_name": "picom-vision",
+  //     "database_id": "<uuid-from-wrangler-d1-create>",
+  //     "migrations_dir": "migrations" }
+  // ],
+  // "kv_namespaces": [
+  //   { "binding": "KV", "id": "<id-from-wrangler-kv-namespace-create>" }
+  // ],
   "vars": {
     "TFY_BASE_URL": "https://tfy.internal.ap-south-1.production.apps.pai.mypaytm.com/api/llm"
   }

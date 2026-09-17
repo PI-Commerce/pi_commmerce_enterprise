@@ -1,0 +1,26 @@
+{
+  // Local dev override. `wrangler dev` and `bun run db:*` scripts pick this up
+  // (`--config wrangler.dev.jsonc`). We can use a placeholder database_id here
+  // because local D1 is file-backed under `.wrangler/state/v3/` — the id only
+  // needs to be a valid uuid shape. Prod ids live in `wrangler.jsonc` and are
+  // filled after `wrangler d1 create`.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "picom-enterprise-demo",
+  "compatibility_date": "2025-09-24",
+  "compatibility_flags": ["nodejs_compat"],
+  "main": "src/server.ts",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "picom-vision",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "kv_namespaces": [
+    { "binding": "KV", "id": "00000000000000000000000000000000" }
+  ],
+  "vars": {
+    "TFY_BASE_URL": "https://tfy.internal.ap-south-1.production.apps.pai.mypaytm.com/api/llm"
+  }
+}
