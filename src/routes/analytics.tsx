@@ -2308,44 +2308,43 @@ function ChannelDetail({
 
   // Aggregate entered across all selected refs, then derive channel values.
   //
-  // Always-on partial-window math: for ALWAYS-ON runs that pre-date the date
-  // window, only count leads that ENTERED the run within the window — so a
-  // 7-day filter on a 30-day-old always-on run reports ~7/30 of its lifetime
-  // total. Time-scoped runs ignore the date window (their span is fixed and
-  // the date filter is hidden anyway). The scale is a linear approximation
-  // sufficient for the prototype's deterministic mock data; production would
-  // bucket events by their real timestamp.
+  // Range reflow: every ref's underlying run gets pushed through
+  // `scaleRunToRange`, which scales node volumes proportionally to
+  // `days / 30` when the picker is narrower than the seeded 30-day window
+  // (and passes through untouched for 30d+). This is the same transitional
+  // scaler the Campaign tab and the Voice/SMS/RCS channel views use — so
+  // changing the picker moves KPI cards, funnel bars, day-wise areas AND
+  // the per-template comparison uniformly with the rest of the surface.
   const totals = useMemo(() => {
-    const ASSUMED_ALWAYS_ON_DAYS = 30;
     let entered = 0;
     for (const ref of refs) {
-      const run = CAMPAIGNS.find((c) => c.id === ref.campaignId)?.runs.find(
+      const rawRun = CAMPAIGNS.find((c) => c.id === ref.campaignId)?.runs.find(
         (r) => r.id === ref.runId,
       );
-      const node = run?.sankey.nodes.find((n) => n.id === ref.nodeId);
+      if (!rawRun) continue;
+      const run = scaleRunToRange(rawRun, dateRange);
+      const node = run.sankey.nodes.find((n) => n.id === ref.nodeId);
       if (!node) continue;
-      let e = node.entered;
-      if (run?.runType === "always-on") {
-        const frac = Math.min(1, days / ASSUMED_ALWAYS_ON_DAYS);
-        e = Math.round(e * frac);
-      }
-      entered += e;
+      entered += node.entered;
     }
     return deriveChannelValues(kind, entered);
-  }, [kind, refs, days]);
+  }, [kind, refs, dateRange]);
 
   // WhatsApp templates in the current scope (one per node), with their pooled
   // base. Drives the Template-comparison chart and the "are clicks measurable?"
   // decision (only templates with a trackable button can produce a Clicked event).
+  // Uses the same range-scaled `entered` so template volumes move with the picker.
   const scopeTemplates = useMemo(() => {
     if (kind !== "whatsapp")
       return [] as { template: WaTemplate; entered: number }[];
     const byId = new Map<string, { template: WaTemplate; entered: number }>();
     for (const ref of refs) {
-      const run = CAMPAIGNS.find((c) => c.id === ref.campaignId)?.runs.find(
+      const rawRun = CAMPAIGNS.find((c) => c.id === ref.campaignId)?.runs.find(
         (r) => r.id === ref.runId,
       );
-      const node = run?.sankey.nodes.find((n) => n.id === ref.nodeId);
+      if (!rawRun) continue;
+      const run = scaleRunToRange(rawRun, dateRange);
+      const node = run.sankey.nodes.find((n) => n.id === ref.nodeId);
       if (!node) continue;
       const tpl =
         node.config?.waMode === "freeform"
@@ -2357,7 +2356,7 @@ function ChannelDetail({
       byId.set(tpl.id, cur);
     }
     return Array.from(byId.values());
-  }, [kind, refs]);
+  }, [kind, refs, dateRange]);
 
   // Clicked is only a real, measurable outcome when at least one in-scope template
   // carries a trackable button (a tracked URL or a Quick Reply). Otherwise we hide
