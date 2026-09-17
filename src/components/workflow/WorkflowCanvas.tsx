@@ -14,6 +14,8 @@ import { whatsappOutputs, completedOutput, deriveNodeOutcomeVariables } from "@/
 import { EXAMPLE_CAMPAIGNS } from "@/lib/campaign-examples";
 import { getSuggestion } from "@/lib/pi-node-suggestions";
 import { applyPiToolCallsToGraph, type PiToolCallLog } from "@/lib/pi-canvas-apply";
+import { readCampaignFn } from "@/lib/server-fns/campaigns";
+import { dslToReactFlow } from "@/lib/dsl-convert";
 import { elkLayout, type Point } from "@/lib/flow-layout";
 import { useRegion, localizeTzAbbrev, localizeCurrency } from "@/lib/region";
 import { ConfigPanel } from "./ConfigPanel";
@@ -75,6 +77,15 @@ const BLANK_NODES: Node<WorkflowNodeData>[] = [
     data: { kind: "start", title: "Start", locked: true, valid: true } },
 ];
 
+/**
+ * Snapshot handle the parent (route) uses to pull the current graph state
+ * when Save is pressed, without lifting nodes/edges into the route's state.
+ */
+export type CanvasGraphSnapshot = {
+  nodes: import("reactflow").Node<WorkflowNodeData>[];
+  edges: import("reactflow").Edge[];
+};
+
 export function WorkflowCanvas({
   status,
   campaignId,
@@ -84,6 +95,7 @@ export function WorkflowCanvas({
   isNew = false,
   onAiBuiltName,
   previewOnly = false,
+  onControlReady,
 }: {
   status: CampaignStatus;
   campaignId?: string;
@@ -95,9 +107,18 @@ export function WorkflowCanvas({
   /** Read-only snapshot mode (e.g. Version History): no palette, no Ask Pi, no editing,
    *  no run pulse — but nodes are still clickable and show their config read-only. */
   previewOnly?: boolean;
+  /**
+   * Fired once on mount with a snapshot getter. Parent stores it in a ref
+   * and calls it from `performSave` to build the DSL payload for D1 —
+   * avoids lifting the entire nodes/edges state up.
+   */
+  onControlReady?: (getGraph: () => CanvasGraphSnapshot) => void;
 }) {
   // Pre-built example campaigns ship their own authored graph; everything else
-  // (the existing demo campaigns) falls back to the shared seed graph.
+  // (the existing demo campaigns) falls back to the shared seed graph. On mount
+  // we ALSO try to hydrate from D1 — if the campaign has been saved (either by
+  // Pi's builder scope or by a previous canvas Save), those changes replace
+  // the in-memory seed. Falls back gracefully when D1 isn't bound.
   const example = campaignId ? EXAMPLE_CAMPAIGNS[campaignId] : undefined;
   const { tzAbbrev, symbol } = useRegion();
   const [nodes, setNodes, onNodesChange] = useNodesState(
@@ -122,6 +143,42 @@ export function WorkflowCanvas({
   const nodesRef = useRef(nodes); nodesRef.current = nodes;
   const edgesRef = useRef(edges); edgesRef.current = edges;
   const didLayoutRef = useRef(false);
+
+  // Expose a snapshot getter to the parent. Fires once on mount; the ref-based
+  // read means it always returns the LIVE nodes/edges without adding a
+  // re-render on every graph change.
+  useEffect(() => {
+    onControlReady?.(() => ({ nodes: nodesRef.current, edges: edgesRef.current }));
+  }, [onControlReady]);
+
+  // D1 hydrate: fire once per campaign id. If D1 returns a saved graph, we
+  // replace the seed nodes/edges. This is what lets Pi's builder-scope edits
+  // survive refresh — the LLM writes to D1 via insert_node, refresh re-reads
+  // from D1, canvas shows the updated graph. Falls back gracefully if D1
+  // isn't bound (prod pre-provisioning): the seed graph already rendered.
+  useEffect(() => {
+    if (isNew || !campaignId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await readCampaignFn({ data: campaignId });
+        if (cancelled || !r.ok || !r.dsl) return;
+        // Only override if the D1 graph is non-empty. An empty D1 row usually
+        // means the seed hasn't run remotely; sticking with EXAMPLE_CAMPAIGNS
+        // is friendlier than blanking the canvas.
+        if (r.dsl.nodes.length === 0) return;
+        const { nodes: hn, edges: he } = dslToReactFlow(r.dsl);
+        setNodes(hn);
+        setEdges(he);
+        // Trigger a re-lay: positions from D1 might differ from ELK's layout.
+        didLayoutRef.current = false;
+      } catch {
+        // Silent fallback — the seed graph is already rendered.
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [campaignId, isNew]);
 
   // Localize region-sensitive node text — timezone abbreviations (e.g. the Voice
   // "Call window … IST" subtitle) and currency symbols in conditional labels

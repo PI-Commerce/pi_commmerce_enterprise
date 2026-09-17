@@ -32,6 +32,7 @@ import { CreateRunDialog, type CampaignOption, type CreateRunPayload } from "@/c
 import { CSV_LIBRARY, makeCsvAsset, generateCsvContent, type CsvAsset } from "@/lib/data-library";
 import { downloadCsv } from "@/lib/analytics-leads";
 import { listRunStatusesFn, updateRunStatusFn } from "@/lib/server-fns/runs";
+import { listCampaignsFn } from "@/lib/server-fns/campaigns";
 
 
 export const Route = createFileRoute("/campaigns/")({
@@ -160,7 +161,45 @@ type Tab = "data" | "campaigns" | "runs";
 function CampaignList() {
   const navigate = useNavigate();
   const [tab, setTab] = useState<Tab>("campaigns");
-  const [rows] = useState<CampaignRow[]>(INITIAL);
+  const [rows, setRows] = useState<CampaignRow[]>(INITIAL);
+  // D1 hydrate: on mount, replace the in-memory seed rows with the live
+  // campaigns table. For campaigns present in D1 that overlap with INITIAL,
+  // D1's `updated_at` refreshes the `lastEdited` timestamp. Campaigns
+  // present only in D1 (e.g. created by Pi's builder scope) get appended.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await listCampaignsFn();
+        if (cancelled || !r.ok) return;
+        setRows((prev) => {
+          const byId = new Map<string, CampaignRow>(prev.map((row) => [row.id, row]));
+          for (const c of r.campaigns) {
+            const existing = byId.get(c.id);
+            const nextRow: CampaignRow = existing
+              ? { ...existing, state: c.status, lastEditedTs: c.updatedAt, lastEdited: relLabel(c.updatedAt) }
+              : {
+                  id: c.id,
+                  name: c.name,
+                  state: c.status,
+                  createdAt: "—",
+                  createdAtTs: c.updatedAt,
+                  lastEdited: relLabel(c.updatedAt),
+                  lastEditedTs: c.updatedAt,
+                  runType: "one-time",
+                  lastRun: "—",
+                  activeRuns: 0,
+                };
+            byId.set(c.id, nextRow);
+          }
+          return Array.from(byId.values());
+        });
+      } catch {
+        /* silent — INITIAL still renders */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
   // Runs are stateful — Pause / Resume / Terminate from the row menu mutate this
   // list so the status pill, filter counts, and "running now" KPIs all update.
   //
@@ -815,6 +854,17 @@ function nowLabel() {
   const ampm = hh >= 12 ? "PM" : "AM";
   const h12 = hh % 12 === 0 ? 12 : hh % 12;
   return `Today, ${h12}:${mm} ${ampm}`;
+}
+
+/** Human-relative time label ("just now", "5m ago", "3h ago", "Yesterday", "3d ago"). */
+function relLabel(ts: number): string {
+  const diff = Date.now() - ts;
+  if (diff < 60_000) return "just now";
+  if (diff < 60 * 60_000) return `${Math.floor(diff / 60_000)}m ago`;
+  if (diff < 24 * 60 * 60_000) return `${Math.floor(diff / (60 * 60_000))}h ago`;
+  const d = Math.floor(diff / (24 * 60 * 60_000));
+  if (d === 1) return "Yesterday";
+  return `${d}d ago`;
 }
 
 function StateTag({ state }: { state: CampaignStatus }) {

@@ -1,11 +1,14 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createFileRoute, useNavigate, useBlocker } from "@tanstack/react-router";
 import { toast } from "sonner";
-import { WorkflowCanvas } from "@/components/workflow/WorkflowCanvas";
+import { WorkflowCanvas, type CanvasGraphSnapshot } from "@/components/workflow/WorkflowCanvas";
 import { BuilderTopBar } from "@/components/workflow/BuilderTopBar";
 import type { CampaignStatus } from "@/lib/campaign-types";
 import { EXAMPLE_CAMPAIGNS } from "@/lib/campaign-examples";
 import { VERSION_HISTORY, makeVersion, type CampaignVersion } from "@/lib/campaign-versions";
+import { writeCampaignFn } from "@/lib/server-fns/campaigns";
+import { reactFlowToDsl } from "@/lib/dsl-convert";
+import type { CampaignVertical } from "@/lib/db/campaigns";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -104,12 +107,64 @@ function CampaignBuilder() {
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, [dirty]);
 
-  // The actual save. Before v1 exists (first run not done) a save is a plain draft
-  // save — no version. Once a history exists, every save mints a new version, so a
-  // run never spans configs and analytics stay pinned to one version.
+  // Canvas snapshot getter — WorkflowCanvas fires this once on mount, we hold
+  // the closure and call it on Save to build the D1 DSL payload.
+  const getGraphRef = useRef<(() => CanvasGraphSnapshot) | null>(null);
+  const registerCanvasControl = useCallback(
+    (getGraph: () => CanvasGraphSnapshot) => {
+      getGraphRef.current = getGraph;
+    },
+    [],
+  );
+
+  // Best-guess vertical from the campaign name / example seed. This drives
+  // the D1 `campaigns.vertical` column. If a name doesn't clearly map, we
+  // fall back to 'd2c' — one of the four legal enum values.
+  const detectVertical = useCallback((): CampaignVertical => {
+    if (example) {
+      const n = example.name.toLowerCase();
+      if (n.startsWith("bfsi")) return "bfsi";
+      if (n.startsWith("retail")) return "retail";
+      if (n.startsWith("b2b")) return "b2b";
+      if (n.startsWith("d2c")) return "d2c";
+    }
+    const n = name.toLowerCase();
+    if (n.includes("bfsi") || n.includes("insurance") || n.includes("loan")) return "bfsi";
+    if (n.includes("retail") || n.includes("loyalty")) return "retail";
+    if (n.includes("b2b") || n.includes("merchant") || n.includes("soundbox")) return "b2b";
+    return "d2c";
+  }, [example, name]);
+
+  // The actual save. Persists the current canvas graph to D1 AND (per the
+  // existing versioning model) mints a version once v1 exists. D1 write is
+  // fire-and-forget — if it fails (no binding on prod, offline), we still
+  // clear the dirty flag and show the toast, so the demo never dead-ends.
   const performSave = useCallback(() => {
     setDirty(false);
     setConfirmSaveOpen(false);
+
+    // D1 persist: build DSL from the live canvas snapshot + head fields.
+    const getGraph = getGraphRef.current;
+    if (getGraph && id && id !== "new") {
+      const { nodes, edges } = getGraph();
+      const dsl = reactFlowToDsl(
+        {
+          id,
+          name,
+          vertical: detectVertical(),
+          status,
+          description: undefined,
+          createdAt: 0, // writeCampaign backfills with now on first insert
+          updatedAt: 0,
+        },
+        nodes,
+        edges,
+      );
+      void writeCampaignFn({ data: dsl }).catch(() => {
+        /* silent — dirty already cleared, toast already shown */
+      });
+    }
+
     if (versions.length === 0) {
       toast.success("Changes saved", { description: name });
       return;
@@ -124,7 +179,7 @@ function CampaignBuilder() {
       }),
     ]);
     toast.success(`Saved as version ${nextNum}`, { description: name });
-  }, [name, versions]);
+  }, [name, versions, id, status, detectVertical]);
 
   // Save entry point: once v1 exists, warn that this creates a new version
   // (even an empty save after a pause). A pre-v1 draft save goes straight through.
@@ -201,6 +256,7 @@ function CampaignBuilder() {
           campaignId={id}
           onValidityChange={handleValidity}
           onDirty={handleDirty}
+          onControlReady={registerCanvasControl}
           isNew={isNew}
         />
       </div>
