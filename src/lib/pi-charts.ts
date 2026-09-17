@@ -158,6 +158,6 @@ export function generateChart(query: string): PiChartSpec {
   if (has(q, /(drop|dip|declin|fell|fall|slip|sank|why)/) && has(q, /(react|conver|campaign|8%)/)) return reactivationDrop();
   if (has(q, /(whatsapp|wa\b)/) && has(q, /(voice|call)/)) return waVsVoice();
   if (has(q, /(trend|over time|vs last|run vs|last run|this run|compare run|growth|daily|timeline)/)) return trendLine();
-  if (has(q, /(channel|by channel|split|breakdown|voice|whatsapp|sms|ads)/)) return barByChannel();
+  if (has(q, /(channel|by channel|split|breakdown|voice|whatsapp|sms|rcs)/)) return barByChannel();
   return barByChannel();
 }

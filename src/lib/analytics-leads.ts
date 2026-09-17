@@ -120,7 +120,6 @@ const STATUS_BY_KIND: Record<SankeyNodeKind, LeadStatus[]> = {
   // RCS: the node's delivery outcomes — delivered / read (RCS read receipt) /
   // failed (folds in handsets that aren't RCS-capable) / timeout.
   rcs: ["delivered", "read", "failed", "no_dlr"],
-  ads: ["clicked", "delivered"],
   aiTransform: [],
   end: [],
 };
@@ -130,7 +129,6 @@ const CHANNEL_BY_KIND: Partial<Record<SankeyNodeKind, ChannelKind>> = {
   voice: "voice",
   sms: "sms",
   rcs: "rcs",
-  ads: "ads",
 };
 
 /**
@@ -147,6 +145,60 @@ export function stageLabelFor(
       ? `${node.serial} • ${node.description}`
       : node.serial;
   return `${serialById.get(node.id) ?? "?"} · ${node.name.split(" · ")[0]}`;
+}
+
+/**
+ * Generate exactly `node.entered` leads placed at a single node. Use this when
+ * the leads table is scoped to a specific node (Channel view drill-down) so
+ * "1,500 Sent" and "1,500 leads in Logs" agree. Statuses are distributed to
+ * match the node kind's realistic outcome mix.
+ */
+export function generateLeadsForNode(run: RunRow, nodeId: string): Lead[] {
+  const node = run.sankey.nodes.find((n) => n.id === nodeId);
+  if (!node) return [];
+  const serialById = new Map(run.sankey.nodes.map((n, i) => [n.id, i + 1]));
+  const rand = rng(`${run.id || "default_run"}_${nodeId}`);
+  const total = node.entered;
+  const statuses = STATUS_BY_KIND[node.kind];
+  const leads: Lead[] = [];
+  for (let i = 0; i < total; i++) {
+    const status = statuses.length
+      ? statuses[Math.floor(rand() * statuses.length)]
+      : undefined;
+    const first = FIRST[Math.floor(rand() * FIRST.length)];
+    const last = LAST[Math.floor(rand() * LAST.length)];
+    const phone = `+91 9${Math.floor(100000000 + rand() * 899999999)}`;
+    leads.push({
+      id: `L-${String(10000 + i).padStart(5, "0")}`,
+      name: `${first} ${last}`,
+      phone,
+      email: `${first}.${last}@example.com`.toLowerCase(),
+      stageNodeId: node.id,
+      stageLabel: stageLabelFor(node, serialById),
+      channel: CHANNEL_BY_KIND[node.kind],
+      status,
+      cost: +(rand() * 0.18 + 0.02).toFixed(3),
+      duration: node.kind === "voice" ? Math.floor(20 + rand() * 240) : undefined,
+      updatedAt: (() => {
+        const h24 = Math.floor(rand() * 23);
+        const m = String(Math.floor(rand() * 59)).padStart(2, "0");
+        const period = h24 >= 12 ? "pm" : "am";
+        const h12 = h24 % 12 || 12;
+        return `${h12}:${m} ${period}`;
+      })(),
+      updatedDate: (() => {
+        const daysAgo = Math.floor(rand() * 30);
+        const d = new Date();
+        d.setHours(0, 0, 0, 0);
+        d.setDate(d.getDate() - daysAgo);
+        const y = d.getFullYear();
+        const mo = String(d.getMonth() + 1).padStart(2, "0");
+        const da = String(d.getDate()).padStart(2, "0");
+        return `${y}-${mo}-${da}`;
+      })(),
+    });
+  }
+  return leads;
 }
 
 /** Generate leads weighted by each node's `entered` count.  */

@@ -4,4 +4,33 @@
   "compatibility_date": "2025-09-24",
   "compatibility_flags": ["nodejs_compat"],
   "main": "src/server.ts",
+  // Phase 3 storage layer.
+  //
+  // - D1 holds campaign DSL, runs, leads, per-node analytics, templates,
+  //   agents and tools. This is what Ask Pi's LLM tools read and write
+  //   through server functions.
+  // - KV holds small mutable state (workspace-level flags, active WABA
+  //   connection, freeform-workflow lock stamps) that doesn't need
+  //   relational shape.
+  //
+  // For local dev wrangler auto-provisions .wrangler/state/v3/{d1,kv} on
+  // first `bun run dev`. Production ids get filled by `wrangler d1 create`
+  // and `wrangler kv namespace create` before the first prod deploy.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "picom-vision",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "KV",
+      "id": "00000000000000000000000000000000"
+    }
+  ],
+  "vars": {
+    "TFY_BASE_URL": "https://tfy.internal.ap-south-1.production.apps.pai.mypaytm.com/api/llm"
+  }
 }
