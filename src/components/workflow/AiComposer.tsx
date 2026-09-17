@@ -203,23 +203,44 @@ export function AiComposer({
           },
         ]);
       } else {
+        // Surface the actual server error so we can diagnose. Different
+        // error prefixes get slightly friendlier framing but always end
+        // with the raw error tail — until this is fully stable, showing
+        // the real string is worth more than a polished fallback.
+        const err = r.error ?? "unknown_error";
+        // Also log to console so devtools shows the raw error even if the
+        // user closes the chat panel before reading.
+        // eslint-disable-next-line no-console
+        console.error("[AskPi] askPi returned ok:false —", err);
+        const friendly = err.startsWith("d1_not_bound")
+          ? "Database isn't bound on this worker. Ask ops to provision D1."
+          : err.startsWith("runtime_env_missing")
+            ? "Worker runtime env is missing. Redeploy needed."
+            : err.startsWith("LLM gateway not configured")
+              ? "LLM gateway isn't configured on this worker. Set PI_AGENT_API_KEY as a wrangler secret."
+              : err.startsWith("tfy_401") || err.includes("Unauthorized")
+                ? "LLM auth failed — the API key is invalid or expired."
+                : err.startsWith("tfy_")
+                  ? "LLM gateway rejected the request."
+                  : err === "empty_response"
+                    ? "LLM returned an empty response — try again."
+                    : err === "exceeded_tool_rounds"
+                      ? "I got stuck in a loop. Try rephrasing more concretely."
+                      : "Something went wrong.";
         setMessages((prev) => [
           ...prev,
           {
             role: "assistant",
-            content:
-              r.error === "d1_not_bound"
-                ? "This worker doesn't have a database bound yet. Provision D1 to enable this."
-                : r.error?.startsWith("tfy_") || r.error?.includes("TFY_API_KEY")
-                  ? "I couldn't reach the language model. Try again in a moment."
-                  : "Something went wrong. Try again in a moment.",
+            content: `${friendly}\n\n\`${err}\``,
           },
         ]);
       }
     } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error("[AskPi] fetch/RPC threw —", e);
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", content: `Network hiccup — try again. (${(e as Error).message})` },
+        { role: "assistant", content: `Network hiccup — try again.\n\n\`${(e as Error).message}\`` },
       ]);
     } finally {
       setState("open");
