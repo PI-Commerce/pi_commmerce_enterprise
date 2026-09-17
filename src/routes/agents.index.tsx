@@ -28,6 +28,7 @@ type Tab = "builder" | "tools";
 
 function Agents() {
   const search = Route.useSearch();
+  const navigate = useNavigate();
   const [tab, setTab] = useState<Tab>(search.tab === "tools" ? "tools" : "builder");
 
   return (
@@ -35,6 +36,27 @@ function Agents() {
       <PageHeader
         title="Agents"
         description="Reusable voice and chat agents you can wire into any campaign."
+        actions={
+          tab === "builder" ? (
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 gap-1.5 text-xs"
+                onClick={() => navigate({ to: "/agents/new", search: { type: "chat" } })}
+              >
+                <Plus className="h-3.5 w-3.5" /> New chat agent
+              </Button>
+              <Button
+                size="sm"
+                className="h-8 gap-1.5 text-xs"
+                onClick={() => navigate({ to: "/agents/new", search: { type: "voice" } })}
+              >
+                <Plus className="h-3.5 w-3.5" /> New voice agent
+              </Button>
+            </div>
+          ) : undefined
+        }
       />
 
       <PageTabs<Tab>

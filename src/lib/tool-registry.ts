@@ -158,7 +158,7 @@ export const TOOLS: ToolDef[] = [
     updatedAt: "05 Jun 2026",
     inputs: [
       { key: "customer_id", dataType: "String", in: "query", source: "campaign", value: "customer_id", description: "Internal customer id" },
-      { key: "order_id", dataType: "String", in: "query", source: "agent", description: "Order the customer is asking about" },
+      { key: "order_id", dataType: "String", in: "query", source: "campaign", value: "order_id", description: "Order the customer is asking about (must be bound to a campaign variable — never left to the LLM)" },
     ],
     outputs: [
       { path: "$.order.delivery_status", varName: "delivered_status", dataType: "String", description: "in_transit / delivered / returned" },

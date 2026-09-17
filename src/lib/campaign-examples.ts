@@ -92,12 +92,27 @@ const sAbSplit = (
   config: { splitVariants: variants.map((v) => ({ id: v.id, label: v.label, pct: v.pct ?? 50 })) },
 });
 
-const sVoice = (id: string, title: string, subtitle?: string, cfg?: Partial<PresetConfig>): Spec => ({
+// Voice-node factory. `agent` is required — a Voice node bound to the wrong
+// agent calls the wrong tools with the wrong IDs at runtime, so the factory
+// never falls back to a global default. `toolInputMap` (per-tool argument
+// bindings) is optional and merged in when the caller supplies one.
+const sVoice = (
+  id: string,
+  title: string,
+  subtitle: string | undefined,
+  cfg: Partial<PresetConfig> & { agent: string },
+): Spec => ({
   id, kind: "voiceCall", title, subtitle,
   config: {
-    agent: "reactivation_voice",
-    voiceVarMap: [{ v: "{{name}}", def: "contact.first_name" }, { v: "{{phone}}", def: "contact.phone" }],
-    callStart: "10:00", callEnd: "19:00", timezone: "Asia/Kolkata (IST)", maxAttempts: 2, retryInterval: "1 hour",
+    voiceVarMap: [
+      { v: "{{name}}", def: "contact.first_name" },
+      { v: "{{phone}}", def: "contact.phone" },
+    ],
+    callStart: "10:00",
+    callEnd: "19:00",
+    timezone: "Asia/Kolkata (IST)",
+    maxAttempts: 2,
+    retryInterval: "1 hour",
     ...cfg,
   },
 });
@@ -263,14 +278,14 @@ const C_RENEWAL = buildCampaign("BFSI · Insurance Renewal", [
     { id: "low", label: "≤ ₹25,000", op: "less than or equal to", value: "25000" },
   ]),
   // high
-  sVoice("vCons", "Voice AI renewal consultation", "Renewal advisory call"),
+  sVoice("vCons", "Voice AI renewal consultation", "Renewal advisory call", { agent: "renewal_voice", toolInputMap: [{ v: "customer_id", def: "contact.customer_id" }, { v: "policy_id", def: "contact.policy_no" }] }),
   ffPolicyQs_ren,
   sWa("rlHigh", "Renewal link", "WhatsApp · renew now", "renewal_link_v1"),
   sCond("rcHigh", "Renewal check", "renewal_status", [
     { id: "yes", label: "Renewed", value: "renewed" },
     { id: "no", label: "Not renewed", value: "pending" },
   ]),
-  sVoice("vfuHigh", "Voice AI follow-up", "Reattempt · 1 retry", { maxAttempts: 1 }),
+  sVoice("vfuHigh", "Voice AI follow-up", "Reattempt · 1 retry", { agent: "renewal_voice", maxAttempts: 1, toolInputMap: [{ v: "customer_id", def: "contact.customer_id" }, { v: "policy_id", def: "contact.policy_no" }] }),
   // low — the renewal reminder IS the A/B test (one message, two copy variants)
   sAbSplit("abLow", "A/B split", "Renewal reminder · Benefits vs Savings", [
     { id: "vA", label: "Benefits", pct: 50 },
@@ -293,7 +308,7 @@ const C_RENEWAL = buildCampaign("BFSI · Insurance Renewal", [
     { id: "yes", label: "Yes", value: "renewed" },
     { id: "no", label: "No", value: "pending" },
   ]),
-  sVoice("vFinal", "Voice AI final renewal call", "Final attempt"),
+  sVoice("vFinal", "Voice AI final renewal call", "Final attempt", { agent: "renewal_voice", toolInputMap: [{ v: "customer_id", def: "contact.customer_id" }, { v: "policy_id", def: "contact.policy_no" }] }),
   sWa("rlFinal", "Renewal link", "WhatsApp · renew now", "renewal_link_v1"),
   sEnd(),
 ], [
@@ -367,9 +382,9 @@ const C_PL_COLLECT = buildCampaign("BFSI · PL DPD Collections", [
   }),
   sWa("waRem", "WhatsApp PL reminder", "WhatsApp · payment reminder", "collections_reminder_v1"),
   sWa("plEarly", "Payment link", "WhatsApp · pay now", "payment_link_v1"),
-  sVoice("vColl", "Voice AI PL collections call", "Personal Loan collections call"),
+  sVoice("vColl", "Voice AI PL collections call", "Personal Loan collections call", { agent: "pl_collections_voice", toolInputMap: [{ v: "customer_id", def: "contact.customer_id" }] }),
   sWa("plMid", "Payment link", "WhatsApp · pay now", "payment_link_v1"),
-  sVoice("vEsc", "Voice AI PL escalated call", "Escalated Personal Loan collections"),
+  sVoice("vEsc", "Voice AI PL escalated call", "Escalated Personal Loan collections", { agent: "pl_collections_voice", toolInputMap: [{ v: "customer_id", def: "contact.customer_id" }] }),
   apiLogPay_pl,
   sWa("plLate", "Payment link", "WhatsApp · pay now", "payment_link_v1"),
   sDelay("d1", 23, "Hours"),
@@ -377,7 +392,7 @@ const C_PL_COLLECT = buildCampaign("BFSI · PL DPD Collections", [
     { id: "yes", label: "Yes", value: "paid" },
     { id: "no", label: "No", value: "unpaid" },
   ]),
-  sVoice("vfu", "Voice AI PL follow-up", "Reattempt · 1 retry", { maxAttempts: 1 }),
+  sVoice("vfu", "Voice AI PL follow-up", "Reattempt · 1 retry", { agent: "pl_collections_voice", maxAttempts: 1, toolInputMap: [{ v: "customer_id", def: "contact.customer_id" }] }),
   sWa("plFu", "WhatsApp payment link", "WhatsApp · pay now", "payment_link_v1"),
   sEnd(),
 ], [
@@ -460,13 +475,13 @@ const C_CART = buildCampaign("D2C · Cart Abandonment", [
     { id: "high", label: "> ₹5,000", op: "greater than", value: "5000" },
     { id: "low", label: "≤ ₹5,000", op: "less than or equal to", value: "5000" },
   ]),
-  sVoice("vRec", "Voice AI recovery call", "Cart recovery call"),
+  sVoice("vRec", "Voice AI recovery call", "Cart recovery call", { agent: "reactivation_voice", toolInputMap: [{ v: "customer_id", def: "contact.customer_id" }, { v: "order_id", def: "contact.cart_id" }] }),
   sWa("cartHigh", "Cart link", "WhatsApp · complete purchase", "cart_link_v1"),
   sCond("purHigh", "Purchase check", "order_status", [
     { id: "yes", label: "Purchased", value: "placed" },
     { id: "no", label: "Not purchased", value: "pending" },
   ]),
-  sVoice("vRemHigh", "Voice AI reminder", "Reattempt · 1 retry", { maxAttempts: 1 }),
+  sVoice("vRemHigh", "Voice AI reminder", "Reattempt · 1 retry", { agent: "reactivation_voice", maxAttempts: 1, toolInputMap: [{ v: "customer_id", def: "contact.customer_id" }, { v: "order_id", def: "contact.cart_id" }] }),
   sAbSplit("ab", "A/B split", "Cart reminder · Discount vs Free shipping", [
     { id: "vA", label: "Discount" },
     { id: "vB", label: "Free shipping" },
@@ -494,7 +509,7 @@ const C_CART = buildCampaign("D2C · Cart Abandonment", [
     { id: "yes", label: "Yes", value: "placed" },
     { id: "no", label: "No", value: "pending" },
   ]),
-  sVoice("vRemLow", "Voice AI reminder", "Reattempt · 1 retry", { maxAttempts: 1 }),
+  sVoice("vRemLow", "Voice AI reminder", "Reattempt · 1 retry", { agent: "reactivation_voice", maxAttempts: 1, toolInputMap: [{ v: "customer_id", def: "contact.customer_id" }, { v: "order_id", def: "contact.cart_id" }] }),
   sEnd(),
 ], [
   ed("start", "aud"), ed("aud", "aitEnrich"), ed("aitEnrich", "apiCart"),
@@ -641,7 +656,7 @@ const C_LOYALTY_UPSELL = buildCampaign("Retail · Loyalty Card Upsell", [
     { id: "enrolled", label: "Enrolled", value: "enrolled" },
     { id: "none",     label: "Not enrolled", value: "pending" },
   ]),
-  sVoice("sUp", "Voice AI · upgrade to Gold", "Limited-time paid Gold upgrade offer", { maxAttempts: 2, timezone: "Asia/Kolkata (IST)" }),
+  sVoice("sUp", "Voice AI · upgrade to Gold", "Limited-time paid Gold upgrade offer", { agent: "loyalty_voice", maxAttempts: 2, timezone: "Asia/Kolkata (IST)", toolInputMap: [{ v: "customer_id", def: "contact.customer_id" }] }),
   sDelay("sDly", 24, "Hours"),
   apiUpg_loy,
   sCond("sUpg", "Upgraded to Gold?", "api_3.upgrade_status", [
@@ -785,7 +800,7 @@ const C_SOUNDBOX = buildCampaign("B2B · Reactivate Paytm Soundbox Merchants", [
   ]),
   ffHelpR,
   // Medium (60–180d): voice reactivation → comeback offer → wait → active again?
-  sVoice("vMed", "Voice AI reactivation call", "Reactivation outreach", { timezone: "Asia/Kolkata (IST)" }),
+  sVoice("vMed", "Voice AI reactivation call", "Reactivation outreach", { agent: "reactivation_voice", timezone: "Asia/Kolkata (IST)", toolInputMap: [{ v: "customer_id", def: "contact.customer_id" }, { v: "order_id", def: "contact.device_id" }] }),
   sWa("waMed", "WhatsApp offer", "WhatsApp · comeback offer", "soundbox_comeback_offer_v1"),
   sDelay("dM1", 48, "Hours"),
   sCond("checkM", "Active again?", "reactivation_status", [
@@ -794,7 +809,7 @@ const C_SOUNDBOX = buildCampaign("B2B · Reactivate Paytm Soundbox Merchants", [
   ]),
   ffHelpM,
   // High (180+d): final voice outreach → device replacement offer → CRM log
-  sVoice("vHigh", "Voice AI final outreach", "Final chance call", { timezone: "Asia/Kolkata (IST)", maxAttempts: 2 }),
+  sVoice("vHigh", "Voice AI final outreach", "Final chance call", { agent: "reactivation_voice", timezone: "Asia/Kolkata (IST)", maxAttempts: 2, toolInputMap: [{ v: "customer_id", def: "contact.customer_id" }, { v: "order_id", def: "contact.device_id" }] }),
   sWa("waHigh", "WhatsApp replacement offer", "WhatsApp · device replacement", "soundbox_device_replacement_v1"),
   apiLog,
   sEnd(),
