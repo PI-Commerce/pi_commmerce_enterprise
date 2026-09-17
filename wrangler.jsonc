@@ -1,33 +1,34 @@
 {
-  "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "picom-enterprise-demo",
-  "compatibility_date": "2025-09-24",
-  "compatibility_flags": ["nodejs_compat"],
-  "main": "src/server.ts",
-  //
-  // Phase 3 storage bindings are commented out until real Cloudflare
-  // resource ids exist. The `wrangler deploy` used by CI rejects a
-  // placeholder database_id, and we don't want to block prod deploys
-  // on that. Local dev uses `wrangler.dev.jsonc` instead (auto-selected
-  // by `wrangler dev`), which enables the bindings against local state
-  // under `.wrangler/state/v3/`.
-  //
-  // To enable on prod:
-  //   1. `wrangler d1 create picom-vision` → paste the returned uuid
-  //      into the `d1_databases[].database_id` block below and uncomment.
-  //   2. `wrangler kv namespace create picom-kv` → paste id into
-  //      `kv_namespaces[].id` and uncomment.
-  //   3. Push. CI's `wrangler deploy` will now bind DB and KV.
-  //
-  // "d1_databases": [
-  //   { "binding": "DB", "database_name": "picom-vision",
-  //     "database_id": "<uuid-from-wrangler-d1-create>",
-  //     "migrations_dir": "migrations" }
-  // ],
-  // "kv_namespaces": [
-  //   { "binding": "KV", "id": "<id-from-wrangler-kv-namespace-create>" }
-  // ],
-  "vars": {
-    "TFY_BASE_URL": "https://tfy.internal.ap-south-1.production.apps.pai.mypaytm.com/api/llm"
-  }
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "picom-enterprise-demo",
+	"compatibility_date": "2025-09-24",
+	"compatibility_flags": ["nodejs_compat"],
+	"main": "src/server.ts",
+	//
+	// Phase 3 storage bindings. `binding` must stay UPPERCASE — every server
+	// function reads `env.DB` and `env.KV` (see src/lib/db/client.ts). Wrangler
+	// suggests binding names based on the resource name (`picom_vision`,
+	// `picom_kv`) but our code path is fixed on DB / KV.
+	//
+	// Local dev uses `wrangler.dev.jsonc` (auto-selected by `wrangler dev` and
+	// the `db:*` scripts via `--config wrangler.dev.jsonc`), which points at
+	// file-backed state under `.wrangler/state/v3/`.
+	//
+	"vars": {
+		"TFY_BASE_URL": "https://tfy.internal.ap-south-1.production.apps.pai.mypaytm.com/api/llm"
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "picom-vision",
+			"database_id": "7e8fe62c-6654-4be8-834f-3e715cb3cebf",
+			"migrations_dir": "migrations"
+		}
+	],
+	"kv_namespaces": [
+		{
+			"binding": "KV",
+			"id": "c6841fc02eef425e91d2cec53f5c34e9"
+		}
+	]
 }

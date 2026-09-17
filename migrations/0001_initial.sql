@@ -21,7 +21,7 @@
 /* ---------- Campaigns ------------------------------------------------------ */
 -- Every campaign is a DAG. `campaign_nodes` + `campaign_edges` carry the graph;
 -- `campaigns` carries the top-level metadata.
-CREATE TABLE campaigns (
+CREATE TABLE IF NOT EXISTS campaigns (
   id                TEXT PRIMARY KEY,          -- e.g. "c_ex4", "c_ex_soundbox"
   name              TEXT NOT NULL,             -- "BFSI · Insurance Renewal"
   vertical          TEXT NOT NULL,             -- "bfsi" | "retail" | "d2c" | "b2b"
@@ -31,7 +31,7 @@ CREATE TABLE campaigns (
   updated_at        INTEGER NOT NULL
 );
 
-CREATE TABLE campaign_nodes (
+CREATE TABLE IF NOT EXISTS campaign_nodes (
   id                TEXT NOT NULL,             -- unique within campaign, e.g. "apiTier"
   campaign_id       TEXT NOT NULL,
   kind              TEXT NOT NULL,             -- NodeKind: start | end | audience | apiToolCall | conditional | abSplit | delay | voiceCall | whatsapp | whatsappFreeform | sms | rcs | aiTransform
@@ -47,7 +47,7 @@ CREATE TABLE campaign_nodes (
 CREATE INDEX idx_campaign_nodes_campaign ON campaign_nodes(campaign_id);
 CREATE INDEX idx_campaign_nodes_kind ON campaign_nodes(kind);
 
-CREATE TABLE campaign_edges (
+CREATE TABLE IF NOT EXISTS campaign_edges (
   id                TEXT NOT NULL,             -- unique within campaign
   campaign_id       TEXT NOT NULL,
   source_id         TEXT NOT NULL,             -- source campaign_node id
@@ -59,7 +59,7 @@ CREATE INDEX idx_campaign_edges_campaign ON campaign_edges(campaign_id);
 
 /* ---------- Runs + Leads --------------------------------------------------- */
 -- One row per run of a campaign. `leads` gets the per-lead per-run snapshot.
-CREATE TABLE runs (
+CREATE TABLE IF NOT EXISTS runs (
   id                TEXT PRIMARY KEY,          -- e.g. "r_9001"
   campaign_id       TEXT NOT NULL,
   code              TEXT NOT NULL,             -- "RUN-4201"
@@ -80,7 +80,7 @@ CREATE INDEX idx_runs_campaign ON runs(campaign_id);
 CREATE INDEX idx_runs_status ON runs(status);
 
 -- Per-node aggregates. This is what Analytics dashboards read.
-CREATE TABLE run_node_metrics (
+CREATE TABLE IF NOT EXISTS run_node_metrics (
   run_id            TEXT NOT NULL,
   node_id           TEXT NOT NULL,             -- campaign_nodes.id in this run's campaign
   entered           INTEGER NOT NULL DEFAULT 0,
@@ -89,7 +89,7 @@ CREATE TABLE run_node_metrics (
 );
 
 -- Per-edge flow volumes (for the Sankey diagram).
-CREATE TABLE run_edge_metrics (
+CREATE TABLE IF NOT EXISTS run_edge_metrics (
   run_id            TEXT NOT NULL,
   edge_id           TEXT NOT NULL,
   source_id         TEXT NOT NULL,
@@ -99,7 +99,7 @@ CREATE TABLE run_edge_metrics (
   PRIMARY KEY (run_id, edge_id)
 );
 
-CREATE TABLE leads (
+CREATE TABLE IF NOT EXISTS leads (
   id                TEXT PRIMARY KEY,          -- "L-10001"
   run_id            TEXT NOT NULL,
   campaign_id       TEXT NOT NULL,
@@ -122,7 +122,7 @@ CREATE INDEX idx_leads_status ON leads(status);
 CREATE INDEX idx_leads_channel ON leads(channel);
 
 /* ---------- Templates ------------------------------------------------------ */
-CREATE TABLE wa_templates (
+CREATE TABLE IF NOT EXISTS wa_templates (
   id                TEXT PRIMARY KEY,          -- Meta numeric id
   name              TEXT NOT NULL UNIQUE,      -- semantic id: fcc_silver_perks
   category          TEXT NOT NULL,             -- Marketing | Utility | Authentication
@@ -137,7 +137,7 @@ CREATE TABLE wa_templates (
 );
 CREATE INDEX idx_wa_templates_status ON wa_templates(status);
 
-CREATE TABLE sms_templates (
+CREATE TABLE IF NOT EXISTS sms_templates (
   id                TEXT PRIMARY KEY,          -- DLT template id
   name              TEXT NOT NULL,
   pe_id             TEXT NOT NULL,             -- Principal Entity id
@@ -148,7 +148,7 @@ CREATE TABLE sms_templates (
   created_at        TEXT NOT NULL
 );
 
-CREATE TABLE rcs_templates (
+CREATE TABLE IF NOT EXISTS rcs_templates (
   id                TEXT PRIMARY KEY,
   name              TEXT NOT NULL,
   agent_id          TEXT NOT NULL,
@@ -159,7 +159,7 @@ CREATE TABLE rcs_templates (
 );
 
 /* ---------- Agents + Tools ------------------------------------------------- */
-CREATE TABLE agents (
+CREATE TABLE IF NOT EXISTS agents (
   id                TEXT PRIMARY KEY,          -- "a_voice_react"
   name              TEXT NOT NULL,             -- "reactivation_voice"
   type              TEXT NOT NULL,             -- voice | chat
@@ -173,7 +173,7 @@ CREATE TABLE agents (
   updated_at        INTEGER NOT NULL
 );
 
-CREATE TABLE tools (
+CREATE TABLE IF NOT EXISTS tools (
   handle            TEXT PRIMARY KEY,          -- "policy_lookup"
   description       TEXT NOT NULL,
   type              TEXT NOT NULL,             -- http
@@ -191,7 +191,7 @@ CREATE TABLE tools (
 /* ---------- Freeform Workflows -------------------------------------------- */
 -- WhatsApp Freeform Workflows — sub-flows used inside the 24h customer-service
 -- window. Reusable across campaigns; picked by the `whatsappFreeform` node.
-CREATE TABLE freeform_workflows (
+CREATE TABLE IF NOT EXISTS freeform_workflows (
   id                TEXT PRIMARY KEY,
   name              TEXT NOT NULL,
   description       TEXT,
@@ -206,7 +206,7 @@ CREATE TABLE freeform_workflows (
 );
 
 /* ---------- Broadcasts + Reports (light tables) --------------------------- */
-CREATE TABLE broadcasts (
+CREATE TABLE IF NOT EXISTS broadcasts (
   id                TEXT PRIMARY KEY,          -- "bc_5011"
   name              TEXT NOT NULL,
   channel           TEXT NOT NULL,             -- whatsapp | sms | rcs
@@ -220,7 +220,7 @@ CREATE TABLE broadcasts (
   total             INTEGER NOT NULL DEFAULT 0
 );
 
-CREATE TABLE reports (
+CREATE TABLE IF NOT EXISTS reports (
   id                TEXT PRIMARY KEY,          -- "rep_806"
   kind              TEXT NOT NULL,             -- campaign_leads | wa_logs | sms_logs | rcs_logs | voice_logs
   requested_at      INTEGER NOT NULL,          -- unix ms

@@ -11,9 +11,9 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "db:migrate:local": "wrangler --config wrangler.dev.jsonc d1 migrations apply picom-vision --local",
-    "db:migrate:remote": "wrangler --config wrangler.dev.jsonc d1 migrations apply picom-vision --remote",
+    "db:migrate:remote": "wrangler --config wrangler.jsonc d1 execute picom-vision --remote --file=migrations/0001_initial.sql",
     "db:seed:local": "bun scripts/seed-d1.mjs > /tmp/picom-seed.sql && wrangler --config wrangler.dev.jsonc d1 execute picom-vision --local --file=/tmp/picom-seed.sql",
-    "db:seed:remote": "bun scripts/seed-d1.mjs > /tmp/picom-seed.sql && wrangler --config wrangler.dev.jsonc d1 execute picom-vision --remote --file=/tmp/picom-seed.sql",
+    "db:seed:remote": "bun scripts/seed-d1.mjs > /tmp/picom-seed.sql && wrangler --config wrangler.jsonc d1 execute picom-vision --remote --file=/tmp/picom-seed.sql",
     "db:reset:local": "bun run db:migrate:local && bun run db:seed:local"
   },
   "dependencies": {
