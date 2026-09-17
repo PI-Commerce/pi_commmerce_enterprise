@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 import { FreeformCanvas } from "@/components/workflow/FreeformCanvas";
 import {
   getFreeformWorkflow,
+  hydrateFreeformWorkflowsFromDb,
   saveFreeformWorkflow,
   createFreeformWorkflow,
   type FreeformStatus,
@@ -46,6 +47,9 @@ function FreeformBuilder() {
 
 function FreeformBuilderInner({ id }: { id: string }) {
   const navigate = useNavigate();
+  // Kick a D1 hydrate so subsequent Save reads see any earlier persisted edits.
+  // Fire-and-forget — the store notifies subscribers via listeners.
+  useEffect(() => { void hydrateFreeformWorkflowsFromDb(); }, []);
   const stored = getFreeformWorkflow(id);
   // Locked workflows are read-only: the graph is rendered previewOnly, the top
   // bar swaps its Save button for a "Duplicate to edit" action, and the name is

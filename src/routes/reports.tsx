@@ -8,7 +8,7 @@
  * See src/lib/reports.ts for the data model.
  */
 
-import { useSyncExternalStore } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { AppShell, PageHeader } from "@/components/app/AppShell";
 import { Badge } from "@/components/ui/badge";
@@ -35,6 +35,7 @@ import {
   formatExpiry,
   formatRows,
   getDynamicReports,
+  hydrateReportsFromDb,
   subscribeReports,
   type ReportRow,
   type ReportStatus,
@@ -54,6 +55,8 @@ function Reports() {
     getDynamicReports,
     () => EMPTY,
   );
+  // First-mount D1 hydrate so any earlier queued export survives a refresh.
+  useEffect(() => { void hydrateReportsFromDb(); }, []);
   const rows = [...dynamic, ...SEED_REPORTS];
 
   return (

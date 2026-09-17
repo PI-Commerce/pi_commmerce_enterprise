@@ -398,6 +398,49 @@ let workflows: FreeformWorkflowRow[] = [...SEED_FREEFORM_WORKFLOWS];
 type Listener = () => void;
 const listeners = new Set<Listener>();
 
+// Background persist — fire the D1 save without blocking the caller. Dynamic
+// import keeps the server-fn (which imports the D1 module) out of any
+// pure-data importer of freeform-types.
+function persistFreeform(row: FreeformWorkflowRow): void {
+  if (typeof window === "undefined") return;
+  void import("@/lib/server-fns/freeform-workflows")
+    .then((m) => m.saveFreeformWorkflowFn({ data: m.freeformToWire(row) }))
+    .catch(() => { /* silent — in-memory state already updated */ });
+}
+
+function persistDelete(id: string): void {
+  if (typeof window === "undefined") return;
+  void import("@/lib/server-fns/freeform-workflows")
+    .then((m) => m.deleteFreeformWorkflowFn({ data: id }))
+    .catch(() => { /* silent */ });
+}
+
+// D1 hydration state — first mount kicks off a fetch and merges D1 rows over
+// the seed. Idempotent; subsequent callers await the memoized promise. Silent
+// no-op when D1 isn't bound so the seed still renders.
+let hydratePromise: Promise<void> | null = null;
+
+export function hydrateFreeformWorkflowsFromDb(): Promise<void> {
+  if (typeof window === "undefined") return Promise.resolve();
+  if (hydratePromise) return hydratePromise;
+  hydratePromise = (async () => {
+    try {
+      const mod = await import("@/lib/server-fns/freeform-workflows");
+      const r = await mod.listFreeformWorkflowsFn();
+      if (!r.ok) return;
+      const merged = mod.hydrateWireFreeformWorkflows(r.workflows);
+      const byId = new Map<string, FreeformWorkflowRow>();
+      for (const w of workflows) byId.set(w.id, w);
+      for (const w of merged) byId.set(w.id, w);
+      workflows = Array.from(byId.values());
+      listeners.forEach((l) => l());
+    } catch {
+      /* silent — the seed still renders */
+    }
+  })();
+  return hydratePromise;
+}
+
 export function getFreeformWorkflows(): FreeformWorkflowRow[] {
   return workflows;
 }
@@ -426,6 +469,7 @@ export function createFreeformWorkflow(input: {
   };
   workflows = [row, ...workflows];
   listeners.forEach((l) => l());
+  persistFreeform(row);
   return row;
 }
 
@@ -441,19 +485,23 @@ export function saveFreeformWorkflow(
     edges?: FreeformEdgeRecord[];
   },
 ): void {
+  let updated: FreeformWorkflowRow | undefined;
   workflows = workflows.map((w) => {
     if (w.id !== id) return w;
     // Locked workflows are immutable — a caller reaching here is a bug (the
     // builder gates Save behind the same lock check), but we still short-circuit
     // to keep the store honest.
     if (w.locked) return w;
-    return {
+    const next: FreeformWorkflowRow = {
       ...w,
       ...patch,
       lastModified: new Date().toISOString(),
     };
+    updated = next;
+    return next;
   });
   listeners.forEach((l) => l());
+  if (updated) persistFreeform(updated);
 }
 
 /**
@@ -466,6 +514,7 @@ export function deleteFreeformWorkflow(id: string): void {
   if (!target || target.status !== "draft" || target.locked) return;
   workflows = workflows.filter((w) => w.id !== id);
   listeners.forEach((l) => l());
+  persistDelete(id);
 }
 
 /**
@@ -474,12 +523,15 @@ export function deleteFreeformWorkflow(id: string): void {
  * a no-op (preserves the original `lockedAt` timestamp).
  */
 export function lockFreeformWorkflow(id: string): void {
-  workflows = workflows.map((w) =>
-    w.id === id && !w.locked
-      ? { ...w, locked: true, lockedAt: new Date().toISOString() }
-      : w,
-  );
+  let updated: FreeformWorkflowRow | undefined;
+  workflows = workflows.map((w) => {
+    if (w.id !== id || w.locked) return w;
+    const next = { ...w, locked: true, lockedAt: new Date().toISOString() };
+    updated = next;
+    return next;
+  });
   listeners.forEach((l) => l());
+  if (updated) persistFreeform(updated);
 }
 
 export function subscribeFreeformWorkflows(l: Listener): () => void {

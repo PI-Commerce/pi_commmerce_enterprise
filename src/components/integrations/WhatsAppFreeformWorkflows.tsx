@@ -37,6 +37,7 @@ import {
 import { cn } from "@/lib/utils";
 import {
   getFreeformWorkflows,
+  hydrateFreeformWorkflowsFromDb,
   subscribeFreeformWorkflows,
   createFreeformWorkflow,
   saveFreeformWorkflow,
@@ -77,6 +78,9 @@ export function WhatsAppFreeformWorkflows() {
   useEffect(() => {
     setPage(1);
   }, [q, workflows.length]);
+
+  // First-mount D1 hydrate so freeform saves survive a page refresh.
+  useEffect(() => { void hydrateFreeformWorkflowsFromDb(); }, []);
 
   const PAGE_SIZE = 8;
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));

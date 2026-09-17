@@ -32,6 +32,7 @@ import type {
   BroadcastRow,
   BroadcastStatus,
 } from "@/lib/broadcasts-seed";
+import { listBroadcastsFn, saveBroadcastFn } from "@/lib/server-fns/broadcasts";
 import { Phone as PhoneIcon, Building2, Radio } from "lucide-react";
 
 export const Route = createFileRoute("/broadcasts")({
@@ -86,6 +87,30 @@ function BroadcastsPage() {
     }
   }, []);
 
+  // D1 hydration — merge persisted broadcasts over the in-memory seed on first
+  // mount so a page refresh reflects earlier Create / Pause / Resume /
+  // Terminate actions. D1 rows take precedence (by id); seed-only rows stay
+  // for the demo. Silent no-op when D1 isn't bound.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    let alive = true;
+    (async () => {
+      try {
+        const r = await listBroadcastsFn();
+        if (!alive || !r.ok) return;
+        setRows((prev) => {
+          const byId = new Map<string, BroadcastRow>();
+          for (const row of prev) byId.set(row.id, row);
+          for (const row of r.broadcasts) byId.set(row.id, row);
+          return Array.from(byId.values());
+        });
+      } catch {
+        /* silent — the seed still renders */
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
+
   const filtered = rows.filter((r) => {
     if (fChannel !== "all" && r.channel !== fChannel) return false;
     if (fStatus !== "all" && r.status !== fStatus) return false;
@@ -99,21 +124,28 @@ function BroadcastsPage() {
 
 
   const setRowStatus = (id: string, next: BroadcastStatus, toastLabel: string, destructive = false) => {
+    let updated: BroadcastRow | undefined;
     setRows((prev) =>
       prev.map((r) => {
         if (r.id !== id) return r;
         // Terminate freezes completedAt so the row settles like it finished.
         const now = new Date();
         const at = `Today, ${now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
-        return {
+        const nextRow: BroadcastRow = {
           ...r,
           status: next,
           completedAt: next === "terminated" ? at : r.completedAt,
         };
+        updated = nextRow;
+        return nextRow;
       }),
     );
     if (destructive) toast.error(toastLabel, { description: id });
     else toast.success(toastLabel, { description: id });
+    // Background persist. Fire-and-forget; UI already updated optimistically.
+    if (updated && typeof window !== "undefined") {
+      void saveBroadcastFn({ data: updated }).catch(() => { /* silent */ });
+    }
   };
 
   const handleCreate = (payload: CreateBroadcastPayload) => {
@@ -136,6 +168,10 @@ function BroadcastsPage() {
     setRows((prev) => [row, ...prev]);
     setCreateOpen(false);
     toast.success("Broadcast started", { description: `${payload.name} · ${CHANNEL_LABEL[payload.channel]} · ${payload.audienceSize.toLocaleString()} recipients` });
+    // Background persist so the new broadcast survives a refresh.
+    if (typeof window !== "undefined") {
+      void saveBroadcastFn({ data: row }).catch(() => { /* silent */ });
+    }
   };
 
   return (

@@ -178,7 +178,7 @@ const day = (offsetDays: number, h = 10, m = 0) => {
 // -----------------------------------------------------------------------------
 
 type Listener = () => void;
-const dynamicReports: ReportRow[] = [];
+let dynamicReports: ReportRow[] = [];
 const listeners = new Set<Listener>();
 let nextSerial = 25;
 
@@ -189,8 +189,15 @@ export function nextReportId(): string {
 }
 
 export function pushReport(r: ReportRow): void {
-  dynamicReports.unshift(r);
+  dynamicReports = [r, ...dynamicReports];
   listeners.forEach((l) => l());
+  // Background persist. Silent fallback when D1 isn't bound. Dynamic import
+  // keeps the server-fn out of any pure-data importers of reports.ts.
+  if (typeof window !== "undefined") {
+    void import("@/lib/server-fns/reports")
+      .then((m) => m.saveReportFn({ data: r }))
+      .catch(() => { /* silent */ });
+  }
 }
 
 export function subscribeReports(l: Listener): () => void {
@@ -202,6 +209,36 @@ export function subscribeReports(l: Listener): () => void {
 
 export function getDynamicReports(): ReportRow[] {
   return dynamicReports;
+}
+
+// D1 hydration state — first mount kicks off a fetch and merges the D1 rows
+// into the dynamic store. Idempotent; subsequent callers await the memoized
+// promise. Silent no-op when D1 isn't bound so the seed still renders.
+let hydratePromise: Promise<void> | null = null;
+
+export function hydrateReportsFromDb(): Promise<void> {
+  if (typeof window === "undefined") return Promise.resolve();
+  if (hydratePromise) return hydratePromise;
+  hydratePromise = (async () => {
+    try {
+      const mod = await import("@/lib/server-fns/reports");
+      const r = await mod.listReportsFn();
+      if (!r.ok) return;
+      const seedIds = new Set(SEED_REPORTS.map((s) => s.id));
+      // Only merge in D1 rows that aren't already covered by the seed —
+      // presentation-only fields (title, createdBy, failureReason) live only in
+      // memory for seed rows, so we don't want the D1 rehydrate to strip them.
+      const extras = r.reports.filter((row) => !seedIds.has(row.id));
+      if (extras.length === 0) return;
+      const existing = new Set(dynamicReports.map((d) => d.id));
+      const merged = [...extras.filter((e) => !existing.has(e.id)), ...dynamicReports];
+      dynamicReports = merged;
+      listeners.forEach((l) => l());
+    } catch {
+      /* silent — seed still renders */
+    }
+  })();
+  return hydratePromise;
 }
 
 export const SEED_REPORTS: ReportRow[] = [

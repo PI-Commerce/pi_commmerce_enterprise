@@ -21,3 +21,6 @@ export * as waTemplates from "./wa-templates";
 export * as smsTemplates from "./sms-templates";
 export * as rcsTemplates from "./rcs-templates";
 export * as tools from "./tools";
+export * as broadcasts from "./broadcasts";
+export * as reports from "./reports";
+export * as freeformWorkflows from "./freeform-workflows";
