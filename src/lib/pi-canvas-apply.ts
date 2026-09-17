@@ -71,13 +71,18 @@ export function applyPiToolCallsToGraph(
           ...ns,
           {
             id: node.id,
-            type: node.kind,
+            // All non-start/end nodes render through the shared "workflow"
+            // node type; kind lives in `data.kind`. Using node.kind as the
+            // ReactFlow `type` renders an empty box because no custom
+            // nodeType is registered for e.g. "voice" or "conditional".
+            type: "workflow",
             position: pos,
             data: {
               title: node.title,
               subtitle: node.subtitle,
               kind: node.kind,
               config: node.config,
+              valid: true,
             } as unknown as WorkflowNodeData,
           },
         ];

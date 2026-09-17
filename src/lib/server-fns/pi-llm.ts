@@ -258,6 +258,48 @@ const TOOL_DEFS = {
 } as const;
 
 async function runTool(name: string, args: Record<string, unknown>): Promise<unknown> {
+  // D1 availability check — mutation tools no-op successfully when D1 isn't
+  // bound (the client-side applyPiToolCallsToGraph still updates the canvas
+  // from the tool_call args, so the user sees the graph change; only the
+  // durability layer is skipped). Read tools return a clear error string so
+  // Pi can adapt its next turn.
+  const hasDb = (() => {
+    try {
+      return !!getEnv().DB;
+    } catch {
+      return false;
+    }
+  })();
+  if (!hasDb) {
+    switch (name) {
+      case "insert_node":
+      case "connect_nodes":
+      case "update_node":
+      case "save_agent":
+        // Mutation tools: return ok so Pi's textual confirmation still fires
+        // and the client applies the change to the live canvas. Include a
+        // warning field so Pi can mention the "not saved to DB" caveat.
+        return { ok: true, warning: "d1_unavailable — change applied to canvas but not persisted" };
+      case "list_agents":
+      case "read_agent":
+      case "list_campaigns":
+      case "read_campaign":
+      case "list_tools":
+      case "count_leads":
+      case "status_breakdown":
+      case "worst_dropoffs":
+      case "latest_runs":
+        return { error: "d1_unavailable — no database bound on this worker" };
+    }
+  }
+  try {
+    return await runToolInner(name, args);
+  } catch (e) {
+    return { error: `tool_failed: ${(e as Error).message}` };
+  }
+}
+
+async function runToolInner(name: string, args: Record<string, unknown>): Promise<unknown> {
   switch (name) {
     case "count_leads":
       return { count: await analytics.countLeads(args as Parameters<typeof analytics.countLeads>[0]) };
@@ -393,9 +435,10 @@ export const askPi = createServerFn({ method: "POST" })
     } catch (e) {
       return { ok: false, error: `runtime_env_missing: ${(e as Error).message}` };
     }
-    if (!env.DB) {
-      return { ok: false, error: "d1_not_bound: DB binding is missing on this worker. Provision D1 and uncomment the binding in wrangler.jsonc." };
-    }
+    // No hard D1 gate — the LLM chat itself doesn't need D1. Per-tool
+    // reads/writes handle missing D1 with their own graceful errors,
+    // which fold back into the tool_result and let Pi say "couldn't
+    // load that" rather than dead-ending the whole conversation.
     // Prefer the current working gateway (PI_AGENT_*) — service account
     // `foundary-ai-workflows` on `llm.tfy.pi.mypaytm.com/openai/v1`. Fall
     // back to the legacy TFY_* names for older deployments; the legacy

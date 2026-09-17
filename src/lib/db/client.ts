@@ -57,19 +57,41 @@ export function setRuntimeEnv(env: unknown): void {
  *      the deployed Worker uses; our src/server.ts fetch handler doesn't
  *      run in prod because Nitro swaps it for its own entry.
  *   2. `runtimeEnv` — manually seeded via {@link setRuntimeEnv}. Used by
- *      test harnesses / local dev paths that go through src/server.ts.
+ *      test harnesses / paths that route through src/server.ts.
+ *   3. `process.env` — local dev fallback. `bun run dev` uses vite (not
+ *      Nitro), which doesn't populate globalThis.__env__ or call our
+ *      fetch handler. We synthesize a minimal Env from `.env` values so
+ *      the LLM path works locally. D1/KV bindings aren't in process.env
+ *      — those callers get `undefined` and hit the graceful `d1_not_bound`
+ *      path.
  *
- * Throws only if BOTH are missing — that's a bundle-order bug, not a
- * runtime problem.
+ * Throws only if none of the three has anything — that's a bundle-order
+ * bug, not a runtime problem.
  */
 export function getEnv(): Env {
   const nitroEnv = (globalThis as { __env__?: Env }).__env__;
   if (nitroEnv) return nitroEnv;
   if (runtimeEnv) return runtimeEnv;
+  // Local dev fallback via process.env. Safe in prod too: CF Worker with
+  // `nodejs_compat` exposes process.env, but the earlier branches short-
+  // circuit so this only runs when the request didn't come through a
+  // Cloudflare fetch handler.
+  if (typeof process !== "undefined" && process.env) {
+    return {
+      PI_AGENT_API_KEY: process.env.PI_AGENT_API_KEY,
+      PI_AGENT_BASE_URL: process.env.PI_AGENT_BASE_URL,
+      PI_AGENT_MODEL: process.env.PI_AGENT_MODEL,
+      TFY_API_KEY: process.env.TFY_API_KEY,
+      TFY_BASE_URL: process.env.TFY_BASE_URL,
+      TFY_MODEL: process.env.TFY_MODEL,
+      THESYS_API_KEY: process.env.THESYS_API_KEY,
+      THESYS_MODEL: process.env.THESYS_MODEL,
+    } as Env;
+  }
   throw new Error(
     "getEnv() called before Nitro populated globalThis.__env__ (and no manual " +
-    "setRuntimeEnv seed). This usually means the server fn ran outside a fetch " +
-    "handler.",
+    "setRuntimeEnv seed, and no process.env fallback). This usually means the " +
+    "server fn ran outside a fetch handler.",
   );
 }
 
