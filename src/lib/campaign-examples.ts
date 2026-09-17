@@ -224,7 +224,13 @@ const apiPolicy_ren: Spec = {
     { id: "success", label: "Success", kind: "outcome" },
     { id: "failed",  label: "Failed",  kind: "outcome" },
   ],
-  config: {},
+  config: {
+    apiTool: "policy_lookup",
+    toolInputMap: [
+      { v: "policy_id", def: "contact.policy_no" },
+      { v: "customer_id", def: "contact.customer_id" },
+    ],
+  },
 };
 
 const ffPolicyQs_ren: Spec = {
@@ -320,7 +326,15 @@ const apiLogPay_pl: Spec = {
     { id: "success", label: "Success", kind: "outcome" },
     { id: "failed",  label: "Failed",  kind: "outcome" },
   ],
-  config: {},
+  config: {
+    apiTool: "log_collection_escalation",
+    toolInputMap: [
+      { v: "loan_id", def: "contact.loan_id" },
+      { v: "customer_id", def: "contact.customer_id" },
+      { v: "dpd", def: "contact.dpd" },
+      { v: "amount_due", def: "contact.amount_due" },
+    ],
+  },
 };
 
 const C_PL_COLLECT = buildCampaign("BFSI · PL DPD Collections", [
@@ -388,14 +402,23 @@ const apiCart_cart: Spec = {
     { id: "success", label: "Success", kind: "outcome" },
     { id: "failed",  label: "Failed",  kind: "outcome" },
   ],
-  config: {},
+  config: {
+    apiTool: "cart_status_check",
+    toolInputMap: [
+      { v: "cart_id", def: "contact.cart_id" },
+      { v: "customer_id", def: "contact.customer_id" },
+    ],
+  },
 };
 
-const ffDelivery_cart: Spec = {
-  id: "ffDelivery",
+// Freeform picks a callback slot from the user; the follow-up delay reads that
+// slot (contact.callback_slot). Static delay after a slot picker is exactly the
+// "why bother?" problem we're avoiding — see the Dynamic delay below.
+const ffCallback_cart: Spec = {
+  id: "ffCallback",
   kind: "whatsappFreeform",
-  title: "WhatsApp · Delivery questions",
-  subtitle: "Freeform workflow · delivery / refund Q&A",
+  title: "WhatsApp · Pick callback slot",
+  subtitle: "Freeform workflow · slot picker",
   outputs: [
     { id: "completed", label: "Success", kind: "outcome" },
     { id: "timed_out", label: "Timeout", kind: "outcome" },
@@ -414,7 +437,7 @@ const ffDelivery_cart: Spec = {
 
 const C_CART = buildCampaign("D2C · Cart Abandonment", [
   sStart(),
-  sAud("CSV · cart abandoners", ["cart_value", "cart_items"]),
+  sAud("CSV · cart abandoners", ["cart_value", "cart_items", "cart_id"]),
   sAiTransform("aitEnrich", "Enrich cart context", "3 AI-derived variables", [
     {
       id: "t1", type: "Custom AI Action",
@@ -451,8 +474,22 @@ const C_CART = buildCampaign("D2C · Cart Abandonment", [
   sWa("abA", "WhatsApp cart reminder · Discount", "Variant · Discount angle", "cart_discount_v1"),
   sWa("abB", "WhatsApp cart reminder · Free shipping", "Variant · Free shipping angle", "cart_free_shipping_v1"),
   sWa("cartLow", "Purchase link", "WhatsApp · complete purchase", "cart_link_v1"),
-  ffDelivery_cart,
-  sDelay("d1", 23, "Hours"),
+  ffCallback_cart,
+  // Dynamic delay: wait until the callback slot the user picked in ffCallback.
+  // Falls back to 4h if the variable is missing (freeform timed out / failed).
+  {
+    id: "d1",
+    kind: "delay",
+    title: "Delay · until callback",
+    subtitle: "Wait until picked slot",
+    config: {
+      delayMode: "variable",
+      delayVariable: "contact.callback_slot",
+      delayVariableFormat: "auto",
+      delayFallbackValue: 4,
+      delayFallbackUnit: "Hours",
+    },
+  },
   sCond("purLow", "Purchased?", "order_status", [
     { id: "yes", label: "Yes", value: "placed" },
     { id: "no", label: "No", value: "pending" },
@@ -467,10 +504,10 @@ const C_CART = buildCampaign("D2C · Cart Abandonment", [
   ed("cart", "ab", "low"),
   ed("ab", "abA", "vA"), ed("ab", "abB", "vB"),
   ed("abA", "cartLow"), ed("abB", "cartLow"),
-  ed("cartLow", "ffDelivery"),
-  ed("ffDelivery", "d1", "completed"),
-  ed("ffDelivery", "d1", "timed_out"),
-  ed("ffDelivery", "d1", "failed"),
+  ed("cartLow", "ffCallback"),
+  ed("ffCallback", "d1", "completed"),
+  ed("ffCallback", "d1", "timed_out"),
+  ed("ffCallback", "d1", "failed"),
   ed("d1", "purLow"),
   ed("purLow", "end", "yes"), ed("purLow", "vRemLow", "no"), ed("vRemLow", "end"),
 ]);
@@ -484,38 +521,7 @@ const C_CART = buildCampaign("D2C · Cart Abandonment", [
 // check with a voice follow-up loop for non-enrollers, sharing one welcome per
 // tier.
 
-// One "confirm enrollment" tier block for Gold/Platinum/Black (no A/B split):
-// single WhatsApp invite → Enrolled? → (enrolled) welcome / (not) voice follow-up →
-// 24h delay → Enrolled now? → same shared welcome / End.
-const loyaltyTierBlock = (p: string, tier: string, label: string): { specs: Spec[]; edges: SpecEdge[] } => ({
-  specs: [
-    sWa(`${p}Wa`, "WhatsApp invite", `${label} · join Loyalty Card`, `fcc_${tier}_invite`),
-    sCond(`${p}Enr`, "Enrolled?", "enrollment_tier", [
-      { id: tier, label: "Enrolled" },
-      { id: "none", label: "Not enrolled" },
-    ]),
-    sWa(`${p}Wel`, `Welcome to ${label}`, `WhatsApp · ${label} welcome`, `fcc_welcome_${tier}`),
-    sVoice(`${p}Fu`, "Voice AI follow-up", `Re-invite to ${label} Loyalty Card`, { maxAttempts: 1, timezone: "Asia/Kolkata (IST)" }),
-    sDelay(`${p}Dly`, 24, "Hours"),
-    sCond(`${p}Enr2`, "Enrolled now?", "enrollment_tier", [
-      { id: tier, label: "Enrolled" },
-      { id: "none", label: "Not enrolled" },
-    ]),
-  ],
-  edges: [
-    ed(`${p}Wa`, `${p}Enr`),
-    ed(`${p}Enr`, `${p}Wel`, tier), ed(`${p}Wel`, "end"),
-    ed(`${p}Enr`, `${p}Fu`, "none"),
-    ed(`${p}Fu`, `${p}Dly`), ed(`${p}Dly`, `${p}Enr2`),
-    ed(`${p}Enr2`, `${p}Wel`, tier), // post-follow-up enrolled → shared welcome
-    ed(`${p}Enr2`, "end", "none"),
-  ],
-});
-
-const LOYALTY_GOLD = loyaltyTierBlock("g", "gold", "Gold");
-const LOYALTY_PLATINUM = loyaltyTierBlock("p", "platinum", "Platinum");
-const LOYALTY_BLACK = loyaltyTierBlock("b", "black", "Black");
-
+// ---- API tool nodes reused across the Loyalty flow ---------------------
 const apiTier_loy: Spec = {
   id: "apiTier",
   kind: "apiToolCall",
@@ -525,14 +531,56 @@ const apiTier_loy: Spec = {
     { id: "success", label: "Success", kind: "outcome" },
     { id: "failed",  label: "Failed",  kind: "outcome" },
   ],
-  config: {},
+  // toolHandle + input mapping wired by the tool-wiring pass — kept a real
+  // registry reference so the config panel opens with a resolved tool.
+  config: {
+    apiTool: "loyalty_tier_fetch",
+    toolInputMap: [
+      { v: "customer_id", def: "contact.customer_id" },
+    ],
+  },
 };
 
-const rcsBlack_loy: Spec = {
-  id: "rcsBlack",
+const apiEnr_loy: Spec = {
+  id: "apiEnr",
+  kind: "apiToolCall",
+  title: "API · Check Silver enrollment",
+  subtitle: "GET /loyalty/enrollment",
+  outputs: [
+    { id: "success", label: "Success", kind: "outcome" },
+    { id: "failed",  label: "Failed",  kind: "outcome" },
+  ],
+  config: {
+    apiTool: "loyalty_enrollment_check",
+    toolInputMap: [
+      { v: "customer_id", def: "contact.customer_id" },
+    ],
+  },
+};
+
+const apiUpg_loy: Spec = {
+  id: "apiUpg",
+  kind: "apiToolCall",
+  title: "API · Check Gold upgrade",
+  subtitle: "GET /loyalty/upgrade-status",
+  outputs: [
+    { id: "success", label: "Success", kind: "outcome" },
+    { id: "failed",  label: "Failed",  kind: "outcome" },
+  ],
+  config: {
+    apiTool: "loyalty_upgrade_status",
+    toolInputMap: [
+      { v: "customer_id", def: "contact.customer_id" },
+    ],
+  },
+};
+
+// ---- Gold path uses an RCS rich card (top-tier customers get the richer surface) ----
+const rcsGold_loy: Spec = {
+  id: "rcsGold",
   kind: "rcs",
-  title: "RCS · Black tier invite",
-  subtitle: "Rich card · Black welcome",
+  title: "RCS · Gold welcome card",
+  subtitle: "Rich card · Gold benefits",
   outputs: [
     { id: "delivered",     label: "Delivered",     kind: "outcome" },
     { id: "read",          label: "Read",          kind: "outcome" },
@@ -544,11 +592,21 @@ const rcsBlack_loy: Spec = {
     rcsAgentId: "acme_utility_bot",
     rcsVarMap: [
       { v: "{{name}}", def: "contact.first_name" },
-      { v: "{{tier}}", def: "Black", mode: "constant" },
+      { v: "{{ltv}}", def: "ltv_fmt" },
+      { v: "{{offer_line}}", def: "tier_offer_line" },
     ],
   },
 };
 
+/**
+ * Loyalty Card Upsell — Silver / Gold, with a real Silver → Gold upsell.
+ *
+ * The demo point: Silver holders who *actually enrolled* get a follow-up voice
+ * call offering a paid Gold upgrade. Both the enrollment check and the upgrade
+ * check are real API tool calls — no magic-variable conditionals reading state
+ * out of thin air. Gold members enter through the RCS rich card (top-tier
+ * surface); WhatsApp is the fallback for handsets that don't render RCS.
+ */
 const C_LOYALTY_UPSELL = buildCampaign("Retail · Loyalty Card Upsell", [
   sStart(),
   sAud("CSV · Loyalty Card members · key customer_id", [
@@ -558,8 +616,8 @@ const C_LOYALTY_UPSELL = buildCampaign("Retail · Loyalty Card Upsell", [
   sAiTransform("aitLoyalty", "Personalize offer copy", "2 AI-derived variables", [
     {
       id: "t1", type: "Custom AI Action",
-      label: "Tier upgrade angle", input: "", output: "tier_offer_line",
-      prompt: "Given contact.acv_6m and contact.orders_6m and contact.fcc_tier, write a one-sentence tier-upgrade pitch (max 80 chars) that highlights the customer's most valued behavior.",
+      label: "Tier upgrade angle", input: "contact.acv_6m", output: "tier_offer_line",
+      prompt: "Given contact.acv_6m (spend in last 6 months), contact.orders_6m (order count), and contact.loyalty_tier, write ONE sentence (max 80 chars) that would motivate this specific customer to upgrade or engage — reference their most valued behaviour (order frequency vs. basket size). Return the sentence only, no quotes.",
     },
     {
       id: "t2", type: "Currency Formatting",
@@ -567,60 +625,60 @@ const C_LOYALTY_UPSELL = buildCampaign("Retail · Loyalty Card Upsell", [
       outputCurrency: "INR",
     },
   ]),
-  rcsBlack_loy,
   sCond("tierSplit", "Loyalty tier", "loyalty_tier", [
     { id: "silver", label: "Silver" },
     { id: "gold", label: "Gold" },
-    { id: "platinum", label: "Platinum" },
-    { id: "black", label: "Black" },
   ]),
-  // ---- Silver: A/B-tested invite → free entry → enrolled members upsold to paid Gold ----
+  // ---- Silver: A/B-tested invite → API-verified enrollment → paid Gold upsell ----
   sAbSplit("sAb", "A/B split", "Silver invite · Perks vs Savings", [
     { id: "vA", label: "Perks" },
     { id: "vB", label: "Savings" },
   ]),
   sWa("sWaA", "WhatsApp invite · Perks", "Silver · join Loyalty Card", "fcc_silver_perks"),
   sWa("sWaB", "WhatsApp invite · Savings", "Silver · join Loyalty Card", "fcc_silver_savings"),
-  sCond("sEnr", "Enrolled?", "enrollment_tier", [
-    { id: "silver", label: "Enrolled" },
-    { id: "none", label: "Not enrolled" },
+  apiEnr_loy,
+  sCond("sEnr", "Enrolled as Silver?", "enrollment_status", [
+    { id: "enrolled", label: "Enrolled", value: "enrolled" },
+    { id: "none",     label: "Not enrolled", value: "pending" },
   ]),
-  sVoice("sUp", "Voice AI · upgrade to Gold", "Limited-time paid Gold upgrade offer", { timezone: "Asia/Kolkata (IST)" }),
+  sVoice("sUp", "Voice AI · upgrade to Gold", "Limited-time paid Gold upgrade offer", { maxAttempts: 2, timezone: "Asia/Kolkata (IST)" }),
   sDelay("sDly", 24, "Hours"),
-  sCond("sUpg", "Upgraded to Gold?", "enrollment_tier", [
-    { id: "gold", label: "Upgraded to Gold" },
-    { id: "silver", label: "Still Silver" },
+  apiUpg_loy,
+  sCond("sUpg", "Upgraded to Gold?", "upgrade_status", [
+    { id: "gold",   label: "Upgraded to Gold", value: "upgraded" },
+    { id: "silver", label: "Still Silver", value: "not_upgraded" },
   ]),
   sWa("sWelGold", "Welcome to Gold", "WhatsApp · Gold welcome", "fcc_welcome_gold"),
   sWa("sWelSilver", "Welcome to Silver", "WhatsApp · Silver welcome", "fcc_welcome_silver"),
-  // ---- Gold / Platinum / Black: single invite → enrollment check (+ voice follow-up loop) ----
-  ...LOYALTY_GOLD.specs, ...LOYALTY_PLATINUM.specs, ...LOYALTY_BLACK.specs,
+  // ---- Gold: RCS rich card, WhatsApp fallback for non-RCS handsets ----
+  rcsGold_loy,
+  sWa("gWaFallback", "WhatsApp fallback", "WhatsApp · Gold welcome (fallback)", "fcc_welcome_gold"),
   sEnd(),
 ], [
   ed("start", "aud"),
   ed("aud", "apiTier"),
   ed("apiTier", "aitLoyalty", "success"), ed("apiTier", "end", "failed"),
   ed("aitLoyalty", "tierSplit"),
-  // 4-way tier fan-out
+  // 2-way tier fan-out: Silver (upsell path) vs Gold (welcome path)
   ed("tierSplit", "sAb", "silver"),
-  ed("tierSplit", "gWa", "gold"),
-  ed("tierSplit", "pWa", "platinum"),
-  // Black tier now enters through the RCS rich-card invite; not_delivered → bWa fallback
-  ed("tierSplit", "rcsBlack", "black"),
-  ed("rcsBlack", "bEnr", "delivered"),
-  ed("rcsBlack", "bEnr", "read"),
-  ed("rcsBlack", "bEnr", "clicked"),
-  ed("rcsBlack", "bWa", "not_delivered"),
-  // Silver: A/B variants converge into one enrolled-check
+  ed("tierSplit", "rcsGold", "gold"),
+  // ---- Silver path ----
   ed("sAb", "sWaA", "vA"), ed("sAb", "sWaB", "vB"),
-  ed("sWaA", "sEnr"), ed("sWaB", "sEnr"),
-  ed("sEnr", "end", "none"), // not enrolled → discard
-  ed("sEnr", "sUp", "silver"), // enrolled (free) → upsell to paid Gold
-  ed("sUp", "sDly"), ed("sDly", "sUpg"),
+  // both A/B invites feed into the same API-verified enrollment check
+  ed("sWaA", "apiEnr"), ed("sWaB", "apiEnr"),
+  ed("apiEnr", "sEnr", "success"), ed("apiEnr", "end", "failed"),
+  ed("sEnr", "end", "none"),           // not enrolled → discard
+  ed("sEnr", "sUp", "enrolled"),       // enrolled → try upsell to paid Gold
+  ed("sUp", "sDly"), ed("sDly", "apiUpg"),
+  ed("apiUpg", "sUpg", "success"), ed("apiUpg", "end", "failed"),
   ed("sUpg", "sWelGold", "gold"), ed("sWelGold", "end"),
   ed("sUpg", "sWelSilver", "silver"), ed("sWelSilver", "end"),
-  // Gold / Platinum / Black tiers
-  ...LOYALTY_GOLD.edges, ...LOYALTY_PLATINUM.edges, ...LOYALTY_BLACK.edges,
+  // ---- Gold path: RCS with WA fallback ----
+  ed("rcsGold", "end", "delivered"),
+  ed("rcsGold", "end", "read"),
+  ed("rcsGold", "end", "clicked"),
+  ed("rcsGold", "gWaFallback", "not_delivered"),
+  ed("gWaFallback", "end"),
 ]);
 
 /* ---- B2B · Reactivate Paytm Soundbox Merchants ------------------------- */
@@ -681,13 +739,20 @@ const apiLog: Spec = {
     { id: "success", label: "Success", kind: "outcome" },
     { id: "failed",  label: "Failed",  kind: "outcome" },
   ],
-  config: {},
+  config: {
+    apiTool: "log_merchant_outreach",
+    toolInputMap: [
+      { v: "device_id", def: "contact.device_id" },
+      { v: "merchant_id", def: "contact.merchant_id" },
+      { v: "last_txn_days", def: "contact.last_txn_days" },
+    ],
+  },
 };
 
 const C_SOUNDBOX = buildCampaign("B2B · Reactivate Paytm Soundbox Merchants", [
   sStart(),
   sAud("CSV · dormant Soundbox merchants", [
-    "last_txn_days", "monthly_tpv", "device_id", "merchant_tier", "preferred_lang",
+    "last_txn_days", "monthly_tpv", "device_id", "merchant_id", "merchant_tier", "preferred_lang",
   ]),
   sAiTransform("aitEnrich", "Enrich merchant context", "3 AI-derived variables", [
     {
