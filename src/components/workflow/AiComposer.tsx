@@ -1,96 +1,138 @@
 import { useEffect, useRef, useState } from "react";
 import { Sparkles, X } from "lucide-react";
-import { AskPiWizardBody, type AskPiPlan, type WizardPhase } from "./AskPiWizard";
-import { CANVAS_CONTEXT, type PiResult } from "@/lib/ask-pi-context";
+import { CANVAS_CONTEXT } from "@/lib/ask-pi-context";
 import { getSuggestion } from "@/lib/pi-node-suggestions";
 import { askPi } from "@/lib/server-fns/pi-llm";
 import { summarizePiEdits, type PiToolCallLog } from "@/lib/pi-canvas-apply";
+import { cn } from "@/lib/utils";
 import {
   PiPill,
   PiPanel,
   PiThinking,
-  PiResultCard,
-  PiChips,
   PiSendButton,
   PiInputIcon,
   usePiDrag,
 } from "@/components/app/ask-pi-ui";
 
-type State = "collapsed" | "idle" | "typing" | "thinking" | "result" | "wizard";
+type State = "collapsed" | "open" | "thinking";
+
+/**
+ * One turn of the Ask Pi conversation. Rendered as a bubble in the chat log.
+ */
+type ChatMessage = {
+  role: "user" | "assistant";
+  content: string;
+  /** Quick-pick options parsed from a ```options fenced block on this turn. */
+  options?: string[];
+  /** One-line diff summary of nodes/edges Pi added on this turn. */
+  edits?: string[];
+};
 
 export type AiComposerProps = {
-  /** "wizard" mode shows the campaign builder Q&A inside the expanded panel. */
+  /** "wizard" mode pre-seeds a welcome from Pi so the blank canvas has a way in. */
   mode?: "chat" | "wizard";
-  /** When set, collapsed pill shows nudge styling + label instead of the default sparkle. */
+  /** Collapsed pill shows nudge styling + label instead of the default sparkle. */
   nudge?: { label: string; active: boolean };
-  /** Auto-open the wizard immediately on mount (used for brand-new campaigns). */
+  /** Auto-open the composer on mount (used for brand-new campaigns). */
   autoOpenWizard?: boolean;
-  onWizardSkeleton?: (skeleton: AskPiPlan) => void;
-  onWizardBuild?: (plan: AskPiPlan) => void;
   onBuildingChange?: (building: boolean) => void;
   /** I3 — confirm a node-level Pi suggestion; the canvas runs its real graph transform. */
   onApplySuggestion?: (s: { nodeId: string; suggestionId: string }) => void;
-  /**
-   * Builder scope — the current campaign id (needed by the askPi server fn
-   * so the LLM's mutation tools know which campaign to write to in D1).
-   */
+  /** Current campaign id — passed to askPi so the LLM's mutation tools write to the right D1 rows. */
   campaignId?: string;
-  /**
-   * Builder scope — called with the LLM's `toolCalls` array after every
-   * successful answer. The canvas parses these and applies them to
-   * ReactFlow's node/edge state so the graph changes are visible immediately.
-   */
+  /** Fired for every LLM turn whose toolCalls include DAG mutations. Canvas applies them. */
   onPiToolCalls?: (toolCalls: PiToolCallLog[]) => void;
 };
 
+/**
+ * In-canvas Ask Pi composer — a real multi-turn chat that builds the DAG live.
+ *
+ * On each user turn, we call `askPi` with `scope: "builder"` and pass the full
+ * transcript as `history` so Pi has memory across turns. Pi either:
+ *   - Asks a single clarifying question (no tool calls). We render its message
+ *     as a bubble; if it emitted a ```options fenced block we render those as
+ *     clickable chips so the user can pick without typing.
+ *   - Builds a chunk of the DAG (insert_node / connect_nodes / update_node
+ *     tool calls). The canvas applies the mutations immediately via
+ *     `onPiToolCalls`; we still render Pi's textual confirmation in the log.
+ *
+ * "Wizard" mode is just chat with a pre-seeded welcome message — used on a
+ * brand-new blank canvas so the flow has a natural entry point.
+ */
 export function AiComposer({
   mode = "chat",
   nudge,
-  autoOpenWizard: _autoOpenWizard = false,
-  onWizardSkeleton,
-  onWizardBuild,
+  autoOpenWizard = false,
   onBuildingChange,
   onApplySuggestion,
   campaignId,
   onPiToolCalls,
 }: AiComposerProps = {}) {
-  const [state, setState] = useState<State>("collapsed");
+  const [state, setState] = useState<State>(autoOpenWizard ? "open" : "collapsed");
   const [value, setValue] = useState("");
-  const [wizardPhase, setWizardPhase] = useState<WizardPhase>("asking");
-  // I3 — a node's "Ask Pi to apply" proposes a real edit; held here until confirmed.
-  const [pendingSuggestion, setPendingSuggestion] = useState<
-    { nodeId: string; suggestionId: string; result: PiResult } | null
-  >(null);
-  // Live LLM answer surfaced from askPi. When present, PiResultCard shows it
-  // (with a summary of any canvas edits Pi made) instead of the canned copy.
-  const [liveResult, setLiveResult] = useState<PiResult | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[]>(() =>
+    mode === "wizard"
+      ? [{
+          role: "assistant",
+          content:
+            "Tell me what you want to build — the trigger, who it targets, and how you want to reach them. I'll ask what I need and then draw the workflow.",
+        }]
+      : [],
+  );
   const [nudgeDismissed, setNudgeDismissed] = useState(false);
   const [hasEngaged, setHasEngaged] = useState(false);
-  // The blank-canvas build wizard runs once. After it completes, Ask Pi becomes a chat composer.
-  const [built, setBuilt] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Shared horizontal drag — identical behaviour + remembered position as the global dock.
   const { dragX, pillHandlers, suppressClick } = usePiDrag(wrapRef);
 
+  const isOpen = state !== "collapsed";
+  const showNudge = !!(nudge?.active && !isOpen && !nudgeDismissed && !hasEngaged);
+
   useEffect(() => {
-    if (state === "idle" || state === "typing") inputRef.current?.focus();
+    onBuildingChange?.(state === "thinking");
+  }, [state, onBuildingChange]);
+
+  useEffect(() => {
+    if (state === "open") inputRef.current?.focus();
   }, [state]);
 
+  // Auto-scroll to bottom whenever the transcript grows.
   useEffect(() => {
-    if (value.length > 0 && state === "idle") setState("typing");
-    if (value.length === 0 && state === "typing") setState("idle");
-  }, [value, state]);
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [messages, state]);
 
-  // I3 — a node's "Ask Pi to apply" hint opens this composer pre-filled with its prompt.
+  // I3 — node-level "Ask Pi to apply" hint opens this composer pre-filled + submits.
+  useEffect(() => {
+    const onSuggest = (e: Event) => {
+      const detail = (e as CustomEvent<{ nodeId: string; suggestionId: string }>).detail;
+      const sug = getSuggestion(detail?.suggestionId);
+      if (!sug) return;
+      setHasEngaged(true);
+      setState("open");
+      // Register the confirmation as the first user turn.
+      setMessages((prev) => [...prev, { role: "user", content: sug.prompt }]);
+      // Fire the underlying transform + a confirming assistant bubble.
+      onApplySuggestion?.({ nodeId: detail.nodeId, suggestionId: detail.suggestionId });
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: sug.result.text, edits: sug.result.diff },
+      ]);
+    };
+    window.addEventListener("askpi:suggest", onSuggest);
+    return () => window.removeEventListener("askpi:suggest", onSuggest);
+  }, [onApplySuggestion]);
+
+  // I3 — "Ask Pi anything…" prompt hook. Same as before but routes into the chat.
   useEffect(() => {
     const onPrompt = (e: Event) => {
       const prompt = (e as CustomEvent<string>).detail;
       if (!prompt) return;
       setHasEngaged(true);
-      setState("idle");
+      setState("open");
       setValue(prompt);
       inputRef.current?.focus();
     };
@@ -98,139 +140,113 @@ export function AiComposer({
     return () => window.removeEventListener("askpi:prompt", onPrompt);
   }, []);
 
-  // I3 — a node's "Ask Pi to apply" opens the composer, pre-fills the ask, "thinks",
-  // then shows the proposed change. The graph only mutates once the user confirms.
-  useEffect(() => {
-    const onSuggest = (e: Event) => {
-      const detail = (e as CustomEvent<{ nodeId: string; suggestionId: string }>).detail;
-      const sug = getSuggestion(detail?.suggestionId);
-      if (!sug) return;
-      setHasEngaged(true);
-      setPendingSuggestion({ nodeId: detail.nodeId, suggestionId: detail.suggestionId, result: sug.result });
-      setValue(sug.prompt);
-      setState("thinking");
-      setTimeout(() => setState("result"), 1800);
-    };
-    window.addEventListener("askpi:suggest", onSuggest);
-    return () => window.removeEventListener("askpi:suggest", onSuggest);
-  }, []);
-
-  // Notify parent of building lock
-  useEffect(() => {
-    onBuildingChange?.(state === "wizard" && wizardPhase === "building");
-  }, [state, wizardPhase, onBuildingChange]);
-
-  // Mark engaged + built once the wizard completes — nudge won't reappear, and
-  // Ask Pi switches from the one-time build wizard to a persistent chat composer.
-  useEffect(() => {
-    if (wizardPhase === "done") { setHasEngaged(true); setBuilt(true); }
-  }, [wizardPhase]);
-
-  // When the build wizard finishes, collapse Ask Pi back to its floating pill.
-  // Clicking the pill reopens it as the persistent chat composer (built ⇒ no wizard).
-  useEffect(() => {
-    if (state === "wizard" && wizardPhase === "done") {
-      const t = setTimeout(() => setState("collapsed"), 600);
-      return () => clearTimeout(t);
-    }
-  }, [state, wizardPhase]);
-
-  const submit = async () => {
-    const question = value.trim();
-    if (!question) return;
-    setPendingSuggestion(null);
-    setLiveResult(null);
-    setState("thinking");
-    // Builder-scope call: LLM has read + mutate tools over D1's DSL. If the
-    // call fails (missing D1, missing TFY key, endpoint unreachable), we fall
-    // back to the canned CANVAS_CONTEXT.result so the demo never dead-ends.
-    try {
-      const r = await askPi({
-        data: {
-          scope: "builder",
-          question,
-          context: campaignId ? { campaignId, surface: "Campaign canvas" } : { surface: "Campaign canvas" },
-        },
-      });
-      if (r.ok) {
-        const toolCalls = r.toolCalls as PiToolCallLog[];
-        // Fire canvas mutations first so the graph visibly updates before the
-        // result panel renders — feels instant.
-        if (toolCalls.length > 0) onPiToolCalls?.(toolCalls);
-        const edits = summarizePiEdits(toolCalls);
-        setLiveResult({
-          text: r.answer,
-          diff: edits.length > 0 ? edits : undefined,
-          cta: edits.length > 0 ? "Got it" : "Got it",
-        });
-      }
-      // If !ok, liveResult stays null → PiResultCard shows CANVAS_CONTEXT.result.
-    } catch {
-      // Same fallback path.
-    }
-    setState("result");
-  };
-
-  const reset = () => {
-    setPendingSuggestion(null);
-    setLiveResult(null);
-    setValue("");
-    setState("idle");
-  };
-
-  const collapse = () => {
-    if (state === "wizard" && wizardPhase === "building") return;
-    setPendingSuggestion(null);
-    setValue("");
-    setState("collapsed");
-  };
-
-  // Confirm the proposed suggestion: run the real graph transform, then collapse
-  // back to the pill so the live canvas change is unobstructed.
-  const confirmSuggestion = () => {
-    if (pendingSuggestion) {
-      onApplySuggestion?.({ nodeId: pendingSuggestion.nodeId, suggestionId: pendingSuggestion.suggestionId });
-    }
-    setPendingSuggestion(null);
-    setValue("");
-    setState("collapsed");
-  };
-
-  // Wizard only runs for the first blank-canvas build (new campaigns, not yet built).
-  // Otherwise Ask Pi opens straight into the chat text-input.
-  const wizardAvailable = mode === "wizard" && !!nudge?.active && !built;
-
-  const openPrimary = () => {
-    setHasEngaged(true);
-    setState(wizardAvailable ? "wizard" : "idle");
-  };
-
-  const isOpen = state !== "collapsed";
-  const expandedTall = state === "thinking" || state === "result";
-  const isWizard = state === "wizard";
-  const showNudge = !!(nudge?.active && !isOpen && !nudgeDismissed && !hasEngaged);
-
-  // Click-outside collapses, unless in wizard or user is typing.
-  // Capture phase is required: the ReactFlow pane (d3-zoom) calls
-  // stopImmediatePropagation() on mousedown, so a bubble-phase document
-  // listener never fires when clicking the canvas. Capturing runs first.
+  // Click-outside collapses only when idle (no busy call, no partial input).
   useEffect(() => {
     if (!isOpen) return;
     const onDown = (e: MouseEvent) => {
       if (!containerRef.current) return;
       if (containerRef.current.contains(e.target as Node)) return;
-      if (state === "wizard") return;
+      if (state === "thinking") return;
       if (value.trim().length > 0) return;
-      collapse();
+      setState("collapsed");
     };
     document.addEventListener("mousedown", onDown, true);
     return () => document.removeEventListener("mousedown", onDown, true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, state, value]);
+
+  const openPrimary = () => {
+    setHasEngaged(true);
+    setState("open");
+  };
+
+  const collapse = () => {
+    if (state === "thinking") return;
+    setState("collapsed");
+  };
+
+  const submit = async (text?: string) => {
+    const q = (text ?? value).trim();
+    if (!q || state === "thinking") return;
+    setValue("");
+    const historyForServer = messages.map((m) => ({ role: m.role, content: m.content }));
+    setMessages((prev) => [...prev, { role: "user", content: q }]);
+    setState("thinking");
+    try {
+      const r = await askPi({
+        data: {
+          scope: "builder",
+          question: q,
+          context: {
+            campaignId,
+            surface: "Campaign canvas",
+            isNew: mode === "wizard",
+            hint:
+              mode === "wizard"
+                ? "The canvas is blank except for a Start node with id 'start'. Anchor the first new node to it."
+                : "The canvas already has nodes. Read the campaign first before editing.",
+          },
+          history: historyForServer,
+        },
+      });
+      if (r.ok) {
+        const toolCalls = (r.toolCalls ?? []) as PiToolCallLog[];
+        if (toolCalls.length > 0) onPiToolCalls?.(toolCalls);
+        const { text: bodyText, options } = parseOptionsBlock(r.answer);
+        const edits = summarizePiEdits(toolCalls);
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant",
+            content: bodyText || (edits.length > 0 ? "Done." : "Not sure what to do with that — could you rephrase?"),
+            options,
+            edits: edits.length > 0 ? edits : undefined,
+          },
+        ]);
+      } else {
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant",
+            content:
+              r.error === "d1_not_bound"
+                ? "This worker doesn't have a database bound yet. Provision D1 to enable this."
+                : r.error?.startsWith("tfy_") || r.error?.includes("TFY_API_KEY")
+                  ? "I couldn't reach the language model. Try again in a moment."
+                  : "Something went wrong. Try again in a moment.",
+          },
+        ]);
+      }
+    } catch (e) {
+      setMessages((prev) => [
+        ...prev,
+        { role: "assistant", content: `Network hiccup — try again. (${(e as Error).message})` },
+      ]);
+    } finally {
+      setState("open");
+    }
+  };
+
+  const resetChat = () => {
+    setMessages(
+      mode === "wizard"
+        ? [{
+            role: "assistant",
+            content: "Fresh start. Describe the campaign you want to build.",
+          }]
+        : [],
+    );
+    setValue("");
+    inputRef.current?.focus();
+  };
+
+  const lastAssistantIdx = (() => {
+    for (let i = messages.length - 1; i >= 0; i--) if (messages[i].role === "assistant") return i;
+    return -1;
+  })();
 
   return (
     <div ref={wrapRef} className="pointer-events-none absolute inset-x-0 bottom-6 z-20 flex justify-center px-4">
-      {/* Collapsed pill — original Google-Docs-style sparkle, with optional floating nudge bubble */}
+      {/* Collapsed pill (with optional nudge bubble) */}
       {!isOpen && (
         <div
           className="pointer-events-none relative flex flex-col items-center"
@@ -253,7 +269,6 @@ export function AiComposer({
               >
                 <X className="h-3 w-3" />
               </button>
-              {/* tail anchoring bubble to pill */}
               <span className="absolute -bottom-1.5 left-1/2 h-3 w-3 -translate-x-1/2 rotate-45 border-b border-r border-ai/30 bg-card" />
               <style>{`
                 @keyframes askPiNudgePulse {
@@ -269,83 +284,180 @@ export function AiComposer({
         </div>
       )}
 
-      {/* Expanded composer — drag offset lives on this non-animated wrapper so it
-          never collides with the panel's slide-up entrance / transition-all. */}
+      {/* Expanded chat panel */}
       {isOpen && (
         <div className="pointer-events-none" style={{ transform: `translateX(${dragX}px)` }}>
-          <PiPanel innerRef={containerRef} className={isWizard ? "w-[640px]" : "w-[680px]"}>
-            {/* Wizard mode body (canvas-only build flow) */}
-            {isWizard && (
-              <div className="relative">
-                {(wizardPhase === "asking" || wizardPhase === "review") && (
+          <PiPanel innerRef={containerRef} className="w-[700px] max-w-[92vw]">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-3.5 w-3.5 text-ai" />
+                <span className="text-[12.5px] font-medium text-foreground">Ask Pi</span>
+                {messages.length > 0 && (
+                  <span className="text-[10.5px] text-muted-foreground">
+                    · {messages.length} {messages.length === 1 ? "turn" : "turns"}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-1">
+                {messages.length > 1 && (
                   <button
-                    onClick={collapse}
-                    className="absolute right-3 top-3 z-10 flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
-                    aria-label="Cancel"
+                    onClick={resetChat}
+                    className="rounded-md px-2 py-1 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+                    title="Start over"
                   >
-                    <X className="h-3.5 w-3.5" />
+                    Clear
                   </button>
                 )}
-                <AskPiWizardBody
-                  active={isWizard}
-                  onSkeleton={(s) => onWizardSkeleton?.(s)}
-                  onBuild={(p) => onWizardBuild?.(p)}
-                  onPhaseChange={setWizardPhase}
-                />
+                <button
+                  onClick={collapse}
+                  aria-label="Close"
+                  className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Chat transcript */}
+            {(messages.length > 0 || state === "thinking") && (
+              <div
+                ref={scrollRef}
+                className="scrollbar-thin max-h-[420px] min-h-[80px] overflow-y-auto px-4 py-3"
+              >
+                <div className="space-y-3">
+                  {messages.map((m, i) => (
+                    <ChatBubble
+                      key={i}
+                      message={m}
+                      showOptions={i === lastAssistantIdx && state !== "thinking"}
+                      onPick={(opt) => submit(opt)}
+                    />
+                  ))}
+                  {state === "thinking" && (
+                    <div className="pl-1">
+                      <PiThinking steps={CANVAS_CONTEXT.thinking} />
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 
-            {/* Chat mode — result / thinking surface */}
-            {!isWizard && expandedTall && (
-              <div className="border-b border-border px-5 py-4 animate-fade-in">
-                {state === "thinking" ? (
-                  <PiThinking steps={CANVAS_CONTEXT.thinking} />
-                ) : pendingSuggestion ? (
-                  <PiResultCard result={pendingSuggestion.result} onAccept={confirmSuggestion} onDismiss={reset} />
-                ) : liveResult ? (
-                  // Real LLM answer + summary of edits Pi just applied to the canvas.
-                  // Canvas is already mutated by this point (onPiToolCalls fired first).
-                  <PiResultCard result={liveResult} onAccept={reset} onDismiss={reset} />
-                ) : (
-                  <PiResultCard result={CANVAS_CONTEXT.result} onAccept={reset} onDismiss={reset} />
-                )}
-              </div>
-            )}
-
-            {/* Chat mode — single-line input row */}
-            {!isWizard && (
-              <div className="flex items-center gap-2 px-4 py-2.5">
-                <PiInputIcon />
-                <textarea
-                  ref={inputRef}
-                  rows={1}
-                  value={value}
-                  onChange={(e) => setValue(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      submit();
-                    }
-                    if (e.key === "Escape" && !value) collapse();
-                  }}
-                  placeholder={CANVAS_CONTEXT.placeholder}
-                  className="scrollbar-thin max-h-32 min-w-0 flex-1 resize-none bg-transparent py-1.5 text-[14px] text-foreground placeholder:text-muted-foreground/80 focus:outline-none"
-                />
-                <PiSendButton
-                  thinking={state === "thinking"}
-                  disabled={!value.trim() && state !== "thinking"}
-                  onClick={state === "thinking" ? reset : submit}
-                />
-              </div>
-            )}
-
-            {/* Chat mode — suggestion chips */}
-            {!isWizard && state === "idle" && value.length === 0 && (
-              <PiChips chips={CANVAS_CONTEXT.chips} onPick={(s) => { setValue(s); setTimeout(submit, 50); }} />
-            )}
+            {/* Input row */}
+            <div className="flex items-end gap-2 border-t border-border px-4 py-2.5">
+              <PiInputIcon />
+              <textarea
+                ref={inputRef}
+                rows={1}
+                value={value}
+                onChange={(e) => setValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    void submit();
+                  }
+                  if (e.key === "Escape" && !value) collapse();
+                }}
+                placeholder={
+                  messages.length === 0
+                    ? CANVAS_CONTEXT.placeholder
+                    : "Reply or ask a follow-up…"
+                }
+                className="scrollbar-thin max-h-32 min-w-0 flex-1 resize-none bg-transparent py-1.5 text-[14px] text-foreground placeholder:text-muted-foreground/80 focus:outline-none"
+              />
+              <PiSendButton
+                thinking={state === "thinking"}
+                disabled={!value.trim() && state !== "thinking"}
+                onClick={state === "thinking" ? () => setState("open") : () => submit()}
+              />
+            </div>
           </PiPanel>
         </div>
       )}
     </div>
   );
+}
+
+/**
+ * One turn's bubble. User bubbles right-aligned, Pi bubbles left-aligned.
+ * Assistant bubbles may render a diff summary of node/edge edits and a row
+ * of quick-pick chips (parsed from ```options blocks) — but only for the
+ * MOST RECENT assistant turn, so old options don't stay tappable.
+ */
+function ChatBubble({
+  message,
+  showOptions,
+  onPick,
+}: {
+  message: ChatMessage;
+  showOptions: boolean;
+  onPick: (opt: string) => void;
+}) {
+  if (message.role === "user") {
+    return (
+      <div className="flex justify-end">
+        <div className="max-w-[80%] rounded-2xl rounded-tr-sm bg-foreground px-3 py-2 text-[13px] leading-relaxed text-background">
+          {message.content}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-start gap-2">
+        <Sparkles className="mt-1 h-3.5 w-3.5 shrink-0 text-ai" />
+        <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-tl-sm border border-border bg-card px-3 py-2 text-[13px] leading-relaxed text-foreground">
+          {message.content}
+          {message.edits && message.edits.length > 0 && (
+            <div className="mt-2 space-y-0.5 border-t border-border pt-2 font-mono text-[11px] text-muted-foreground">
+              {message.edits.map((e, i) => (
+                <div key={i}>{e}</div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+      {showOptions && message.options && message.options.length > 0 && (
+        <div className="ml-6 flex flex-wrap gap-1.5">
+          {message.options.map((opt) => (
+            <button
+              key={opt}
+              onClick={() => onPick(opt)}
+              className={cn(
+                "rounded-full border border-ai/40 bg-ai/5 px-3 py-1 text-[11.5px] font-medium text-foreground",
+                "hover:border-ai/70 hover:bg-ai/10",
+                "transition-colors",
+              )}
+            >
+              {opt}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Parse a ```options fenced block out of an assistant message. Returns the
+ * remaining prose plus the list of options. Any of:
+ *   ```options
+ *   Option A
+ *   Option B
+ *   ```
+ * Also tolerates optional leading bullets ("- ", "* ") in each option line.
+ */
+function parseOptionsBlock(md: string): { text: string; options?: string[] } {
+  const re = /```options\s*\n([\s\S]*?)```/i;
+  const m = md.match(re);
+  if (!m || m.index === undefined) return { text: md.trim() };
+  const raw = m[1];
+  const options = raw
+    .split("\n")
+    .map((s) => s.replace(/^\s*[-*]\s+/, "").trim())
+    .filter((s) => s.length > 0 && s.length < 80);
+  const before = md.slice(0, m.index).trim();
+  const after = md.slice(m.index + m[0].length).trim();
+  const text = [before, after].filter(Boolean).join("\n\n");
+  return { text, options: options.length > 0 ? options : undefined };
 }

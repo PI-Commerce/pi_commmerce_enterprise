@@ -549,27 +549,13 @@ export function WorkflowCanvas({
 
       {!previewOnly && (
         <AiComposer
-          mode="wizard"
+          mode={isNew ? "wizard" : "chat"}
           nudge={{ label: "Ask Pi to build your campaign", active: autoStartAskPi }}
           autoOpenWizard={askPiOpen}
           campaignId={campaignId}
           onBuildingChange={setAiBuilding}
           onApplySuggestion={applySuggestion}
           onPiToolCalls={applyPiToolCalls}
-          onWizardSkeleton={(skel) => {
-            setSelected(null);
-            setNodes(skel.nodes);
-            setEdges(skel.edges);
-            refit();
-          }}
-          onWizardBuild={(plan) => {
-            setSelected(null);
-            setNodes(plan.nodes);
-            setEdges(plan.edges);
-            onAiBuiltName?.(plan.name);
-            onDirty?.();
-            refit();
-          }}
         />
       )}
     </div>

@@ -258,6 +258,9 @@ function CampaignBuilder() {
           onDirty={handleDirty}
           onControlReady={registerCanvasControl}
           isNew={isNew}
+          // On a brand-new campaign, auto-open Ask Pi's nudge so the user has
+          // an obvious way into the multi-turn build flow.
+          autoStartAskPi={isNew}
         />
       </div>
 
