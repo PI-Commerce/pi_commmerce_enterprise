@@ -6,15 +6,10 @@
  *   1. Which auto-included fields go in the payload envelope
  *   2. Where in the app it can be attached
  *
- * The registry only knows URL + auth + type. Per-node payload extras
- * (workflow variables specific to a particular Human Escalation node)
- * live on the node's config, not on the webhook.
- *
  *   Type              Attached where                                Delivers
  *   ------------------------------------------------------------------------
  *   Channels          Channels → <channel> settings                 Delivery events (sent/delivered/read/replied/failed)
  *   Campaign          Start node config, per campaign               Lifecycle (started/paused/completed/failed)
- *   Human Escalation  Human Escalation node config, per node        lead.escalated
  *
  * v1 is in-memory. Store lives in webhooks-store.ts.
  */
@@ -23,22 +18,20 @@
  *  Types
  * -------------------------------------------------------------------------- */
 
-export type WebhookType = "channels" | "campaign" | "human_escalation";
+export type WebhookType = "channels" | "campaign";
 
 export const WEBHOOK_TYPE_LABEL: Record<WebhookType, string> = {
-  channels:         "Channels",
-  campaign:         "Campaign",
-  human_escalation: "Human Escalation",
+  channels: "Channels",
+  campaign: "Campaign",
 };
 
 /**
- * Human Escalation + Channels ship in the developer surface. Campaign is
- * declared in the type system but not yet exposed in the create picker.
+ * Channels ships in the developer surface. Campaign is declared in the type
+ * system but not yet exposed in the create picker.
  */
 export const WEBHOOK_TYPE_ENABLED: Record<WebhookType, boolean> = {
-  channels:         true,
-  campaign:         false,
-  human_escalation: true,
+  channels: true,
+  campaign: false,
 };
 
 /* -------------------------------------------------------------------------- *
@@ -74,9 +67,8 @@ export const CHANNEL_EVENTS: Record<WebhookChannel, { id: string; label: string 
 };
 
 export const WEBHOOK_TYPE_DESCRIPTION: Record<WebhookType, string> = {
-  channels:         "Delivery events for a specific channel instance.",
-  campaign:         "Campaign lifecycle events (started, paused, completed, failed).",
-  human_escalation: "Fires when a lead reaches a Human Escalation node.",
+  channels: "Delivery events for a specific channel instance.",
+  campaign: "Campaign lifecycle events (started, paused, completed, failed).",
 };
 
 /** HMAC signature header name. Signature is HMAC-SHA256 over the raw POST
@@ -93,9 +85,6 @@ export const AUTO_INCLUDED_FIELDS: Record<WebhookType, string[]> = {
   // once channel-side event catalog is settled.
   channels: [],
   campaign: [],
-  human_escalation: [
-    "timestamp", "campaign_id", "lead_id", "phone", "run_id",
-  ],
 };
 
 /** Example payload rendered in the webhook dialog's Payload preview — literal
@@ -103,13 +92,6 @@ export const AUTO_INCLUDED_FIELDS: Record<WebhookType, string[]> = {
 export const PAYLOAD_EXAMPLE: Record<WebhookType, Record<string, string | number | boolean>> = {
   channels: {},
   campaign: {},
-  human_escalation: {
-    timestamp:   "2026-08-04T14:22:00Z",
-    campaign_id: "c_ex20",
-    lead_id:     "l_1040",
-    phone:       "+919812340000",
-    run_id:      "r_8041",
-  },
 };
 
 export type WebhookHeader = { key: string; value: string };
@@ -155,7 +137,7 @@ export type Webhook = {
 export type DeliveryAttempt = {
   id: string;                  // del_xxxxx
   webhookId: string;
-  /** Concrete event name — e.g. "lead.escalated", "whatsapp.delivered". Used
+  /** Concrete event name — e.g. "whatsapp.delivered", "campaign.started". Used
    *  for filtering the delivery log. */
   event: string;
   at: string;                  // ISO
@@ -183,28 +165,6 @@ function isoHoursAgo(hours: number, minute = 0): string {
 }
 
 export const SEED_WEBHOOKS: Webhook[] = [
-  {
-    id: "wh_crm_esc",
-    name: "Client CRM · Escalations",
-    type: "human_escalation",
-    endpointUrl: "https://crm.acmecorp.internal/hooks/pi/escalations",
-    authToken: "whsec_1a2b3c4d5e6f7g8h9i0j1k2l3m4n5o6p",
-    headers: [{ key: "Authorization", value: "Bearer <acme-crm-token>" }],
-    status: "active",
-    createdAt: isoDaysAgo(42, 9, 12),
-    lastDeliveryAt: isoHoursAgo(2, 14),
-  },
-  {
-    id: "wh_ops_slack_esc",
-    name: "Ops Slack · Escalation queue",
-    type: "human_escalation",
-    endpointUrl: "https://hooks.slack.com/services/T00/B00/pi-esc-alerts",
-    authToken: "whsec_9z8y7x6w5v4u3t2s1r0q9p8o7n6m5l4k",
-    headers: [],
-    status: "active",
-    createdAt: isoDaysAgo(30, 15, 40),
-    lastDeliveryAt: isoHoursAgo(6, 22),
-  },
   {
     id: "wh_wa_events",
     name: "wa-delivery-events",
@@ -258,17 +218,6 @@ export const SEED_WEBHOOKS: Webhook[] = [
     createdAt: isoDaysAgo(21, 8, 40),
     lastDeliveryAt: isoDaysAgo(1, 16),
   },
-  {
-    id: "wh_disabled_test",
-    name: "Legacy sandbox (paused)",
-    type: "human_escalation",
-    endpointUrl: "https://old-sandbox.acmecorp.internal/pi-webhook",
-    authToken: "whsec_pauseddemosecretpauseddemosecret",
-    headers: [],
-    status: "paused",
-    createdAt: isoDaysAgo(120, 14, 30),
-    lastDeliveryAt: isoDaysAgo(30, 9, 15),
-  },
 ];
 
 /* -------------------------------------------------------------------------- *
@@ -291,9 +240,6 @@ const SAMPLE_EVENTS: Record<WebhookType, string[]> = {
   campaign: [
     "campaign.started", "campaign.completed", "campaign.failed", "campaign.paused",
   ],
-  human_escalation: [
-    "lead.escalated",
-  ],
 };
 
 function buildDeliveries(): DeliveryAttempt[] {
@@ -301,12 +247,12 @@ function buildDeliveries(): DeliveryAttempt[] {
   for (const wh of SEED_WEBHOOKS) {
     if (wh.status === "paused") continue;
     const events = SAMPLE_EVENTS[wh.type];
-    const n = wh.type === "channels" ? 40 : wh.type === "campaign" ? 12 : 22;
+    const n = wh.type === "channels" ? 40 : 12;
     for (let i = 0; i < n; i++) {
       const hoursAgo = Math.floor(((h(wh.id + i) % 168) / 168) * 168);
       const event = events[h(wh.id + ":" + i) % events.length];
       const roll = h(wh.id + "^" + i) % 100;
-      const successThreshold = wh.type === "channels" ? 98 : wh.type === "campaign" ? 97 : 94;
+      const successThreshold = wh.type === "channels" ? 98 : 97;
       const success = roll < successThreshold;
       const responseCode = success ? 200 : roll % 3 === 0 ? 429 : roll % 3 === 1 ? 500 : null;
       const latencyMs = success
@@ -350,8 +296,5 @@ export function generateAuthToken(): string {
   return out;
 }
 
-/** Back-compat re-exports so any callers that still import the old names
- *  (Human Escalation node) keep compiling. Safe to remove after those
- *  are migrated. */
 export const maskSecret = maskToken;
 export const generateSigningSecret = generateAuthToken;

@@ -65,7 +65,6 @@ const DEFAULT_NODE_DATA: Record<NodeKind, Partial<WorkflowNodeData>> = {
   sms: { subtitle: "Send SMS", valid: false, error: "Add message body", outputs: completedOutput() },
   rcs: { subtitle: "Send RCS", valid: false, error: "Pick template", outputs: completedOutput() },
   aiTransform: { subtitle: "AI transformation", valid: false, error: "Set prompt" },
-  needsReview: { subtitle: "Human review", valid: false, error: "Set escalation rule" },
   adsCampaign: { subtitle: "WhatsApp CTWA ad", valid: false, error: "Complete setup" },
 };
 

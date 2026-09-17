@@ -1,7 +1,7 @@
 import { useState } from "react";
 import {
   Users, GitBranch, Split, Phone, MessageCircle,
-  MessageSquare, MessageSquareText, Clock, Megaphone, Plus, X, Webhook, Sparkles, Flag, Workflow,
+  MessageSquare, MessageSquareText, Clock, Megaphone, Plus, X, Webhook, Sparkles, Workflow,
   type LucideIcon,
 } from "lucide-react";
 import type { NodeKind } from "@/lib/campaign-types";
@@ -21,7 +21,6 @@ const ICONS: Partial<Record<NodeKind, LucideIcon>> = {
   rcs: MessageSquareText,
   aiTransform: Sparkles,
   adsCampaign: Megaphone,
-  needsReview: Flag,
 };
 
 // Audience is omitted: every canvas already ships with exactly one (non-deletable)
@@ -30,7 +29,7 @@ const SECTIONS: Array<{ label: string; nodes: NodeKind[] }> = [
   { label: "Data Nodes", nodes: ["apiToolCall"] },
   { label: "Logic Nodes", nodes: ["conditional", "abSplit", "delay"] },
   { label: "AI Nodes", nodes: ["aiTransform"] },
-  { label: "Action Nodes", nodes: ["voiceCall", "whatsapp", "whatsappFreeform", "sms", "rcs", "needsReview"] },
+  { label: "Action Nodes", nodes: ["voiceCall", "whatsapp", "whatsappFreeform", "sms", "rcs"] },
   { label: "Ads Nodes", nodes: ["adsCampaign"] },
 ];
 

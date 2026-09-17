@@ -31,7 +31,7 @@ import {
   Check, CheckCheck, CircleAlert, CircleDashed, CircleDot,
   ExternalLink, FileText, Reply, Sparkles, Video,
   MessageCircle, MessageSquare, MessageSquareText,
-  Megaphone, Flag, ChevronDown, ChevronRight, PhoneMissed, PhoneCall,
+  Megaphone, ChevronDown, ChevronRight, PhoneMissed, PhoneCall,
 } from "lucide-react";
 
 export const Route = createFileRoute("/inbox/$id")({
@@ -98,11 +98,6 @@ function LeadDetail() {
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="text-lg font-semibold">{lead.name}</h1>
-                {lead.humanEscalated && (
-                  <span className="inline-flex items-center gap-1 rounded-full border border-warning/40 bg-warning/10 px-2 py-0.5 text-[11px] font-medium text-warning" title="Human Escalation flagged in at least one run">
-                    <Flag className="h-3 w-3" /> Escalated
-                  </span>
-                )}
               </div>
               <p className="mt-0.5 font-mono text-[11.5px] text-muted-foreground">
                 {lead.id} · {lead.customerId}
@@ -196,7 +191,6 @@ function CampaignsTab({ lead }: { lead: LeadRecord }) {
             <th className="px-4 py-2.5 text-left font-medium">Status</th>
             <th className="px-4 py-2.5 text-left font-medium">Entered</th>
             <th className="px-4 py-2.5 text-left font-medium">Exited</th>
-            <th className="px-4 py-2.5 text-left font-medium">Human Escalation</th>
           </tr>
         </thead>
         <tbody>
@@ -213,15 +207,6 @@ function CampaignsTab({ lead }: { lead: LeadRecord }) {
               <td className="px-4 py-3 text-[11.5px] text-muted-foreground">{formatIso(c.enteredAt)}</td>
               <td className="px-4 py-3 text-[11.5px] text-muted-foreground">
                 {c.exitedAt ? formatIso(c.exitedAt) : "—"}
-              </td>
-              <td className="px-4 py-3">
-                {c.humanEscalated ? (
-                  <span className="inline-flex items-center gap-1 rounded-full border border-warning/40 bg-warning/10 px-2 py-0.5 text-[11px] font-medium text-warning">
-                    <Flag className="h-3 w-3" /> Escalated
-                  </span>
-                ) : (
-                  <span className="text-[11px] text-muted-foreground">—</span>
-                )}
               </td>
             </tr>
           ))}

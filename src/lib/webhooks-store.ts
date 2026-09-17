@@ -59,8 +59,6 @@ export function useDeliveries(webhookId?: string): DeliveryAttempt[] {
   return webhookId ? deliveries.filter((d) => d.webhookId === webhookId) : deliveries;
 }
 
-/** Filter helper — used by the HITL node's multi-select to only offer
- *  webhooks of type `human_escalation`. */
 export function webhooksOfType(type: WebhookType): Webhook[] {
   return webhooks.filter((w) => w.type === type);
 }
@@ -70,8 +68,6 @@ export function webhooksById(ids: readonly string[]): Webhook[] {
   const set = new Set(ids);
   return webhooks.filter((w) => set.has(w.id));
 }
-/** Active-only count of webhooks matching a type — used by the HITL node's
- *  info tooltip when no per-node selection is made. */
 export function activeCountForType(type: WebhookType): number {
   return webhooks.filter((w) => w.type === type && w.status === "active").length;
 }

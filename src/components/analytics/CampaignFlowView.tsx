@@ -33,7 +33,6 @@ const KIND_MAP: Record<SankeyNodeKind, NodeKind> = {
   delay: "delay",
   aiTransform: "aiTransform",
   end: "end",
-  needsReview: "needsReview",
 };
 
 /** Context carries the analytics-only "expand freeform" handler down to the
