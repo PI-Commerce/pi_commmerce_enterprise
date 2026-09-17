@@ -1,12 +1,10 @@
 import { useState, useRef, useEffect } from "react";
 import { Link } from "@tanstack/react-router";
-import { ChevronLeft, Save, Play, Pause, Lock, Check, AlertCircle, History } from "lucide-react";
-import { toast } from "sonner";
+import { ChevronLeft, Save, Rocket, Check, AlertCircle, History } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { CampaignStatus } from "@/lib/campaign-types";
 import { STATUS_TONE } from "@/lib/campaign-types";
-import { CreateRunDialog, type CreateRunPayload } from "@/components/workflow/CreateRunDialog";
 import type { CampaignVersion } from "@/lib/campaign-versions";
 
 
@@ -22,31 +20,32 @@ const OBJECTIVE_LABELS: Record<string, string> = {
 export function BuilderTopBar({
   campaignId,
   name, onNameChange,
-  status, onStatusChange,
+  status,
   dirty, validNodes, totalNodes,
-  onSave, onExit,
+  onSave, onExit, onPublish,
   objective, description,
-  versions = [], onRunStarted, onResume,
+  versions = [],
+  hasLiveRun = false,
 }: {
   campaignId: string;
   name: string;
   onNameChange: (n: string) => void;
   status: CampaignStatus;
-  onStatusChange: (s: CampaignStatus) => void;
   dirty: boolean;
   validNodes: number;
   totalNodes: number;
   onSave: () => void;
   onExit: () => void;
+  /** Publish the current config as a new version (enabled only when every node is valid). */
+  onPublish: () => void;
   objective?: string;
   description?: string;
   versions?: CampaignVersion[];
-  onRunStarted?: () => void;
-  onResume?: () => void;
+  /** True when ≥1 associated run is live — publishing then warns it mints a new version. */
+  hasLiveRun?: boolean;
 }) {
   const [editingName, setEditingName] = useState(false);
   const [draft, setDraft] = useState(name);
-  const [runOpen, setRunOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const currentVersion = versions.length ? Math.max(...versions.map((v) => v.version)) : 0;
@@ -60,9 +59,9 @@ export function BuilderTopBar({
     if (draft.trim() && draft !== name) onNameChange(draft.trim());
   };
 
+  // Editing is always allowed — even with a live run. Publishing then mints a new
+  // version that only new leads follow (existing leads stay on their version).
   const allValid = validNodes === totalNodes && totalNodes > 0;
-  const runnable = allValid && status === "ready";
-  const editLocked = status === "running" || status === "locked";
 
   // Navigate out and let the route's useBlocker surface the unsaved-changes
   // toast (PRD §6.5). No native confirm() — that bypassed the toast blocker.
@@ -95,12 +94,9 @@ export function BuilderTopBar({
           />
         ) : (
           <button
-            onClick={() => !editLocked && setEditingName(true)}
-            className={cn(
-              "truncate rounded-md px-2 py-1 text-[13.5px] font-medium",
-              editLocked ? "cursor-not-allowed text-foreground" : "hover:bg-accent",
-            )}
-            title={editLocked ? "Locked while campaign is Running" : description || "Rename campaign"}
+            onClick={() => setEditingName(true)}
+            className="truncate rounded-md px-2 py-1 text-[13.5px] font-medium hover:bg-accent"
+            title={description || "Rename campaign"}
           >
             {name}
           </button>
@@ -121,19 +117,17 @@ export function BuilderTopBar({
             STATUS_TONE[status],
           )}
         >
-          {status === "running" && <span className="h-1.5 w-1.5 rounded-full bg-success animate-pulse" />}
-          {status === "locked" && <Lock className="h-3 w-3" />}
           {status}
         </span>
 
-        {dirty && !editLocked && (
+        {dirty && (
           <span className="hidden items-center gap-1 text-[11px] text-muted-foreground md:inline-flex">
             <span className="h-1 w-1 rounded-full bg-warning" /> Unsaved changes
           </span>
         )}
 
         <span className="hidden items-center gap-1 text-[11px] text-muted-foreground lg:inline-flex">
-          {runnable ? (
+          {allValid ? (
             <><Check className="h-3 w-3 text-success" /> {totalNodes} nodes validated</>
           ) : (
             <><AlertCircle className="h-3 w-3 text-warning" /> {validNodes}/{totalNodes} nodes configured</>
@@ -156,52 +150,30 @@ export function BuilderTopBar({
           variant="outline"
           size="sm"
           onClick={onSave}
-          disabled={editLocked || (!dirty && status !== "paused")}
-          title={status === "paused" ? "Save — creates a new version" : "Save changes"}
+          disabled={!dirty}
+          title="Save changes"
           className="h-8 gap-1.5 text-xs"
         >
           <Save className="h-3.5 w-3.5" /> Save
         </Button>
 
-        {status === "running" ? (
-          <Button size="sm" variant="outline" onClick={() => { onStatusChange("paused"); toast.success("Campaign paused", { description: name }); }} className="h-8 gap-1.5 text-xs">
-            <Pause className="h-3 w-3" /> Pause
-          </Button>
-        ) : status === "paused" ? (
-          <Button size="sm" onClick={() => { if (onResume) { onResume(); } else { onStatusChange("running"); toast.success("Campaign resumed", { description: name }); } }} className="h-8 gap-1.5 text-xs">
-            <Play className="h-3 w-3 fill-current" /> Resume
-          </Button>
-        ) : (
-          <Button
-            size="sm"
-            onClick={() => setRunOpen(true)}
-            disabled={!runnable}
-            className="h-8 gap-1.5 text-xs"
-            title={
-              !allValid
-                ? "Resolve validation errors first"
-                : status !== "ready"
-                  ? "Only Ready campaigns can run. Save changes to mark as Ready."
-                  : "Run campaign"
-            }
-          >
-            <Play className="h-3 w-3 fill-current" />
-            Run
-          </Button>
-        )}
+        <Button
+          size="sm"
+          onClick={onPublish}
+          disabled={!allValid}
+          className="h-8 gap-1.5 text-xs"
+          title={
+            !allValid
+              ? "Resolve validation errors first"
+              : hasLiveRun
+                ? "Publish a new version — new leads follow it"
+                : "Publish campaign"
+          }
+        >
+          <Rocket className="h-3.5 w-3.5" />
+          Publish
+        </Button>
       </div>
-
-      <CreateRunDialog
-        open={runOpen}
-        onOpenChange={setRunOpen}
-        campaignName={name}
-        onStart={(payload: CreateRunPayload) => {
-          setRunOpen(false);
-          onStatusChange("running");
-          onRunStarted?.();
-          toast.success("Run started", { description: `${payload.runName} · ${payload.triggerMode === "api" ? "API trigger activated" : "running now"}` });
-        }}
-      />
     </header>
   );
 }

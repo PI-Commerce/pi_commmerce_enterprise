@@ -55,13 +55,17 @@ const DEFAULT_NODE_DATA: Record<NodeKind, Partial<WorkflowNodeData>> = {
   start: { valid: true, locked: true },
   end: { valid: true, locked: true },
   audience: { subtitle: "CSV or runtime API", valid: false, error: "Select source" },
+  apiToolCall: { subtitle: "Call an API", valid: false, error: "Configure request" },
   conditional: { subtitle: "Route on variable", valid: false, error: "Add a branch" },
   abSplit: { subtitle: "Split traffic", valid: false, error: "Set split %" },
   delay: { subtitle: "Wait", valid: false, error: "Set duration" },
   voiceCall: { subtitle: "AI voice outreach", valid: false, error: "Select agent", outputs: completedOutput() },
   whatsapp: { subtitle: "Send WhatsApp message", valid: false, error: "Pick template", outputs: whatsappOutputs(undefined) },
+  whatsappFreeform: { subtitle: "WhatsApp freeform workflow", valid: false, error: "Pick workflow" },
   sms: { subtitle: "Send SMS", valid: false, error: "Add message body", outputs: completedOutput() },
-  
+  rcs: { subtitle: "Send RCS", valid: false, error: "Pick template", outputs: completedOutput() },
+  aiTransform: { subtitle: "AI transformation", valid: false, error: "Set prompt" },
+  needsReview: { subtitle: "Human review", valid: false, error: "Set escalation rule" },
   adsCampaign: { subtitle: "WhatsApp CTWA ad", valid: false, error: "Complete setup" },
 };
 

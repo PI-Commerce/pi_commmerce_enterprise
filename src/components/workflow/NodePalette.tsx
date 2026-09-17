@@ -1,7 +1,7 @@
 import { useState } from "react";
 import {
   Users, GitBranch, Split, Phone, MessageCircle,
-  MessageSquare, Clock, Megaphone, Plus, X,
+  MessageSquare, MessageSquareText, Clock, Megaphone, Plus, X, Webhook, Sparkles, Flag, Workflow,
   type LucideIcon,
 } from "lucide-react";
 import type { NodeKind } from "@/lib/campaign-types";
@@ -10,25 +10,33 @@ import { cn } from "@/lib/utils";
 
 const ICONS: Partial<Record<NodeKind, LucideIcon>> = {
   audience: Users,
+  apiToolCall: Webhook,
   conditional: GitBranch,
   abSplit: Split,
   delay: Clock,
   voiceCall: Phone,
   whatsapp: MessageCircle,
+  whatsappFreeform: Workflow,
   sms: MessageSquare,
+  rcs: MessageSquareText,
+  aiTransform: Sparkles,
   adsCampaign: Megaphone,
+  needsReview: Flag,
 };
 
+// Audience is omitted: every canvas already ships with exactly one (non-deletable)
+// Audience node as the single contact entry point, so it's never addable here.
 const SECTIONS: Array<{ label: string; nodes: NodeKind[] }> = [
-  { label: "Data Nodes", nodes: ["audience"] },
+  { label: "Data Nodes", nodes: ["apiToolCall"] },
   { label: "Logic Nodes", nodes: ["conditional", "abSplit", "delay"] },
-  { label: "Action Nodes", nodes: ["voiceCall", "whatsapp", "sms"] },
+  { label: "AI Nodes", nodes: ["aiTransform"] },
+  { label: "Action Nodes", nodes: ["voiceCall", "whatsapp", "whatsappFreeform", "sms", "rcs", "needsReview"] },
   { label: "Ads Nodes", nodes: ["adsCampaign"] },
 ];
 
 // Out of scope for v1: cannot be added to new campaigns (disabled in palette),
 // but retained in existing example campaigns (render + read-only config).
-const DISABLED_KINDS = new Set<NodeKind>(["sms", "adsCampaign"]);
+const DISABLED_KINDS = new Set<NodeKind>(["adsCampaign"]);
 
 export function NodePalette({
   onAdd, disabled,

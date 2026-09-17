@@ -77,6 +77,7 @@ export function DateRangePicker({
             selected={value}
             onSelect={onChange}
             numberOfMonths={2}
+            showOutsideDays={false}
             defaultMonth={value?.from ?? subDays(new Date(), 30)}
             className={cn("p-3 pointer-events-auto")}
           />

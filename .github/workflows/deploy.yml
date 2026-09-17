@@ -1,12 +1,14 @@
 name: Deploy to Cloudflare Workers
 
 # `main`   -> Worker `picom-enterprise-demo`   (stable demo)
-# `vision` -> Worker `picom-enterprise-vision` (forward-looking "Pi Magic" build)
-# The vision target is selected by renaming the generated config after build (see below) —
-# wrangler forbids `env` blocks in the redirected/generated config this project deploys.
+# `vision` -> Worker `picom-enterprise-vision` (Ask Pi + Pi Magic + v2 surface)
+# `v2`     -> Worker `pi-commerce-enterprise-v2` (v2 iteration branch)
+# Each non-main target is selected by renaming the generated config after build.
+# Wrangler's redirected-config format can't carry `env` blocks, so a runtime
+# rewrite is the cleanest branch-to-worker mapping.
 on:
   push:
-    branches: [main, vision]
+    branches: [main, vision, v2]
   workflow_dispatch:
 
 jobs:
@@ -36,6 +38,10 @@ jobs:
       - name: Point build at the vision Worker
         if: github.ref_name == 'vision'
         run: node -e "const f='dist/server/wrangler.json',fs=require('fs');const c=JSON.parse(fs.readFileSync(f));c.name='picom-enterprise-vision';fs.writeFileSync(f,JSON.stringify(c,null,2));console.log('Deploying Worker:',c.name)"
+
+      - name: Point build at the v2 Worker
+        if: github.ref == 'refs/heads/v2'
+        run: node -e "const f='dist/server/wrangler.json',fs=require('fs');const c=JSON.parse(fs.readFileSync(f));c.name='pi-commerce-enterprise-v2';fs.writeFileSync(f,JSON.stringify(c,null,2));console.log('Deploying Worker:',c.name)"
 
       - name: Deploy to Cloudflare Workers
         run: bunx wrangler deploy

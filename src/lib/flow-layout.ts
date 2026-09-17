@@ -8,7 +8,8 @@
  * that sits below keeps its follow-up nodes below (no diagonal cross-overs).
  * Orthogonal edge routing yields interior bend-points that the custom
  * `RoutedEdge` threads through clean lanes. Used by the example library, the
- * Ask Pi builder, and the Analytics flow view so every surface reads the same.
+ * campaign builder canvas, and the Analytics flow view so every surface reads
+ * the same.
  *
  * ELK is asynchronous, so layout runs at render-time (not module-eval): example
  * graphs ship positionless and are laid out when actually rendered.

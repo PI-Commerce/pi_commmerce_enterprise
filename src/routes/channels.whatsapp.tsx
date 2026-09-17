@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { MessageCircle, Link2, Unplug } from "lucide-react";
 import { WhatsAppOverview } from "@/components/integrations/WhatsAppOverview";
 import { WhatsAppTemplates } from "@/components/integrations/WhatsAppTemplates";
+import { WhatsAppFreeformWorkflows } from "@/components/integrations/WhatsAppFreeformWorkflows";
 import { WhatsAppEmbeddedSignup } from "@/components/integrations/WhatsAppEmbeddedSignup";
 import { useWabaConnection, setWabaConnection } from "@/lib/waba-store";
 
@@ -14,7 +15,7 @@ export const Route = createFileRoute("/channels/whatsapp")({
   head: () => ({ meta: [{ title: "WhatsApp Business · Pi Commerce Enterprise" }] }),
 });
 
-type Tab = "overview" | "templates";
+type Tab = "overview" | "templates" | "freeform";
 
 /**
  * Channels → WhatsApp Business. A normal in-app page (keeps the sidebar): a thin
@@ -65,6 +66,7 @@ function WhatsAppManage() {
                   tabs={[
                     { id: "overview", label: "Overview" },
                     { id: "templates", label: "Templates" },
+                    { id: "freeform", label: "Freeform Workflows" },
                   ]}
                 />
               </div>
@@ -75,7 +77,13 @@ function WhatsAppManage() {
         {/* Body */}
         <div className="min-h-0 flex-1">
           {connection ? (
-            tab === "overview" ? <WhatsAppOverview data={connection} /> : <WhatsAppTemplates waba={connection} />
+            tab === "overview" ? (
+              <WhatsAppOverview data={connection} />
+            ) : tab === "templates" ? (
+              <WhatsAppTemplates waba={connection} />
+            ) : (
+              <WhatsAppFreeformWorkflows />
+            )
           ) : (
             <div className="h-full overflow-y-auto">
               <div className="px-8 pb-8 pt-6">

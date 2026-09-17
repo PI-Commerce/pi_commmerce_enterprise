@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Play, Copy, Check, Webhook, Lock, Zap, Upload, Clock, Infinity as InfinityIcon } from "lucide-react";
+import { Play, Webhook, Lock, Zap, Upload, Clock, Infinity as InfinityIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CSV_LIBRARY, makeCsvAsset, type CsvAsset } from "@/lib/data-library";
 
@@ -87,7 +87,6 @@ export function CreateRunDialog({
   const [localCsvs, setLocalCsvs] = useState<CsvAsset[]>([]);
   const [startAt, setStartAt] = useState("");
   const [endAt, setEndAt] = useState("");
-  const [copied, setCopied] = useState(false);
 
   // Catalog includes the locked campaign if it isn't already in CAMPAIGNS.
   const catalog = useMemo(() => {
@@ -106,7 +105,6 @@ export function CreateRunDialog({
     setLocalCsvs([]);
     setStartAt("");
     setEndAt("");
-    setCopied(false);
   };
 
   // The dialog stays mounted, so the useState initializer can't pick up a campaign
@@ -125,11 +123,6 @@ export function CreateRunDialog({
   useEffect(() => {
     if (runType === "always-on" && audienceSource !== "api") setAudienceSource("api");
   }, [runType, audienceSource]);
-
-  const endpoint = useMemo(
-    () => `https://api.picommerce.io/v1/runs/trigger/${selectedId || "cmp_xxx"}`,
-    [selectedId],
-  );
 
   // Library options = files uploaded this session (newest first) + the shared library.
   const csvOptions = useMemo<CsvAsset[]>(() => [...localCsvs, ...CSV_LIBRARY], [localCsvs]);
@@ -353,28 +346,20 @@ export function CreateRunDialog({
                   </div>
                 )}
 
-                {/* API: copy-able trigger endpoint (E7) */}
+                {/* API: the trigger endpoint is unique per run, so it is revealed in a
+                    follow-up dialog right AFTER the run is created (and again on the
+                    run's row, E7). */}
                 {audienceSource === "api" && (
                   <div className="space-y-1.5 rounded-md border border-dashed border-border bg-muted/30 p-2.5">
                     <Label className="flex items-center gap-1.5 text-xs">
                       <Webhook className="h-3 w-3" /> Trigger API endpoint
                     </Label>
-                    <div className="flex items-center gap-1.5 rounded-md border border-input bg-background px-2.5 py-1.5">
-                      <code className="flex-1 truncate font-mono text-[11px] text-muted-foreground">{endpoint}</code>
-                      <Button
-                        type="button" size="sm" variant="ghost"
-                        className="h-6 w-6 shrink-0 p-0"
-                        onClick={() => {
-                          navigator.clipboard.writeText(endpoint);
-                          setCopied(true);
-                          setTimeout(() => setCopied(false), 1500);
-                        }}
-                      >
-                        {copied ? <Check className="h-3 w-3 text-success" /> : <Copy className="h-3 w-3" />}
-                      </Button>
-                    </div>
-                    <p className="text-[11px] text-muted-foreground">
-                      POST the flat-JSON payload defined in the Audience node to start a run.
+                    <p className="flex items-start gap-1.5 text-[11px] text-muted-foreground">
+                      <Lock className="mt-0.5 h-3 w-3 shrink-0" />
+                      A unique trigger endpoint is generated when the run is created — you'll
+                      get a copyable link as soon as you create it (and again on the run's
+                      row). POST the flat-JSON payload defined in the Audience node to start
+                      streaming leads.
                     </p>
                   </div>
                 )}
