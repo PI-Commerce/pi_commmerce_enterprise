@@ -1,13 +1,18 @@
 /**
  * Ask Pi LLM entry point — TrueFoundry (OpenAI-compatible) tool loop.
  *
- * Two modes:
- *   1. Analytics scope → the LLM receives a set of read-only tools mapped to
- *      `db/analytics.ts` queries. It answers real questions with real
- *      numbers, and never writes to the DB.
- *   2. Builder scope → the LLM also gets the campaign-mutation tools
- *      (insertNode, updateNode, connectNodes, ...). Any Save propagates to
- *      the DB atomically at the end of the loop.
+ * Scopes:
+ *   1. Analytics → read-only tools over D1's leads / runs / campaigns
+ *      (count_leads, status_breakdown, worst_dropoffs, latest_runs,
+ *      read_campaign). Answers real questions with real numbers; never
+ *      writes.
+ *   2. Builder  → analytics tools plus the campaign DAG mutations
+ *      (insert_node, connect_nodes, update_node). Called from the in-canvas
+ *      AiComposer on `/campaigns/$id`.
+ *   3. Agents   → analytics tools plus agent mutations (list_agents,
+ *      read_agent, save_agent, list_tools). Called from the global dock
+ *      when the user is on `/agents`. Pi drafts / edits voice agents by
+ *      natural language and the change survives refresh via D1.
  *
  * Server-only. Accessed via `askPi()` from the client.
  */
@@ -15,8 +20,10 @@ import { createServerFn } from "@tanstack/react-start";
 import { getEnv } from "@/lib/db/client";
 import * as campaigns from "@/lib/db/campaigns";
 import * as analytics from "@/lib/db/analytics";
+import * as agentsDb from "@/lib/db/agents";
+import type { AgentRecord } from "@/lib/agent-data";
 
-export type AskPiScope = "analytics" | "builder";
+export type AskPiScope = "analytics" | "builder" | "agents";
 
 export type AskPiRequest = {
   scope: AskPiScope;
@@ -184,6 +191,70 @@ const TOOL_DEFS = {
       },
     },
   ],
+  agents: [
+    {
+      type: "function",
+      function: {
+        name: "list_agents",
+        description: "Return every voice agent in the workspace with id, name, status, tools[].",
+        parameters: { type: "object", properties: {} },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "read_agent",
+        description: "Fetch the full record for one agent by id — including masterPrompt, knowledgeBase, tools, postCall vars, evalPrompt.",
+        parameters: {
+          type: "object",
+          properties: { id: { type: "string" } },
+          required: ["id"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "save_agent",
+        description:
+          "Upsert an agent. Pass a full AgentRecord: { id, name, type: 'voice', status: 'live' | 'draft' | 'paused', tools: string[], masterPrompt: string, knowledgeBase: string, postCall: { id, name, prompt }[], evalPrompt?: string }. Merge on top of the existing record if you're editing — always call read_agent first, then send the merged object back.",
+        parameters: {
+          type: "object",
+          properties: {
+            id: { type: "string" },
+            name: { type: "string" },
+            type: { type: "string", enum: ["voice"] },
+            status: { type: "string", enum: ["live", "draft", "paused"] },
+            tools: { type: "array", items: { type: "string" } },
+            masterPrompt: { type: "string" },
+            knowledgeBase: { type: "string" },
+            postCall: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  id: { type: "string" },
+                  name: { type: "string" },
+                  prompt: { type: "string" },
+                },
+                required: ["id", "name", "prompt"],
+              },
+            },
+            evalPrompt: { type: "string" },
+          },
+          required: ["id", "name", "type", "status", "tools", "masterPrompt", "knowledgeBase", "postCall"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "list_tools",
+        description: "Return every tool handle the agents can use (policy_lookup, order_lookup, crm_query, place_call, …) with a one-line description. Use this before you propose a `tools` array on save_agent so you never invent a handle.",
+        parameters: { type: "object", properties: {} },
+      },
+    },
+  ],
 } as const;
 
 async function runTool(name: string, args: Record<string, unknown>): Promise<unknown> {
@@ -209,6 +280,40 @@ async function runTool(name: string, args: Record<string, unknown>): Promise<unk
     case "update_node":
       await campaigns.updateNode(args.campaignId as string, args.nodeId as string, args.patch as never);
       return { ok: true };
+    case "list_agents": {
+      const map = await agentsDb.listAgents();
+      // Trim payload — Pi doesn't need the full masterPrompt on a list call.
+      return Object.values(map).map((a) => ({
+        id: a.id, name: a.name, status: a.status, tools: a.tools,
+      }));
+    }
+    case "read_agent":
+      return (await agentsDb.readAgent(args.id as string)) ?? { error: "agent_not_found" };
+    case "save_agent": {
+      const rec = args as unknown as AgentRecord;
+      if (!rec?.id || !rec?.name) return { error: "save_agent: id and name are required" };
+      // Backfill safe defaults for any field the LLM omitted.
+      const full: AgentRecord = {
+        id: rec.id,
+        name: rec.name,
+        type: rec.type ?? "voice",
+        status: rec.status ?? "draft",
+        tools: rec.tools ?? [],
+        masterPrompt: rec.masterPrompt ?? "",
+        knowledgeBase: rec.knowledgeBase ?? "",
+        postCall: rec.postCall ?? [],
+        ...(rec.evalPrompt ? { evalPrompt: rec.evalPrompt } : {}),
+      };
+      await agentsDb.upsertAgent(full);
+      return { ok: true, id: full.id };
+    }
+    case "list_tools": {
+      // Read the tools registry from D1 so Pi sees the same list the workspace has.
+      const rows = await getEnv().DB
+        .prepare("SELECT handle, description FROM tools ORDER BY handle")
+        .all<{ handle: string; description: string }>();
+      return rows.results ?? [];
+    }
     default:
       return { error: `unknown tool: ${name}` };
   }
@@ -217,6 +322,13 @@ async function runTool(name: string, args: Record<string, unknown>): Promise<unk
 const SYSTEM_ANALYTICS = `You are Pi, the analytics copilot for a marketing automation platform. Answer the user's question using the analytics tools available to you. Never make up numbers — always call a tool. Reply in plain, direct language. Include the exact numbers you observed. If the tools can't answer the question, say so briefly.`;
 
 const SYSTEM_BUILDER = `You are Pi, the campaign copilot for a marketing automation platform. When the user asks you to build or edit a campaign, use the mutation tools (list_campaigns, read_campaign, insert_node, connect_nodes, update_node). Confirm each change in one line. Never invent DSL — call the tools.`;
+
+const SYSTEM_AGENTS = `You are Pi, the voice-agent copilot for a marketing automation platform. When the user asks you to draft, edit, tune, or wire up a voice agent, use the agent tools:
+  - Always call list_agents first if the user's request is ambiguous about which agent, and confirm the target.
+  - Before proposing an edit, call read_agent to load the current record.
+  - Before proposing which tools an agent should carry, call list_tools so you use real handles (never invent).
+  - Apply changes with save_agent, passing the FULL merged record (id, name, type='voice', status, tools[], masterPrompt, knowledgeBase, postCall[], evalPrompt?). Merge your patch on top of what read_agent returned — do NOT drop existing fields.
+Confirm each change in one line ("Updated <name>: <what changed>"). Keep master prompts natural (English AND Devanagari variants for every quoted line — never Latin-transliterated Hindi like 'namaste, kaise ho'). Only reference tool handles the list_tools call returned.`;
 
 /**
  * Live Ask Pi call. Multi-turn tool loop over TrueFoundry's OpenAI-compat
@@ -244,9 +356,13 @@ export const askPi = createServerFn({ method: "POST" })
     if (!key || !base) return { ok: false, error: "TFY_API_KEY / TFY_BASE_URL not configured (set in .env or wrangler secrets)" };
     const model = env.TFY_MODEL || "openai-main/anthropic/claude-sonnet-4-6";
 
-    const systemContent = data.scope === "builder" ? SYSTEM_BUILDER : SYSTEM_ANALYTICS;
-    const tools = data.scope === "builder"
-      ? [...TOOL_DEFS.analytics, ...TOOL_DEFS.builder]
+    const systemContent =
+      data.scope === "builder" ? SYSTEM_BUILDER
+      : data.scope === "agents" ? SYSTEM_AGENTS
+      : SYSTEM_ANALYTICS;
+    const tools =
+      data.scope === "builder" ? [...TOOL_DEFS.analytics, ...TOOL_DEFS.builder]
+      : data.scope === "agents"  ? [...TOOL_DEFS.analytics, ...TOOL_DEFS.agents]
       : [...TOOL_DEFS.analytics];
 
     const messages: Array<Record<string, unknown>> = [

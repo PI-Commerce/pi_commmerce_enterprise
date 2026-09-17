@@ -70,6 +70,17 @@ export function hydrateAgentsFromDb(): Promise<void> {
   return hydratePromise;
 }
 
+/**
+ * Force a fresh hydrate — called from Ask Pi's agents-scope handler after a
+ * `save_agent` tool call so the UI reflects Pi's edit without a refresh.
+ * Unlike `hydrateAgentsFromDb` this ignores the memoized promise.
+ */
+export function refreshAgentsFromDb(): Promise<void> {
+  if (typeof window === "undefined") return Promise.resolve();
+  hydratePromise = null;
+  return hydrateAgentsFromDb();
+}
+
 export function subscribeAgents(cb: () => void): () => void {
   listeners.add(cb);
   return () => {

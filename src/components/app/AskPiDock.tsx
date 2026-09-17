@@ -6,6 +6,7 @@ import { getPiContext } from "@/lib/ask-pi-context";
 import { pickThesysFixtureKey, THESYS_FIXTURES, type ThesysFixtureKey } from "@/lib/pi-thesys-fixtures";
 import { askPiThesys } from "@/lib/ask-pi-thesys";
 import { askPi } from "@/lib/server-fns/pi-llm";
+import { refreshAgentsFromDb } from "@/lib/agent-store";
 import { PiThesysResult } from "./PiThesysResult";
 import {
   PiPill,
@@ -132,15 +133,26 @@ export function AskPiDock() {
     // unreachable from local without VPN), gracefully fall back to the surface's
     // canned proposal so nothing dead-ends.
     try {
+      const serverScope =
+        ctx.scopeMode === "builder" ? "builder"
+        : ctx.scopeMode === "agents"  ? "agents"
+        : "analytics";
       const r = await askPi({
         data: {
-          scope: ctx.scopeMode === "builder" ? "builder" : "analytics",
+          scope: serverScope,
           question: query,
           context: { pathname, surface: ctx.scope, systemHint: ctx.systemHint },
         },
       });
       if (r.ok && r.answer.trim().length > 0) {
         setLiveAnswer(r.answer);
+      }
+      // Agents-scope mutations: if Pi called save_agent, the in-memory
+      // agent-store has stale data. Force a re-hydrate from D1 so the /agents
+      // list and any open AgentBuilder pick up the change without a refresh.
+      if (r.ok && ctx.scopeMode === "agents") {
+        const mutated = r.toolCalls?.some((tc) => tc.name === "save_agent");
+        if (mutated) void refreshAgentsFromDb();
       }
       // If !ok we simply leave liveAnswer null and the result card shows ctx.result.
     } catch {

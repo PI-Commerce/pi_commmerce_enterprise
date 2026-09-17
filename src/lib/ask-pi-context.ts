@@ -24,7 +24,7 @@ export type PiResult = {
  * "thesys" → keep the existing generative-UI card path (Analytics). Not a
  *   server-fn scope; the dock branches on this at call time.
  */
-export type PiScopeMode = "analytics" | "builder" | "thesys";
+export type PiScopeMode = "analytics" | "builder" | "agents" | "thesys";
 
 export type PiContext = {
   /** Short human label for the surface (telemetry / headers). */
@@ -117,10 +117,12 @@ const ROUTES: { match: (p: string) => boolean; ctx: PiContext }[] = [
     match: (p) => p.startsWith("/agents"),
     ctx: {
       scope: "Agents",
-      // Analytics-only reads for now; write tools (list_agents / save_agent)
-      // land in the next PR where AgentBuilder wires Save through to D1.
-      scopeMode: "analytics",
-      systemHint: "The user is on the Agents surface. Answer with the specific agent(s) they mean; use list_campaigns to trace which campaigns bind which agent. Propose config edits in a diff-style summary; do not claim to have saved.",
+      // Agents scope adds list_agents / read_agent / save_agent / list_tools
+      // to the analytics reads. Pi can actually edit and save voice agents,
+      // and the change round-trips through D1 (agent-store re-hydrates after
+      // the call so the UI reflects the edit without a refresh).
+      scopeMode: "agents",
+      systemHint: "The user is on the Agents surface. Draft, edit, tune, or wire tools onto voice agents by natural language. Always read_agent before proposing an edit, list_tools before proposing a tools array, and save_agent with the FULL merged record (never drop fields). Confirm each change in one line.",
       placeholder: "Ask Pi to draft, edit, or wire up an agent…",
       chips: ["Draft a win-back voice agent", "Which tools does Pi Concierge use?", "Add a refund tool"],
       thinking: ["Reading the agent registry…", "Reviewing tools & scopes…", "Drafting the agent config…"],
