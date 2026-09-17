@@ -191,6 +191,12 @@ function CampaignBuilder() {
       />
       <div className="relative flex-1">
         <WorkflowCanvas
+          // `key` forces a fresh mount when the campaign id changes, so the
+          // internal useNodesState/useEdgesState re-init from the new example
+          // graph instead of holding the previous campaign's nodes. Without
+          // this the canvas rendered empty on route change and only recovered
+          // on hard refresh.
+          key={id}
           status={status}
           campaignId={id}
           onValidityChange={handleValidity}

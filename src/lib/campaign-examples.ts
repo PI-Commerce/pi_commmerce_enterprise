@@ -280,7 +280,13 @@ const C_RENEWAL = buildCampaign("BFSI · Insurance Renewal", [
   // high
   sVoice("vCons", "Voice AI renewal consultation", "Renewal advisory call", { agent: "renewal_voice", toolInputMap: [{ v: "customer_id", def: "contact.customer_id" }, { v: "policy_id", def: "contact.policy_no" }] }),
   ffPolicyQs_ren,
-  sWa("rlHigh", "Renewal link", "WhatsApp · renew now", "renewal_link_v1"),
+  sWa("rlHigh", "Renewal link", "WhatsApp · renew now", "renewal_link_v1", {
+    vars: [
+      { v: "{{1}}", def: "contact.first_name" },
+      { v: "{{2}}", def: "contact.policy_no" },
+      { v: "{{3}}", def: "contact.expiry_date" },
+    ],
+  }),
   sCond("rcHigh", "Renewal check", "renewal_status", [
     { id: "yes", label: "Renewed", value: "renewed" },
     { id: "no", label: "Not renewed", value: "pending" },
@@ -291,10 +297,27 @@ const C_RENEWAL = buildCampaign("BFSI · Insurance Renewal", [
     { id: "vA", label: "Benefits", pct: 50 },
     { id: "vB", label: "Savings", pct: 50 },
   ]),
-  sWa("waBenefits", "WhatsApp renewal reminder · Benefits", "Variant · Benefits angle", "renewal_benefits_v1"),
-  sWa("waSavings", "WhatsApp renewal reminder · Savings", "Variant · Savings angle", "renewal_savings_v1"),
+  sWa("waBenefits", "WhatsApp renewal reminder · Benefits", "Variant · Benefits angle", "renewal_benefits_v1", {
+    vars: [
+      { v: "{{1}}", def: "contact.first_name" },
+      { v: "{{2}}", def: "contact.policy_no" },
+      { v: "{{3}}", def: "3", mode: "constant" },
+    ],
+  }),
+  sWa("waSavings", "WhatsApp renewal reminder · Savings", "Variant · Savings angle", "renewal_savings_v1", {
+    vars: [
+      { v: "{{1}}", def: "contact.first_name" },
+      { v: "{{2}}", def: "contact.policy_no" },
+      { v: "{{3}}", def: "1,200", mode: "constant" },
+    ],
+  }),
   sDelay("d1", 23, "Hours"),
-  sWa("wfu", "WhatsApp follow-up", "WhatsApp · nudge", "renewal_followup_v1"),
+  sWa("wfu", "WhatsApp follow-up", "WhatsApp · nudge", "renewal_followup_v1", {
+    vars: [
+      { v: "{{1}}", def: "contact.first_name" },
+      { v: "{{2}}", def: "contact.policy_no" },
+    ],
+  }),
   sSms("smsRen", "SMS renewal reminder", "SMS · renew now", SMS_RENEWAL_PROMO, {
     vars: [
       { v: "name", def: "contact.first_name" },
@@ -309,7 +332,13 @@ const C_RENEWAL = buildCampaign("BFSI · Insurance Renewal", [
     { id: "no", label: "No", value: "pending" },
   ]),
   sVoice("vFinal", "Voice AI final renewal call", "Final attempt", { agent: "renewal_voice", toolInputMap: [{ v: "customer_id", def: "contact.customer_id" }, { v: "policy_id", def: "contact.policy_no" }] }),
-  sWa("rlFinal", "Renewal link", "WhatsApp · renew now", "renewal_link_v1"),
+  sWa("rlFinal", "Renewal link", "WhatsApp · renew now", "renewal_link_v1", {
+    vars: [
+      { v: "{{1}}", def: "contact.first_name" },
+      { v: "{{2}}", def: "contact.policy_no" },
+      { v: "{{3}}", def: "contact.expiry_date" },
+    ],
+  }),
   sEnd(),
 ], [
   ed("start", "aud"), ed("aud", "apiPolicy"),
@@ -380,20 +409,50 @@ const C_PL_COLLECT = buildCampaign("BFSI · PL DPD Collections", [
       { v: "hours", def: "24", mode: "constant" },
     ],
   }),
-  sWa("waRem", "WhatsApp PL reminder", "WhatsApp · payment reminder", "collections_reminder_v1"),
-  sWa("plEarly", "Payment link", "WhatsApp · pay now", "payment_link_v1"),
+  sWa("waRem", "WhatsApp PL reminder", "WhatsApp · payment reminder", "collections_reminder_v1", {
+    vars: [
+      { v: "{{1}}", def: "contact.first_name" },
+      { v: "{{2}}", def: "amount_due_fmt" },
+      { v: "{{3}}", def: "contact.loan_id" },
+    ],
+  }),
+  sWa("plEarly", "Payment link", "WhatsApp · pay now", "payment_link_v1", {
+    vars: [
+      { v: "{{1}}", def: "contact.first_name" },
+      { v: "{{2}}", def: "amount_due_fmt" },
+      { v: "{{3}}", def: "contact.loan_id" },
+    ],
+  }),
   sVoice("vColl", "Voice AI PL collections call", "Personal Loan collections call", { agent: "pl_collections_voice", toolInputMap: [{ v: "customer_id", def: "contact.customer_id" }] }),
-  sWa("plMid", "Payment link", "WhatsApp · pay now", "payment_link_v1"),
+  sWa("plMid", "Payment link", "WhatsApp · pay now", "payment_link_v1", {
+    vars: [
+      { v: "{{1}}", def: "contact.first_name" },
+      { v: "{{2}}", def: "amount_due_fmt" },
+      { v: "{{3}}", def: "contact.loan_id" },
+    ],
+  }),
   sVoice("vEsc", "Voice AI PL escalated call", "Escalated Personal Loan collections", { agent: "pl_collections_voice", toolInputMap: [{ v: "customer_id", def: "contact.customer_id" }] }),
   apiLogPay_pl,
-  sWa("plLate", "Payment link", "WhatsApp · pay now", "payment_link_v1"),
+  sWa("plLate", "Payment link", "WhatsApp · pay now", "payment_link_v1", {
+    vars: [
+      { v: "{{1}}", def: "contact.first_name" },
+      { v: "{{2}}", def: "amount_due_fmt" },
+      { v: "{{3}}", def: "contact.loan_id" },
+    ],
+  }),
   sDelay("d1", 23, "Hours"),
   sCond("paid", "Paid?", "payment_status", [
     { id: "yes", label: "Yes", value: "paid" },
     { id: "no", label: "No", value: "unpaid" },
   ]),
   sVoice("vfu", "Voice AI PL follow-up", "Reattempt · 1 retry", { agent: "pl_collections_voice", maxAttempts: 1, toolInputMap: [{ v: "customer_id", def: "contact.customer_id" }] }),
-  sWa("plFu", "WhatsApp payment link", "WhatsApp · pay now", "payment_link_v1"),
+  sWa("plFu", "WhatsApp payment link", "WhatsApp · pay now", "payment_link_v1", {
+    vars: [
+      { v: "{{1}}", def: "contact.first_name" },
+      { v: "{{2}}", def: "amount_due_fmt" },
+      { v: "{{3}}", def: "contact.loan_id" },
+    ],
+  }),
   sEnd(),
 ], [
   ed("start", "aud"), ed("aud", "aitCollect"), ed("aitCollect", "dpd"),
@@ -476,7 +535,11 @@ const C_CART = buildCampaign("D2C · Cart Abandonment", [
     { id: "low", label: "≤ ₹5,000", op: "less than or equal to", value: "5000" },
   ]),
   sVoice("vRec", "Voice AI recovery call", "Cart recovery call", { agent: "reactivation_voice", toolInputMap: [{ v: "customer_id", def: "contact.customer_id" }, { v: "order_id", def: "contact.cart_id" }] }),
-  sWa("cartHigh", "Cart link", "WhatsApp · complete purchase", "cart_link_v1"),
+  sWa("cartHigh", "Cart link", "WhatsApp · complete purchase", "cart_link_v1", {
+    vars: [
+      { v: "{{1}}", def: "contact.first_name" },
+    ],
+  }),
   sCond("purHigh", "Purchase check", "order_status", [
     { id: "yes", label: "Purchased", value: "placed" },
     { id: "no", label: "Not purchased", value: "pending" },
@@ -486,9 +549,23 @@ const C_CART = buildCampaign("D2C · Cart Abandonment", [
     { id: "vA", label: "Discount" },
     { id: "vB", label: "Free shipping" },
   ]),
-  sWa("abA", "WhatsApp cart reminder · Discount", "Variant · Discount angle", "cart_discount_v1"),
-  sWa("abB", "WhatsApp cart reminder · Free shipping", "Variant · Free shipping angle", "cart_free_shipping_v1"),
-  sWa("cartLow", "Purchase link", "WhatsApp · complete purchase", "cart_link_v1"),
+  sWa("abA", "WhatsApp cart reminder · Discount", "Variant · Discount angle", "cart_discount_v1", {
+    vars: [
+      { v: "{{1}}", def: "contact.first_name" },
+      { v: "{{2}}", def: "10", mode: "constant" },
+      { v: "{{3}}", def: "tomorrow 11 PM", mode: "constant" },
+    ],
+  }),
+  sWa("abB", "WhatsApp cart reminder · Free shipping", "Variant · Free shipping angle", "cart_free_shipping_v1", {
+    vars: [
+      { v: "{{1}}", def: "contact.first_name" },
+    ],
+  }),
+  sWa("cartLow", "Purchase link", "WhatsApp · complete purchase", "cart_link_v1", {
+    vars: [
+      { v: "{{1}}", def: "contact.first_name" },
+    ],
+  }),
   ffCallback_cart,
   // Dynamic delay: wait until the callback slot the user picked in ffCallback.
   // Falls back to 4h if the variable is missing (freeform timed out / failed).
@@ -603,7 +680,7 @@ const rcsGold_loy: Spec = {
     { id: "not_delivered", label: "Not delivered", kind: "outcome" },
   ],
   config: {
-    rcsTemplateId: "rcs_tpl_order_shipped",
+    rcsTemplateId: "rcs_tpl_gold_welcome",
     rcsAgentId: "acme_utility_bot",
     rcsVarMap: [
       { v: "{{name}}", def: "contact.first_name" },
@@ -649,8 +726,18 @@ const C_LOYALTY_UPSELL = buildCampaign("Retail · Loyalty Card Upsell", [
     { id: "vA", label: "Perks" },
     { id: "vB", label: "Savings" },
   ]),
-  sWa("sWaA", "WhatsApp invite · Perks", "Silver · join Loyalty Card", "fcc_silver_perks"),
-  sWa("sWaB", "WhatsApp invite · Savings", "Silver · join Loyalty Card", "fcc_silver_savings"),
+  sWa("sWaA", "WhatsApp invite · Perks", "Silver · join Loyalty Card", "fcc_silver_perks", {
+    vars: [
+      { v: "{{1}}", def: "contact.first_name" },
+      { v: "{{2}}", def: "tier_offer_line" },
+    ],
+  }),
+  sWa("sWaB", "WhatsApp invite · Savings", "Silver · join Loyalty Card", "fcc_silver_savings", {
+    vars: [
+      { v: "{{1}}", def: "contact.first_name" },
+      { v: "{{2}}", def: "1,800", mode: "constant" },
+    ],
+  }),
   apiEnr_loy,
   sCond("sEnr", "Enrolled as Silver?", "api_2.enrollment_status", [
     { id: "enrolled", label: "Enrolled", value: "enrolled" },
@@ -663,11 +750,26 @@ const C_LOYALTY_UPSELL = buildCampaign("Retail · Loyalty Card Upsell", [
     { id: "gold",   label: "Upgraded to Gold", value: "upgraded" },
     { id: "silver", label: "Still Silver", value: "not_upgraded" },
   ]),
-  sWa("sWelGold", "Welcome to Gold", "WhatsApp · Gold welcome", "fcc_welcome_gold"),
-  sWa("sWelSilver", "Welcome to Silver", "WhatsApp · Silver welcome", "fcc_welcome_silver"),
+  sWa("sWelGold", "Welcome to Gold", "WhatsApp · Gold welcome", "fcc_welcome_gold", {
+    vars: [
+      { v: "{{1}}", def: "contact.first_name" },
+      { v: "{{2}}", def: "contact.customer_id" },
+    ],
+  }),
+  sWa("sWelSilver", "Welcome to Silver", "WhatsApp · Silver welcome", "fcc_welcome_silver", {
+    vars: [
+      { v: "{{1}}", def: "contact.first_name" },
+      { v: "{{2}}", def: "contact.customer_id" },
+    ],
+  }),
   // ---- Gold: RCS rich card, WhatsApp fallback for non-RCS handsets ----
   rcsGold_loy,
-  sWa("gWaFallback", "WhatsApp fallback", "WhatsApp · Gold welcome (fallback)", "fcc_welcome_gold"),
+  sWa("gWaFallback", "WhatsApp fallback", "WhatsApp · Gold welcome (fallback)", "fcc_welcome_gold", {
+    vars: [
+      { v: "{{1}}", def: "contact.first_name" },
+      { v: "{{2}}", def: "contact.customer_id" },
+    ],
+  }),
   sEnd(),
 ], [
   ed("start", "aud"),
@@ -777,8 +879,8 @@ const C_SOUNDBOX = buildCampaign("B2B · Reactivate Paytm Soundbox Merchants", [
     },
     {
       id: "t2", type: "Custom AI Action",
-      label: "Format last payment date", input: "", output: "last_txn_fmt",
-      prompt: "Format contact.last_txn_days as a human-readable string like 'about 6 weeks ago'.",
+      label: "Dormancy phrase", input: "contact.last_txn_days", output: "last_txn_fmt",
+      prompt: "Given contact.last_txn_days (an integer number of days since the merchant last received a payment through their Soundbox), return a short sentence fragment that reads naturally after 'your Paytm Soundbox '. Examples: 45 → 'has been quiet for about six weeks', 120 → 'hasn't heard a payment in nearly four months', 200 → 'has been silent for over six months'. Return the phrase only, no quotes, no leading capital.",
     },
     {
       id: "t3", type: "Custom AI Action",
@@ -792,7 +894,12 @@ const C_SOUNDBOX = buildCampaign("B2B · Reactivate Paytm Soundbox Merchants", [
     { id: "high",   label: "180+ days",   op: "greater than", value: "180" },
   ]),
   // Recent (30–60d): gentle WhatsApp nudge → wait → active again?
-  sWa("waRecent", "WhatsApp check-in", "WhatsApp · we noticed you're quiet", "soundbox_reactivate_gentle_v1"),
+  sWa("waRecent", "WhatsApp check-in", "WhatsApp · we noticed you're quiet", "soundbox_reactivate_gentle_v1", {
+    vars: [
+      { v: "{{1}}", def: "contact.first_name" },
+      { v: "{{2}}", def: "last_txn_fmt" },
+    ],
+  }),
   sDelay("dR1", 48, "Hours"),
   sCond("checkR", "Active again?", "reactivation_status", [
     { id: "reactivated", label: "Yes" },
@@ -801,7 +908,13 @@ const C_SOUNDBOX = buildCampaign("B2B · Reactivate Paytm Soundbox Merchants", [
   ffHelpR,
   // Medium (60–180d): voice reactivation → comeback offer → wait → active again?
   sVoice("vMed", "Voice AI reactivation call", "Reactivation outreach", { agent: "reactivation_voice", timezone: "Asia/Kolkata (IST)", toolInputMap: [{ v: "customer_id", def: "contact.customer_id" }, { v: "order_id", def: "contact.device_id" }] }),
-  sWa("waMed", "WhatsApp offer", "WhatsApp · comeback offer", "soundbox_comeback_offer_v1"),
+  sWa("waMed", "WhatsApp offer", "WhatsApp · comeback offer", "soundbox_comeback_offer_v1", {
+    vars: [
+      { v: "{{1}}", def: "contact.first_name" },
+      { v: "{{2}}", def: "last_txn_fmt" },
+      { v: "{{3}}", def: "₹500 cashback on your first payment", mode: "constant" },
+    ],
+  }),
   sDelay("dM1", 48, "Hours"),
   sCond("checkM", "Active again?", "reactivation_status", [
     { id: "reactivated", label: "Yes" },
@@ -810,7 +923,13 @@ const C_SOUNDBOX = buildCampaign("B2B · Reactivate Paytm Soundbox Merchants", [
   ffHelpM,
   // High (180+d): final voice outreach → device replacement offer → CRM log
   sVoice("vHigh", "Voice AI final outreach", "Final chance call", { agent: "reactivation_voice", timezone: "Asia/Kolkata (IST)", maxAttempts: 2, toolInputMap: [{ v: "customer_id", def: "contact.customer_id" }, { v: "order_id", def: "contact.device_id" }] }),
-  sWa("waHigh", "WhatsApp replacement offer", "WhatsApp · device replacement", "soundbox_device_replacement_v1"),
+  sWa("waHigh", "WhatsApp replacement offer", "WhatsApp · device replacement", "soundbox_device_replacement_v1", {
+    vars: [
+      { v: "{{1}}", def: "contact.first_name" },
+      { v: "{{2}}", def: "last_txn_fmt" },
+      { v: "{{3}}", def: "no charges, no downtime", mode: "constant" },
+    ],
+  }),
   apiLog,
   sEnd(),
 ], [

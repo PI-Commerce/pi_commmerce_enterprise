@@ -396,4 +396,20 @@ export const SEED_RCS_TEMPLATES: RcsTemplate[] = [
     ],
     createdAt: "02 Jul 2026",
   },
+  {
+    id: "rcs_tpl_gold_welcome",
+    name: "gold_welcome_card",
+    agentId: "acme_utility_bot",
+    type: "RICH_CARD",
+    approvalStatus: "Approved",
+    title: "Welcome to Loyalty Card Gold",
+    body: "Hi {{name}}, you're now a Gold member — your lifetime spend of {{ltv}} unlocked it. {{offer_line}}",
+    // JIO image, Vertical → plain 2:1 card, no height.
+    media: { mediaType: "IMAGE", orientation: "VERTICAL", source: "url", url: "https://cdn.picomm.in/rcs/gold-welcome.png" },
+    buttons: [
+      { type: "URL", text: "Explore Gold benefits", url: "https://picomm.in/loyalty/gold" },
+      { type: "REPLY", text: "Not now", postback: "gold_welcome_dismiss" },
+    ],
+    createdAt: "15 Jul 2026",
+  },
 ];
