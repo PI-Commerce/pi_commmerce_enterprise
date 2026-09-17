@@ -19,6 +19,11 @@
 import { useSyncExternalStore } from "react";
 import { SEED_SMS_CONFIG, type SmsChannelConfig } from "@/lib/sms-config";
 import { SEED_SMS_TEMPLATES, type SmsTemplate } from "@/lib/sms-templates";
+import {
+  listSmsTemplatesFn,
+  saveSmsTemplateFn,
+  deleteSmsTemplateFn,
+} from "@/lib/server-fns/sms-templates";
 
 // Ops-provisioned and immutable from the panel's point of view — the dashboard
 // only ever reads it (see sms-config.ts).
@@ -56,7 +61,47 @@ export function getSmsTemplates(): SmsTemplate[] {
 
 /** Reactive hook for the mirrored DLT template registry. */
 export function useSmsTemplates(): SmsTemplate[] {
-  return useSyncExternalStore(subscribe, () => templates, () => SEED_SMS_TEMPLATES);
+  const list = useSyncExternalStore(subscribe, () => templates, () => SEED_SMS_TEMPLATES);
+  if (typeof window !== "undefined") void hydrateSmsTemplatesFromDb();
+  return list;
+}
+
+/* --------------------------- D1 hydration --------------------------- */
+//
+// Templates hydrate from D1 on first client mount so any earlier upserts
+// survive a refresh — same shape as `agent-store.ts`. Falls back silently to
+// the seed list when D1 isn't bound.
+
+let hydrateTemplatesPromise: Promise<void> | null = null;
+
+function mergeById(seed: SmsTemplate[], fromDb: SmsTemplate[]): SmsTemplate[] {
+  const byId = new Map<string, SmsTemplate>();
+  for (const t of seed) byId.set(t.id, t);
+  for (const t of fromDb) byId.set(t.id, t);
+  return [...byId.values()];
+}
+
+export function hydrateSmsTemplatesFromDb(): Promise<void> {
+  if (typeof window === "undefined") return Promise.resolve();
+  if (hydrateTemplatesPromise) return hydrateTemplatesPromise;
+  hydrateTemplatesPromise = (async () => {
+    try {
+      const r = await listSmsTemplatesFn();
+      if (!r.ok) return;
+      templates = mergeById(templates, r.templates);
+      emit();
+    } catch {
+      /* silent fallback */
+    }
+  })();
+  return hydrateTemplatesPromise;
+}
+
+/** Force a fresh hydrate — ignores the memoized promise. */
+export function refreshSmsTemplatesFromDb(): Promise<void> {
+  if (typeof window === "undefined") return Promise.resolve();
+  hydrateTemplatesPromise = null;
+  return hydrateSmsTemplatesFromDb();
 }
 
 /** Add a template, or replace the existing entry with the same DLT Template ID. */
@@ -69,6 +114,11 @@ export function upsertSmsTemplate(t: SmsTemplate) {
     templates = next;
   }
   emit();
+  if (typeof window !== "undefined") {
+    void saveSmsTemplateFn({ data: t }).catch(() => {
+      /* silent */
+    });
+  }
 }
 
 /** Add many at once (bulk upload). Existing IDs are replaced, new ones prepended. */
@@ -82,11 +132,23 @@ export function addSmsTemplates(added: SmsTemplate[]) {
   }
   templates = [...fresh, ...templates.map((t) => byId.get(t.id) ?? t)];
   emit();
+  if (typeof window !== "undefined") {
+    for (const t of added) {
+      void saveSmsTemplateFn({ data: t }).catch(() => {
+        /* silent */
+      });
+    }
+  }
 }
 
 export function removeSmsTemplate(id: string) {
   templates = templates.filter((t) => t.id !== id);
   emit();
+  if (typeof window !== "undefined") {
+    void deleteSmsTemplateFn({ data: id }).catch(() => {
+      /* silent */
+    });
+  }
 }
 
 /** Resolve a template by DLT Template ID, or by name as a fallback. */

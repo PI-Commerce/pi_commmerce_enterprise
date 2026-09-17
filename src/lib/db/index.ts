@@ -17,3 +17,7 @@ export * as campaigns from "./campaigns";
 export * as analytics from "./analytics";
 export * as agents from "./agents";
 export * as runs from "./runs";
+export * as waTemplates from "./wa-templates";
+export * as smsTemplates from "./sms-templates";
+export * as rcsTemplates from "./rcs-templates";
+export * as tools from "./tools";

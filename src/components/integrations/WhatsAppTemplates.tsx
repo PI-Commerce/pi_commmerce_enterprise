@@ -26,7 +26,7 @@ import { toast } from "sonner";
 import type { ConnectedWaba } from "@/lib/waba-onboarding";
 import { useRegion } from "@/lib/region";
 import {
-  SEED_TEMPLATES, TEMPLATE_CATEGORIES, TEMPLATE_BUTTON_TYPES, BUTTON_TYPE_LABELS,
+  TEMPLATE_CATEGORIES, TEMPLATE_BUTTON_TYPES, BUTTON_TYPE_LABELS,
   MEDIA_HINTS, languageLabel, fillVariables, variableCount,
   MAX_TEMPLATE_BUTTONS, cappedButtonTypes, buttonRuleErrors, buttonFieldErrors, duplicateButtonIndexes,
   bodyEdgeVariable, bodyTooManyVariables,
@@ -34,6 +34,7 @@ import {
   type WaTemplate, type TemplateStatus, type TemplateCategory, type TemplateFormat,
   type TemplateButton, type TemplateButtonType,
 } from "@/lib/waba-templates";
+import { useWaTemplates, upsertWaTemplate, removeWaTemplate } from "@/lib/waba-store";
 
 /** Max buttons shown inline in the WhatsApp bubble; the rest fold into
  *  "See all options" (Meta shows the first two when there are more than three). */
@@ -78,7 +79,7 @@ const EMOJIS = [
  * primitives) rather than Paytm's blue UI. Mock only — nothing is sent to Meta.
  */
 export function WhatsAppTemplates({ waba }: { waba: ConnectedWaba }) {
-  const [templates, setTemplates] = useState<WaTemplate[]>(SEED_TEMPLATES);
+  const templates = useWaTemplates();
   const [editing, setEditing] = useState<WaTemplate | null>(null);
   const [creating, setCreating] = useState(false);
 
@@ -87,11 +88,7 @@ export function WhatsAppTemplates({ waba }: { waba: ConnectedWaba }) {
   const close = () => { setCreating(false); setEditing(null); };
 
   const save = (t: WaTemplate) => {
-    setTemplates((prev) => {
-      const i = prev.findIndex((x) => x.id === t.id);
-      if (i === -1) return [t, ...prev];
-      const next = [...prev]; next[i] = t; return next;
-    });
+    upsertWaTemplate(t);
     close();
   };
 
@@ -106,7 +103,7 @@ export function WhatsAppTemplates({ waba }: { waba: ConnectedWaba }) {
       status: "Draft",
       createdAt: formatToday(),
     };
-    setTemplates((prev) => [copy, ...prev]);
+    upsertWaTemplate(copy);
     toast.success(`Cloned as ${copy.name}`);
   };
 
@@ -116,7 +113,7 @@ export function WhatsAppTemplates({ waba }: { waba: ConnectedWaba }) {
       onCreate={openCreate}
       onEdit={openEdit}
       onClone={clone}
-      onDelete={(id) => setTemplates((prev) => prev.filter((t) => t.id !== id))}
+      onDelete={(id) => removeWaTemplate(id)}
     />
   );
 }

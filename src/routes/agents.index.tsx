@@ -9,7 +9,8 @@ import {
 import { Wrench, Search, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { TOOLS, STATUS_LABEL } from "@/lib/tool-registry";
+import { STATUS_LABEL } from "@/lib/tool-registry";
+import { useTools } from "@/lib/tools-store";
 import { useAgents } from "@/lib/agent-store";
 
 export const Route = createFileRoute("/agents/")({
@@ -66,13 +67,14 @@ const AGENT_STATUSES: AgentStatus[] = ["live", "draft", "paused", "archived"];
 
 function BuilderTabsHeader({ tab, setTab }: { tab: Tab; setTab: (t: Tab) => void }) {
   const agents = useAgents();
+  const tools = useTools();
   return (
     <PageTabs<Tab>
       value={tab}
       onChange={setTab}
       tabs={[
         { id: "builder", label: "Builder", count: Object.keys(agents).length },
-        { id: "tools", label: "Tools", count: TOOLS.length },
+        { id: "tools", label: "Tools", count: tools.length },
       ]}
     />
   );
@@ -162,8 +164,9 @@ function StatusTag({ status }: { status: string }) {
 function Tools() {
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
+  const tools = useTools();
 
-  const filtered = TOOLS.filter((t) => {
+  const filtered = tools.filter((t) => {
     if (query && !t.handle.toLowerCase().includes(query.toLowerCase())) return false;
     return true;
   });
