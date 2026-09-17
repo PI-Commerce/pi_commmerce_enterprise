@@ -20,12 +20,16 @@ export type Env = {
   DB: D1Database;
   KV: KVNamespace;
   /**
-   * Ask Pi LLM gateway. The "PI_AGENT_*" trio is the current working
-   * gateway (`llm.tfy.pi.mypaytm.com/openai/v1`, service account
-   * `foundary-ai-workflows`). "TFY_*" is retained for backward-compat but
-   * the underlying service account has been rotated out — new deployments
-   * should populate PI_AGENT_*.
+   * Ask Pi LLM. Preferred path: Anthropic direct (public network, reachable
+   * from Cloudflare Workers). Falls back to the older TrueFoundry gateways
+   * (PI_AGENT_* / TFY_*) which are Paytm-internal and only reachable when
+   * the request originates from inside the corporate network (i.e. local
+   * dev with a laptop on the Paytm VPN).
    */
+  ANTHROPIC_API_KEY?: string;
+  ANTHROPIC_MODEL?: string;
+  ANTHROPIC_WORKSPACE_ID?: string;
+  /** Legacy TrueFoundry paths (kept as fallback for local dev on Paytm net). */
   PI_AGENT_API_KEY?: string;
   PI_AGENT_BASE_URL?: string;
   PI_AGENT_MODEL?: string;
@@ -78,6 +82,9 @@ export function getEnv(): Env {
   // Cloudflare fetch handler.
   if (typeof process !== "undefined" && process.env) {
     return {
+      ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+      ANTHROPIC_MODEL: process.env.ANTHROPIC_MODEL,
+      ANTHROPIC_WORKSPACE_ID: process.env.ANTHROPIC_WORKSPACE_ID,
       PI_AGENT_API_KEY: process.env.PI_AGENT_API_KEY,
       PI_AGENT_BASE_URL: process.env.PI_AGENT_BASE_URL,
       PI_AGENT_MODEL: process.env.PI_AGENT_MODEL,

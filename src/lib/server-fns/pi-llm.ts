@@ -418,110 +418,245 @@ const SYSTEM_AGENTS = `You are Pi, the voice-agent copilot for a marketing autom
 Confirm each change in one line ("Updated <name>: <what changed>"). Keep master prompts natural (English AND Devanagari variants for every quoted line — never Latin-transliterated Hindi like 'namaste, kaise ho'). Only reference tool handles the list_tools call returned.`;
 
 /**
- * Live Ask Pi call. Multi-turn tool loop over TrueFoundry's OpenAI-compat
- * chat/completions endpoint. Caps at 6 tool-call rounds so a runaway loop
- * can't burn the budget.
+ * Live Ask Pi call. Multi-turn tool loop.
+ *
+ * Two transport paths, picked at runtime:
+ *   - Anthropic native (`api.anthropic.com/v1/messages`) — public network,
+ *     reachable from Cloudflare Workers, current prod path. Used whenever
+ *     `env.ANTHROPIC_API_KEY` is set.
+ *   - TrueFoundry OpenAI-compat (`llm.tfy.pi.mypaytm.com/openai/v1`) —
+ *     Paytm-internal, only reachable when the origin is on the corporate
+ *     network. Used as fallback for local dev on Paytm VPN when the
+ *     Anthropic key isn't configured.
+ *
+ * Caps at 8 tool-call rounds — enough for a full campaign build (7-14
+ * tool calls in the insurance-renewal example), but small enough that a
+ * runaway loop can't burn budget.
  */
 export const askPi = createServerFn({ method: "POST" })
   .inputValidator((r: AskPiRequest) => r)
   .handler(async ({ data }): Promise<AskPiResponse> => {
-    // Guard the runtime shape end-to-end so a missing binding / secret degrades
-    // gracefully into an "ok: false" the client can fall back on, instead of
-    // throwing a 500 back to the browser. Order: env exists, DB bound (needed
-    // by every tool call), TFY key + base present.
     let env;
     try {
       env = getEnv();
     } catch (e) {
       return { ok: false, error: `runtime_env_missing: ${(e as Error).message}` };
     }
-    // No hard D1 gate — the LLM chat itself doesn't need D1. Per-tool
-    // reads/writes handle missing D1 with their own graceful errors,
-    // which fold back into the tool_result and let Pi say "couldn't
-    // load that" rather than dead-ending the whole conversation.
-    // Prefer the current working gateway (PI_AGENT_*) — service account
-    // `foundary-ai-workflows` on `llm.tfy.pi.mypaytm.com/openai/v1`. Fall
-    // back to the legacy TFY_* names for older deployments; the legacy
-    // service account has been rotated out but leaving the fallback in
-    // place means an env with only TFY_* set surfaces a real 401 instead
-    // of a "not configured" error.
-    const key = env.PI_AGENT_API_KEY || env.TFY_API_KEY;
-    const base = env.PI_AGENT_BASE_URL || env.TFY_BASE_URL;
-    if (!key || !base) return { ok: false, error: "LLM gateway not configured — set PI_AGENT_API_KEY + PI_AGENT_BASE_URL in .env / wrangler secrets" };
-    const model =
-      env.PI_AGENT_MODEL ||
-      env.TFY_MODEL ||
-      "pi-agentic/global.anthropic.claude-sonnet-4-6";
 
     const systemContent =
       data.scope === "builder" ? SYSTEM_BUILDER
       : data.scope === "agents" ? SYSTEM_AGENTS
       : SYSTEM_ANALYTICS;
-    const tools =
+    const scopeTools =
       data.scope === "builder" ? [...TOOL_DEFS.analytics, ...TOOL_DEFS.builder]
       : data.scope === "agents"  ? [...TOOL_DEFS.analytics, ...TOOL_DEFS.agents]
       : [...TOOL_DEFS.analytics];
 
-    const messages: Array<Record<string, unknown>> = [
-      { role: "system", content: systemContent },
-      ...(data.history ?? []).map((m) => ({ role: m.role, content: m.content })),
-    ];
-    if (data.context && Object.keys(data.context).length > 0) {
-      messages.push({
-        role: "system",
-        content: `Current context: ${JSON.stringify(data.context)}`,
+    // Prefer Anthropic direct. If missing, fall back to the OpenAI-compat
+    // TrueFoundry gateway. If neither, ok:false with a clear message.
+    if (env.ANTHROPIC_API_KEY) {
+      return await runAnthropicLoop({
+        apiKey: env.ANTHROPIC_API_KEY,
+        model: env.ANTHROPIC_MODEL || "claude-sonnet-4-5",
+        workspaceId: env.ANTHROPIC_WORKSPACE_ID,
+        systemContent,
+        tools: scopeTools,
+        question: data.question,
+        history: data.history,
+        context: data.context,
       });
     }
-    messages.push({ role: "user", content: data.question });
 
-    const toolCalls: ToolCallLog[] = [];
-    for (let round = 0; round < 6; round++) {
-      const res = await fetch(`${base}/chat/completions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${key}`,
-        },
-        body: JSON.stringify({ model, messages, tools, tool_choice: "auto" }),
-      });
-      if (!res.ok) {
-        const body = await res.text();
-        return { ok: false, error: `tfy_${res.status}: ${body.slice(0, 200)}` };
-      }
-      const json = await res.json() as {
-        choices?: Array<{
-          message?: {
-            content?: string | null;
-            tool_calls?: Array<{
-              id: string;
-              function: { name: string; arguments: string };
-            }>;
-          };
-        }>;
-      };
-      const msg = json.choices?.[0]?.message;
-      if (!msg) return { ok: false, error: "empty_response" };
-      messages.push({ role: "assistant", content: msg.content ?? "", tool_calls: msg.tool_calls });
-      if (!msg.tool_calls || msg.tool_calls.length === 0) {
-        return { ok: true, answer: msg.content ?? "", toolCalls };
-      }
-      for (const tc of msg.tool_calls) {
-        let args: Record<string, unknown> = {};
-        try { args = JSON.parse(tc.function.arguments) as Record<string, unknown>; }
-        catch { /* keep as {} */ }
-        const result = await runTool(tc.function.name, args);
-        toolCalls.push({
-          name: tc.function.name,
-          args: JSON.stringify(args),
-          result: JSON.stringify(result),
-        });
-        messages.push({
-          role: "tool",
-          tool_call_id: tc.id,
-          name: tc.function.name,
-          content: JSON.stringify(result),
-        });
-      }
+    const tfyKey = env.PI_AGENT_API_KEY || env.TFY_API_KEY;
+    const tfyBase = env.PI_AGENT_BASE_URL || env.TFY_BASE_URL;
+    if (!tfyKey || !tfyBase) {
+      return { ok: false, error: "LLM gateway not configured — set ANTHROPIC_API_KEY (preferred) or PI_AGENT_API_KEY + PI_AGENT_BASE_URL in .env / wrangler secrets" };
     }
-    return { ok: false, error: "exceeded_tool_rounds" };
+    return await runTfyLoop({
+      apiKey: tfyKey,
+      baseUrl: tfyBase,
+      model: env.PI_AGENT_MODEL || env.TFY_MODEL || "pi-agentic/global.anthropic.claude-sonnet-4-6",
+      systemContent,
+      tools: scopeTools,
+      question: data.question,
+      history: data.history,
+      context: data.context,
+    });
   });
+
+/* -------------------------------------------------------------------------- */
+/* Anthropic native tool loop                                                  */
+/* -------------------------------------------------------------------------- */
+
+type LoopInput = {
+  apiKey: string;
+  model: string;
+  systemContent: string;
+  tools: ReadonlyArray<{ type: "function"; function: { name: string; description: string; parameters: unknown } }>;
+  question: string;
+  history?: Array<{ role: "user" | "assistant"; content: string }>;
+  context?: Record<string, unknown>;
+};
+
+/**
+ * Anthropic /v1/messages tool loop. Their shape:
+ *   - `system` is a top-level string (not a message role)
+ *   - tools flatten to { name, description, input_schema }
+ *   - response content is an array of blocks: { type:"text",text } and
+ *     { type:"tool_use", id, name, input }
+ *   - tool results go back as user-message content: { type:"tool_result",
+ *     tool_use_id, content: string }
+ */
+async function runAnthropicLoop(
+  input: LoopInput & { workspaceId?: string },
+): Promise<AskPiResponse> {
+  // Convert our OpenAI-shape tool defs to Anthropic's shape.
+  const anthropicTools = input.tools.map((t) => ({
+    name: t.function.name,
+    description: t.function.description,
+    input_schema: t.function.parameters,
+  }));
+
+  // Anthropic messages: user/assistant only. `system` moves out. We fold the
+  // context hint into the system string so it survives every turn.
+  const systemFull = input.context && Object.keys(input.context).length > 0
+    ? `${input.systemContent}\n\n## Current context\n${JSON.stringify(input.context, null, 2)}`
+    : input.systemContent;
+
+  type AnthropicBlock =
+    | { type: "text"; text: string }
+    | { type: "tool_use"; id: string; name: string; input: Record<string, unknown> }
+    | { type: "tool_result"; tool_use_id: string; content: string };
+
+  // Seed history from prior turns (all user/assistant text blocks).
+  const messages: Array<{ role: "user" | "assistant"; content: AnthropicBlock[] | string }> = [];
+  for (const m of input.history ?? []) {
+    messages.push({ role: m.role, content: m.content });
+  }
+  messages.push({ role: "user", content: input.question });
+
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+    "x-api-key": input.apiKey,
+    "anthropic-version": "2023-06-01",
+  };
+
+  const toolCalls: ToolCallLog[] = [];
+  for (let round = 0; round < 8; round++) {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        model: input.model,
+        max_tokens: 4096,
+        system: systemFull,
+        messages,
+        tools: anthropicTools,
+      }),
+    });
+    if (!res.ok) {
+      const body = await res.text();
+      return { ok: false, error: `anthropic_${res.status}: ${body.slice(0, 300)}` };
+    }
+    const json = await res.json() as {
+      content?: AnthropicBlock[];
+      stop_reason?: string;
+      role?: string;
+    };
+    const blocks = json.content ?? [];
+    // Record the assistant turn verbatim so tool results reference the
+    // matching tool_use ids on the next round.
+    messages.push({ role: "assistant", content: blocks });
+
+    const toolUses = blocks.filter((b): b is Extract<AnthropicBlock, { type: "tool_use" }> => b.type === "tool_use");
+    if (toolUses.length === 0) {
+      // Terminal turn — collect all text blocks as the answer.
+      const answer = blocks
+        .filter((b): b is Extract<AnthropicBlock, { type: "text" }> => b.type === "text")
+        .map((b) => b.text)
+        .join("");
+      return { ok: true, answer, toolCalls };
+    }
+
+    // Execute every tool call in this turn, then post the results back as a
+    // single user message with N tool_result blocks.
+    const resultBlocks: AnthropicBlock[] = [];
+    for (const tu of toolUses) {
+      const result = await runTool(tu.name, tu.input ?? {});
+      const resultStr = JSON.stringify(result);
+      toolCalls.push({
+        name: tu.name,
+        args: JSON.stringify(tu.input ?? {}),
+        result: resultStr,
+      });
+      resultBlocks.push({ type: "tool_result", tool_use_id: tu.id, content: resultStr });
+    }
+    messages.push({ role: "user", content: resultBlocks });
+  }
+  return { ok: false, error: "exceeded_tool_rounds" };
+}
+
+/* -------------------------------------------------------------------------- */
+/* TFY OpenAI-compat fallback (kept for local dev on Paytm net)                */
+/* -------------------------------------------------------------------------- */
+
+async function runTfyLoop(
+  input: LoopInput & { baseUrl: string },
+): Promise<AskPiResponse> {
+  const messages: Array<Record<string, unknown>> = [
+    { role: "system", content: input.systemContent },
+    ...(input.history ?? []).map((m) => ({ role: m.role, content: m.content })),
+  ];
+  if (input.context && Object.keys(input.context).length > 0) {
+    messages.push({ role: "system", content: `Current context: ${JSON.stringify(input.context)}` });
+  }
+  messages.push({ role: "user", content: input.question });
+
+  const toolCalls: ToolCallLog[] = [];
+  for (let round = 0; round < 8; round++) {
+    const res = await fetch(`${input.baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${input.apiKey}`,
+      },
+      body: JSON.stringify({ model: input.model, messages, tools: input.tools, tool_choice: "auto" }),
+    });
+    if (!res.ok) {
+      const body = await res.text();
+      return { ok: false, error: `tfy_${res.status}: ${body.slice(0, 200)}` };
+    }
+    const json = await res.json() as {
+      choices?: Array<{
+        message?: {
+          content?: string | null;
+          tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }>;
+        };
+      }>;
+    };
+    const msg = json.choices?.[0]?.message;
+    if (!msg) return { ok: false, error: "empty_response" };
+    messages.push({ role: "assistant", content: msg.content ?? "", tool_calls: msg.tool_calls });
+    if (!msg.tool_calls || msg.tool_calls.length === 0) {
+      return { ok: true, answer: msg.content ?? "", toolCalls };
+    }
+    for (const tc of msg.tool_calls) {
+      let args: Record<string, unknown> = {};
+      try { args = JSON.parse(tc.function.arguments) as Record<string, unknown>; }
+      catch { /* keep as {} */ }
+      const result = await runTool(tc.function.name, args);
+      toolCalls.push({
+        name: tc.function.name,
+        args: JSON.stringify(args),
+        result: JSON.stringify(result),
+      });
+      messages.push({
+        role: "tool",
+        tool_call_id: tc.id,
+        name: tc.function.name,
+        content: JSON.stringify(result),
+      });
+    }
+  }
+  return { ok: false, error: "exceeded_tool_rounds" };
+}
