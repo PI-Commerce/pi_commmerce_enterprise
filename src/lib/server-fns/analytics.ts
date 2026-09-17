@@ -43,6 +43,7 @@ export type AnalyticsLead = {
   campaignId: string;
   name: string;
   phone: string;
+  email: string;
   stageNodeId: string;
   stageKind: string;
   channel: string | null;
@@ -120,7 +121,7 @@ export const getAnalyticsLeads = createServerFn({ method: "POST" })
     const offset = Math.max(0, (page - 1) * pageSize);
     const rows = await db
       .prepare(
-        `SELECT id, run_id, campaign_id, name, phone, stage_node_id, stage_kind,
+        `SELECT id, run_id, campaign_id, name, phone, email, stage_node_id, stage_kind,
                 channel, status, cost, duration_sec, updated_at
          FROM leads ${where}
          ORDER BY updated_at DESC
@@ -128,7 +129,7 @@ export const getAnalyticsLeads = createServerFn({ method: "POST" })
       )
       .bind(...binds, pageSize, offset)
       .all<{
-        id: string; run_id: string; campaign_id: string; name: string; phone: string;
+        id: string; run_id: string; campaign_id: string; name: string; phone: string; email: string;
         stage_node_id: string; stage_kind: string; channel: string | null;
         status: string | null; cost: number; duration_sec: number | null; updated_at: number;
       }>();
@@ -140,6 +141,7 @@ export const getAnalyticsLeads = createServerFn({ method: "POST" })
         campaignId: r.campaign_id,
         name: r.name,
         phone: r.phone,
+        email: r.email,
         stageNodeId: r.stage_node_id,
         stageKind: r.stage_kind,
         channel: r.channel,

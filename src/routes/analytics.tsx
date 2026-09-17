@@ -90,7 +90,41 @@ import {
   type ReportChannel,
 } from "@/lib/reports";
 import { format as fmtDate } from "date-fns";
-import { useD1RangeRatio } from "@/lib/hooks/use-analytics";
+import { useD1RangeRatio, useAnalyticsLeads } from "@/lib/hooks/use-analytics";
+import type { AnalyticsFilter, AnalyticsLead } from "@/lib/server-fns/analytics";
+
+/**
+ * Adapt a D1 `AnalyticsLead` into the client-side `Lead` shape the existing
+ * LeadsTable renders. The client shape has a few derived string fields
+ * (stageLabel, updatedDate, updatedAt) that the D1 row doesn't carry, so we
+ * compute them here from the run's sankey nodes + the D1 numeric timestamp.
+ */
+function analyticsLeadToLead(
+  r: AnalyticsLead,
+  nodesById: Map<string, { name: string; serial: number }>,
+): Lead {
+  const nodeMeta = nodesById.get(r.stageNodeId);
+  const stageLabel = nodeMeta
+    ? `#${nodeMeta.serial} ${nodeMeta.name}`
+    : r.stageNodeId;
+  const d = new Date(r.updatedAt);
+  const iso = fmtDate(d, "yyyy-MM-dd");
+  const time = fmtDate(d, "HH:mm");
+  return {
+    id: r.id,
+    name: r.name,
+    phone: r.phone,
+    email: r.email,
+    stageNodeId: r.stageNodeId,
+    stageLabel,
+    channel: (r.channel ?? undefined) as Lead["channel"],
+    status: (r.status ?? undefined) as Lead["status"],
+    cost: r.cost,
+    duration: r.durationSec ?? undefined,
+    updatedAt: `${iso} ${time}`,
+    updatedDate: iso,
+  };
+}
 
 /**
  * Format a DateRange's `from`/`to` boundaries as ISO yyyy-mm-dd for the
@@ -750,13 +784,35 @@ function LeadsTable({
   // scope we fall back to the run-level weighted sample.
   const singleScopedId =
     restrictToNodeIds && restrictToNodeIds.length === 1 ? restrictToNodeIds[0] : null;
+
+  // D1-backed lead fetch: filter by runId + (optional) single node + (optional)
+  // date range. Falls back to the pre-Phase-3 `generateLeads` sample when D1
+  // isn't bound or returns nothing (so prod-before-provisioning still shows
+  // something in the Logs table).
+  const d1Filter = useMemo<AnalyticsFilter>(() => ({
+    runId: run.id,
+    stageNodeId: singleScopedId ?? undefined,
+    from: dateRange?.from ? fmtDate(dateRange.from, "yyyy-MM-dd") : undefined,
+    to: dateRange?.to ? fmtDate(dateRange.to, "yyyy-MM-dd") : undefined,
+  }), [run.id, singleScopedId, dateRange]);
+  // Pull a wide window from D1 so client-side filtering (stage / status / q)
+  // still has enough rows to matter. Real pagination is client-side below.
+  const d1LeadsQuery = useAnalyticsLeads(d1Filter, 1, 5000);
+
   const scoped = useMemo(() => {
+    // Prefer D1 when we have real rows for this scope.
+    if (d1LeadsQuery.rows.length > 0) {
+      const nodeIds = restrictToNodeIds ? new Set(restrictToNodeIds) : null;
+      const seedNodes = new Map(run.sankey.nodes.map((n, i) => [n.id, { name: n.name, serial: i + 1 } as const]));
+      const adapted = d1LeadsQuery.rows.map((r): Lead => analyticsLeadToLead(r, seedNodes));
+      return nodeIds ? adapted.filter((l) => nodeIds.has(l.stageNodeId)) : adapted;
+    }
     if (singleScopedId) return generateLeadsForNode(run, singleScopedId);
     const all = generateLeads(run, run.kpi.validLeads);
     return restrictToNodeIds
       ? all.filter((l) => restrictToNodeIds.includes(l.stageNodeId))
       : all;
-  }, [run, restrictToNodeIds, singleScopedId]);
+  }, [run, restrictToNodeIds, singleScopedId, d1LeadsQuery.rows]);
 
   const [stageSel, setStageSel] = useState<string[]>([]);
   const [statusSel, setStatusSel] = useState<string[]>([]);
