@@ -11,6 +11,6 @@ export const Route = createFileRoute("/agents/$id")({
 
 function EditAgent() {
   const { id } = Route.useParams();
-  const record = getAgentRecord(id) ?? AGENT_RECORDS.a_concierge;
+  const record = getAgentRecord(id) ?? AGENT_RECORDS.a_voice_react;
   return <AgentBuilder mode="edit" type={record.type} record={record} />;
 }

@@ -384,33 +384,6 @@ export const SEED_RCS_TEMPLATES: RcsTemplate[] = [
     createdAt: "12 Jun 2026",
   },
   {
-    id: "rcs_tpl_welcome_offer",
-    name: "welcome_offer_card",
-    agentId: "acme_promo_bot",
-    type: "RICH_CARD",
-    approvalStatus: "Approved",
-    title: "Welcome to ACME, {{name}}! 🎉",
-    body: "Here's {{discount}}% off your first order. Tap below to start shopping.",
-    // JIO image, Vertical → plain 2:1 card, no height.
-    media: { mediaType: "IMAGE", orientation: "VERTICAL", source: "url", url: "https://cdn.picomm.in/rcs/welcome.jpg" },
-    buttons: [
-      { type: "REPLY", text: "Shop now", postback: "shop_now" },
-      { type: "REPLY", text: "See offers", postback: "see_offers" },
-      { type: "URL", text: "Visit store", url: "https://picomm.in/shop" },
-    ],
-    createdAt: "18 Jun 2026",
-  },
-  {
-    id: "rcs_tpl_delivery_otp",
-    name: "delivery_otp_text",
-    agentId: "acme_otp_bot",
-    type: "TEXT",
-    approvalStatus: "Approved",
-    body: "{{otp}} is your ACME verification code. Valid for {{minutes}} minutes. Do not share it with anyone.",
-    buttons: [],
-    createdAt: "12 Jun 2026",
-  },
-  {
     id: "rcs_tpl_payment_reminder",
     name: "payment_reminder_text",
     agentId: "acme_utility_bot",
@@ -422,38 +395,5 @@ export const SEED_RCS_TEMPLATES: RcsTemplate[] = [
       { type: "REPLY", text: "Need help", postback: "need_help" },
     ],
     createdAt: "02 Jul 2026",
-  },
-  {
-    id: "rcs_tpl_festive_sale",
-    name: "festive_sale_card",
-    agentId: "acme_promo_bot",
-    type: "RICH_CARD",
-    approvalStatus: "Pending",
-    title: "{{festival}} Sale is live! 🪔",
-    body: "{{name}}, up to {{discount}}% off everything. Offer ends {{expiry_date}}.",
-    // JIO video, Horizontal → Medium (7:3), with a thumbnail.
-    media: { mediaType: "VIDEO", orientation: "HORIZONTAL", height: "MEDIUM", source: "url", url: "https://cdn.picomm.in/rcs/festive.mp4" },
-    buttons: [
-      { type: "REPLY", text: "Shop the sale", postback: "shop_sale" },
-      { type: "DIALER", text: "Call support", phone: "+911800123456" },
-    ],
-    createdAt: "15 Jul 2026",
-  },
-  {
-    id: "rcs_tpl_feedback",
-    name: "feedback_request_card",
-    // Registered under the Netcore-VI retail brand — exercises Netcore's
-    // Vertical Short/Medium heights.
-    agentId: "retail_utility_bot",
-    type: "RICH_CARD",
-    approvalStatus: "Rejected",
-    title: "How did we do, {{name}}?",
-    body: "Your order {{order_id}} was delivered. We'd love your feedback.",
-    media: { mediaType: "IMAGE", orientation: "VERTICAL", height: "SHORT", source: "url", url: "https://cdn.picomm.in/rcs/feedback.png" },
-    buttons: [
-      { type: "REPLY", text: "👍 Great", postback: "rating_good" },
-      { type: "REPLY", text: "👎 Not great", postback: "rating_bad" },
-    ],
-    createdAt: "21 Jul 2026",
   },
 ];

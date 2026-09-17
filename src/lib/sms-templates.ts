@@ -171,17 +171,6 @@ export function templateSegments(t: Pick<SmsTemplate, "content" | "smsType">): S
 /** Mirrored DLT templates for the demo workspace. */
 export const SEED_SMS_TEMPLATES: SmsTemplate[] = [
   {
-    id: "1107168420993847112",
-    name: "order_confirm_txn",
-    smsType: "Text",
-    category: "Transactional",
-    peId: "1101473820000034521",
-    senderId: "PICOMM",
-    content:
-      "Hi {{name}}, your order {{order_id}} of Rs {{amount}} is confirmed and will be delivered by {{eta}}. Track: {{link}} - PICOMM",
-    createdAt: "12 Jun 2026",
-  },
-  {
     id: "1107168421004829376",
     name: "delivery_otp",
     smsType: "Text",
@@ -212,36 +201,6 @@ export const SEED_SMS_TEMPLATES: SmsTemplate[] = [
     content:
       "Payment of Rs {{amount}} for order {{order_id}} could not be processed. Retry at {{link}} or your order will be cancelled in {{hours}} hours. - PICOMM",
     createdAt: "02 Jul 2026",
-  },
-  {
-    id: "1107168421339104782",
-    name: "cart_recovery_promo",
-    smsType: "Text",
-    category: "Promotional",
-    peId: "1101473820000034521",
-    senderId: "PIOFFR",
-    content: "{{name}}, you left {{item}} in your cart. Complete your order today and get {{discount}}% off. {{link}} - PICOMM",
-    createdAt: "09 Jul 2026",
-  },
-  {
-    id: "1107168421447290318",
-    name: "festive_offer_hindi",
-    smsType: "Unicode",
-    category: "Promotional",
-    peId: "1101473820000034521",
-    senderId: "PIOFFR",
-    content: "{{name}} जी, {{festival}} पर पाएं {{discount}}% की छूट। ऑफर {{expiry_date}} तक मान्य है। {{link}} - PICOMM",
-    createdAt: "15 Jul 2026",
-  },
-  {
-    id: "1107168421556731209",
-    name: "kyc_pending_txn",
-    smsType: "Text",
-    category: "Transactional",
-    peId: "1101473820000034521",
-    senderId: "PICOMM",
-    content: "Dear {{name}}, your KYC is pending verification. Complete it by {{due_date}} to keep your account active. {{link}} - PICOMM",
-    createdAt: "21 Jul 2026",
   },
   {
     id: "1107168421663902554",

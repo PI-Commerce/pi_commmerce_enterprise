@@ -58,7 +58,7 @@ function Dashboard() {
       <div className="grid grid-cols-4 gap-3">
         <Kpi
           label="Active campaigns"
-          value="8"
+          value="5"
           unit="live"
           timeframe="Currently running"
           info="Campaigns with at least one run in progress right now."
@@ -201,9 +201,9 @@ function ShortcutCard({ icon: Icon, title, desc, to }: { icon: React.ComponentTy
 
 // Live runs, sorted by startedAtTs descending at render time.
 const LIVE_RUNS = [
-  { id: "r_8423", campaign: "Dormant Trader Reactivation", startedAt: "Today, 12:04 PM", startedAtTs: 1719813840000, processed: 630,  total: 1500 as number | undefined },
-  { id: "r_8422", campaign: "Retail · Activation",         startedAt: "Today, 11:50 AM", startedAtTs: 1719813000000, processed: 1200, total: undefined },
-  { id: "r_8421", campaign: "New Trader Onboarding",       startedAt: "Today, 11:32 AM", startedAtTs: 1719811920000, processed: 410,  total: 900 },
-  { id: "r_8420", campaign: "KYC Drop-off Recovery",       startedAt: "Today, 10:58 AM", startedAtTs: 1719809880000, processed: 220,  total: 540 },
-  { id: "r_8419", campaign: "High-Value Win-Back",         startedAt: "Today, 10:20 AM", startedAtTs: 1719807600000, processed: 75,   total: 300 },
+  { id: "r_9001", campaign: "B2B · Reactivate Paytm Soundbox Merchants", startedAt: "Today, 12:04 PM", startedAtTs: 1719813840000, processed: 630,  total: 1500 as number | undefined },
+  { id: "r_9002", campaign: "Retail · Loyalty Card Upsell",              startedAt: "Today, 11:50 AM", startedAtTs: 1719813000000, processed: 1200, total: undefined },
+  { id: "r_9003", campaign: "D2C · Cart Abandonment",                    startedAt: "Today, 11:32 AM", startedAtTs: 1719811920000, processed: 410,  total: 900 },
+  { id: "r_9004", campaign: "BFSI · Insurance Renewal",                  startedAt: "Today, 10:58 AM", startedAtTs: 1719809880000, processed: 220,  total: 540 },
+  { id: "r_9005", campaign: "BFSI · PL DPD Collections",                 startedAt: "Today, 10:20 AM", startedAtTs: 1719807600000, processed: 75,   total: 300 },
 ] as const;

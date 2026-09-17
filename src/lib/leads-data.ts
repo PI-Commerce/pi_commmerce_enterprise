@@ -179,13 +179,11 @@ export function relTime(iso: string): string {
 export type CampaignCatalogEntry = { id: string; name: string };
 
 export const CAMPAIGN_CATALOG: CampaignCatalogEntry[] = [
-  { id: "c_ex17", name: "Retail · ACME Corp FCC Loyalty" },
-  { id: "c_ex7",  name: "Retail · Activation" },
-  { id: "c_ex8",  name: "Retail · Reward Expiry" },
-  { id: "c_ex9",  name: "Retail · Winback" },
-  { id: "c_ex11", name: "Retail · Seasonal Sale" },
-  { id: "c_ex14", name: "D2C · Cart Abandonment" },
-  { id: "c_ex15", name: "E-commerce · Price Drop" },
+  { id: "c_ex4",         name: "BFSI · Insurance Renewal" },
+  { id: "c_ex6",         name: "BFSI · PL DPD Collections" },
+  { id: "c_ex14",        name: "D2C · Cart Abandonment" },
+  { id: "c_ex17",        name: "Retail · Loyalty Card Upsell" },
+  { id: "c_ex_soundbox", name: "B2B · Reactivate Paytm Soundbox Merchants" },
 ];
 
 const FIRST_NAMES = [
@@ -237,39 +235,37 @@ function fakePhone(rng: () => number): string {
  * -------------------------------------------------------------------------- */
 
 function waBodyFor(campaignName: string, firstName: string): { body: string; linkLabel?: string } {
-  if (campaignName.includes("Loyalty"))           return { body: `Hi ${firstName}, thanks for being a loyal customer! Here's an exclusive reward for you.`, linkLabel: "Redeem now" };
-  if (campaignName.includes("Activation"))        return { body: `Welcome ${firstName}! Complete your first purchase and get 15% off.`, linkLabel: "Shop now" };
-  if (campaignName.includes("Reward Expiry"))     return { body: `Hi ${firstName}, your reward points expire in 7 days — redeem now.` };
-  if (campaignName.includes("Winback"))           return { body: `${firstName}, we've missed you! Here's a special offer to bring you back.`, linkLabel: "See offer" };
-  if (campaignName.includes("Seasonal"))          return { body: `${firstName}, our seasonal sale is live — up to 40% off.`, linkLabel: "Browse sale" };
+  if (campaignName.includes("Renewal"))           return { body: `Hi ${firstName}, your Paytm policy is up for renewal. Renew in a tap and keep your cover live.`, linkLabel: "Renew now" };
+  if (campaignName.includes("Collections"))       return { body: `Hi ${firstName}, your Paytm loan EMI is pending. Pay now to avoid additional charges.`, linkLabel: "Pay EMI" };
   if (campaignName.includes("Cart Abandonment"))  return { body: `Hi ${firstName}, you left something in your cart. Complete your purchase now.`, linkLabel: "Resume checkout" };
-  if (campaignName.includes("Price Drop"))        return { body: `${firstName}, the item you saved just dropped in price!`, linkLabel: "View item" };
-  if (campaignName.includes("human handoff"))     return { body: `Hi ${firstName}, this is Pi Support — how can I help today?` };
+  if (campaignName.includes("Loyalty"))           return { body: `Hi ${firstName}, thanks for being a loyal customer! Here's an exclusive upgrade offer on your card.`, linkLabel: "See offer" };
+  if (campaignName.includes("Soundbox"))          return { body: `Hi ${firstName}, we noticed your Paytm Soundbox has been quiet. Reactivate today and keep collecting payments.`, linkLabel: "Reactivate" };
   return { body: `Hi ${firstName}, we have an update for you.` };
 }
 
 function smsBodyFor(campaignName: string, firstName: string): string {
-  if (campaignName.includes("Cart Abandonment"))  return `${firstName}, complete your order at picomm.in/cart before it clears. - PICOMM`;
-  if (campaignName.includes("Reward"))            return `Hi ${firstName}, your reward expires soon. Redeem: picomm.in/r - PICOMM`;
-  if (campaignName.includes("Seasonal"))          return `${firstName}, up to 40% off ends tonight. picomm.in/sale - PICOMM`;
-  if (campaignName.includes("Loyalty"))           return `${firstName}, exclusive loyalty voucher inside. picomm.in/loyal - PICOMM`;
-  if (campaignName.includes("Winback"))           return `${firstName}, we miss you — 20% off any order. picomm.in/back - PICOMM`;
-  return `Hi ${firstName}, an update from PICOMM. picomm.in - PICOMM`;
+  if (campaignName.includes("Renewal"))           return `${firstName}, renew your Paytm policy today: paytm.me/renew - PAYTM`;
+  if (campaignName.includes("Collections"))       return `${firstName}, EMI pending. Pay now: paytm.me/pay - PAYTM`;
+  if (campaignName.includes("Cart Abandonment"))  return `${firstName}, complete your order at paytm.me/cart before it clears. - PAYTM`;
+  if (campaignName.includes("Loyalty"))           return `${firstName}, exclusive loyalty upgrade inside. paytm.me/loyal - PAYTM`;
+  if (campaignName.includes("Soundbox"))          return `${firstName}, reactivate your Soundbox: paytm.me/sb - PAYTM`;
+  return `Hi ${firstName}, an update from Paytm. paytm.me - PAYTM`;
 }
 
 function rcsBodyFor(campaignName: string, firstName: string): string {
-  if (campaignName.includes("Price Drop"))        return `${firstName}, prices just dropped on 3 items in your wishlist.`;
-  if (campaignName.includes("Loyalty"))           return `${firstName}, you've unlocked Gold tier — new benefits inside.`;
-  if (campaignName.includes("Seasonal"))          return `${firstName}, tap below to see today's flash-sale picks curated for you.`;
+  if (campaignName.includes("Loyalty"))           return `${firstName}, you've unlocked a new tier — see your upgraded benefits inside.`;
+  if (campaignName.includes("Renewal"))           return `${firstName}, tap below to renew your Paytm policy in one step.`;
+  if (campaignName.includes("Soundbox"))          return `${firstName}, tap below to reactivate your Soundbox in under a minute.`;
   return `${firstName}, here's an update tailored for you.`;
 }
 
 function inboundReplyFor(campaignName: string, rng: () => number): string {
   const generic = ["Ok", "Thanks!", "Not interested", "Tell me more", "Sure", "Later maybe"];
-  if (campaignName.includes("Cart"))      return pick(rng, ["Already ordered", "Not now", "Show me options"]);
-  if (campaignName.includes("Loyalty"))   return pick(rng, ["Redeemed!", "Nice, thanks", "I'll check"]);
-  if (campaignName.includes("Winback"))   return pick(rng, ["Maybe", "Not interested", "What's the offer?"]);
-  if (campaignName.includes("handoff"))   return pick(rng, ["I need help with my order", "Where's my refund?", "Something's broken"]);
+  if (campaignName.includes("Cart"))          return pick(rng, ["Already ordered", "Not now", "Show me options"]);
+  if (campaignName.includes("Loyalty"))       return pick(rng, ["Interested", "Nice, thanks", "I'll check"]);
+  if (campaignName.includes("Renewal"))       return pick(rng, ["Will do", "Send me the link", "Not now"]);
+  if (campaignName.includes("Collections"))   return pick(rng, ["Will pay soon", "Send link", "Facing trouble, need help"]);
+  if (campaignName.includes("Soundbox"))      return pick(rng, ["Yes reactivate", "How much fee?", "Not needed now"]);
   return pick(rng, generic);
 }
 
@@ -363,22 +359,31 @@ function maybeTemplateFor(
       ],
     };
   }
-  if (campaignName.includes("Seasonal") || campaignName.includes("Price Drop")) {
+  if (campaignName.includes("Renewal")) {
     return {
       header: { kind: "text", text: `Hi ${firstName}` },
       body,
       buttons: [
-        { kind: "url", label: linkLabel ?? "Shop now", url: "https://picomm.in/sale" },
+        { kind: "url", label: linkLabel ?? "Renew now", url: "https://paytm.me/renew" },
         { kind: "phone", label: "Call support", phone: "+911800123456" },
       ],
     };
   }
-  if (campaignName.includes("handoff")) {
+  if (campaignName.includes("Collections")) {
     return {
       body,
       buttons: [
-        { kind: "quick_reply", label: "Track order" },
-        { kind: "quick_reply", label: "Talk to human" },
+        { kind: "url", label: linkLabel ?? "Pay EMI", url: "https://paytm.me/pay" },
+        { kind: "quick_reply", label: "Need help" },
+      ],
+    };
+  }
+  if (campaignName.includes("Soundbox")) {
+    return {
+      body,
+      buttons: [
+        { kind: "url", label: linkLabel ?? "Reactivate", url: "https://paytm.me/sb" },
+        { kind: "quick_reply", label: "Not needed" },
       ],
     };
   }

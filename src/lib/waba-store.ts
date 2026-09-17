@@ -6,14 +6,17 @@
  * module-level store exposed through `useSyncExternalStore` keeps both routes in
  * sync without prop-drilling or a context provider.
  *
- * Intentionally in-memory only (no localStorage): a hard refresh resets the demo
- * to the not-connected state, so the full Embedded Signup can be replayed live.
- * `getServerSnapshot` returns `null` to stay SSR/hydration-safe.
+ * Intentionally in-memory only (no localStorage). Seeded to the DEMO_RESULT so
+ * WhatsApp is connected on first load — approved templates, freeform workflows,
+ * and hero campaign nodes light up without the reviewer having to run Embedded
+ * Signup first. Disconnect + Reconnect still work if the reviewer wants to walk
+ * through the signup path live. `getServerSnapshot` returns `null` to stay
+ * SSR/hydration-safe.
  */
 import { useSyncExternalStore } from "react";
-import type { ConnectedWaba } from "@/lib/waba-onboarding";
+import { DEMO_RESULT, type ConnectedWaba } from "@/lib/waba-onboarding";
 
-let current: ConnectedWaba | null = null;
+let current: ConnectedWaba | null = DEMO_RESULT;
 const listeners = new Set<() => void>();
 
 function emit() {

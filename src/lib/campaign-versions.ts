@@ -68,15 +68,19 @@ const NOW = Date.now();
  * "Current". Other campaigns start with no history until their first run.
  */
 export const VERSION_HISTORY: Record<string, CampaignVersion[]> = {
-  c_ex1: [
+  c_ex4: [
     makeVersion({ version: 1, trigger: "created", createdTs: NOW - 6 * DAY, summary: "Initial version — saved and launched the first run." }),
-    makeVersion({ version: 2, trigger: "edit", createdTs: NOW - 3 * DAY - 2 * HOUR, summary: "Added the Mid-LTV → SMS fallback track for tiers that skip the AI conversation." }),
-    makeVersion({ version: 3, trigger: "edit", createdTs: NOW - 18 * HOUR, summary: "Re-balanced the Chat-AI A/B split to 50/50 and widened the Voice retry window." }),
+    makeVersion({ version: 2, trigger: "edit", createdTs: NOW - 3 * DAY - 2 * HOUR, summary: "Added an SMS fallback for the 'not renewed' branch after voice attempts run out." }),
+    makeVersion({ version: 3, trigger: "edit", createdTs: NOW - 18 * HOUR, summary: "Widened the Voice retry window and re-balanced the Benefits vs Savings A/B split to 50/50." }),
   ],
-  c_ex2: [
+  c_ex6: [
     makeVersion({ version: 1, trigger: "created", createdTs: NOW - 9 * DAY, summary: "Initial version — saved and launched the first run." }),
-    makeVersion({ version: 2, trigger: "edit", createdTs: NOW - 4 * DAY - 5 * HOUR, summary: "Added a Voice callback retry (1×) for the 'callback' disposition path." }),
+    makeVersion({ version: 2, trigger: "edit", createdTs: NOW - 4 * DAY - 5 * HOUR, summary: "Added a Voice callback retry (1×) for the 'callback' disposition on the 31–90 DPD path." }),
     makeVersion({ version: 3, trigger: "resumed-edit", createdTs: NOW - 26 * HOUR, summary: "Paused and edited — refined the WhatsApp 'needs help' → 2-day delay → SMS nudge branch." }),
+  ],
+  c_ex17: [
+    makeVersion({ version: 1, trigger: "created", createdTs: NOW - 8 * DAY, summary: "Initial version — saved and launched the first run." }),
+    makeVersion({ version: 2, trigger: "edit", createdTs: NOW - 2 * DAY, summary: "Split the upsell offer into three tiers and added an A/B on the messaging tone." }),
   ],
 };
 

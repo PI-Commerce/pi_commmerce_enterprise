@@ -155,92 +155,164 @@ export type FreeformWorkflowRow = {
 
 /* --------------------------------- Seed data --------------------------------- */
 
-/** A small pre-configured example graph  -  greeting Text + slot picker List  -
- *  so the campaign-side preview modal and variable mapping have something to
- *  render out of the box against the ready seed workflows. */
-const EXAMPLE_TESTDRIVE_NODES: FreeformNodeRecord[] = [
+/** Soundbox troubleshooting flow  -  the freeform workflow referenced by the
+ *  Reactivate Paytm Soundbox Merchants hero campaign (c_ex_soundbox). Merchants
+ *  who reply "Chat with support" on the reactivation nudge get dropped into
+ *  this flow inside the 24-hour window. */
+const SOUNDBOX_HELP_NODES: FreeformNodeRecord[] = [
   {
     id: "start",
     type: "freeform",
-    position: { x: 0, y: 60 },
+    position: { x: 0, y: 200 },
     data: { kind: "start", title: "Start", locked: true, valid: true },
   },
   {
-    id: "n_text_1",
+    id: "text_intro",
     type: "freeform",
-    position: { x: 240, y: 60 },
+    position: { x: 240, y: 200 },
     data: {
       kind: "text",
-      title: "Greet",
+      title: "Intro",
       serial: "text_1",
       valid: true,
       config: {
-        text: "Hi {{name}}, thanks for your interest in the {{model}}. Are you looking to book a test drive?",
+        text: "Namaste {{name}}, sorry your Soundbox {{device_id}} isn't working as expected. Tell me what's happening and I'll get it sorted.",
+      },
+    },
+  },
+  {
+    id: "list_options",
+    type: "freeform",
+    position: { x: 520, y: 200 },
+    data: {
+      kind: "list",
+      title: "What's wrong",
+      serial: "list_1",
+      valid: true,
+      config: {
+        header: "Soundbox Support",
+        body: "Which of these best describes the issue with device {{device_id}}?",
+        footer: "We'll fix it fast.",
+        buttonLabel: "Choose",
+        rows: [
+          { id: "no_power", title: "Not turning on", description: "Screen is blank / no lights" },
+          { id: "no_sound", title: "Not playing sound", description: "Payment received but no beep" },
+          { id: "no_network", title: "No network / offline", description: "Says 'offline' or won't connect" },
+          { id: "talk_to_support", title: "Speak to a human", description: "Route me to Paytm support" },
+        ],
+      },
+    },
+  },
+  {
+    id: "text_no_power",
+    type: "freeform",
+    position: { x: 820, y: 40 },
+    data: {
+      kind: "text",
+      title: "No power",
+      serial: "text_2",
+      valid: true,
+      config: {
+        text: "Hold the power button for 10 seconds to force-restart the Soundbox. If nothing happens, plug in the charger for 15 minutes and try again. If it still won't turn on, the battery may be dead and we'll swap the device for free.",
         buttonsBlock: {
           mode: "quick_reply",
           buttons: [
-            { id: "yes", label: "Yes" },
-            { id: "not_now", label: "Not now" },
+            { id: "fixed", label: "It's working now" },
+            { id: "still_broken", label: "Still not working" },
           ],
         },
       },
     },
   },
   {
-    id: "n_list_1",
+    id: "text_no_sound",
     type: "freeform",
-    position: { x: 560, y: 60 },
+    position: { x: 820, y: 200 },
     data: {
-      kind: "list",
-      title: "Pick slot",
-      serial: "list_1",
+      kind: "text",
+      title: "No sound",
+      serial: "text_3",
       valid: true,
       config: {
-        header: "Available slots",
-        body: "Pick a time slot at {{dealership}} for your test drive on {{preferred_date}}.",
-        footer: "Slots update every 15 minutes.",
-        buttonLabel: "Choose",
-        rows: [
-          { id: "r_am", title: "10 AM - 12 PM", description: "Morning" },
-          { id: "r_noon", title: "12 PM - 2 PM", description: "Noon" },
-          { id: "r_pm", title: "4 PM - 6 PM", description: "Afternoon" },
-        ],
+        text: "Please increase the volume using the buttons on the side, then ask a friend to send you ₹1 on your Paytm QR to test. If it still doesn't announce the amount, the speaker may need service — we'll send a replacement.",
+        buttonsBlock: {
+          mode: "quick_reply",
+          buttons: [
+            { id: "fixed", label: "Working now" },
+            { id: "need_replacement", label: "Send replacement" },
+          ],
+        },
+      },
+    },
+  },
+  {
+    id: "document_manual",
+    type: "freeform",
+    position: { x: 820, y: 360 },
+    data: {
+      kind: "document",
+      title: "User manual",
+      serial: "document_1",
+      valid: true,
+      config: {
+        mediaSource: "url",
+        mediaUrl: "https://cdn.paytm.com/soundbox/troubleshooting-en.pdf",
+        mediaFileName: "soundbox-troubleshooting-en.pdf",
+        caption: "Here's the network reset guide for your Soundbox {{device_id}}. Follow steps 1-4 to reconnect it to Wi-Fi. If it still shows offline after that, reply here and we'll help.",
+      },
+    },
+  },
+  {
+    id: "text_talk_to_support",
+    type: "freeform",
+    position: { x: 820, y: 520 },
+    data: {
+      kind: "text",
+      title: "Escalate",
+      serial: "text_4",
+      valid: true,
+      config: {
+        text: "No problem, {{name}}. A Paytm merchant-support agent will call you back within 30 minutes on this number. Your device ID {{device_id}} is already shared with them.",
       },
     },
   },
   {
     id: "end",
     type: "freeform",
-    position: { x: 880, y: 60 },
+    position: { x: 1140, y: 200 },
     data: { kind: "end", title: "End", locked: true, valid: true },
   },
 ];
-const EXAMPLE_TESTDRIVE_EDGES: FreeformEdgeRecord[] = [
-  { id: "e1", source: "start", target: "n_text_1" },
-  { id: "e2", source: "n_text_1", target: "n_list_1", sourceHandle: "btn_yes" },
-  { id: "e3", source: "n_text_1", target: "end", sourceHandle: "btn_not_now" },
-  { id: "e4", source: "n_list_1", target: "end", sourceHandle: "row_r_am" },
-  { id: "e5", source: "n_list_1", target: "end", sourceHandle: "row_r_noon" },
-  { id: "e6", source: "n_list_1", target: "end", sourceHandle: "row_r_pm" },
+
+const SOUNDBOX_HELP_EDGES: FreeformEdgeRecord[] = [
+  { id: "e1", source: "start", target: "text_intro" },
+  { id: "e2", source: "text_intro", target: "list_options" },
+  { id: "e3", source: "list_options", target: "text_no_power", sourceHandle: "row_no_power" },
+  { id: "e4", source: "list_options", target: "text_no_sound", sourceHandle: "row_no_sound" },
+  { id: "e5", source: "list_options", target: "document_manual", sourceHandle: "row_no_network" },
+  { id: "e6", source: "list_options", target: "text_talk_to_support", sourceHandle: "row_talk_to_support" },
+  { id: "e7", source: "text_no_power", target: "end", sourceHandle: "btn_fixed" },
+  { id: "e8", source: "text_no_power", target: "text_talk_to_support", sourceHandle: "btn_still_broken" },
+  { id: "e9", source: "text_no_sound", target: "end", sourceHandle: "btn_fixed" },
+  { id: "e10", source: "text_no_sound", target: "text_talk_to_support", sourceHandle: "btn_need_replacement" },
+  { id: "e11", source: "document_manual", target: "end" },
+  { id: "e12", source: "text_talk_to_support", target: "end" },
 ];
 
 export const SEED_FREEFORM_WORKFLOWS: FreeformWorkflowRow[] = [
   {
-    id: "ff_pre_book_test_drive",
-    name: "Pre-book & Test Drive Interest",
+    id: "ff_soundbox_help",
+    name: "Soundbox Help",
     description:
-      "Post-broadcast follow-up: capture interest, offer callback or slot booking.",
+      "In-conversation troubleshooting for dormant Soundbox merchants — power, sound, network, or route to support.",
     status: "ready",
-    lastModified: "2026-08-05T14:22:00Z",
-    createdAt: "2026-07-18T09:10:00Z",
-    usedInCampaigns: 3,
-    nodes: EXAMPLE_TESTDRIVE_NODES,
-    edges: EXAMPLE_TESTDRIVE_EDGES,
-    // Seeded as locked so the demo shows the "used in a live campaign run"
-    // state out of the box: builder is read-only, badge appears in the table,
-    // and this workflow is eligible for the Channel Analytics workflow picker.
+    lastModified: "2026-08-30T10:15:00Z",
+    createdAt: "2026-08-22T14:00:00Z",
+    usedInCampaigns: 1,
+    nodes: SOUNDBOX_HELP_NODES,
+    edges: SOUNDBOX_HELP_EDGES,
     locked: true,
-    lockedAt: "2026-07-20T10:00:00Z",
+    lockedAt: "2026-08-25T09:00:00Z",
   },
   {
     id: "ff_callback_slot_picker",
@@ -249,7 +321,7 @@ export const SEED_FREEFORM_WORKFLOWS: FreeformWorkflowRow[] = [
     status: "ready",
     lastModified: "2026-08-01T11:05:00Z",
     createdAt: "2026-07-22T15:30:00Z",
-    usedInCampaigns: 1,
+    usedInCampaigns: 0,
     nodes: [
       {
         id: "start",
@@ -317,17 +389,6 @@ export const SEED_FREEFORM_WORKFLOWS: FreeformWorkflowRow[] = [
         sourceHandle: "row_r_evening",
       },
     ],
-  },
-  {
-    id: "ff_kyc_document_upload",
-    name: "KYC Document Upload",
-    description: "Ask for PAN, Aadhaar, address proof  -  post to KYC API.",
-    status: "draft",
-    lastModified: "2026-08-07T08:00:00Z",
-    createdAt: "2026-08-06T18:45:00Z",
-    usedInCampaigns: 0,
-    nodes: [],
-    edges: [],
   },
 ];
 
