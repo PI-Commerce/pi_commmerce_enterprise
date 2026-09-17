@@ -90,19 +90,49 @@ import {
   type ReportChannel,
 } from "@/lib/reports";
 import { format as fmtDate } from "date-fns";
+import { useD1RangeRatio } from "@/lib/hooks/use-analytics";
+
+/**
+ * Format a DateRange's `from`/`to` boundaries as ISO yyyy-mm-dd for the
+ * AnalyticsFilter shape. Undefined boundaries pass through as undefined.
+ */
+function dateRangeToIsoFrom(range: DateRange | undefined): string | undefined {
+  return range?.from ? fmtDate(range.from, "yyyy-MM-dd") : undefined;
+}
+function dateRangeToIsoTo(range: DateRange | undefined): string | undefined {
+  return range?.to ? fmtDate(range.to, "yyyy-MM-dd") : undefined;
+}
 
 /**
  * Scale a run's KPIs and Sankey edge/node volumes to the fraction of the
- * seeded 30-day window the picker covers. This is the transitional bridge
- * until every widget reads from the D1 server functions
- * (`getAnalyticsSummary` / `getAnalyticsLeads`) — until then, changing the
- * range needs to visibly reshuffle the numbers on the whole page, not just
- * the Logs table.
+ * picker's window this run represents.
+ *
+ * Two modes:
+ *   1. If `overrideRatio` is passed, use it — this is the D1-driven path:
+ *      the caller computed `range-filtered-leads / all-time-leads` via
+ *      `useD1RangeRatio` and hands the real fraction in.
+ *   2. Otherwise fall back to the synthetic `days/30` factor. This is what
+ *      the app used before Phase 3 wired D1 aggregates. Kept as a bridge
+ *      for prod-before-D1-provisioning: if D1 isn't bound, the scaler
+ *      still moves numbers.
+ *
+ * Both paths pass the same downstream shape (RunRow) so widgets don't need
+ * to branch on data source.
  */
-function scaleRunToRange(run: RunRow, range: DateRange | undefined): RunRow {
-  const days = rangeDays(range);
-  if (!days || days >= 30) return run;
-  const ratio = Math.max(0.05, Math.min(1, days / 30));
+function scaleRunToRange(
+  run: RunRow,
+  range: DateRange | undefined,
+  overrideRatio?: number | null,
+): RunRow {
+  let ratio: number;
+  if (typeof overrideRatio === "number") {
+    if (overrideRatio >= 1) return run;
+    ratio = Math.max(0.05, Math.min(1, overrideRatio));
+  } else {
+    const days = rangeDays(range);
+    if (!days || days >= 30) return run;
+    ratio = Math.max(0.05, Math.min(1, days / 30));
+  }
   const round = (n: number) => Math.max(0, Math.round(n * ratio));
   const scaledNodes = run.sankey.nodes.map((n) => ({
     ...n,
@@ -466,14 +496,21 @@ function CampaignAnalytics({
     visibleRuns.find((r) => r.id === runId) ??
     visibleRuns[0] ??
     campaign.runs[0];
-  // Range-scoped run — every KPI, funnel volume and Sankey edge is scaled
-  // proportionally to how many days the picker covers (out of the seeded
-  // 30-day window). This is the transition path: when the D1 server fn is
-  // wired the ratio-scaling goes away and the widgets read filtered
-  // aggregates directly.
+  // Range-scoped run — Sankey volumes and KPIs scale to how much of this
+  // run's lifetime falls inside the picker window. The ratio comes from D1
+  // via `useD1RangeRatio` — one query with the window, one without, divide.
+  // Fallback: if D1 isn't bound (prod pre-provisioning) `useD1RangeRatio`
+  // returns null and `scaleRunToRange` uses the pre-Phase-3 `days/30`
+  // synthetic factor so the surface still moves numbers.
+  const d1Ratio = useD1RangeRatio({
+    campaignId: campaign.id,
+    runId: baseRun.id,
+    from: dateRangeToIsoFrom(dateRange),
+    to: dateRangeToIsoTo(dateRange),
+  });
   const run = useMemo(
-    () => scaleRunToRange(baseRun, dateRange),
-    [baseRun, dateRange],
+    () => scaleRunToRange(baseRun, dateRange, d1Ratio),
+    [baseRun, dateRange, d1Ratio],
   );
   const [openNode, setOpenNode] = useState<SankeyNode | null>(null);
   // The Sankey node currently being drilled into as an expanded freeform
@@ -1883,6 +1920,18 @@ function ChannelAnalytics({
   const effectiveAssetId = mode === "broadcast" ? broadcastResolvedAssetId : selection.assetId;
   const effectiveModeIsAsset = mode === "asset" || mode === "broadcast";
 
+  // D1-driven range ratio at the channel level. Scoped by `channel = kind`
+  // (WA / SMS / RCS / voice) so every ref in the tab scales by the same
+  // fraction — matches how the pre-Phase-3 synthetic scaler behaved (one
+  // `days/30` factor across the whole surface). Falls back to null if D1
+  // isn't bound, in which case the callers of scaleRunToRange revert to
+  // the synthetic factor.
+  const channelD1Ratio = useD1RangeRatio({
+    channel: kind,
+    from: dateRangeToIsoFrom(dateRange),
+    to: dateRangeToIsoTo(dateRange),
+  });
+
   // ── Mode-driven resolved refs ──────────────────────────────────────────────
   const selectedRefs = useMemo(() => {
     if (effectiveModeIsAsset) {
@@ -2191,7 +2240,7 @@ function ChannelAnalytics({
             const baseRun = CAMPAIGNS.find(
               (c) => c.id === ref.campaignId,
             )!.runs.find((r) => r.id === ref.runId)!;
-            const run = scaleRunToRange(baseRun, dateRange);
+            const run = scaleRunToRange(baseRun, dateRange, channelD1Ratio);
             const node = run.sankey.nodes.find((n) => n.id === ref.nodeId)!;
             return { run, node };
           });
@@ -2208,7 +2257,7 @@ function ChannelAnalytics({
             const baseRun = CAMPAIGNS.find(
               (c) => c.id === ref.campaignId,
             )!.runs.find((r) => r.id === ref.runId)!;
-            const run = scaleRunToRange(baseRun, dateRange);
+            const run = scaleRunToRange(baseRun, dateRange, channelD1Ratio);
             const node = run.sankey.nodes.find((n) => n.id === ref.nodeId)!;
             return { run, node };
           });
@@ -2220,7 +2269,7 @@ function ChannelAnalytics({
             const baseRun = CAMPAIGNS.find(
               (c) => c.id === ref.campaignId,
             )!.runs.find((r) => r.id === ref.runId)!;
-            const run = scaleRunToRange(baseRun, dateRange);
+            const run = scaleRunToRange(baseRun, dateRange, channelD1Ratio);
             const node = run.sankey.nodes.find((n) => n.id === ref.nodeId)!;
             return { run, node };
           });
@@ -2232,7 +2281,12 @@ function ChannelAnalytics({
           );
         })()
       ) : (
-        <ChannelDetail kind={kind} refs={selectedRefs} dateRange={dateRange} />
+        <ChannelDetail
+          kind={kind}
+          refs={selectedRefs}
+          dateRange={dateRange}
+          d1Ratio={channelD1Ratio}
+        />
       )}
     </>
   );
@@ -2282,10 +2336,13 @@ function ChannelDetail({
   kind,
   refs,
   dateRange,
+  d1Ratio,
 }: {
   kind: ChannelKind;
   refs: Ref[];
   dateRange: DateRange | undefined;
+  /** Real range/all ratio from D1 (parent computed). Null falls back to days/30. */
+  d1Ratio: number | null;
 }) {
   const color = CHANNEL_COLORS[kind];
   const days = rangeDays(dateRange);
@@ -2322,13 +2379,13 @@ function ChannelDetail({
         (r) => r.id === ref.runId,
       );
       if (!rawRun) continue;
-      const run = scaleRunToRange(rawRun, dateRange);
+      const run = scaleRunToRange(rawRun, dateRange, d1Ratio);
       const node = run.sankey.nodes.find((n) => n.id === ref.nodeId);
       if (!node) continue;
       entered += node.entered;
     }
     return deriveChannelValues(kind, entered);
-  }, [kind, refs, dateRange]);
+  }, [kind, refs, dateRange, d1Ratio]);
 
   // WhatsApp templates in the current scope (one per node), with their pooled
   // base. Drives the Template-comparison chart and the "are clicks measurable?"
@@ -2343,7 +2400,7 @@ function ChannelDetail({
         (r) => r.id === ref.runId,
       );
       if (!rawRun) continue;
-      const run = scaleRunToRange(rawRun, dateRange);
+      const run = scaleRunToRange(rawRun, dateRange, d1Ratio);
       const node = run.sankey.nodes.find((n) => n.id === ref.nodeId);
       if (!node) continue;
       const tpl =
@@ -2356,7 +2413,7 @@ function ChannelDetail({
       byId.set(tpl.id, cur);
     }
     return Array.from(byId.values());
-  }, [kind, refs, dateRange]);
+  }, [kind, refs, dateRange, d1Ratio]);
 
   // Clicked is only a real, measurable outcome when at least one in-scope template
   // carries a trackable button (a tracked URL or a Quick Reply). Otherwise we hide

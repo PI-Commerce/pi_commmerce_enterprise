@@ -112,13 +112,26 @@ for (const camp of CAMPAIGNS) {
       );
     }
     // Seed leads. `generateLeads` returns validLeads-worth of rows.
+    //
+    // Range picker realism: spread lead `updated_at` deterministically across
+    // the trailing 30-day window instead of all pointing at `now`. Otherwise
+    // any range that excludes today would return zero leads, and any range
+    // that includes today would return every lead — the picker wouldn't
+    // visibly move numbers on the analytics surface. Modulo bucket keyed by
+    // lead index keeps the spread stable across reseeds.
     const leads = generateLeads(run, run.kpi.validLeads);
-    for (const lead of leads) {
+    const DAY_MS = 24 * 60 * 60 * 1000;
+    leads.forEach((lead, i) => {
       const stageKind = run.sankey.nodes.find((n) => n.id === lead.stageNodeId)?.kind ?? "start";
+      const daysAgo = (i * 7 + (run.id.length * 3)) % 30; // 0..29
+      // Random-ish minute-of-day so LIMIT/OFFSET ORDER BY updated_at DESC gives
+      // a stable but non-clumpy list.
+      const minutesJitter = ((i * 37) % (24 * 60));
+      const leadUpdatedAt = now - daysAgo * DAY_MS - minutesJitter * 60 * 1000;
       push(
-        `INSERT OR REPLACE INTO leads (id, run_id, campaign_id, name, phone, email, stage_node_id, stage_kind, channel, status, cost, duration_sec, attributes_json, updated_at) VALUES (${q(`${run.id}_${lead.id}`)}, ${q(run.id)}, ${q(camp.id)}, ${q(lead.name)}, ${q(lead.phone)}, ${q(lead.email)}, ${q(lead.stageNodeId)}, ${q(stageKind)}, ${q(lead.channel ?? null)}, ${q(lead.status ?? null)}, ${q(lead.cost)}, ${q(lead.duration ?? null)}, ${q("{}")}, ${q(now)});`,
+        `INSERT OR REPLACE INTO leads (id, run_id, campaign_id, name, phone, email, stage_node_id, stage_kind, channel, status, cost, duration_sec, attributes_json, updated_at) VALUES (${q(`${run.id}_${lead.id}`)}, ${q(run.id)}, ${q(camp.id)}, ${q(lead.name)}, ${q(lead.phone)}, ${q(lead.email)}, ${q(lead.stageNodeId)}, ${q(stageKind)}, ${q(lead.channel ?? null)}, ${q(lead.status ?? null)}, ${q(lead.cost)}, ${q(lead.duration ?? null)}, ${q("{}")}, ${q(leadUpdatedAt)});`,
       );
-    }
+    });
   }
 }
 
