@@ -281,8 +281,6 @@ function smartConfigFor(kind: NodeKind): { config: Partial<PresetConfig>; subtit
         },
         subtitle: "Promotional · PICOMM",
       };
-    case "adsCampaign":
-      return { config: {}, subtitle: "WhatsApp CTWA · ready" };
     default:
       return null;
   }
@@ -542,9 +540,6 @@ function KindFields({
 
     case "rcs":
       return <RcsFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
-
-    case "adsCampaign":
-      return <AdsCampaignFields readOnly={readOnly} mark={mark} />;
   }
 }
 
@@ -1527,7 +1522,7 @@ function WhatsAppCore({
                     <SelectItem value={templateId}>{templateId} · legacy</SelectItem>
                   )}
                   {APPROVED_TEMPLATES.map((t) => (
-                    <SelectItem key={t.id} value={t.id}>{t.name} · {t.category}</SelectItem>
+                    <SelectItem key={t.id} value={t.name}>{t.name} · {t.category}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -2500,99 +2495,6 @@ function RcsCore({ config, readOnly, mark, onChange }: {
   );
 }
 
-
-/* --------------------------- Ads Campaign --------------------------- */
-
-function AdsCampaignFields({ readOnly, mark }: { readOnly?: boolean; mark: (v: boolean, e?: string) => void }) {
-  const [audienceMode, setAudienceMode] = useState<"meta" | "upload">("meta");
-  const { symbol } = useRegion();
-  return (
-    <>
-      <Section title="Platform">
-        <div className="grid grid-cols-4 gap-1.5">
-          <PlatformChip active>WhatsApp CTWA</PlatformChip>
-          <PlatformChip disabled>FB Ads</PlatformChip>
-          <PlatformChip disabled>Instagram</PlatformChip>
-          <PlatformChip disabled>Google</PlatformChip>
-        </div>
-        <p className="text-[11px] text-muted-foreground">Currently supports WhatsApp Click-to-WhatsApp Ads. More platforms coming soon.</p>
-      </Section>
-
-      <Section title="Account & Objective">
-        <Field label="Meta ad account" required>
-          <SelectLike disabled={readOnly} options={["act_12345 · Pi Commerce Main", "act_67890 · Pi Commerce Test"]} onPick={() => mark(true)} placeholder="Select account…" />
-        </Field>
-        <Field label="Campaign objective" required>
-          <SelectLike disabled={readOnly} options={["Engagement", "Leads", "Messages", "Sales"]} onPick={() => mark(true)} defaultValue="Messages" />
-        </Field>
-      </Section>
-
-      <Section title="Audience">
-        <div className="grid grid-cols-2 gap-2">
-          <SegmentBtn active={audienceMode === "meta"} onClick={() => setAudienceMode("meta")} disabled={readOnly}>Meta audience filters</SegmentBtn>
-          <SegmentBtn active={audienceMode === "upload"} onClick={() => setAudienceMode("upload")} disabled={readOnly}>Customer upload</SegmentBtn>
-        </div>
-        {audienceMode === "meta" ? (
-          <>
-            <Field label="Locations"><Input disabled={readOnly} placeholder="India, UAE" className="h-9" /></Field>
-            <div className="grid grid-cols-2 gap-2">
-              <Field label="Age min"><Input disabled={readOnly} type="number" defaultValue={25} className="h-9" /></Field>
-              <Field label="Age max"><Input disabled={readOnly} type="number" defaultValue={55} className="h-9" /></Field>
-            </div>
-            <Field label="Interests"><Input disabled={readOnly} placeholder="Investing, stocks, mutual funds" className="h-9" /></Field>
-          </>
-        ) : (
-          <>
-            <Field label="Upload customer CSV" required>
-              <label className="flex h-16 cursor-pointer items-center justify-center rounded-lg border border-dashed border-border bg-muted/30 text-xs text-muted-foreground hover:bg-muted/60">
-                <input type="file" accept=".csv" className="hidden" disabled={readOnly} />
-                Upload customer list (phone/email hashed)
-              </label>
-            </Field>
-            <Field label="Audience type">
-              <SelectLike disabled={readOnly} options={["Custom audience", "Lookalike audience"]} onPick={() => undefined} defaultValue="Custom audience" />
-            </Field>
-          </>
-        )}
-      </Section>
-
-      <Section title="Budget & Schedule">
-        <div className="grid grid-cols-2 gap-2">
-          <Field label={`Daily budget (${symbol.trim()})`} required><Input disabled={readOnly} type="number" placeholder="5000" className="h-9" onChange={() => mark(true)} /></Field>
-          <Field label="Bid strategy"><SelectLike disabled={readOnly} options={["Lowest cost", "Cost cap", "Bid cap"]} onPick={() => undefined} defaultValue="Lowest cost" /></Field>
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <Field label="Start"><Input disabled={readOnly} type="date" className="h-9" /></Field>
-          <Field label="End"><Input disabled={readOnly} type="date" className="h-9" /></Field>
-        </div>
-      </Section>
-
-      <Section title="Creative">
-        <Field label="Creative source" required>
-          <SelectLike disabled={readOnly} options={["Upload new creative", "Select from Asset Library"]} onPick={() => mark(true)} />
-        </Field>
-        <div className="grid grid-cols-3 gap-1.5">
-          {["Creative A", "Creative B", "Creative C"].map((c) => (
-            <div key={c} className="aspect-square rounded-md border border-border bg-muted/40 p-1.5 text-[10px] text-muted-foreground">
-              <div className="flex h-full w-full items-end rounded bg-gradient-to-br from-muted to-muted-foreground/20 p-1">{c}</div>
-            </div>
-          ))}
-        </div>
-        <p className="text-[11px] text-muted-foreground">Only approved creatives are selectable.</p>
-      </Section>
-
-      <Section title="WhatsApp behaviour">
-        <Field label="Click-to-WhatsApp template">
-          <SelectLike disabled={readOnly} options={["welcome_intro_v1", "lead_qualify_v2"]} onPick={() => undefined} />
-        </Field>
-        <Field label="Welcome message">
-          <Textarea disabled={readOnly} placeholder="Hey! Thanks for reaching out. How can we help you today?" className="min-h-16 resize-none text-sm" />
-        </Field>
-      </Section>
-    </>
-  );
-}
-
 /* --------------------------- Primitives --------------------------- */
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -2748,21 +2650,6 @@ function SegmentBtn({ active, onClick, disabled, title, children }: { active?: b
     >
       {children}
     </button>
-  );
-}
-
-function PlatformChip({ active, disabled, children }: { active?: boolean; disabled?: boolean; children: React.ReactNode }) {
-  return (
-    <div
-      className={cn(
-        "rounded-md border px-2 py-1.5 text-center text-[11px] font-medium",
-        active && "border-foreground bg-foreground text-background",
-        !active && !disabled && "border-border bg-background",
-        disabled && "border-dashed border-border bg-muted/30 text-muted-foreground",
-      )}
-    >
-      {children}
-    </div>
   );
 }
 

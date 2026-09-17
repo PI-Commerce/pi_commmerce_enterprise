@@ -258,7 +258,7 @@ const C_RENEWAL = buildCampaign("BFSI · Insurance Renewal", [
   sStart(),
   sAud("CSV · policies expiring in 30 days", ["premium", "policy_no", "expiry_date"]),
   apiPolicy_ren,
-  sCond("prem", "Premium branch", "premium", [
+  sCond("prem", "Premium branch", "api_1.premium", [
     { id: "high", label: "> ₹25,000", op: "greater than", value: "25000" },
     { id: "low", label: "≤ ₹25,000", op: "less than or equal to", value: "25000" },
   ]),
@@ -456,7 +456,7 @@ const C_CART = buildCampaign("D2C · Cart Abandonment", [
     },
   ]),
   apiCart_cart,
-  sCond("cart", "Cart value branch", "cart_value", [
+  sCond("cart", "Cart value branch", "api_1.cart_value", [
     { id: "high", label: "> ₹5,000", op: "greater than", value: "5000" },
     { id: "low", label: "≤ ₹5,000", op: "less than or equal to", value: "5000" },
   ]),
@@ -625,7 +625,7 @@ const C_LOYALTY_UPSELL = buildCampaign("Retail · Loyalty Card Upsell", [
       outputCurrency: "INR",
     },
   ]),
-  sCond("tierSplit", "Loyalty tier", "loyalty_tier", [
+  sCond("tierSplit", "Loyalty tier", "api_1.loyalty_tier", [
     { id: "silver", label: "Silver" },
     { id: "gold", label: "Gold" },
   ]),
@@ -637,14 +637,14 @@ const C_LOYALTY_UPSELL = buildCampaign("Retail · Loyalty Card Upsell", [
   sWa("sWaA", "WhatsApp invite · Perks", "Silver · join Loyalty Card", "fcc_silver_perks"),
   sWa("sWaB", "WhatsApp invite · Savings", "Silver · join Loyalty Card", "fcc_silver_savings"),
   apiEnr_loy,
-  sCond("sEnr", "Enrolled as Silver?", "enrollment_status", [
+  sCond("sEnr", "Enrolled as Silver?", "api_2.enrollment_status", [
     { id: "enrolled", label: "Enrolled", value: "enrolled" },
     { id: "none",     label: "Not enrolled", value: "pending" },
   ]),
   sVoice("sUp", "Voice AI · upgrade to Gold", "Limited-time paid Gold upgrade offer", { maxAttempts: 2, timezone: "Asia/Kolkata (IST)" }),
   sDelay("sDly", 24, "Hours"),
   apiUpg_loy,
-  sCond("sUpg", "Upgraded to Gold?", "upgrade_status", [
+  sCond("sUpg", "Upgraded to Gold?", "api_3.upgrade_status", [
     { id: "gold",   label: "Upgraded to Gold", value: "upgraded" },
     { id: "silver", label: "Still Silver", value: "not_upgraded" },
   ]),

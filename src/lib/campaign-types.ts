@@ -3,7 +3,7 @@
  * Designed to translate cleanly into a future Temporal-style runtime.
  */
 
-export type NodeGroup = "system" | "data" | "logic" | "action" | "ai" | "ads";
+export type NodeGroup = "system" | "data" | "logic" | "action" | "ai";
 
 export type NodeKind =
   // system
@@ -23,9 +23,7 @@ export type NodeKind =
   | "sms"
   | "rcs"
   // ai
-  | "aiTransform"
-  // ads
-  | "adsCampaign";
+  | "aiTransform";
 
 export type NodeRunState = "idle" | "running" | "success" | "failed";
 
@@ -310,7 +308,6 @@ export const NODE_GROUPS: Record<NodeKind, NodeGroup> = {
   sms: "action",
   rcs: "action",
   aiTransform: "ai",
-  adsCampaign: "ads",
 };
 
 export const NODE_LABELS: Record<NodeKind, string> = {
@@ -327,7 +324,6 @@ export const NODE_LABELS: Record<NodeKind, string> = {
   sms: "SMS",
   rcs: "RCS",
   aiTransform: "AI Transformation",
-  adsCampaign: "Ads Campaign Setup",
 };
 
 export const STATUS_TONE: Record<CampaignStatus, string> = {
@@ -353,7 +349,6 @@ export const SERIAL_PREFIX: Record<NodeKind, string> = {
   sms: "sms",
   rcs: "rcs",
   aiTransform: "ait",
-  adsCampaign: "ads",
 };
 
 /**

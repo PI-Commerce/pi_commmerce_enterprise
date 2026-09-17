@@ -1,7 +1,7 @@
 import { useState } from "react";
 import {
   Users, GitBranch, Split, Phone, MessageCircle,
-  MessageSquare, MessageSquareText, Clock, Megaphone, Plus, X, Webhook, Sparkles, Workflow,
+  MessageSquare, MessageSquareText, Clock, Plus, X, Webhook, Sparkles, Workflow,
   type LucideIcon,
 } from "lucide-react";
 import type { NodeKind } from "@/lib/campaign-types";
@@ -20,7 +20,6 @@ const ICONS: Partial<Record<NodeKind, LucideIcon>> = {
   sms: MessageSquare,
   rcs: MessageSquareText,
   aiTransform: Sparkles,
-  adsCampaign: Megaphone,
 };
 
 // Audience is omitted: every canvas already ships with exactly one (non-deletable)
@@ -30,12 +29,11 @@ const SECTIONS: Array<{ label: string; nodes: NodeKind[] }> = [
   { label: "Logic Nodes", nodes: ["conditional", "abSplit", "delay"] },
   { label: "AI Nodes", nodes: ["aiTransform"] },
   { label: "Action Nodes", nodes: ["voiceCall", "whatsapp", "whatsappFreeform", "sms", "rcs"] },
-  { label: "Ads Nodes", nodes: ["adsCampaign"] },
 ];
 
-// Out of scope for v1: cannot be added to new campaigns (disabled in palette),
-// but retained in existing example campaigns (render + read-only config).
-const DISABLED_KINDS = new Set<NodeKind>(["adsCampaign"]);
+// Reserved slot for kinds that are out-of-scope for v1: rendered in the palette
+// but disabled. Currently empty — every listed kind is addable.
+const DISABLED_KINDS = new Set<NodeKind>();
 
 export function NodePalette({
   onAdd, disabled,

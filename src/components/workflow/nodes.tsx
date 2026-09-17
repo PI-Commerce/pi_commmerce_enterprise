@@ -3,7 +3,7 @@ import { Handle, Position, type NodeProps } from "reactflow";
 import {
   Play, Square, Users, GitBranch, Split,
   Phone, MessageCircle, MessageSquare, MessageSquareText,
-  Clock, Megaphone, AlertCircle, CheckCircle2, Loader2, Sparkles, FlaskConical, Webhook, Workflow, Eye,
+  Clock, AlertCircle, CheckCircle2, Loader2, Sparkles, FlaskConical, Webhook, Workflow, Eye,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -59,7 +59,6 @@ const ICONS: Record<NodeKind, LucideIcon> = {
   sms: MessageSquare,
   rcs: MessageSquareText,
   aiTransform: Sparkles,
-  adsCampaign: Megaphone,
 };
 
 const GROUP_TONE: Record<string, string> = {
@@ -68,7 +67,6 @@ const GROUP_TONE: Record<string, string> = {
   logic: "text-chart-1 bg-chart-1/10",
   action: "text-success bg-success/10",
   ai: "text-ai bg-ai/10",
-  ads: "text-chart-3 bg-chart-3/10",
 };
 
 export function WorkflowNode({ id, data, selected }: NodeProps<WorkflowNodeData>) {

@@ -28,7 +28,6 @@ const KIND_MAP: Record<SankeyNodeKind, NodeKind> = {
   voice: "voiceCall",
   sms: "sms",
   rcs: "rcs",
-  ads: "adsCampaign",
   conditional: "conditional",
   delay: "delay",
   aiTransform: "aiTransform",

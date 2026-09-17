@@ -62,6 +62,7 @@ import {
 } from "@/lib/analytics-data";
 import {
   generateLeads,
+  generateLeadsForNode,
   leadsToCsv,
   downloadCsv,
   stageLabelFor,
@@ -102,7 +103,6 @@ const CHANNEL_CTA_LABEL: Record<ChannelKind, string> = {
   voice: "View Detailed Voice Analytics",
   sms: "View Detailed SMS Analytics",
   rcs: "View Detailed RCS Analytics",
-  ads: "View Detailed Ads Analytics",
 };
 
 // PRD-aligned KPI definitions used by info tooltips on drawer + channel cards.
@@ -120,9 +120,6 @@ const METRIC_INFO: Record<string, string> = {
   Replied: "Messages the recipient responded to.",
   Failed:
     "Attempts that did not succeed — a failed call, or a message rejected/undeliverable.",
-  Impressions: "Times the ad was shown to a user.",
-  Clicks: "Ad interactions that resulted in a click.",
-  "Total Leads": "Leads captured from the ad campaign.",
   Entered: "Users who arrived at this node.",
   Exited: "Users who left this node toward a downstream step.",
   Conversion: "Exited ÷ Entered for this node.",
@@ -135,7 +132,6 @@ const CHANNEL_COLORS: Record<ChannelKind, string> = {
   voice: "#a78bfa",
   sms: "#f59e0b",
   rcs: "#6366f1",
-  ads: "#06b6d4",
 };
 const NODE_COLOR: Record<SankeyNodeKind, string> = {
   start: "#22c55e",
@@ -149,7 +145,6 @@ const NODE_COLOR: Record<SankeyNodeKind, string> = {
   voice: "#a78bfa",
   sms: "#f59e0b",
   rcs: "#6366f1",
-  ads: "#06b6d4",
   conditional: "#64748b",
   delay: "#94a3b8",
   aiTransform: "#a855f7",
@@ -165,7 +160,6 @@ const NODE_TYPE_LABEL: Record<SankeyNodeKind, string> = {
   voice: "Voice Call",
   sms: "SMS",
   rcs: "RCS",
-  ads: "Ads Campaign",
   conditional: "Conditional Branch",
   delay: "Delay",
   aiTransform: "AI Transformation",
@@ -667,14 +661,19 @@ function LeadsTable({
     }
     downloadCsv(`${run.id || "run"}_leads.csv`, leadsToCsv(filtered));
   };
-  const allLeads = useMemo(() => generateLeads(run, run.kpi.validLeads), [run]);
-  const scoped = useMemo(
-    () =>
-      restrictToNodeIds
-        ? allLeads.filter((l) => restrictToNodeIds.includes(l.stageNodeId))
-        : allLeads,
-    [allLeads, restrictToNodeIds],
-  );
+  // When the table is scoped to a single node (Channel view drill-down), we
+  // generate leads for exactly that node with count = node.entered so the
+  // Sent/Delivered/Read funnel volumes and the Logs row count agree. Without a
+  // scope we fall back to the run-level weighted sample.
+  const singleScopedId =
+    restrictToNodeIds && restrictToNodeIds.length === 1 ? restrictToNodeIds[0] : null;
+  const scoped = useMemo(() => {
+    if (singleScopedId) return generateLeadsForNode(run, singleScopedId);
+    const all = generateLeads(run, run.kpi.validLeads);
+    return restrictToNodeIds
+      ? all.filter((l) => restrictToNodeIds.includes(l.stageNodeId))
+      : all;
+  }, [run, restrictToNodeIds, singleScopedId]);
 
   const [stageSel, setStageSel] = useState<string[]>([]);
   const [statusSel, setStatusSel] = useState<string[]>([]);
@@ -966,7 +965,6 @@ const CHANNEL_KINDS = new Set<SankeyNodeKind>([
   "whatsapp",
   "voice",
   "sms",
-  "ads",
 ]);
 
 /** Compute per-kind metric tiles per PRD. */
@@ -1021,16 +1019,13 @@ function buildNodeMetrics(
       { label: "Failed", value: failed.toLocaleString() },
     ];
   }
-  if (k === "whatsapp" || k === "ads") {
+  if (k === "whatsapp") {
     const m = NODE_METRICS[k as ChannelKind] ?? [];
-    const keep: Record<string, string[]> = {
-      whatsapp: ["Sent", "Delivered", "Read", "Clicked", "Replied"],
-      ads: ["Impressions", "Clicks", "Leads"],
-    };
+    const keep = ["Sent", "Delivered", "Read", "Clicked", "Replied"];
     return m
-      .filter((x) => keep[k].includes(x.label))
+      .filter((x) => keep.includes(x.label))
       .map((x) => ({
-        label: x.label === "Leads" ? "Total Leads" : x.label,
+        label: x.label,
         value:
           typeof x.value === "number"
             ? x.value.toLocaleString()
@@ -1671,14 +1666,12 @@ const CHANNEL_KPI_LABELS: Record<ChannelKind, string[]> = {
   sms: ["Sent", "Delivered", "Failed"],
   // RCS renders via RcsChannelView; kept for completeness.
   rcs: ["Sent", "Delivered", "Read", "Failed"],
-  ads: ["Impressions", "Clicks", "Total Leads"],
 };
 const CHANNEL_TREND_LABELS: Record<ChannelKind, string[]> = {
   whatsapp: ["Sent", "Delivered", "Read"],
   voice: ["Completed", "Failed"],
   sms: ["Sent", "Delivered"],
   rcs: ["Sent", "Delivered", "Read"],
-  ads: ["Impressions", "Clicks", "Total Leads"],
 };
 
 function deriveChannelValues(
@@ -1726,14 +1719,6 @@ function deriveChannelValues(
         Delivered: Math.round(sent * 0.88),
         Read: Math.round(sent * 0.62),
         Failed: Math.round(sent * 0.1),
-      };
-    }
-    case "ads": {
-      const base = Math.max(entered, 1);
-      return {
-        Impressions: base * 100,
-        Clicks: Math.round(base * 3.9),
-        "Total Leads": Math.round(base * 0.42),
       };
     }
   }
@@ -2403,12 +2388,8 @@ function ChannelDetail({
     Sent: "#22c55e",
     Delivered: "#0ea5e9",
     Read: "#a78bfa",
-    Converted: "#f59e0b",
-    Completed: "#22c55e",
+    Converted: "#f59e0b",    Completed: "#22c55e",
     Failed: "#ef4444",
-    Impressions: "#22c55e",
-    Clicks: "#0ea5e9",
-    "Total Leads": "#a78bfa",
   };
 
   const daywiseOption = useMemo<EChartsOption>(
@@ -2654,7 +2635,7 @@ function ChannelDetail({
             title={logTitle}
             hideStage={kind === "whatsapp"}
             dateRange={dateRange}
-            channelForExport={kind === "ads" ? undefined : (kind as ReportChannel)}
+            channelForExport={kind as ReportChannel}
           />
         </>
       )}

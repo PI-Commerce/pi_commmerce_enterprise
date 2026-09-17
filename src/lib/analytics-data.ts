@@ -19,7 +19,7 @@ function getToolSummary(handle: string): { method?: string; outputCount: number 
   return { method: t.method, outputCount: t.outputs.length };
 }
 
-export type ChannelKind = "whatsapp" | "voice" | "sms" | "rcs" | "ads";
+export type ChannelKind = "whatsapp" | "voice" | "sms" | "rcs";
 
 export type SankeyNodeKind =
   | "start"
@@ -31,7 +31,6 @@ export type SankeyNodeKind =
   | "voice"
   | "sms"
   | "rcs"
-  | "ads"
   | "conditional"
   | "delay"
   | "aiTransform"
@@ -109,7 +108,6 @@ const KIND_TO_SANKEY: Record<NodeKind, SankeyNodeKind> = {
   whatsappFreeform: "whatsappFreeform",
   sms: "sms",
   rcs: "rcs",
-  adsCampaign: "ads",
   // API Tool Call is its own node in analytics: a data/processing step that every
   // lead flows through. It shows Common Metrics + a Configuration Snapshot, but
   // has no channel funnel of its own.
@@ -135,7 +133,6 @@ const PASS_RATE: Record<SankeyNodeKind, number> = {
   whatsappFreeform: 0.86,
   sms: 0.9,
   rcs: 0.88,
-  ads: 0.95,
 };
 
 /** Stable string hash for deterministic per-node variance. */
@@ -457,13 +454,6 @@ export const NODE_METRICS: Partial<
     { label: "Sent", value: 12580 },
     { label: "Delivered", value: 12180 },
     { label: "Failed", value: 400 },
-  ],
-  ads: [
-    { label: "Impressions", value: 982000 },
-    { label: "Clicks", value: 38210 },
-    { label: "CTR", value: 3.9 },
-    { label: "Leads", value: 4120 },
-    { label: "CPL", value: 1.84 },
   ],
 };
 
