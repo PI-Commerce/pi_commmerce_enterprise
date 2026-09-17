@@ -31,6 +31,7 @@ import { lockFreeformWorkflow } from "@/lib/freeform-types";
 import { CreateRunDialog, type CampaignOption, type CreateRunPayload } from "@/components/workflow/CreateRunDialog";
 import { CSV_LIBRARY, makeCsvAsset, generateCsvContent, type CsvAsset } from "@/lib/data-library";
 import { downloadCsv } from "@/lib/analytics-leads";
+import { listRunStatusesFn, updateRunStatusFn } from "@/lib/server-fns/runs";
 
 
 export const Route = createFileRoute("/campaigns/")({
@@ -131,17 +132,27 @@ type RunRow = {
   completedAt: string | "ongoing";
   leadsProcessed: number;
   leadsTotal?: number; // present when source is CSV
+  /**
+   * D1 backing id (present for the 5 hero rows that map to a seeded run).
+   * When set, Pause/Resume/Terminate persist to D1 and mount hydration
+   * reads status from D1. Historical rows without a d1RunId (r_899x) stay
+   * UI-only and their status changes don't survive refresh.
+   */
+  d1RunId?: string;
 };
 
+// The 5 hero rows use the D1-seeded run ids (`r_c_ex*`) so status changes
+// round-trip through D1. The 3 historical rows (r_899x) are UI-only demo
+// clutter — kept for status-column variety.
 const INITIAL_RUNS: RunRow[] = [
-  { id: "r_9001", campaign: "B2B · Reactivate Paytm Soundbox Merchants", status: "running",   runType: "one-time",  triggerMode: "manual", startedAt: "Today, 12:04 PM",     completedAt: "ongoing",             leadsProcessed: 630,  leadsTotal: 1500 },
-  { id: "r_9002", campaign: "Retail · Loyalty Card Upsell",              status: "running",   runType: "recurring", triggerMode: "api",    startedAt: "Today, 11:50 AM",     completedAt: "ongoing",             leadsProcessed: 1200 },
-  { id: "r_9003", campaign: "D2C · Cart Abandonment",                    status: "running",   runType: "one-time",  triggerMode: "manual", startedAt: "Today, 11:32 AM",     completedAt: "ongoing",             leadsProcessed: 410,  leadsTotal: 900 },
-  { id: "r_9004", campaign: "BFSI · Insurance Renewal",                  status: "running",   runType: "one-time",  triggerMode: "manual", startedAt: "Today, 10:58 AM",     completedAt: "ongoing",             leadsProcessed: 220,  leadsTotal: 540 },
-  { id: "r_9005", campaign: "BFSI · PL DPD Collections",                 status: "running",   runType: "one-time",  triggerMode: "manual", startedAt: "Today, 10:20 AM",     completedAt: "ongoing",             leadsProcessed: 75,   leadsTotal: 300 },
-  { id: "r_8998", campaign: "BFSI · Insurance Renewal",                  status: "paused",    runType: "one-time",  triggerMode: "manual", startedAt: "Yesterday, 04:20 PM", completedAt: "ongoing",             leadsProcessed: 180,  leadsTotal: 540 },
-  { id: "r_8997", campaign: "D2C · Cart Abandonment",                    status: "completed", runType: "one-time",  triggerMode: "manual", startedAt: "Yesterday, 10:00 AM", completedAt: "Yesterday, 11:14 AM", leadsProcessed: 900, leadsTotal: 900 },
-  { id: "r_8996", campaign: "Retail · Loyalty Card Upsell",              status: "completed", runType: "recurring", triggerMode: "api",    startedAt: "Yesterday, 09:00 AM", completedAt: "Yesterday, 10:12 AM", leadsProcessed: 3200 },
+  { id: "r_c_ex_soundbox", d1RunId: "r_c_ex_soundbox", campaign: "B2B · Reactivate Paytm Soundbox Merchants", status: "running",   runType: "one-time",  triggerMode: "manual", startedAt: "Today, 12:04 PM",     completedAt: "ongoing",             leadsProcessed: 630,  leadsTotal: 1500 },
+  { id: "r_c_ex17",        d1RunId: "r_c_ex17",        campaign: "Retail · Loyalty Card Upsell",              status: "running",   runType: "recurring", triggerMode: "api",    startedAt: "Today, 11:50 AM",     completedAt: "ongoing",             leadsProcessed: 1200 },
+  { id: "r_c_ex14",        d1RunId: "r_c_ex14",        campaign: "D2C · Cart Abandonment",                    status: "running",   runType: "one-time",  triggerMode: "manual", startedAt: "Today, 11:32 AM",     completedAt: "ongoing",             leadsProcessed: 410,  leadsTotal: 900 },
+  { id: "r_c_ex4",         d1RunId: "r_c_ex4",         campaign: "BFSI · Insurance Renewal",                  status: "running",   runType: "one-time",  triggerMode: "manual", startedAt: "Today, 10:58 AM",     completedAt: "ongoing",             leadsProcessed: 220,  leadsTotal: 540 },
+  { id: "r_c_ex6",         d1RunId: "r_c_ex6",         campaign: "BFSI · PL DPD Collections",                 status: "running",   runType: "one-time",  triggerMode: "manual", startedAt: "Today, 10:20 AM",     completedAt: "ongoing",             leadsProcessed: 75,   leadsTotal: 300 },
+  { id: "r_8998",                                       campaign: "BFSI · Insurance Renewal",                  status: "paused",    runType: "one-time",  triggerMode: "manual", startedAt: "Yesterday, 04:20 PM", completedAt: "ongoing",             leadsProcessed: 180,  leadsTotal: 540 },
+  { id: "r_8997",                                       campaign: "D2C · Cart Abandonment",                    status: "completed", runType: "one-time",  triggerMode: "manual", startedAt: "Yesterday, 10:00 AM", completedAt: "Yesterday, 11:14 AM", leadsProcessed: 900, leadsTotal: 900 },
+  { id: "r_8996",                                       campaign: "Retail · Loyalty Card Upsell",              status: "completed", runType: "recurring", triggerMode: "api",    startedAt: "Yesterday, 09:00 AM", completedAt: "Yesterday, 10:12 AM", leadsProcessed: 3200 },
 ];
 
 type Tab = "data" | "campaigns" | "runs";
@@ -152,9 +163,51 @@ function CampaignList() {
   const [rows] = useState<CampaignRow[]>(INITIAL);
   // Runs are stateful — Pause / Resume / Terminate from the row menu mutate this
   // list so the status pill, filter counts, and "running now" KPIs all update.
+  //
+  // D1 persistence: on mount we hydrate statuses from D1 for every row that has
+  // a `d1RunId`, so an earlier Pause survives a refresh. On status change we
+  // fire `updateRunStatusFn` in the background — UI stays optimistic. If D1
+  // isn't bound (prod pre-provisioning), hydration and writes both fail
+  // silently and the UI behaves exactly like the pre-Phase-3 in-memory version.
   const [runs, setRuns] = useState<RunRow[]>(INITIAL_RUNS);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await listRunStatusesFn();
+        if (cancelled || !r.ok) return;
+        setRuns((rs) =>
+          rs.map((row) => {
+            if (!row.d1RunId) return row;
+            const dbStatus = r.statuses[row.d1RunId];
+            if (!dbStatus || dbStatus === row.status) return row;
+            return {
+              ...row,
+              status: dbStatus,
+              ...(dbStatus === "completed" || dbStatus === "terminated"
+                ? { completedAt: nowLabel() }
+                : {}),
+            };
+          }),
+        );
+      } catch {
+        // Silent — INITIAL_RUNS still renders.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
   const changeRunStatus = (id: string, next: RunStatus) => {
     setRuns((rs) => rs.map((r) => (r.id === id ? { ...r, status: next, ...(next === "completed" || next === "terminated" ? { completedAt: nowLabel() } : {}) } : r)));
+    // Background persist. Silent — the optimistic setState already succeeded
+    // and the toast in the menu handler explains what happened. Skip the D1
+    // write for the "pending" transient state; only running/paused/completed/
+    // failed/terminated map to D1's run_status enum.
+    const row = runs.find((r) => r.id === id);
+    if (row?.d1RunId && next !== "pending") {
+      void updateRunStatusFn({ data: { id: row.d1RunId, status: next } }).catch(() => {
+        /* silent */
+      });
+    }
   };
 
   // Data library (CSV library tab — scope C1–C3). Shared source of truth with

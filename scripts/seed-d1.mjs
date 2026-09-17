@@ -78,11 +78,28 @@ for (const [id, ex] of Object.entries(EXAMPLE_CAMPAIGNS)) {
 }
 
 // ---- Runs + per-node metrics + per-edge metrics + leads ----
+//
+// The analytics fixtures hardcode `run.status = "completed"` because those
+// runs power the analytics history views. But the Campaigns > Runs table
+// (INITIAL_RUNS in campaigns.index.tsx) expects the hero campaigns' current
+// run to be "running" so the "Pause / Resume / Terminate" menu is meaningful.
+// So we OVERRIDE status here at seed time to match the demo's live-run story.
+// User pauses/resumes/terminates → the same row's D1 status gets flipped by
+// updateRunStatusFn → mount hydration reflects the change across refresh.
+const DEMO_RUN_STATUS_OVERRIDES = new Map([
+  ["r_c_ex_soundbox", "running"],
+  ["r_c_ex17",        "running"],
+  ["r_c_ex14",        "running"],
+  ["r_c_ex4",         "running"],
+  ["r_c_ex6",         "running"],
+]);
+
 push("\n-- Runs, node/edge metrics, leads");
 for (const camp of CAMPAIGNS) {
   for (const run of camp.runs) {
+    const seedStatus = DEMO_RUN_STATUS_OVERRIDES.get(run.id) ?? run.status;
     push(
-      `INSERT OR REPLACE INTO runs (id, campaign_id, code, name, status, run_type, trigger_mode, audience_source, audience_size, total_leads, valid_leads, leads_processed, success_rate, started_at, completed_at) VALUES (${q(run.id)}, ${q(camp.id)}, ${q(run.code)}, ${q(run.name)}, ${q(run.status)}, ${q(run.runType)}, ${q(run.triggerMode ?? "manual")}, ${q(run.audienceSource ?? "csv")}, ${q(run.audience)}, ${q(run.totalLeads)}, ${q(run.kpi.validLeads)}, ${q(run.kpi.leadsProcessed)}, ${q(run.kpi.successRate)}, ${q(now)}, ${q(run.status === "completed" ? now : null)});`,
+      `INSERT OR REPLACE INTO runs (id, campaign_id, code, name, status, run_type, trigger_mode, audience_source, audience_size, total_leads, valid_leads, leads_processed, success_rate, started_at, completed_at) VALUES (${q(run.id)}, ${q(camp.id)}, ${q(run.code)}, ${q(run.name)}, ${q(seedStatus)}, ${q(run.runType)}, ${q(run.triggerMode ?? "manual")}, ${q(run.audienceSource ?? "csv")}, ${q(run.audience)}, ${q(run.totalLeads)}, ${q(run.kpi.validLeads)}, ${q(run.kpi.leadsProcessed)}, ${q(run.kpi.successRate)}, ${q(now)}, ${q(seedStatus === "completed" ? now : null)});`,
     );
     for (const n of run.sankey.nodes) {
       push(
