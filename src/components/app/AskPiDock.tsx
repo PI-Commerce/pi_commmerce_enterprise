@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouterState } from "@tanstack/react-router";
+import { Sparkle, X, Download, LayoutGrid } from "lucide-react";
+import { toast } from "sonner";
 import { getPiContext } from "@/lib/ask-pi-context";
-import { generateChart, type PiChartSpec } from "@/lib/pi-charts";
-import { PiChartResult } from "./PiChartResult";
+import { pickThesysFixtureKey, THESYS_FIXTURES, type ThesysFixtureKey } from "@/lib/pi-thesys-fixtures";
+import { askPiThesys } from "@/lib/ask-pi-thesys";
+import { PiThesysResult } from "./PiThesysResult";
 import {
   PiPill,
   PiNudge,
@@ -42,13 +45,17 @@ function loadDismissedNudges(): string[] {
 export function AskPiDock() {
   const [state, setState] = useState<State>("collapsed");
   const [value, setValue] = useState("");
-  // I7 — on the Analytics surface, a question yields a generated, downloadable chart.
-  const [chart, setChart] = useState<PiChartSpec | null>(null);
+  // I7 — on the Analytics surface, a question yields a Thesys C1 generative-UI card.
+  // Live path: the C1 API generates a fresh card per question (liveDsl). If the call fails
+  // (no key / offline), we fall back to one of the captured static fixtures (thesysKey).
+  const [thesysKey, setThesysKey] = useState<ThesysFixtureKey | null>(null);
+  const [liveDsl, setLiveDsl] = useState<string | null>(null);
   // I4 — retired nudge ids (✕-dismissed are also persisted; used-nudges are session-only).
   const [hiddenNudges, setHiddenNudges] = useState<string[]>(() => loadDismissedNudges());
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const thesysCaptureRef = useRef<HTMLDivElement>(null);
 
   // Route-driven context. Re-resolves on navigation so chips/placeholder/result
   // always match the surface Pi is summoned from.
@@ -77,31 +84,74 @@ export function AskPiDock() {
     if (state === "idle") inputRef.current?.focus();
   }, [state]);
 
-  // Click-outside collapses, unless the user is mid-prompt.
+  // Click-outside collapses only from the idle composer. Once Pi is working or showing a
+  // result, an outside click is ignored so the answer is never lost by accident — close it
+  // with the ✕. Also stays open while the user is mid-prompt.
   useEffect(() => {
     if (!isOpen) return;
     const onDown = (e: MouseEvent) => {
       if (!panelRef.current) return;
       if (panelRef.current.contains(e.target as Node)) return;
+      if (state !== "idle") return;
       if (value.trim().length > 0) return;
       setState("collapsed");
     };
     document.addEventListener("mousedown", onDown, true);
     return () => document.removeEventListener("mousedown", onDown, true);
-  }, [isOpen, value]);
+  }, [isOpen, value, state]);
 
-  const submit = (q: string = value) => {
+  const submit = async (q: string = value) => {
     const query = q.trim();
     if (!query) return;
     if (q !== value) setValue(q);
-    // Analytics is generative: turn the question into a real chart. Elsewhere,
-    // keep the route's canned text proposal.
-    setChart(ctx.scope === "Analytics" ? generateChart(query) : null);
     setState("thinking");
-    setTimeout(() => setState("result"), 1800);
+    if (ctx.scope === "Analytics") {
+      // Generative: ask C1 to build a card from the live question. Fall back to a captured
+      // fixture if the API is unreachable or unconfigured so the demo never dead-ends.
+      setThesysKey(null);
+      setLiveDsl(null);
+      try {
+        const r = await askPiThesys({ data: query });
+        if (r.ok) setLiveDsl(r.content);
+        else setThesysKey(pickThesysFixtureKey(query));
+      } catch {
+        setThesysKey(pickThesysFixtureKey(query));
+      }
+      setState("result");
+    } else {
+      // Elsewhere, keep the route's canned text proposal.
+      setThesysKey(null);
+      setLiveDsl(null);
+      setTimeout(() => setState("result"), 1800);
+    }
   };
 
-  const reset = () => { setChart(null); setValue(""); setState("idle"); };
+  const reset = () => { setThesysKey(null); setLiveDsl(null); setValue(""); setState("idle"); };
+
+  // Download the currently rendered Thesys card as a PNG. The Crayon renderer draws
+  // regular DOM (no canvas), so we snapshot the wrapper via html-to-image and force a
+  // download. Same UX as PiChartResult's Download PNG.
+  const downloadThesysPng = async () => {
+    const node = thesysCaptureRef.current;
+    if (!node) return;
+    try {
+      const { toPng } = await import("html-to-image");
+      const dataUrl = await toPng(node, { backgroundColor: "#ffffff", pixelRatio: 2, cacheBust: true });
+      const a = document.createElement("a");
+      a.href = dataUrl;
+      a.download = `pi-analytics-${Date.now()}.png`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch (err) {
+      toast.error("Could not export PNG", { description: (err as Error).message });
+    }
+  };
+
+  const addThesysAsCard = () => {
+    toast.success("Added to your dashboard");
+    reset();
+  };
 
   // I4 — proactive nudge plumbing. The route supplies it; it floats above the pill
   // until retired. `persist` writes the ✕-dismissal to localStorage; using a nudge
@@ -146,8 +196,41 @@ export function AskPiDock() {
               <div className="border-b border-border px-5 py-4 animate-fade-in">
                 {state === "thinking" ? (
                   <PiThinking steps={ctx.thinking} />
-                ) : chart ? (
-                  <PiChartResult spec={chart} onAdd={reset} onDismiss={reset} />
+                ) : liveDsl || thesysKey ? (
+                  <div className="space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="flex items-center gap-1 rounded-full border border-ai/30 bg-ai/5 px-2 py-0.5 text-[9.5px] font-medium text-ai">
+                        <Sparkle className="h-2.5 w-2.5 fill-ai" /> Generated by Pi
+                      </span>
+                      <button
+                        onClick={reset}
+                        aria-label="Close"
+                        className="flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                    <div ref={thesysCaptureRef} className="rounded-xl border border-ai/30 bg-card p-2">
+                      <PiThesysResult c1Response={liveDsl ?? THESYS_FIXTURES[thesysKey!]} />
+                    </div>
+                    <div className="flex items-center justify-end gap-1.5">
+                      <button onClick={reset} className="rounded-md px-2.5 py-1 text-[11.5px] text-muted-foreground hover:text-foreground">
+                        Dismiss
+                      </button>
+                      <button
+                        onClick={downloadThesysPng}
+                        className="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[11.5px] font-medium text-foreground hover:bg-accent"
+                      >
+                        <Download className="h-3 w-3" /> Download PNG
+                      </button>
+                      <button
+                        onClick={addThesysAsCard}
+                        className="inline-flex items-center gap-1 rounded-md bg-foreground px-2.5 py-1 text-[11.5px] font-medium text-background"
+                      >
+                        <LayoutGrid className="h-3 w-3" /> Add as card
+                      </button>
+                    </div>
+                  </div>
                 ) : (
                   <PiResultCard result={ctx.result} onAccept={reset} onDismiss={reset} />
                 )}
