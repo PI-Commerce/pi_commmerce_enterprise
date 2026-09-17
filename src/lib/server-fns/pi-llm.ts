@@ -226,7 +226,19 @@ const SYSTEM_BUILDER = `You are Pi, the campaign copilot for a marketing automat
 export const askPi = createServerFn({ method: "POST" })
   .inputValidator((r: AskPiRequest) => r)
   .handler(async ({ data }): Promise<AskPiResponse> => {
-    const env = getEnv();
+    // Guard the runtime shape end-to-end so a missing binding / secret degrades
+    // gracefully into an "ok: false" the client can fall back on, instead of
+    // throwing a 500 back to the browser. Order: env exists, DB bound (needed
+    // by every tool call), TFY key + base present.
+    let env;
+    try {
+      env = getEnv();
+    } catch (e) {
+      return { ok: false, error: `runtime_env_missing: ${(e as Error).message}` };
+    }
+    if (!env.DB) {
+      return { ok: false, error: "d1_not_bound: DB binding is missing on this worker. Provision D1 and uncomment the binding in wrangler.jsonc." };
+    }
     const key = env.TFY_API_KEY;
     const base = env.TFY_BASE_URL;
     if (!key || !base) return { ok: false, error: "TFY_API_KEY / TFY_BASE_URL not configured (set in .env or wrangler secrets)" };

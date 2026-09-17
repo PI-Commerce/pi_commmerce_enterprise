@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { getPiContext } from "@/lib/ask-pi-context";
 import { pickThesysFixtureKey, THESYS_FIXTURES, type ThesysFixtureKey } from "@/lib/pi-thesys-fixtures";
 import { askPiThesys } from "@/lib/ask-pi-thesys";
+import { askPi } from "@/lib/server-fns/pi-llm";
 import { PiThesysResult } from "./PiThesysResult";
 import {
   PiPill,
@@ -50,6 +51,9 @@ export function AskPiDock() {
   // (no key / offline), we fall back to one of the captured static fixtures (thesysKey).
   const [thesysKey, setThesysKey] = useState<ThesysFixtureKey | null>(null);
   const [liveDsl, setLiveDsl] = useState<string | null>(null);
+  // Live LLM answer on non-Analytics surfaces. Populated by the askPi server fn.
+  // When null, the result panel falls back to the surface's canned ctx.result.
+  const [liveAnswer, setLiveAnswer] = useState<string | null>(null);
   // I4 — retired nudge ids (✕-dismissed are also persisted; used-nudges are session-only).
   const [hiddenNudges, setHiddenNudges] = useState<string[]>(() => loadDismissedNudges());
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -105,11 +109,14 @@ export function AskPiDock() {
     if (!query) return;
     if (q !== value) setValue(q);
     setState("thinking");
-    if (ctx.scope === "Analytics") {
-      // Generative: ask C1 to build a card from the live question. Fall back to a captured
-      // fixture if the API is unreachable or unconfigured so the demo never dead-ends.
-      setThesysKey(null);
-      setLiveDsl(null);
+    // Reset all live-result channels — each submit clears the previous surface's answer.
+    setThesysKey(null);
+    setLiveDsl(null);
+    setLiveAnswer(null);
+    if (ctx.scopeMode === "thesys") {
+      // Analytics — generative UI card. Ask C1 to build one from the live question;
+      // fall back to a captured fixture if the API is unreachable so the demo never
+      // dead-ends.
       try {
         const r = await askPiThesys({ data: query });
         if (r.ok) setLiveDsl(r.content);
@@ -118,15 +125,31 @@ export function AskPiDock() {
         setThesysKey(pickThesysFixtureKey(query));
       }
       setState("result");
-    } else {
-      // Elsewhere, keep the route's canned text proposal.
-      setThesysKey(null);
-      setLiveDsl(null);
-      setTimeout(() => setState("result"), 1800);
+      return;
     }
+    // Every other surface — call the real askPi LLM with the current route's scope
+    // + system hint. If it fails (missing D1 binding, missing TFY key, endpoint
+    // unreachable from local without VPN), gracefully fall back to the surface's
+    // canned proposal so nothing dead-ends.
+    try {
+      const r = await askPi({
+        data: {
+          scope: ctx.scopeMode === "builder" ? "builder" : "analytics",
+          question: query,
+          context: { pathname, surface: ctx.scope, systemHint: ctx.systemHint },
+        },
+      });
+      if (r.ok && r.answer.trim().length > 0) {
+        setLiveAnswer(r.answer);
+      }
+      // If !ok we simply leave liveAnswer null and the result card shows ctx.result.
+    } catch {
+      // Network / RPC failure — same fallback.
+    }
+    setState("result");
   };
 
-  const reset = () => { setThesysKey(null); setLiveDsl(null); setValue(""); setState("idle"); };
+  const reset = () => { setThesysKey(null); setLiveDsl(null); setLiveAnswer(null); setValue(""); setState("idle"); };
 
   // Download the currently rendered Thesys card as a PNG. The Crayon renderer draws
   // regular DOM (no canvas), so we snapshot the wrapper via html-to-image and force a
@@ -231,6 +254,14 @@ export function AskPiDock() {
                       </button>
                     </div>
                   </div>
+                ) : liveAnswer ? (
+                  // Real LLM answer over D1 for this surface. Preserve the surface's
+                  // canned CTA so the "next action" language stays on-brand.
+                  <PiResultCard
+                    result={{ text: liveAnswer, cta: ctx.result.cta }}
+                    onAccept={reset}
+                    onDismiss={reset}
+                  />
                 ) : (
                   <PiResultCard result={ctx.result} onAccept={reset} onDismiss={reset} />
                 )}
