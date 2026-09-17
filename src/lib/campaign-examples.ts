@@ -215,15 +215,50 @@ function buildCampaign(name: string, specs: Spec[], edges: SpecEdge[]): ExampleC
 }
 
 /* ---- BFSI · Insurance Renewal ------------------------------------------ */
+const apiPolicy_ren: Spec = {
+  id: "apiPolicy",
+  kind: "apiToolCall",
+  title: "API · Fetch policy details",
+  subtitle: "GET /insurance/policy",
+  outputs: [
+    { id: "success", label: "Success", kind: "outcome" },
+    { id: "failed",  label: "Failed",  kind: "outcome" },
+  ],
+  config: {},
+};
+
+const ffPolicyQs_ren: Spec = {
+  id: "ffPolicyQs",
+  kind: "whatsappFreeform",
+  title: "WhatsApp · Policy questions",
+  subtitle: "Freeform workflow · pre-renewal Q&A",
+  outputs: [
+    { id: "completed", label: "Success", kind: "outcome" },
+    { id: "timed_out", label: "Timeout", kind: "outcome" },
+    { id: "failed",    label: "Failed",  kind: "outcome" },
+  ],
+  config: {
+    ffWorkflowId: "ff_callback_slot_picker",
+    ffTimerMode: "inactivity",
+    ffTimerMinutes: 30,
+    ffVarMap: [
+      { v: "{{name}}", def: "contact.first_name" },
+      { v: "{{plan}}", def: "contact.policy_no" },
+    ],
+  },
+};
+
 const C_RENEWAL = buildCampaign("BFSI · Insurance Renewal", [
   sStart(),
   sAud("CSV · policies expiring in 30 days", ["premium", "policy_no", "expiry_date"]),
+  apiPolicy_ren,
   sCond("prem", "Premium branch", "premium", [
     { id: "high", label: "> ₹25,000", op: "greater than", value: "25000" },
     { id: "low", label: "≤ ₹25,000", op: "less than or equal to", value: "25000" },
   ]),
   // high
   sVoice("vCons", "Voice AI renewal consultation", "Renewal advisory call"),
+  ffPolicyQs_ren,
   sWa("rlHigh", "Renewal link", "WhatsApp · renew now", "renewal_link_v1"),
   sCond("rcHigh", "Renewal check", "renewal_status", [
     { id: "yes", label: "Renewed", value: "renewed" },
@@ -256,9 +291,15 @@ const C_RENEWAL = buildCampaign("BFSI · Insurance Renewal", [
   sWa("rlFinal", "Renewal link", "WhatsApp · renew now", "renewal_link_v1"),
   sEnd(),
 ], [
-  ed("start", "aud"), ed("aud", "prem"),
-  // high — Voice consult → renewal link → renewed?
-  ed("prem", "vCons", "high"), ed("vCons", "rlHigh"), ed("rlHigh", "rcHigh"),
+  ed("start", "aud"), ed("aud", "apiPolicy"),
+  ed("apiPolicy", "prem", "success"), ed("apiPolicy", "end", "failed"),
+  // high — Voice consult → policy Q&A freeform → renewal link → renewed?
+  ed("prem", "vCons", "high"),
+  ed("vCons", "ffPolicyQs"),
+  ed("ffPolicyQs", "rlHigh", "completed"),
+  ed("ffPolicyQs", "rlHigh", "timed_out"),
+  ed("ffPolicyQs", "rlHigh", "failed"),
+  ed("rlHigh", "rcHigh"),
   ed("rcHigh", "end", "yes"), ed("rcHigh", "vfuHigh", "no"), ed("vfuHigh", "end"),
   // low — A/B split → two messages → converge on reminder → delay → follow-up → renewed?
   ed("prem", "abLow", "low"),
@@ -270,9 +311,33 @@ const C_RENEWAL = buildCampaign("BFSI · Insurance Renewal", [
 ]);
 
 /* ---- BFSI · PL DPD Collections ----------------------------------------- */
+const apiLogPay_pl: Spec = {
+  id: "apiLogPay",
+  kind: "apiToolCall",
+  title: "API · Log escalation to CRM",
+  subtitle: "POST /collections/escalation",
+  outputs: [
+    { id: "success", label: "Success", kind: "outcome" },
+    { id: "failed",  label: "Failed",  kind: "outcome" },
+  ],
+  config: {},
+};
+
 const C_PL_COLLECT = buildCampaign("BFSI · PL DPD Collections", [
   sStart(),
   sAud("CSV · delinquent PL borrowers", ["dpd", "amount_due", "loan_id"]),
+  sAiTransform("aitCollect", "Enrich borrower context", "2 AI-derived variables", [
+    {
+      id: "t1", type: "Custom AI Action",
+      label: "Format amount due", input: "", output: "amount_due_fmt",
+      prompt: "Format contact.amount_due as an INR currency string with correct separators (e.g. ₹18,450).",
+    },
+    {
+      id: "t2", type: "Custom AI Action",
+      label: "Hindi greeting", input: "", output: "first_name_hi",
+      prompt: "Transliterate contact.first_name into the Devanagari script for use in a Hindi WhatsApp greeting when preferred_lang is 'hi'.",
+    },
+  ]),
   sCond("dpd", "DPD branch", "days_past_due", [
     { id: "early", label: "1–30 DPD", op: "between", value: "1", value2: "30" },
     { id: "mid",   label: "31–90 DPD", op: "between", value: "31", value2: "90" },
@@ -291,6 +356,7 @@ const C_PL_COLLECT = buildCampaign("BFSI · PL DPD Collections", [
   sVoice("vColl", "Voice AI PL collections call", "Personal Loan collections call"),
   sWa("plMid", "Payment link", "WhatsApp · pay now", "payment_link_v1"),
   sVoice("vEsc", "Voice AI PL escalated call", "Escalated Personal Loan collections"),
+  apiLogPay_pl,
   sWa("plLate", "Payment link", "WhatsApp · pay now", "payment_link_v1"),
   sDelay("d1", 23, "Hours"),
   sCond("paid", "Paid?", "payment_status", [
@@ -301,15 +367,51 @@ const C_PL_COLLECT = buildCampaign("BFSI · PL DPD Collections", [
   sWa("plFu", "WhatsApp payment link", "WhatsApp · pay now", "payment_link_v1"),
   sEnd(),
 ], [
-  ed("start", "aud"), ed("aud", "dpd"),
+  ed("start", "aud"), ed("aud", "aitCollect"), ed("aitCollect", "dpd"),
   ed("dpd", "smsDue", "early"), ed("smsDue", "waRem"), ed("waRem", "plEarly"), ed("plEarly", "d1"),
   ed("dpd", "vColl", "mid"), ed("vColl", "plMid"), ed("plMid", "d1"),
-  ed("dpd", "vEsc", "late"), ed("vEsc", "plLate"), ed("plLate", "d1"),
+  ed("dpd", "vEsc", "late"),
+  ed("vEsc", "apiLogPay"),
+  ed("apiLogPay", "plLate", "success"), ed("apiLogPay", "plLate", "failed"),
+  ed("plLate", "d1"),
   ed("d1", "paid"), ed("paid", "end", "yes"),
   ed("paid", "vfu", "no"), ed("vfu", "plFu"), ed("plFu", "end"),
 ]);
 
 /* ---- D2C · Cart Abandonment -------------------------------------------- */
+const apiCart_cart: Spec = {
+  id: "apiCart",
+  kind: "apiToolCall",
+  title: "API · Check cart status",
+  subtitle: "GET /orders/cart",
+  outputs: [
+    { id: "success", label: "Success", kind: "outcome" },
+    { id: "failed",  label: "Failed",  kind: "outcome" },
+  ],
+  config: {},
+};
+
+const ffDelivery_cart: Spec = {
+  id: "ffDelivery",
+  kind: "whatsappFreeform",
+  title: "WhatsApp · Delivery questions",
+  subtitle: "Freeform workflow · delivery / refund Q&A",
+  outputs: [
+    { id: "completed", label: "Success", kind: "outcome" },
+    { id: "timed_out", label: "Timeout", kind: "outcome" },
+    { id: "failed",    label: "Failed",  kind: "outcome" },
+  ],
+  config: {
+    ffWorkflowId: "ff_callback_slot_picker",
+    ffTimerMode: "inactivity",
+    ffTimerMinutes: 20,
+    ffVarMap: [
+      { v: "{{name}}", def: "contact.first_name" },
+      { v: "{{cart_value}}", def: "cart_value_fmt" },
+    ],
+  },
+};
+
 const C_CART = buildCampaign("D2C · Cart Abandonment", [
   sStart(),
   sAud("CSV · cart abandoners", ["cart_value", "cart_items"]),
@@ -330,6 +432,7 @@ const C_CART = buildCampaign("D2C · Cart Abandonment", [
       prompt: "Transliterate contact.first_name into the Devanagari script for use in a Hindi WhatsApp greeting.",
     },
   ]),
+  apiCart_cart,
   sCond("cart", "Cart value branch", "cart_value", [
     { id: "high", label: "> ₹5,000", op: "greater than", value: "5000" },
     { id: "low", label: "≤ ₹5,000", op: "less than or equal to", value: "5000" },
@@ -348,6 +451,7 @@ const C_CART = buildCampaign("D2C · Cart Abandonment", [
   sWa("abA", "WhatsApp cart reminder · Discount", "Variant · Discount angle", "cart_discount_v1"),
   sWa("abB", "WhatsApp cart reminder · Free shipping", "Variant · Free shipping angle", "cart_free_shipping_v1"),
   sWa("cartLow", "Purchase link", "WhatsApp · complete purchase", "cart_link_v1"),
+  ffDelivery_cart,
   sDelay("d1", 23, "Hours"),
   sCond("purLow", "Purchased?", "order_status", [
     { id: "yes", label: "Yes", value: "placed" },
@@ -356,13 +460,18 @@ const C_CART = buildCampaign("D2C · Cart Abandonment", [
   sVoice("vRemLow", "Voice AI reminder", "Reattempt · 1 retry", { maxAttempts: 1 }),
   sEnd(),
 ], [
-  ed("start", "aud"), ed("aud", "aitEnrich"), ed("aitEnrich", "cart"),
+  ed("start", "aud"), ed("aud", "aitEnrich"), ed("aitEnrich", "apiCart"),
+  ed("apiCart", "cart", "success"), ed("apiCart", "end", "failed"),
   ed("cart", "vRec", "high"), ed("vRec", "cartHigh"), ed("cartHigh", "purHigh"),
   ed("purHigh", "end", "yes"), ed("purHigh", "vRemHigh", "no"), ed("vRemHigh", "end"),
   ed("cart", "ab", "low"),
   ed("ab", "abA", "vA"), ed("ab", "abB", "vB"),
   ed("abA", "cartLow"), ed("abB", "cartLow"),
-  ed("cartLow", "d1"), ed("d1", "purLow"),
+  ed("cartLow", "ffDelivery"),
+  ed("ffDelivery", "d1", "completed"),
+  ed("ffDelivery", "d1", "timed_out"),
+  ed("ffDelivery", "d1", "failed"),
+  ed("d1", "purLow"),
   ed("purLow", "end", "yes"), ed("purLow", "vRemLow", "no"), ed("vRemLow", "end"),
 ]);
 
@@ -407,11 +516,58 @@ const LOYALTY_GOLD = loyaltyTierBlock("g", "gold", "Gold");
 const LOYALTY_PLATINUM = loyaltyTierBlock("p", "platinum", "Platinum");
 const LOYALTY_BLACK = loyaltyTierBlock("b", "black", "Black");
 
+const apiTier_loy: Spec = {
+  id: "apiTier",
+  kind: "apiToolCall",
+  title: "API · Fetch loyalty tier",
+  subtitle: "GET /loyalty/tier",
+  outputs: [
+    { id: "success", label: "Success", kind: "outcome" },
+    { id: "failed",  label: "Failed",  kind: "outcome" },
+  ],
+  config: {},
+};
+
+const rcsBlack_loy: Spec = {
+  id: "rcsBlack",
+  kind: "rcs",
+  title: "RCS · Black tier invite",
+  subtitle: "Rich card · Black welcome",
+  outputs: [
+    { id: "delivered",     label: "Delivered",     kind: "outcome" },
+    { id: "read",          label: "Read",          kind: "outcome" },
+    { id: "clicked",       label: "Clicked",       kind: "outcome" },
+    { id: "not_delivered", label: "Not delivered", kind: "outcome" },
+  ],
+  config: {
+    rcsTemplateId: "rcs_tpl_order_shipped",
+    rcsAgentId: "acme_utility_bot",
+    rcsVarMap: [
+      { v: "{{name}}", def: "contact.first_name" },
+      { v: "{{tier}}", def: "Black", mode: "constant" },
+    ],
+  },
+};
+
 const C_LOYALTY_UPSELL = buildCampaign("Retail · Loyalty Card Upsell", [
   sStart(),
   sAud("CSV · Loyalty Card members · key customer_id", [
     "loyalty_tier", "acv_6m", "aov_6m", "orders_6m", "lifetime_value", "last_purchase_days", "preferred_lang",
   ]),
+  apiTier_loy,
+  sAiTransform("aitLoyalty", "Personalize offer copy", "2 AI-derived variables", [
+    {
+      id: "t1", type: "Custom AI Action",
+      label: "Tier upgrade angle", input: "", output: "tier_offer_line",
+      prompt: "Given contact.acv_6m and contact.orders_6m and contact.fcc_tier, write a one-sentence tier-upgrade pitch (max 80 chars) that highlights the customer's most valued behavior.",
+    },
+    {
+      id: "t2", type: "Currency Formatting",
+      label: "Format lifetime value", input: "contact.lifetime_value", output: "ltv_fmt",
+      outputCurrency: "INR",
+    },
+  ]),
+  rcsBlack_loy,
   sCond("tierSplit", "Loyalty tier", "loyalty_tier", [
     { id: "silver", label: "Silver" },
     { id: "gold", label: "Gold" },
@@ -441,12 +597,20 @@ const C_LOYALTY_UPSELL = buildCampaign("Retail · Loyalty Card Upsell", [
   ...LOYALTY_GOLD.specs, ...LOYALTY_PLATINUM.specs, ...LOYALTY_BLACK.specs,
   sEnd(),
 ], [
-  ed("start", "aud"), ed("aud", "tierSplit"),
+  ed("start", "aud"),
+  ed("aud", "apiTier"),
+  ed("apiTier", "aitLoyalty", "success"), ed("apiTier", "end", "failed"),
+  ed("aitLoyalty", "tierSplit"),
   // 4-way tier fan-out
   ed("tierSplit", "sAb", "silver"),
   ed("tierSplit", "gWa", "gold"),
   ed("tierSplit", "pWa", "platinum"),
-  ed("tierSplit", "bWa", "black"),
+  // Black tier now enters through the RCS rich-card invite; not_delivered → bWa fallback
+  ed("tierSplit", "rcsBlack", "black"),
+  ed("rcsBlack", "bEnr", "delivered"),
+  ed("rcsBlack", "bEnr", "read"),
+  ed("rcsBlack", "bEnr", "clicked"),
+  ed("rcsBlack", "bWa", "not_delivered"),
   // Silver: A/B variants converge into one enrolled-check
   ed("sAb", "sWaA", "vA"), ed("sAb", "sWaB", "vB"),
   ed("sWaA", "sEnr"), ed("sWaB", "sEnr"),
