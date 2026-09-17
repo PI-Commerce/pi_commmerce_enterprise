@@ -15,6 +15,11 @@
 	// file-backed state under `.wrangler/state/v3/`.
 	//
 	"vars": {
+		// Ask Pi (Anthropic direct). Workspace-scoped API key requires the
+		// workspace id as a header; not sensitive, so lives as a public var.
+		"ANTHROPIC_MODEL": "claude-sonnet-4-5",
+		"ANTHROPIC_WORKSPACE_ID": "wrkspc_01Na63Tz3oB5uNVUbYyy2Apt",
+		// Legacy TFY vars kept for the fallback path (local dev on Paytm net).
 		"PI_AGENT_BASE_URL": "https://llm.tfy.pi.mypaytm.com/openai/v1",
 		"PI_AGENT_MODEL": "pi-agentic/global.anthropic.claude-sonnet-4-6"
 	},

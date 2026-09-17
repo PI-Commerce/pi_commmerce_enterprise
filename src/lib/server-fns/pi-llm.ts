@@ -540,6 +540,11 @@ async function runAnthropicLoop(
     "x-api-key": input.apiKey,
     "anthropic-version": "2023-06-01",
   };
+  // Workspace-scoped API keys require this header; unscoped keys reject it.
+  // Only send when the workspace id is configured.
+  if (input.workspaceId) {
+    headers["anthropic-workspace-id"] = input.workspaceId;
+  }
 
   const toolCalls: ToolCallLog[] = [];
   for (let round = 0; round < 8; round++) {
