@@ -175,6 +175,29 @@ export async function writeCampaign(dsl: CampaignDsl): Promise<void> {
   ]);
 }
 
+/**
+ * Bulk-update node positions for a campaign. Fired by the client after
+ * ELK re-lays out (either the manual Wand2 button or the auto-arrange
+ * that runs after Pi's inserts / skeleton insertion). Without this,
+ * Pi's raw position hints (which are just "right of the rightmost")
+ * end up as the persisted layout — a refresh reads them back and the
+ * graph looks messy until the user manually re-lays.
+ */
+export async function updateNodePositions(
+  campaignId: string,
+  positions: Array<{ id: string; x: number; y: number }>,
+): Promise<void> {
+  if (positions.length === 0) return;
+  const db = getDb();
+  await db.batch(
+    positions.map((p) =>
+      db.prepare(
+        "UPDATE campaign_nodes SET position_x = ?, position_y = ? WHERE campaign_id = ? AND id = ?",
+      ).bind(p.x, p.y, campaignId, p.id),
+    ),
+  );
+}
+
 /** LLM tool primitive: insert a single node into a campaign. */
 export async function insertNode(campaignId: string, node: DslNode): Promise<void> {
   await getDb()
@@ -198,21 +221,62 @@ export async function insertNode(campaignId: string, node: DslNode): Promise<voi
   await bumpUpdatedAt(campaignId);
 }
 
-/** LLM tool primitive: patch one node's config or title. */
+/**
+ * LLM tool primitive: patch one node's title / subtitle / config / outputs.
+ *
+ * IMPORTANT: `config` and `outputs` are MERGED with the existing row, not
+ * replaced. Pi's `update_node` calls typically pass just the changed keys
+ * (e.g. `patch.config = { phoneField: "phone" }` on the Audience node),
+ * expecting the rest of the config (fields, csvKeys, ...) to stick. If we
+ * did `SET config_json = ?` with just the patch, D1 would lose every
+ * pre-existing key on the next refresh — that's the "config disappears on
+ * refresh" bug from staging.
+ *
+ * We read the row first, deep-merge the patch, then write. Two round-trips
+ * per update, worth it for correctness.
+ */
 export async function updateNode(
   campaignId: string,
   nodeId: string,
   patch: Partial<Pick<DslNode, "title" | "subtitle" | "config" | "outputs">>,
 ): Promise<void> {
+  const db = getDb();
+  // Load current shape for merging (only needed when config / outputs
+  // change; skip the read when just title / subtitle move).
+  const needsRead = patch.config != null || patch.outputs != null;
+  let existing: { config_json: string; outputs_json: string } | null = null;
+  if (needsRead) {
+    existing = await db
+      .prepare("SELECT config_json, outputs_json FROM campaign_nodes WHERE campaign_id = ? AND id = ?")
+      .bind(campaignId, nodeId)
+      .first<{ config_json: string; outputs_json: string }>();
+  }
+
   const sets: string[] = [];
   const binds: unknown[] = [];
   if (patch.title != null) { sets.push("title = ?"); binds.push(patch.title); }
   if (patch.subtitle != null) { sets.push("subtitle = ?"); binds.push(patch.subtitle); }
-  if (patch.config != null) { sets.push("config_json = ?"); binds.push(JSON.stringify(patch.config)); }
-  if (patch.outputs != null) { sets.push("outputs_json = ?"); binds.push(JSON.stringify(patch.outputs)); }
+  if (patch.config != null) {
+    // Merge with existing config so partial patches don't erase other keys.
+    let mergedConfig: Record<string, unknown> = {};
+    if (existing?.config_json) {
+      try { mergedConfig = JSON.parse(existing.config_json) as Record<string, unknown>; }
+      catch { /* keep {} */ }
+    }
+    mergedConfig = { ...mergedConfig, ...(patch.config as Record<string, unknown>) };
+    sets.push("config_json = ?");
+    binds.push(JSON.stringify(mergedConfig));
+  }
+  if (patch.outputs != null) {
+    // Outputs are replaced (an outputs patch is meant as the full new set;
+    // Pi doesn't emit partial output arrays). If a future caller wants
+    // append semantics, do that here explicitly.
+    sets.push("outputs_json = ?");
+    binds.push(JSON.stringify(patch.outputs));
+  }
   if (!sets.length) return;
   binds.push(campaignId, nodeId);
-  await getDb()
+  await db
     .prepare(`UPDATE campaign_nodes SET ${sets.join(", ")} WHERE campaign_id = ? AND id = ?`)
     .bind(...binds)
     .run();

@@ -18,6 +18,7 @@ import type { WorkflowNodeData, NodeKind, PresetConfig } from "@/lib/campaign-ty
 import { validateAndHealPiToolCalls, type ValidatorHeal, type ValidatorError } from "@/lib/pi-construct-validator";
 import { stripDraftSkeletons, hasDraftSkeletons } from "@/lib/pi-draft-skeleton";
 import { computeNodeValidity } from "@/lib/node-validity";
+import { actionNodeOutputs } from "@/lib/wa-outputs";
 
 /** One entry in the server fn's `toolCalls` array. */
 export type PiToolCallLog = {
@@ -113,6 +114,16 @@ export function applyPiToolCallsToGraph(
           node.kind as NodeKind,
           node.config as PresetConfig | undefined,
         );
+        // Derive output handles from the picked asset (WA buttons, voice
+        // success/failure, SMS DLR, etc). Without this, Pi's newly-
+        // inserted node renders with just the default handle — the
+        // template-specific button branches only appear after the user
+        // clicks in and the config panel derives them. Same deriver as
+        // the ConfigPanel's own recompute path.
+        const derivedOutputs = actionNodeOutputs(
+          node.kind as NodeKind,
+          node.config as WorkflowNodeData["config"],
+        );
         ns = [
           ...ns,
           {
@@ -128,6 +139,7 @@ export function applyPiToolCallsToGraph(
               config: node.config,
               valid: validity.valid,
               ...(validity.error ? { error: validity.error } : {}),
+              ...(derivedOutputs ? { outputs: derivedOutputs } : {}),
             } as unknown as WorkflowNodeData,
           },
         ];
@@ -174,15 +186,21 @@ export function applyPiToolCallsToGraph(
         const idx = ns.findIndex((n) => n.id === nodeId);
         if (idx < 0) break;
         const existing = ns[idx];
-        // Merge the config first, then recompute validity from the merged
-        // shape so a patch that satisfies the last missing `requires` key
-        // flips valid: false → true (and clears the error line).
+        // Merge the config first, then recompute validity + outputs from
+        // the merged shape. A patch that satisfies the last missing
+        // `requires` key flips valid: false → true (and clears the error
+        // line); a patch that picks a WA template hydrates the button
+        // branches into `data.outputs` in the same tick.
         const nextConfig = patch.config !== undefined
           ? { ...(existing.data.config ?? {}), ...patch.config }
           : existing.data.config;
         const validity = computeNodeValidity(
           existing.data.kind as NodeKind,
           nextConfig as PresetConfig | undefined,
+        );
+        const derivedOutputs = actionNodeOutputs(
+          existing.data.kind as NodeKind,
+          nextConfig as WorkflowNodeData["config"],
         );
         ns = [
           ...ns.slice(0, idx),
@@ -195,6 +213,10 @@ export function applyPiToolCallsToGraph(
               ...(patch.config !== undefined ? { config: nextConfig } : {}),
               valid: validity.valid,
               ...(validity.error ? { error: validity.error } : { error: undefined }),
+              // Only overwrite outputs when the deriver has an opinion —
+              // authored preset nodes carry hand-tuned outputs we don't
+              // want to blow away.
+              ...(derivedOutputs ? { outputs: derivedOutputs } : {}),
             } as WorkflowNodeData,
           },
           ...ns.slice(idx + 1),

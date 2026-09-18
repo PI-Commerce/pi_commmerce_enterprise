@@ -114,6 +114,31 @@ export const createBlankCampaignFn = createServerFn({ method: "POST" })
     }
   });
 
+export type UpdateNodePositionsResult =
+  | { ok: true }
+  | { ok: false; error: string };
+
+/**
+ * Persist ELK-laid positions to D1 after the canvas relays out. Called
+ * from `autoArrange` in WorkflowCanvas so a refresh reads back the
+ * clean laid-out positions, not Pi's raw "right of the rightmost"
+ * hints. Batched into a single D1 request.
+ */
+export const updateNodePositionsFn = createServerFn({ method: "POST" })
+  .inputValidator(
+    (r: { campaignId: string; positions: Array<{ id: string; x: number; y: number }> }) => r,
+  )
+  .handler(async ({ data }): Promise<UpdateNodePositionsResult> => {
+    const bail = bailWithoutDb();
+    if (bail) return bail;
+    try {
+      await campaignsDb.updateNodePositions(data.campaignId, data.positions);
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: `d1_write_failed: ${(e as Error).message}` };
+    }
+  });
+
 /** Delete a campaign (and cascading nodes/edges/runs via app-level cleanup). */
 export const deleteCampaignFn = createServerFn({ method: "POST" })
   .inputValidator((id: string) => id)

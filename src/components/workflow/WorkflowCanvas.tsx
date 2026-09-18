@@ -17,7 +17,7 @@ import { getSuggestion } from "@/lib/pi-node-suggestions";
 import { applyPiToolCallsToGraph, type PiToolCallLog } from "@/lib/pi-canvas-apply";
 import type { ProposedDraft } from "@/lib/pi-propose-draft";
 import { buildDraftSkeleton } from "@/lib/pi-draft-skeleton";
-import { readCampaignFn } from "@/lib/server-fns/campaigns";
+import { readCampaignFn, updateNodePositionsFn } from "@/lib/server-fns/campaigns";
 import { dslToReactFlow } from "@/lib/dsl-convert";
 import { elkLayout, type Point } from "@/lib/flow-layout";
 import { useRegion, localizeTzAbbrev, localizeCurrency } from "@/lib/region";
@@ -553,6 +553,9 @@ export function WorkflowCanvas({
 
   // One-click clean-up: re-run the ELK left-to-right layout on the current
   // graph (positions + routed edge lanes), then fit it to the viewport.
+  // Also persists the laid-out positions back to D1 (skipping skeleton
+  // placeholders whose `_skel_` prefix marks them as ephemeral) so a
+  // refresh reads back the clean layout, not Pi's raw insert hints.
   const autoArrange = useCallback(async () => {
     const rf = rfRef.current;
     if (!rf) return;
@@ -566,7 +569,21 @@ export function WorkflowCanvas({
     setEdges((eds) => eds.map((e) => ({ ...e, type: "routed", data: { ...(e.data ?? {}), points: ptsById.get(e.id) ?? [] } })));
     onDirty?.();
     setTimeout(() => rfRef.current?.fitView({ padding: 0.2, duration: 400 }), 60);
-  }, [setNodes, setEdges, onDirty]);
+
+    // Persist positions to D1 (real nodes only — skip _skel_ placeholders).
+    // Fire-and-forget: the visual layout already updated in memory; D1
+    // catches up in the background. Silent on failure.
+    if (campaignId && campaignId !== "new") {
+      const positions = laid.nodes
+        .filter((n) => !n.id.startsWith("_skel_"))
+        .map((n) => ({ id: n.id, x: n.position.x, y: n.position.y }));
+      if (positions.length > 0) {
+        void updateNodePositionsFn({ data: { campaignId, positions } }).catch(() => {
+          /* silent — refresh will reflect the miss, ELK re-lays anyway */
+        });
+      }
+    }
+  }, [setNodes, setEdges, onDirty, campaignId]);
 
   // Publish autoArrange into the ref so `applyPiToolCalls` (declared
   // earlier in this component) can call it without a forward reference.

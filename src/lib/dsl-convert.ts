@@ -10,8 +10,18 @@
 import type { Edge, Node } from "reactflow";
 import type { WorkflowNodeData, NodeKind, NodeOutput } from "@/lib/campaign-types";
 import type { CampaignDsl, DslNode, DslEdge } from "@/lib/db/campaigns";
+import { actionNodeOutputs } from "@/lib/wa-outputs";
 
 export function dslNodeToReactFlow(n: DslNode): Node<WorkflowNodeData> {
+  // Auto-derive output handles from the node's kind + config. WA templates
+  // with trackable buttons emit `btn_*` handles; Voice / SMS / RCS emit
+  // channel-specific outcomes; API tools their success/failure pair. We
+  // derive on every hydrate so a refresh reads back with all handles
+  // populated — even for nodes Pi inserted with just `{ config: {
+  // waTemplate: "..." } }` and no `outputs`. Falls back to whatever's in
+  // the persisted `outputs` for kinds the deriver doesn't cover
+  // (Conditional user-authored branches, A/B variants, etc.).
+  const derived = actionNodeOutputs(n.kind, n.config as WorkflowNodeData["config"]);
   return {
     id: n.id,
     // Only the "workflow" node type is registered (see nodes.tsx `nodeTypes`).
@@ -25,7 +35,7 @@ export function dslNodeToReactFlow(n: DslNode): Node<WorkflowNodeData> {
       subtitle: n.subtitle,
       serial: n.serial,
       config: n.config as WorkflowNodeData["config"],
-      outputs: n.outputs,
+      outputs: derived ?? n.outputs,
       // Preserve Start / End immutability across hydrate — matches the
       // WorkflowCanvas INITIAL seed where these two are `locked: true`.
       ...(n.kind === "start" || n.kind === "end" ? { locked: true } : {}),
