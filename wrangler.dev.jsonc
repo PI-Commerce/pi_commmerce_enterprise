@@ -22,9 +22,9 @@
   ],
   "vars": {
     "ANTHROPIC_MODEL": "claude-sonnet-4-5",
-    // Org-scoped prod key: no workspace header. If you switch back to a
-    // workspace-scoped key, re-add ANTHROPIC_WORKSPACE_ID here + in
-    // wrangler.jsonc.
+    // Org-scoped prod key requires the workspace header. See the note in
+    // wrangler.jsonc for the full explanation.
+    "ANTHROPIC_WORKSPACE_ID": "wrkspc_01SqWhjWtkzVzSY6gNoit3s8",
     "PI_AGENT_BASE_URL": "https://llm.tfy.pi.mypaytm.com/openai/v1",
     "PI_AGENT_MODEL": "pi-agentic/global.anthropic.claude-sonnet-4-6"
   }

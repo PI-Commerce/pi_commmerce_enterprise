@@ -15,12 +15,15 @@
 	// file-backed state under `.wrangler/state/v3/`.
 	//
 	"vars": {
-		// Ask Pi (Anthropic direct). The current prod key is ORG-scoped, so
-		// no `anthropic-workspace-id` header is sent — pi-llm.ts only sends
-		// the header when ANTHROPIC_WORKSPACE_ID is set. If you re-issue a
-		// workspace-scoped key, put its workspace id back here (and only
-		// then).
+		// Ask Pi (Anthropic direct). The current prod key is ORG-scoped —
+		// which paradoxically REQUIRES the `anthropic-workspace-id` header
+		// so Anthropic knows which workspace inside the org to bill /
+		// rate-limit against. (Workspace-scoped keys are the ones that
+		// DON'T need the header, since the key itself pins the workspace.)
+		// pi-llm.ts sends the header whenever ANTHROPIC_WORKSPACE_ID is
+		// set. Not sensitive, so lives as a public var.
 		"ANTHROPIC_MODEL": "claude-sonnet-4-5",
+		"ANTHROPIC_WORKSPACE_ID": "wrkspc_01SqWhjWtkzVzSY6gNoit3s8",
 		// Legacy TFY vars kept for the fallback path (local dev on Paytm net).
 		"PI_AGENT_BASE_URL": "https://llm.tfy.pi.mypaytm.com/openai/v1",
 		"PI_AGENT_MODEL": "pi-agentic/global.anthropic.claude-sonnet-4-6"
