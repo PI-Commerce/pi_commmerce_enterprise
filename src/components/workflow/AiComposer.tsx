@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { Sparkles, X, PenLine } from "lucide-react";
 import { CANVAS_CONTEXT } from "@/lib/ask-pi-context";
 import { renderChatMarkdown } from "@/lib/chat-markdown";
+import { extractProposedDraft, type ProposedDraft } from "@/lib/pi-propose-draft";
+import { ConfirmDraftCard } from "./ConfirmDraftCard";
 import { getSuggestion } from "@/lib/pi-node-suggestions";
 import { askPi } from "@/lib/server-fns/pi-llm";
 import { summarizePiEdits, type PiToolCallLog } from "@/lib/pi-canvas-apply";
@@ -47,6 +49,13 @@ type ChatMessage = {
   /** Rich quick-pick — a ```pi-choice fenced JSON block. Preferred going
    *  forward. When both are present, `choice` wins. */
   choice?: ChatChoice;
+  /** Structured plan Pi emitted via `propose_draft`. When present, the
+   *  bubble renders a ConfirmDraftCard below the prose with Draft this /
+   *  Edit buttons. */
+  draft?: ProposedDraft;
+  /** True after the user has hit Draft this on this bubble — disables
+   *  the buttons so a double-click can't re-fire the draft. */
+  draftAccepted?: boolean;
   /** One-line diff summary of nodes/edges Pi added on this turn. */
   edits?: string[];
 };
@@ -65,6 +74,10 @@ export type AiComposerProps = {
   campaignId?: string;
   /** Fired for every LLM turn whose toolCalls include DAG mutations. Canvas applies them. */
   onPiToolCalls?: (toolCalls: PiToolCallLog[]) => void;
+  /** Fired when the user hits "Draft this" on a Confirm-Draft card. The
+   *  canvas uses the draft to insert shape-aware pulsating skeleton nodes
+   *  ahead of Pi's real insert_node calls arriving. */
+  onDraftAccepted?: (draft: ProposedDraft) => void;
 };
 
 /**
@@ -90,6 +103,7 @@ export function AiComposer({
   onApplySuggestion,
   campaignId,
   onPiToolCalls,
+  onDraftAccepted,
 }: AiComposerProps = {}) {
   const [state, setState] = useState<State>(autoOpenWizard ? "open" : "collapsed");
   const [value, setValue] = useState("");
@@ -223,16 +237,25 @@ export function AiComposer({
           console.log("[AskPi] builder context diag:", r.diag);
         }
         const toolCalls = (r.toolCalls ?? []) as PiToolCallLog[];
-        if (toolCalls.length > 0) onPiToolCalls?.(toolCalls);
+        // Split the batch into (a) the plan-announcement call
+        // (`propose_draft` — the client renders the Confirm-Draft card
+        // and does NOT touch the canvas yet), and (b) real mutation
+        // calls (`insert_node` / `connect_nodes` / `update_node` — those
+        // go straight through to the canvas). Read-only tools (analytics
+        // reads) are already ignored by applyPiToolCallsToGraph.
+        const draft = extractProposedDraft(toolCalls);
+        const mutationCalls = toolCalls.filter((t) => t.name !== "propose_draft");
+        if (mutationCalls.length > 0) onPiToolCalls?.(mutationCalls);
         const { text: bodyText, options, choice } = parsePiFencedBlocks(r.answer);
-        const edits = summarizePiEdits(toolCalls);
+        const edits = summarizePiEdits(mutationCalls);
         setMessages((prev) => [
           ...prev,
           {
             role: "assistant",
-            content: bodyText || (edits.length > 0 ? "Done." : "Not sure what to do with that — could you rephrase?"),
+            content: bodyText || (edits.length > 0 ? "Done." : draft ? "Here's the plan." : "Not sure what to do with that — could you rephrase?"),
             options,
             choice,
+            draft: draft ?? undefined,
             edits: edits.length > 0 ? edits : undefined,
           },
         ]);
@@ -279,6 +302,25 @@ export function AiComposer({
     } finally {
       setState("open");
     }
+  };
+
+  /** Accept a Confirm-Draft card. Marks the assistant bubble as accepted,
+   *  fires the canvas hook to insert pulsating skeletons, then submits
+   *  "Draft this" as the next user message so Pi wires the real nodes. */
+  const acceptDraft = (msgIdx: number, draft: ProposedDraft) => {
+    setMessages((prev) => prev.map((m, i) => (i === msgIdx ? { ...m, draftAccepted: true } : m)));
+    onDraftAccepted?.(draft);
+    // Send "Draft this" as if the user typed it. Pi's next turn will be
+    // the real insert_node / connect_nodes batch.
+    submit("Draft this");
+  };
+
+  /** Reject / edit a Confirm-Draft card. Just marks it accepted (so the
+   *  buttons disable) and focuses the input — the user types what to
+   *  change. Pi's next turn re-proposes with adjustments. */
+  const editDraft = (msgIdx: number) => {
+    setMessages((prev) => prev.map((m, i) => (i === msgIdx ? { ...m, draftAccepted: true } : m)));
+    inputRef.current?.focus();
   };
 
   const resetChat = () => {
@@ -398,6 +440,8 @@ export function AiComposer({
                       message={m}
                       showOptions={i === lastAssistantIdx && state !== "thinking"}
                       onPick={(opt) => submit(opt)}
+                      onDraft={m.draft ? () => acceptDraft(i, m.draft as ProposedDraft) : undefined}
+                      onEdit={m.draft ? () => editDraft(i) : undefined}
                     />
                   ))}
                   {state === "thinking" && (
@@ -454,10 +498,14 @@ function ChatBubble({
   message,
   showOptions,
   onPick,
+  onDraft,
+  onEdit,
 }: {
   message: ChatMessage;
   showOptions: boolean;
   onPick: (opt: string) => void;
+  onDraft?: () => void;
+  onEdit?: () => void;
 }) {
   if (message.role === "user") {
     return (
@@ -490,6 +538,18 @@ function ChatBubble({
           )}
         </div>
       </div>
+      {/* Confirm-Draft card — rendered when Pi emitted a propose_draft
+          tool call on this turn. Draft this / Edit route through the
+          parent so it can trigger canvas skeletons + submit the follow-up
+          user message. */}
+      {message.draft && onDraft && onEdit && (
+        <ConfirmDraftCard
+          draft={message.draft}
+          onDraft={onDraft}
+          onEdit={onEdit}
+          disabled={message.draftAccepted}
+        />
+      )}
       {showOptions && picker && picker.length > 0 && (
         // Numbered-row picker. Each row shows the label + an optional hint
         // subtitle (from `pi-choice`), and the whole card sits under the

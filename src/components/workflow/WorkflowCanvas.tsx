@@ -15,6 +15,8 @@ import { whatsappOutputs, completedOutput, deriveNodeOutcomeVariables } from "@/
 import { EXAMPLE_CAMPAIGNS } from "@/lib/campaign-examples";
 import { getSuggestion } from "@/lib/pi-node-suggestions";
 import { applyPiToolCallsToGraph, type PiToolCallLog } from "@/lib/pi-canvas-apply";
+import type { ProposedDraft } from "@/lib/pi-propose-draft";
+import { buildDraftSkeleton } from "@/lib/pi-draft-skeleton";
 import { readCampaignFn } from "@/lib/server-fns/campaigns";
 import { dslToReactFlow } from "@/lib/dsl-convert";
 import { elkLayout, type Point } from "@/lib/flow-layout";
@@ -423,6 +425,24 @@ export function WorkflowCanvas({
   // updates the moment Pi's answer arrives — no refetch, no round-trip.
   // The same tool calls also wrote to D1 server-side (via the askPi
   // handler), so the change survives refresh.
+  // Confirm-Draft accepted — insert shape-aware pulsating skeletons that
+  // mirror Pi's proposed plan (one placeholder per channel per branch,
+  // laid out LTR, converging into `end`). Pi's real insert_node calls
+  // land in the next turn; applyPiToolCallsToGraph strips the skeletons
+  // just before applying the real inserts so the swap is atomic.
+  const applyDraftSkeleton = useCallback(
+    (draft: ProposedDraft) => {
+      const { skeletonNodes, skeletonEdges } = buildDraftSkeleton(draft, nodes);
+      if (skeletonNodes.length === 0) return;
+      setNodes((ns) => [...ns, ...skeletonNodes]);
+      setEdges((es) => [...es, ...skeletonEdges]);
+      onDirty?.();
+      // Refit so the pulsating shape lands in the viewport centre.
+      refit();
+    },
+    [nodes, setNodes, setEdges, onDirty, refit],
+  );
+
   const applyPiToolCalls = useCallback(
     (toolCalls: PiToolCallLog[]) => {
       const next = applyPiToolCallsToGraph(toolCalls, nodes, edges);
@@ -608,6 +628,7 @@ export function WorkflowCanvas({
           onBuildingChange={setAiBuilding}
           onApplySuggestion={applySuggestion}
           onPiToolCalls={applyPiToolCalls}
+          onDraftAccepted={applyDraftSkeleton}
         />
       )}
     </div>

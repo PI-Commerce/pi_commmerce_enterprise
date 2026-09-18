@@ -16,6 +16,7 @@
 import type { Edge, Node } from "reactflow";
 import type { WorkflowNodeData } from "@/lib/campaign-types";
 import { validateAndHealPiToolCalls, type ValidatorHeal, type ValidatorError } from "@/lib/pi-construct-validator";
+import { stripDraftSkeletons, hasDraftSkeletons } from "@/lib/pi-draft-skeleton";
 
 /** One entry in the server fn's `toolCalls` array. */
 export type PiToolCallLog = {
@@ -47,16 +48,28 @@ export function applyPiToolCallsToGraph(
   nodes: Node<WorkflowNodeData>[],
   edges: Edge[],
 ): ApplyResult {
+  // If Pi is about to insert real nodes, strip any draft skeletons first
+  // so the real nodes replace the placeholders cleanly. Detected by any
+  // `_skel_*` id in the graph AND the presence of an insert_node in the
+  // batch — the check on both sides means the strip only fires when
+  // it's actually appropriate.
+  let ns = nodes;
+  let es = edges;
+  let changed = false;
+  const hasInsert = toolCalls.some((t) => t.name === "insert_node");
+  if (hasInsert && hasDraftSkeletons(ns)) {
+    const stripped = stripDraftSkeletons(ns, es);
+    ns = stripped.nodes;
+    es = stripped.edges;
+    if (stripped.stripped) changed = true;
+  }
+
   // Every batch of tool calls gets validated + healed against the canonical
   // construct BEFORE any mutation touches ReactFlow state. Rejected calls
   // are dropped (their reasons go back via `errors`); coerced calls (wrong
   // position direction, etc.) show up in `heals`. Pure — the returned
   // toolCalls array is what we apply below.
-  const { toolCalls: validated, heals, errors } = validateAndHealPiToolCalls(toolCalls, nodes, edges);
-
-  let ns = nodes;
-  let es = edges;
-  let changed = false;
+  const { toolCalls: validated, heals, errors } = validateAndHealPiToolCalls(toolCalls, ns, es);
 
   for (const tc of validated) {
     let args: Record<string, unknown> = {};
