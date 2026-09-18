@@ -43,12 +43,14 @@ export type BuilderDiag = {
   hasDb: boolean;
   voiceAgents: number;
   waTemplates: number;
+  freeformWorkflows: number;
   smsTemplates: number;
   rcsTemplates: number;
   tools: number;
   errors: {
     voiceAgentsErr?: string;
     waTemplatesErr?: string;
+    freeformWorkflowsErr?: string;
     smsTemplatesErr?: string;
     rcsTemplatesErr?: string;
     toolsErr?: string;
@@ -550,9 +552,19 @@ If the user's ask is completely unrelated (dashboard summary, help with billing,
 
 ## One question per turn (hard rule)
 
-Ask exactly ONE thing per turn. If multiple pieces of info are still missing, pick the most important one first and ask that; the next turn asks the next. Do NOT stack two questions in the same reply — the chat surface can only render one \`pi-choice\` card per bubble, and the user reads better with one decision at a time.
+Every reply asks EXACTLY ONE thing. Not two. Not "and also". Not "let me know both". If multiple pieces of info are still missing, pick the most important one and ask ONLY that; the next turn asks the next.
 
-Emit AT MOST one \`pi-choice\` fenced block per reply. Anything beyond the first is dropped by the client anyway. If you have two asset picks to make (a voice agent AND a WhatsApp template), ask about the voice agent this turn, template next turn.
+- Do NOT list "here's what I need" followed by multiple bullets.
+- Do NOT ask a question and then tack on "also" / "one more thing" / "quick side question".
+- If the question has narrow answers, emit ONE \`pi-choice\` block for THAT question. Do not emit a second \`pi-choice\` (the client drops all but the first, and it looks broken).
+- Numbered lists ("1. …  2. …") in the prose are NEVER questions. They are context / summary lines. If a numbered list ends with a question mark, that's a violation.
+
+## No AI fluff (hard rule)
+
+- NEVER use em-dashes (—) or en-dashes (–). Use plain hyphens (-), commas, or new sentences.
+- No "let me know", "just to confirm", "quick question" preambles.
+- Don't apologize on behalf of the platform.
+- Don't preface with "great!" / "perfect!" / "got it!" every turn. One brief confirmation is fine when useful, not a habit.
 
 ## Quick-pick options format (\`pi-choice\`)
 
@@ -649,12 +661,14 @@ export const askPi = createServerFn({ method: "POST" })
           hasDb: builderCtx._diag.hasDb,
           voiceAgents: builderCtx.assets.voiceAgents.length,
           waTemplates: builderCtx.assets.waTemplates.length,
+          freeformWorkflows: builderCtx.assets.freeformWorkflows.length,
           smsTemplates: builderCtx.assets.smsTemplates.length,
           rcsTemplates: builderCtx.assets.rcsTemplates.length,
           tools: builderCtx.assets.tools.length,
           errors: {
             voiceAgentsErr: builderCtx._diag.voiceAgentsErr,
             waTemplatesErr: builderCtx._diag.waTemplatesErr,
+            freeformWorkflowsErr: builderCtx._diag.freeformWorkflowsErr,
             smsTemplatesErr: builderCtx._diag.smsTemplatesErr,
             rcsTemplatesErr: builderCtx._diag.rcsTemplatesErr,
             toolsErr: builderCtx._diag.toolsErr,
@@ -666,6 +680,7 @@ export const askPi = createServerFn({ method: "POST" })
           hasDb: false,
           voiceAgents: 0,
           waTemplates: 0,
+          freeformWorkflows: 0,
           smsTemplates: 0,
           rcsTemplates: 0,
           tools: 0,

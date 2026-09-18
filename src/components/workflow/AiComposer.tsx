@@ -126,6 +126,42 @@ export function AiComposer({
   const wrapRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // Vertical resize on the panel's top edge. The header is the drag
+  // handle; dragging up grows the transcript area, dragging down shrinks.
+  // Clamped so the transcript can't collapse to zero or eat the whole
+  // viewport.
+  const [transcriptHeight, setTranscriptHeight] = useState(420);
+  const resizeRef = useRef<{ startY: number; startH: number } | null>(null);
+  const onResizeMouseDown = (e: React.MouseEvent) => {
+    resizeRef.current = { startY: e.clientY, startH: transcriptHeight };
+    e.preventDefault();
+  };
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      if (!resizeRef.current) return;
+      const delta = resizeRef.current.startY - e.clientY;
+      const next = Math.max(160, Math.min(window.innerHeight - 200, resizeRef.current.startH + delta));
+      setTranscriptHeight(next);
+    };
+    const onUp = () => { resizeRef.current = null; };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, []);
+
+  // Auto-grow textarea — resize based on content up to 8 lines-ish.
+  // Runs on every value change; the max-height CSS ceiling stops it from
+  // eating the whole screen when the user pastes a wall of text.
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+  }, [value]);
+
   const { dragX, pillHandlers, suppressClick } = usePiDrag(wrapRef);
 
   const isOpen = state !== "collapsed";
@@ -385,12 +421,15 @@ export function AiComposer({
       {/* Expanded chat panel */}
       {isOpen && (
         <div className="pointer-events-none" style={{ transform: `translateX(${dragX}px)` }}>
-          <PiPanel innerRef={containerRef} className="w-[700px] max-w-[92vw]">
-            {/* Header — third-person is fine here because it's a UI chrome
-                surface tag, not Pi speaking. Shows the current activity
-                clearly: "Drafting…" while a request is in flight, "Ready"
-                otherwise. */}
-            <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
+          <PiPanel innerRef={containerRef} className="w-[840px] max-w-[94vw]">
+            {/* Header doubles as the vertical resize handle — drag its top
+                edge up/down to grow/shrink the transcript. Third-person is
+                fine here because it's UI chrome, not Pi speaking. */}
+            <div
+              onMouseDown={onResizeMouseDown}
+              className="flex cursor-ns-resize items-center justify-between border-b border-border px-4 py-2.5 select-none"
+              title="Drag to resize"
+            >
               <div className="flex items-center gap-2">
                 <Sparkles
                   className={cn(
@@ -407,7 +446,7 @@ export function AiComposer({
                   </span>
                 )}
               </div>
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1" onMouseDown={(e) => e.stopPropagation()}>
                 {messages.length > 1 && (
                   <button
                     onClick={resetChat}
@@ -427,11 +466,13 @@ export function AiComposer({
               </div>
             </div>
 
-            {/* Chat transcript */}
+            {/* Chat transcript — height driven by the drag-resize state so
+                the user can grow/shrink it. */}
             {(messages.length > 0 || state === "thinking") && (
               <div
                 ref={scrollRef}
-                className="scrollbar-thin max-h-[420px] min-h-[80px] overflow-y-auto px-4 py-3"
+                className="scrollbar-thin min-h-[80px] overflow-y-auto px-4 py-3"
+                style={{ maxHeight: transcriptHeight, height: transcriptHeight }}
               >
                 <div className="space-y-3">
                   {messages.map((m, i) => (
@@ -529,13 +570,11 @@ function ChatBubble({
         <Sparkles className="mt-1 h-3.5 w-3.5 shrink-0 text-ai" />
         <div className="max-w-[85%] rounded-2xl rounded-tl-sm border border-border bg-card px-3 py-2 text-[13px] leading-relaxed text-foreground">
           {renderChatMarkdown(message.content)}
-          {message.edits && message.edits.length > 0 && (
-            <div className="mt-2 space-y-0.5 border-t border-border pt-2 font-mono text-[11px] text-muted-foreground">
-              {message.edits.map((e, i) => (
-                <div key={i}>{e}</div>
-              ))}
-            </div>
-          )}
+          {/* The `edits` diff list ("+ whatsapp_1.engaged -> whatsappFreeform_1")
+              is intentionally NOT rendered. Users don't need to see the internal
+              plumbing of every insert / connect Pi made; the canvas already
+              shows the result visually. The field stays on ChatMessage for
+              future in-devtools logging. */}
         </div>
       </div>
       {/* Confirm-Draft card — rendered when Pi emitted a propose_draft

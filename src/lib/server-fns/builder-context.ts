@@ -23,6 +23,7 @@ import * as waDb from "@/lib/db/wa-templates";
 import * as smsDb from "@/lib/db/sms-templates";
 import * as rcsDb from "@/lib/db/rcs-templates";
 import * as toolsDb from "@/lib/db/tools";
+import * as freeformDb from "@/lib/db/freeform-workflows";
 import { CANONICAL_CONSTRUCT_RULES } from "@/lib/pi-construct-rules";
 import { BUILDER_ALLOWED_KINDS, summarizeRegistryForContext } from "@/lib/node-registry";
 import { computeAllValidity } from "@/lib/node-validity";
@@ -43,6 +44,7 @@ export type BuilderContext = {
   assets: {
     voiceAgents: Array<{ id: string; name: string; status: string }>;
     waTemplates: Array<{ id: string; name: string; category: string }>;
+    freeformWorkflows: Array<{ id: string; name: string; status: string }>;
     smsTemplates: Array<{ id: string; name: string; category?: string }>;
     rcsTemplates: Array<{ id: string; name: string }>;
     tools: Array<{ handle: string; description: string }>;
@@ -55,6 +57,7 @@ export type BuilderContext = {
     hasDb: boolean;
     voiceAgentsErr?: string;
     waTemplatesErr?: string;
+    freeformWorkflowsErr?: string;
     smsTemplatesErr?: string;
     rcsTemplatesErr?: string;
     toolsErr?: string;
@@ -103,7 +106,7 @@ export async function assembleBuilderContext(campaignId: string | undefined): Pr
   // error is stashed in _diag so we can debug from Cloudflare logs.
   const diag: BuilderContext["_diag"] = { hasDb };
 
-  const [voiceAgents, waTemplates, smsTemplates, rcsTemplates, tools] = await Promise.all([
+  const [voiceAgents, waTemplates, freeformWorkflows, smsTemplates, rcsTemplates, tools] = await Promise.all([
     (async () => {
       if (!hasDb) return [];
       try {
@@ -121,6 +124,20 @@ export async function assembleBuilderContext(campaignId: string | undefined): Pr
         return list.map((t) => ({ id: t.id, name: t.name, category: t.category }));
       } catch (e) {
         diag.waTemplatesErr = (e as Error).message;
+        return [];
+      }
+    })(),
+    (async () => {
+      if (!hasDb) return [];
+      try {
+        const list = await freeformDb.listFreeformWorkflows();
+        // Only workflows in `ready` status are pickable (matches the config
+        // panel's own picker gate). Draft / locked workflows are hidden.
+        return list
+          .filter((w) => w.status === "ready")
+          .map((w) => ({ id: w.id, name: w.name, status: w.status }));
+      } catch (e) {
+        diag.freeformWorkflowsErr = (e as Error).message;
         return [];
       }
     })(),
@@ -165,6 +182,7 @@ export async function assembleBuilderContext(campaignId: string | undefined): Pr
     hasDb,
     voiceAgents: voiceAgents.length,
     waTemplates: waTemplates.length,
+    freeformWorkflows: freeformWorkflows.length,
     smsTemplates: smsTemplates.length,
     rcsTemplates: rcsTemplates.length,
     tools: tools.length,
@@ -183,7 +201,7 @@ export async function assembleBuilderContext(campaignId: string | undefined): Pr
     validity,
     rules: CANONICAL_CONSTRUCT_RULES,
     nodeKinds: summarizeRegistryForContext(BUILDER_ALLOWED_KINDS),
-    assets: { voiceAgents, waTemplates, smsTemplates, rcsTemplates, tools },
+    assets: { voiceAgents, waTemplates, freeformWorkflows, smsTemplates, rcsTemplates, tools },
     _diag: diag,
   };
 }
