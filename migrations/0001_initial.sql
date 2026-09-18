@@ -44,8 +44,8 @@ CREATE TABLE IF NOT EXISTS campaign_nodes (
   outputs_json      TEXT NOT NULL DEFAULT '[]', -- NodeOutput[]
   PRIMARY KEY (campaign_id, id)
 );
-CREATE INDEX idx_campaign_nodes_campaign ON campaign_nodes(campaign_id);
-CREATE INDEX idx_campaign_nodes_kind ON campaign_nodes(kind);
+CREATE INDEX IF NOT EXISTS idx_campaign_nodes_campaign ON campaign_nodes(campaign_id);
+CREATE INDEX IF NOT EXISTS idx_campaign_nodes_kind ON campaign_nodes(kind);
 
 CREATE TABLE IF NOT EXISTS campaign_edges (
   id                TEXT NOT NULL,             -- unique within campaign
@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS campaign_edges (
   source_handle     TEXT,                       -- e.g. "success", "vA", "gold" — null = default
   PRIMARY KEY (campaign_id, id)
 );
-CREATE INDEX idx_campaign_edges_campaign ON campaign_edges(campaign_id);
+CREATE INDEX IF NOT EXISTS idx_campaign_edges_campaign ON campaign_edges(campaign_id);
 
 /* ---------- Runs + Leads --------------------------------------------------- */
 -- One row per run of a campaign. `leads` gets the per-lead per-run snapshot.
@@ -76,8 +76,8 @@ CREATE TABLE IF NOT EXISTS runs (
   started_at        INTEGER NOT NULL,          -- unix ms
   completed_at      INTEGER
 );
-CREATE INDEX idx_runs_campaign ON runs(campaign_id);
-CREATE INDEX idx_runs_status ON runs(status);
+CREATE INDEX IF NOT EXISTS idx_runs_campaign ON runs(campaign_id);
+CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status);
 
 -- Per-node aggregates. This is what Analytics dashboards read.
 CREATE TABLE IF NOT EXISTS run_node_metrics (
@@ -115,11 +115,11 @@ CREATE TABLE IF NOT EXISTS leads (
   attributes_json   TEXT NOT NULL DEFAULT '{}', -- per-campaign contact vars: policy_no, dpd, cart_value, etc
   updated_at        INTEGER NOT NULL           -- unix ms
 );
-CREATE INDEX idx_leads_run ON leads(run_id);
-CREATE INDEX idx_leads_campaign ON leads(campaign_id);
-CREATE INDEX idx_leads_stage_node ON leads(run_id, stage_node_id);
-CREATE INDEX idx_leads_status ON leads(status);
-CREATE INDEX idx_leads_channel ON leads(channel);
+CREATE INDEX IF NOT EXISTS idx_leads_run ON leads(run_id);
+CREATE INDEX IF NOT EXISTS idx_leads_campaign ON leads(campaign_id);
+CREATE INDEX IF NOT EXISTS idx_leads_stage_node ON leads(run_id, stage_node_id);
+CREATE INDEX IF NOT EXISTS idx_leads_status ON leads(status);
+CREATE INDEX IF NOT EXISTS idx_leads_channel ON leads(channel);
 
 /* ---------- Templates ------------------------------------------------------ */
 CREATE TABLE IF NOT EXISTS wa_templates (
@@ -135,7 +135,7 @@ CREATE TABLE IF NOT EXISTS wa_templates (
   footer            TEXT,
   buttons_json      TEXT NOT NULL DEFAULT '[]'
 );
-CREATE INDEX idx_wa_templates_status ON wa_templates(status);
+CREATE INDEX IF NOT EXISTS idx_wa_templates_status ON wa_templates(status);
 
 CREATE TABLE IF NOT EXISTS sms_templates (
   id                TEXT PRIMARY KEY,          -- DLT template id
