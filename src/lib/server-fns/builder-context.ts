@@ -42,6 +42,18 @@ export type BuilderContext = {
     rcsTemplates: Array<{ id: string; name: string }>;
     tools: Array<{ handle: string; description: string }>;
   };
+  /** Diagnostic — surfaces WHY a catalog might be empty so we can tell
+   *  "no D1 binding" from "table is empty" from "read threw an error" from
+   *  Cloudflare logs. Not read by the LLM; the server logs it before
+   *  dispatch. */
+  _diag: {
+    hasDb: boolean;
+    voiceAgentsErr?: string;
+    waTemplatesErr?: string;
+    smsTemplatesErr?: string;
+    rcsTemplatesErr?: string;
+    toolsErr?: string;
+  };
 };
 
 /**
@@ -82,44 +94,77 @@ export async function assembleBuilderContext(campaignId: string | undefined): Pr
   }
 
   // Asset catalogs — every one is defensive. If D1 isn't bound or a list
-  // fails, that slice is [] but the rest of the context still ships.
+  // fails, that slice is [] but the rest of the context still ships. Any
+  // error is stashed in _diag so we can debug from Cloudflare logs.
+  const diag: BuilderContext["_diag"] = { hasDb };
+
   const [voiceAgents, waTemplates, smsTemplates, rcsTemplates, tools] = await Promise.all([
     (async () => {
       if (!hasDb) return [];
       try {
         const map = await agentsDb.listAgents();
         return Object.values(map).map((a) => ({ id: a.id, name: a.name, status: a.status }));
-      } catch { return []; }
+      } catch (e) {
+        diag.voiceAgentsErr = (e as Error).message;
+        return [];
+      }
     })(),
     (async () => {
       if (!hasDb) return [];
       try {
         const list = await waDb.listWaTemplates();
         return list.map((t) => ({ id: t.id, name: t.name, category: t.category }));
-      } catch { return []; }
+      } catch (e) {
+        diag.waTemplatesErr = (e as Error).message;
+        return [];
+      }
     })(),
     (async () => {
       if (!hasDb) return [];
       try {
         const list = await smsDb.listSmsTemplates();
         return list.map((t) => ({ id: t.id, name: t.name, category: t.category }));
-      } catch { return []; }
+      } catch (e) {
+        diag.smsTemplatesErr = (e as Error).message;
+        return [];
+      }
     })(),
     (async () => {
       if (!hasDb) return [];
       try {
         const list = await rcsDb.listRcsTemplates();
         return list.map((t) => ({ id: t.id, name: t.name }));
-      } catch { return []; }
+      } catch (e) {
+        diag.rcsTemplatesErr = (e as Error).message;
+        return [];
+      }
     })(),
     (async () => {
       if (!hasDb) return [];
       try {
         const list = await toolsDb.listTools();
         return list.map((t) => ({ handle: t.handle, description: t.description }));
-      } catch { return []; }
+      } catch (e) {
+        diag.toolsErr = (e as Error).message;
+        return [];
+      }
     })(),
   ]);
+
+  // Server log — visible in Cloudflare Workers logs / `wrangler tail`.
+  // Shows the exact counts + any error messages, so when a Pi turn returns
+  // "no voice agents" we can distinguish D1-unbound / read-threw / really-empty.
+  // eslint-disable-next-line no-console
+  console.log("[builder-context]", JSON.stringify({
+    campaignId: campaignId ?? null,
+    hasDb,
+    voiceAgents: voiceAgents.length,
+    waTemplates: waTemplates.length,
+    smsTemplates: smsTemplates.length,
+    rcsTemplates: rcsTemplates.length,
+    tools: tools.length,
+    diag,
+  }));
 
   return {
     surface: "campaigns.builder",
@@ -128,5 +173,6 @@ export async function assembleBuilderContext(campaignId: string | undefined): Pr
     rules: CANONICAL_CONSTRUCT_RULES,
     nodeKinds: summarizeRegistryForContext(BUILDER_ALLOWED_KINDS),
     assets: { voiceAgents, waTemplates, smsTemplates, rcsTemplates, tools },
+    _diag: diag,
   };
 }

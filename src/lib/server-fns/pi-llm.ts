@@ -36,8 +36,28 @@ export type AskPiRequest = {
   history?: Array<{ role: "user" | "assistant"; content: string }>;
 };
 
+/** Diagnostic returned on builder-scope replies. Surfaces catalog counts +
+ *  per-list errors so devtools can see WHY a catalog was empty. Not read by
+ *  the model. Will be removed once the empty-catalog root cause is closed. */
+export type BuilderDiag = {
+  hasDb: boolean;
+  voiceAgents: number;
+  waTemplates: number;
+  smsTemplates: number;
+  rcsTemplates: number;
+  tools: number;
+  errors: {
+    voiceAgentsErr?: string;
+    waTemplatesErr?: string;
+    smsTemplatesErr?: string;
+    rcsTemplatesErr?: string;
+    toolsErr?: string;
+  };
+  assembleErr?: string;
+};
+
 export type AskPiResponse =
-  | { ok: true; answer: string; toolCalls: ToolCallLog[] }
+  | { ok: true; answer: string; toolCalls: ToolCallLog[]; diag?: BuilderDiag }
   | { ok: false; error: string };
 
 type ToolCallLog = { name: string; args: string; result: string };
@@ -451,7 +471,7 @@ async function runToolInner(name: string, args: Record<string, unknown>): Promis
 
 const SYSTEM_ANALYTICS = `You are Pi, the analytics copilot for a marketing automation platform. Answer the user's question using the analytics tools available to you. Never make up numbers — always call a tool. Reply in plain, direct language. Include the exact numbers you observed. If the tools can't answer the question, say so briefly.`;
 
-const SYSTEM_BUILDER = `You are Pi (Paytm Intelligence), the campaign workflow builder for a marketing automation platform. Speak in the third person about Pi ("Pi will wire the Voice Call after the WhatsApp timeout branch"), never first person. English only.
+const SYSTEM_BUILDER = `You are Pi (Paytm Intelligence), the campaign workflow builder for a marketing automation platform. In chat replies speak in the first person naturally ("I'll wire the Voice Call after the WhatsApp timeout branch", "let me know which agent", "I found these agents"). Do NOT refer to yourself as "Pi" in the third person inside chat replies — that reads stilted. The word "Pi" only appears in the standalone loading / thinking states, which are handled by the UI, not by you. English only.
 
 ## Non-negotiables
 
@@ -476,13 +496,17 @@ Pi asks minimum viable questions. Don't ask what the context already tells you. 
 - **Real asset ids** — which specific voice agent / WA template / SMS template to wire.
 - **Follow-up branches** — for each channel, does the user want a downstream action on its non-default output? (e.g. Voice Call after a WhatsApp Template's \`timeout\` branch.)
 
+## Never invent platform state
+
+Never say things like "temporary database issue", "system will recover shortly", "connection issue", or any variant of that — you have no way to know that and it makes the user distrust the assistant. If the injected context has an empty catalog, treat it as authoritative: the catalog is empty. Say so directly, offer the deep link. Do not apologize on behalf of the platform.
+
 ## Asset-picking rules (hard)
 
-Pi already sees the full workspace asset catalog in the injected context (\`assets.voiceAgents\`, \`assets.waTemplates\`, \`assets.smsTemplates\`, \`assets.rcsTemplates\`, \`assets.tools\`). When Pi needs an asset pick, follow these rules exactly:
+Pi already sees the full workspace asset catalog in the injected context (\`assets.voiceAgents\`, \`assets.waTemplates\`, \`assets.smsTemplates\`, \`assets.rcsTemplates\`, \`assets.tools\`). When I need an asset pick, follow these rules exactly:
 
 1. **Cite specific assets by name.** When asking "which voice agent", surface the actual available agents by name as options (using the fenced options block). Never ask an open-ended "which agent" question when a catalog exists — that's lazy.
 2. **Never ask "do you have these assets".** Pi already knows. Don't hedge, don't preface with "if you don't have these yet, you can create them at...". Just present the picks.
-3. **If the catalog is EMPTY for the kind Pi needs (voiceAgents is [], waTemplates is [], etc.), and only then**, tell the user and offer the deep link — one line, no drama. Example: "No voice agents exist in the workspace yet. Create one at [Agents](/agents) and Pi will pick it up on the next turn."
+3. **If the catalog is EMPTY for the kind I need (voiceAgents is [], waTemplates is [], etc.), and only then**, tell the user and offer the deep link — one line, no drama. Example reply text: "No voice agents in the workspace yet. Create one at [Agents](/agents) and I'll pick it up on the next turn."
 4. **Never ask about asset content or authoring.** "How should the voice sound?", "What should the WhatsApp template say?", "Which agent should Pi build?" are all wrong — those decisions live inside the asset itself, in different surfaces.
 
 Deep links to other surfaces (only when a catalog is empty): use inline Markdown link form \`[label](/path)\`. Valid targets: \`/agents\` (voice agents + API tools), \`/channels\` (WA / SMS / RCS templates).
@@ -582,6 +606,7 @@ export const askPi = createServerFn({ method: "POST" })
     // rules, node registry, and asset catalogs so Pi reads real state on EVERY
     // turn. Falls back to the client-supplied context if the assembler fails.
     let enrichedContext: Record<string, unknown> | undefined = data.context;
+    let builderDiag: BuilderDiag | undefined;
     if (data.scope === "builder") {
       try {
         const campaignId = typeof data.context?.campaignId === "string"
@@ -589,15 +614,42 @@ export const askPi = createServerFn({ method: "POST" })
           : undefined;
         const builderCtx = await assembleBuilderContext(campaignId);
         enrichedContext = { ...(data.context ?? {}), ...builderCtx };
-      } catch {
+        // Temporary diagnostic — surfaced back on the response so the client
+        // console shows why a catalog might be empty. Not read by Pi.
+        builderDiag = {
+          hasDb: builderCtx._diag.hasDb,
+          voiceAgents: builderCtx.assets.voiceAgents.length,
+          waTemplates: builderCtx.assets.waTemplates.length,
+          smsTemplates: builderCtx.assets.smsTemplates.length,
+          rcsTemplates: builderCtx.assets.rcsTemplates.length,
+          tools: builderCtx.assets.tools.length,
+          errors: {
+            voiceAgentsErr: builderCtx._diag.voiceAgentsErr,
+            waTemplatesErr: builderCtx._diag.waTemplatesErr,
+            smsTemplatesErr: builderCtx._diag.smsTemplatesErr,
+            rcsTemplatesErr: builderCtx._diag.rcsTemplatesErr,
+            toolsErr: builderCtx._diag.toolsErr,
+          },
+        };
+      } catch (e) {
         /* keep client-supplied context — better than nothing */
+        builderDiag = {
+          hasDb: false,
+          voiceAgents: 0,
+          waTemplates: 0,
+          smsTemplates: 0,
+          rcsTemplates: 0,
+          tools: 0,
+          errors: {},
+          assembleErr: (e as Error).message,
+        };
       }
     }
 
     // Prefer Anthropic direct. If missing, fall back to the OpenAI-compat
     // TrueFoundry gateway. If neither, ok:false with a clear message.
     if (env.ANTHROPIC_API_KEY) {
-      return await runAnthropicLoop({
+      const r = await runAnthropicLoop({
         apiKey: env.ANTHROPIC_API_KEY,
         model: env.ANTHROPIC_MODEL || "claude-sonnet-4-5",
         workspaceId: env.ANTHROPIC_WORKSPACE_ID,
@@ -607,6 +659,10 @@ export const askPi = createServerFn({ method: "POST" })
         history: data.history,
         context: enrichedContext,
       });
+      // Attach the builder diagnostic to a successful response so the client
+      // console can show which catalogs were empty and why. Non-invasive.
+      if (r.ok && builderDiag) return { ...r, diag: builderDiag };
+      return r;
     }
 
     const tfyKey = env.PI_AGENT_API_KEY || env.TFY_API_KEY;
@@ -614,7 +670,7 @@ export const askPi = createServerFn({ method: "POST" })
     if (!tfyKey || !tfyBase) {
       return { ok: false, error: "LLM gateway not configured — set ANTHROPIC_API_KEY (preferred) or PI_AGENT_API_KEY + PI_AGENT_BASE_URL in .env / wrangler secrets" };
     }
-    return await runTfyLoop({
+    const r = await runTfyLoop({
       apiKey: tfyKey,
       baseUrl: tfyBase,
       model: env.PI_AGENT_MODEL || env.TFY_MODEL || "pi-agentic/global.anthropic.claude-sonnet-4-6",
@@ -624,6 +680,8 @@ export const askPi = createServerFn({ method: "POST" })
       history: data.history,
       context: enrichedContext,
     });
+    if (r.ok && builderDiag) return { ...r, diag: builderDiag };
+    return r;
   });
 
 /* -------------------------------------------------------------------------- */

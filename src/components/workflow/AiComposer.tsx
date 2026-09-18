@@ -193,6 +193,13 @@ export function AiComposer({
         },
       });
       if (r.ok) {
+        // Diagnostic — logs the builder-context asset counts so we can see
+        // from browser devtools whether Pi got a real catalog or an empty
+        // one, and why (D1 unbound / read threw / really empty).
+        if (r.diag) {
+          // eslint-disable-next-line no-console
+          console.log("[AskPi] builder context diag:", r.diag);
+        }
         const toolCalls = (r.toolCalls ?? []) as PiToolCallLog[];
         if (toolCalls.length > 0) onPiToolCalls?.(toolCalls);
         const { text: bodyText, options } = parseOptionsBlock(r.answer);
