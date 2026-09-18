@@ -6,6 +6,7 @@ import ReactFlow, {
   type ReactFlowInstance,
 } from "reactflow";
 import { Wand2 } from "lucide-react";
+import { toast } from "sonner";
 import { nodeTypes, CanvasModeContext } from "./nodes";
 import { edgeTypes } from "./edges";
 import type { WorkflowNodeData, NodeKind, CampaignStatus } from "@/lib/campaign-types";
@@ -86,7 +87,18 @@ const BLANK_NODES: Node<WorkflowNodeData>[] = [
   { id: "start", type: "workflow", position: { x: 0, y: 0 },
     data: { kind: "start", title: "Start", locked: true, valid: true } },
   { id: "audience", type: "workflow", position: { x: 240, y: 0 },
-    data: { kind: "audience", title: "Audience", subtitle: "Configure the source", valid: false, error: "Select source" } },
+    data: {
+      kind: "audience",
+      title: "Audience",
+      subtitle: "Configure the source",
+      valid: false,
+      error: "Select source",
+      // Explicit empty schema (both keys present, both empty). This is what
+      // stops ConfigPanel's `AudienceFields` from falling back to the
+      // sample-CSV columns (customer_id / phone / first_name / …) when the
+      // audience config is otherwise blank on a fresh campaign.
+      config: { fields: [], csvKeys: [] },
+    } },
   { id: "end", type: "workflow", position: { x: 480, y: 0 },
     data: { kind: "end", title: "End", locked: true, valid: true } },
 ];
@@ -414,6 +426,22 @@ export function WorkflowCanvas({
   const applyPiToolCalls = useCallback(
     (toolCalls: PiToolCallLog[]) => {
       const next = applyPiToolCallsToGraph(toolCalls, nodes, edges);
+      // Surface validator errors — one toast per unique reason. These are
+      // tool calls the validator dropped because they violated a canonical
+      // rule (reserved id, unknown target, disallowed kind for the builder
+      // scope, etc.). Pi should retry with the corrected plan; this toast
+      // is the demo's "you got saved" note.
+      if (next.errors.length > 0) {
+        const seen = new Set<string>();
+        for (const err of next.errors) {
+          if (seen.has(err.reason)) continue;
+          seen.add(err.reason);
+          toast.warning("Pi's plan needed a fix", { description: err.detail });
+        }
+      }
+      // Heals are auto-coercions (bezier edge type, LTR position, etc.) —
+      // the graph mutation still lands, just with the corrected values.
+      // Skipped from toasts for now; visible in devtools if needed.
       if (!next.changed) return;
       setNodes(next.nodes);
       setEdges(next.edges);

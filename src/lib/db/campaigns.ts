@@ -281,11 +281,14 @@ export async function createBlankCampaign(
       `INSERT INTO campaign_nodes (id, campaign_id, kind, title, subtitle, serial, position_x, position_y, config_json, outputs_json)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).bind("start", id, "start", "Start", null, "start_1", 0, 0, "{}", "[]"),
-    // Audience (blank schema — user or Pi fills the CSV / API config)
+    // Audience (blank schema — user or Pi fills fields via update_node).
+    // `fields: []` + `csvKeys: []` are explicit so ConfigPanel's schema
+    // editor shows the empty state instead of falling back to the
+    // sample-CSV column set.
     db.prepare(
       `INSERT INTO campaign_nodes (id, campaign_id, kind, title, subtitle, serial, position_x, position_y, config_json, outputs_json)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).bind("audience", id, "audience", "Audience", "Configure the source", "audience_1", 240, 0, "{}", "[]"),
+    ).bind("audience", id, "audience", "Audience", "Configure the source", "audience_1", 240, 0, JSON.stringify({ fields: [], csvKeys: [] }), "[]"),
     // End
     db.prepare(
       `INSERT INTO campaign_nodes (id, campaign_id, kind, title, subtitle, serial, position_x, position_y, config_json, outputs_json)

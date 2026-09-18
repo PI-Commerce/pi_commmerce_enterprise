@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Sparkles, X } from "lucide-react";
+import { Sparkles, X, PenLine } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { CANVAS_CONTEXT } from "@/lib/ask-pi-context";
 import { getSuggestion } from "@/lib/pi-node-suggestions";
@@ -482,20 +482,32 @@ function ChatBubble({
         </div>
       </div>
       {showOptions && message.options && message.options.length > 0 && (
-        <div className="ml-6 flex flex-wrap gap-1.5">
-          {message.options.map((opt) => (
+        // Vertical numbered-row picker (matches the Claude-style options UI).
+        // Beats the flat pill row when there are more than a couple of
+        // options; also gives Pi room to attach short hint text per option
+        // in Phase C. For now every option is a bare label.
+        <div className="ml-6 flex flex-col overflow-hidden rounded-2xl border border-border bg-card/60">
+          {message.options.map((opt, i) => (
             <button
               key={opt}
               onClick={() => onPick(opt)}
               className={cn(
-                "rounded-full border border-ai/40 bg-ai/5 px-3 py-1 text-[11.5px] font-medium text-foreground",
-                "hover:border-ai/70 hover:bg-ai/10",
-                "transition-colors",
+                "group flex items-center gap-3 border-b border-border/60 px-3 py-2.5 text-left last:border-b-0",
+                "transition-colors hover:bg-ai/5",
               )}
             >
-              {opt}
+              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md border border-border bg-background text-[10.5px] font-medium text-muted-foreground group-hover:border-ai/60 group-hover:text-ai">
+                {i + 1}
+              </span>
+              <span className="text-[13px] leading-snug text-foreground">{opt}</span>
             </button>
           ))}
+          {/* Escape hatch: user can always type a free-form answer instead.
+              Not a button — just a visual cue pointing them at the input. */}
+          <div className="flex items-center gap-3 border-t border-border/60 bg-muted/30 px-3 py-2 text-[12px] text-muted-foreground">
+            <PenLine className="h-3.5 w-3.5" />
+            <span>Or type something else…</span>
+          </div>
         </div>
       )}
     </div>

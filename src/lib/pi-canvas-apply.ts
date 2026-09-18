@@ -15,6 +15,7 @@
  */
 import type { Edge, Node } from "reactflow";
 import type { WorkflowNodeData } from "@/lib/campaign-types";
+import { validateAndHealPiToolCalls, type ValidatorHeal, type ValidatorError } from "@/lib/pi-construct-validator";
 
 /** One entry in the server fn's `toolCalls` array. */
 export type PiToolCallLog = {
@@ -23,6 +24,16 @@ export type PiToolCallLog = {
   args: string;
   /** JSON-encoded return value from the server-side tool implementation. */
   result: string;
+};
+
+/** What `applyPiToolCallsToGraph` returns. */
+export type ApplyResult = {
+  nodes: Node<WorkflowNodeData>[];
+  edges: Edge[];
+  changed: boolean;
+  /** Heals + errors from the validator, so the chat can surface them. */
+  heals: ValidatorHeal[];
+  errors: ValidatorError[];
 };
 
 /**
@@ -35,12 +46,19 @@ export function applyPiToolCallsToGraph(
   toolCalls: PiToolCallLog[],
   nodes: Node<WorkflowNodeData>[],
   edges: Edge[],
-): { nodes: Node<WorkflowNodeData>[]; edges: Edge[]; changed: boolean } {
+): ApplyResult {
+  // Every batch of tool calls gets validated + healed against the canonical
+  // construct BEFORE any mutation touches ReactFlow state. Rejected calls
+  // are dropped (their reasons go back via `errors`); coerced calls (wrong
+  // position direction, etc.) show up in `heals`. Pure — the returned
+  // toolCalls array is what we apply below.
+  const { toolCalls: validated, heals, errors } = validateAndHealPiToolCalls(toolCalls, nodes, edges);
+
   let ns = nodes;
   let es = edges;
   let changed = false;
 
-  for (const tc of toolCalls) {
+  for (const tc of validated) {
     let args: Record<string, unknown> = {};
     try {
       args = JSON.parse(tc.args) as Record<string, unknown>;
@@ -159,7 +177,7 @@ export function applyPiToolCallsToGraph(
     }
   }
 
-  return { nodes: ns, edges: es, changed };
+  return { nodes: ns, edges: es, changed, heals, errors };
 }
 
 /**
