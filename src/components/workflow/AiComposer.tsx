@@ -615,45 +615,57 @@ function parsePiFencedBlocks(md: string): { text: string; options?: string[]; ch
   let choice: ChatChoice | undefined;
   let options: string[] | undefined;
 
-  // pi-choice (rich)
-  const choiceRe = /```pi-choice\s*\n([\s\S]*?)```/i;
-  const cm = working.match(choiceRe);
-  if (cm && cm.index !== undefined) {
-    try {
-      const parsed = JSON.parse(cm[1]) as ChatChoice;
-      if (parsed && Array.isArray(parsed.options) && parsed.options.length > 0) {
-        // Coerce optional fields to safe defaults.
-        choice = {
-          type: parsed.type ?? "single",
-          key: parsed.key,
-          question: parsed.question,
-          options: parsed.options
-            .filter((o) => o && typeof o.label === "string")
-            .map((o) => ({ id: o.id ?? o.label, label: o.label, hint: o.hint })),
-        };
+  // Strip EVERY ```pi-choice fenced block from the prose (Pi occasionally
+  // emits multiple in one turn). We keep only the FIRST valid one as the
+  // picker card — one question per bubble stays clean. Every subsequent
+  // block still gets stripped from the text so it doesn't leak as raw
+  // code below the assistant bubble.
+  const choiceRe = /```pi-choice\s*\n([\s\S]*?)```/gi;
+  working = working.replace(choiceRe, (_full, body: string) => {
+    if (!choice) {
+      try {
+        const parsed = JSON.parse(body) as ChatChoice;
+        if (parsed && Array.isArray(parsed.options) && parsed.options.length > 0) {
+          choice = {
+            type: parsed.type ?? "single",
+            key: parsed.key,
+            question: parsed.question,
+            options: parsed.options
+              .filter((o) => o && typeof o.label === "string")
+              .map((o) => ({ id: o.id ?? o.label, label: o.label, hint: o.hint })),
+          };
+        }
+      } catch {
+        /* malformed — fall through and just strip the block */
       }
-    } catch {
-      // Malformed JSON — leave `choice` undefined; the prose still renders.
     }
-    working = (working.slice(0, cm.index).trim() + "\n\n" + working.slice(cm.index + cm[0].length).trim()).trim();
-  }
+    return "";
+  });
 
-  // Legacy options (flat)
-  const optRe = /```options\s*\n([\s\S]*?)```/i;
-  const om = working.match(optRe);
-  if (om && om.index !== undefined) {
-    const raw = om[1];
-    const list = raw
-      .split("\n")
-      .map((s) => s.replace(/^\s*[-*]\s+/, "").trim())
-      .filter((s) => s.length > 0 && s.length < 80);
-    if (list.length > 0) options = list;
-    working = (working.slice(0, om.index).trim() + "\n\n" + working.slice(om.index + om[0].length).trim()).trim();
-  }
+  // Same treatment for legacy ```options fences. First valid one wins.
+  const optRe = /```options\s*\n([\s\S]*?)```/gi;
+  working = working.replace(optRe, (_full, body: string) => {
+    if (!options && !choice) {
+      const list = body
+        .split("\n")
+        .map((s) => s.replace(/^\s*[-*]\s+/, "").trim())
+        .filter((s) => s.length > 0 && s.length < 80);
+      if (list.length > 0) options = list;
+    }
+    return "";
+  });
+
+  // Also strip any generic ```<lang> fenced blocks that leak through (Pi
+  // is prompted away from these but LLMs sometimes wrap JSON in ```json).
+  // Guarded to only nuke blocks that clearly aren't language-prose.
+  const strayFenceRe = /```(?:json|yaml|yml|javascript|ts|typescript)\s*\n[\s\S]*?```/gi;
+  working = working.replace(strayFenceRe, "");
+
+  // Collapse any run of 3+ blank lines that the stripping left behind.
+  working = working.replace(/\n{3,}/g, "\n\n").trim();
 
   return {
-    text: working.trim(),
-    // Rich choice wins if both are present.
+    text: working,
     ...(choice ? { choice } : options ? { options } : {}),
   };
 }

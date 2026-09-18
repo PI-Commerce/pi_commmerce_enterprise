@@ -443,6 +443,11 @@ export function WorkflowCanvas({
     [nodes, setNodes, setEdges, onDirty, refit],
   );
 
+  // Held as a ref so `applyPiToolCalls` (declared above `autoArrange`)
+  // can trigger a relayout without hitting TDZ on the const reference.
+  // Populated by the effect below once autoArrange is defined.
+  const autoArrangeRef = useRef<(() => Promise<void>) | null>(null);
+
   const applyPiToolCalls = useCallback(
     (toolCalls: PiToolCallLog[]) => {
       const next = applyPiToolCallsToGraph(toolCalls, nodes, edges);
@@ -467,9 +472,18 @@ export function WorkflowCanvas({
       setEdges(next.edges);
       setSelected(null);
       onDirty?.();
-      refit();
+      // Fire ELK relayout so Pi's new nodes land cleanly aligned — same
+      // path the manual Wand2 button uses. Two rAFs give ReactFlow time
+      // to flush the setNodes / setEdges and remount + measure the new
+      // nodes before ELK reads their sizes. Without this, Pi's insert
+      // positions read as messy until the user clicks Wand2.
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          void autoArrangeRef.current?.();
+        });
+      });
     },
-    [nodes, edges, setNodes, setEdges, onDirty, refit],
+    [nodes, edges, setNodes, setEdges, onDirty],
   );
 
   const deleteNode = useCallback(
@@ -540,6 +554,10 @@ export function WorkflowCanvas({
     onDirty?.();
     setTimeout(() => rfRef.current?.fitView({ padding: 0.2, duration: 400 }), 60);
   }, [setNodes, setEdges, onDirty]);
+
+  // Publish autoArrange into the ref so `applyPiToolCalls` (declared
+  // earlier in this component) can call it without a forward reference.
+  useEffect(() => { autoArrangeRef.current = autoArrange; }, [autoArrange]);
 
   // I6 — edit focus mode: when a node is selected, spotlight it by dimming everything
   // else. Suppressed mid-build and during the live run pulse so neither is disrupted.
