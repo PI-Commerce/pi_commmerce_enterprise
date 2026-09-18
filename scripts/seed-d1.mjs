@@ -37,6 +37,7 @@ const { SEED_RCS_TEMPLATES } = await import(join(ROOT, "src/lib/rcs-templates.ts
 const { AGENT_RECORDS } = await import(join(ROOT, "src/lib/agent-data.ts"));
 const { TOOLS } = await import(join(ROOT, "src/lib/tool-registry.ts"));
 const { SEED_FREEFORM_WORKFLOWS } = await import(join(ROOT, "src/lib/freeform-types.ts"));
+const { LEAD_RECORDS } = await import(join(ROOT, "src/lib/leads-data.ts"));
 
 const now = Date.now();
 const out = [];
@@ -180,6 +181,18 @@ push("\n-- Freeform workflows");
 for (const w of SEED_FREEFORM_WORKFLOWS) {
   push(
     `INSERT OR REPLACE INTO freeform_workflows (id, name, description, status, locked, locked_at, used_in_campaigns, nodes_json, edges_json, created_at, updated_at) VALUES (${q(w.id)}, ${q(w.name)}, ${q(w.description ?? null)}, ${q(w.status)}, ${q(w.locked ? 1 : 0)}, ${q(w.lockedAt ? Date.parse(w.lockedAt) : null)}, ${q(w.usedInCampaigns ?? 0)}, ${q(JSON.stringify(w.nodes))}, ${q(JSON.stringify(w.edges))}, ${q(Date.parse(w.createdAt))}, ${q(Date.parse(w.lastModified))});`,
+  );
+}
+
+// ---- Inbox leads ----
+//
+// One row per lead. `messages` + `campaigns` stay as JSON blobs — inbox is
+// always accessed by lead id and renders the full history at once, so a
+// second `inbox_messages` table would only add joins for no gain.
+push("\n-- Inbox leads");
+for (const lead of LEAD_RECORDS) {
+  push(
+    `INSERT OR REPLACE INTO inbox_leads (id, customer_id, name, phone, email, created_at, last_updated_at, last_interaction_at, campaigns_json, messages_json) VALUES (${q(lead.id)}, ${q(lead.customerId)}, ${q(lead.name)}, ${q(lead.phone)}, ${q(lead.email ?? null)}, ${q(lead.createdAt)}, ${q(lead.lastUpdatedAt)}, ${q(lead.lastInteractionAt)}, ${q(JSON.stringify(lead.campaigns ?? []))}, ${q(JSON.stringify(lead.messages ?? []))});`,
   );
 }
 

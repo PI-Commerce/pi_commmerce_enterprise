@@ -16,7 +16,7 @@
  *                     Per-channel filters top-right: Campaign + Date range.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { AppShell } from "@/components/app/AppShell";
 import { Button } from "@/components/ui/button";
@@ -33,6 +33,7 @@ import {
   MessageCircle, MessageSquare, MessageSquareText,
   Megaphone, ChevronDown, ChevronRight, PhoneMissed, PhoneCall,
 } from "lucide-react";
+import { readInboxLeadFn } from "@/lib/server-fns/inbox";
 
 export const Route = createFileRoute("/inbox/$id")({
   component: LeadDetail,
@@ -63,7 +64,26 @@ const CHANNEL_ORDER: LeadChannel[] = ["wa", "sms", "rcs", "voice"];
 function LeadDetail() {
   const { id } = Route.useParams();
   const navigate = useNavigate();
-  const lead = LEAD_RECORDS.find((l) => l.id === id);
+  // Seed with the in-memory `LEAD_RECORDS` match so first paint is instant,
+  // then hydrate the same lead from D1 (fresher messages / campaigns). If D1
+  // has no row (cold prod), we keep the seed. Same fallback pattern as the
+  // inbox list route.
+  const seed = useMemo(() => LEAD_RECORDS.find((l) => l.id === id) ?? null, [id]);
+  const [lead, setLead] = useState<LeadRecord | null>(seed);
+  useEffect(() => { setLead(seed); }, [seed]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await readInboxLeadFn({ data: id });
+        if (cancelled || !r.ok || !r.lead) return;
+        setLead(r.lead);
+      } catch {
+        /* silent — seed keeps rendering */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [id]);
   const [tab, setTab] = useState<"campaigns" | "conversations">("conversations");
 
   if (!lead) {

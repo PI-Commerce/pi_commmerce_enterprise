@@ -582,26 +582,58 @@ function AudienceFields({ config, readOnly, mark }: { config?: PresetConfig; rea
     mark(ok, err);
   }, [schemaOk, phoneOk, phoneField]);
 
-  // CSV drop — simulates reading the header row only, then *merges* any new columns into
-  // the existing editable rows (never clobbers what's already there).
-  const onFile = (name?: string) => {
-    if (!name) return;
-    setFileName(name);
+  // CSV drop — reads ONLY the header row of the uploaded file (never the
+  // data rows), then *merges* any new columns into the existing editable
+  // rows (never clobbers what's already there). Falls back to CSV_KEYS if
+  // the file is empty or unreadable.
+  const onFile = (file?: File) => {
+    if (!file) return;
+    setFileName(file.name);
     setImporting(true);
-    setTimeout(() => {
+
+    const finish = (headers: string[], reason?: string) => {
       setFields((prev) => {
         const existing = new Set(prev.filter((f) => f.name.trim()).map((f) => f.name));
-        const additions = CSV_KEYS
+        const additions = headers
           .filter((k) => !existing.has(k))
           .map((k) => ({ id: uid("f"), name: k, type: "String" as const }));
-        // Drop any leading blank placeholder row if we're adding real columns.
         const base = prev.filter((f) => f.name.trim());
         const merged = [...base, ...additions];
         return merged.length ? merged : prev;
       });
       setImporting(false);
-      toast.success("Columns merged", { description: `${CSV_KEYS.length} columns read · row data not stored` });
-    }, 900);
+      if (reason) {
+        toast.warning("Fell back to sample columns", { description: reason });
+      } else {
+        toast.success("Columns merged", {
+          description: `${headers.length} column${headers.length === 1 ? "" : "s"} read · row data not stored`,
+        });
+      }
+    };
+
+    // Read the file client-side and take the first line.
+    const reader = new FileReader();
+    reader.onerror = () => finish(CSV_KEYS, "Could not read the file");
+    reader.onload = () => {
+      try {
+        const raw = String(reader.result ?? "");
+        const firstLine = raw.split(/\r?\n/, 1)[0] ?? "";
+        if (!firstLine.trim()) {
+          finish(CSV_KEYS, "File was empty");
+          return;
+        }
+        // Split on comma, strip wrapping quotes + whitespace, drop blanks.
+        const headers = firstLine
+          .split(",")
+          .map((h) => h.trim().replace(/^"(.*)"$/, "$1").trim())
+          .filter(Boolean);
+        finish(headers.length ? headers : CSV_KEYS, headers.length ? undefined : "No header columns found");
+      } catch {
+        finish(CSV_KEYS, "Could not parse the header row");
+      }
+    };
+    // Slice to first 8 KB — plenty for a header line, avoids loading huge CSVs.
+    reader.readAsText(file.slice(0, 8 * 1024));
   };
 
   return (
@@ -625,13 +657,13 @@ function AudienceFields({ config, readOnly, mark }: { config?: PresetConfig; rea
               {!readOnly && !importing && (
                 <label className="shrink-0 cursor-pointer text-[11px] text-muted-foreground hover:text-foreground">
                   Replace
-                  <input type="file" accept=".csv" className="hidden" disabled={readOnly} onChange={(e) => onFile(e.target.files?.[0]?.name ?? "sample.csv")} />
+                  <input type="file" accept=".csv" className="hidden" disabled={readOnly} onChange={(e) => onFile(e.target.files?.[0])} />
                 </label>
               )}
             </div>
           ) : (
             <label className="flex h-20 cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border bg-muted/30 px-3 text-center text-xs text-muted-foreground hover:bg-muted/60">
-              <input type="file" accept=".csv" className="hidden" disabled={readOnly} onChange={(e) => onFile(e.target.files?.[0]?.name ?? "sample.csv")} />
+              <input type="file" accept=".csv" className="hidden" disabled={readOnly} onChange={(e) => onFile(e.target.files?.[0])} />
               <FileSpreadsheet className="h-5 w-5 text-chart-2" />
               <span>Drop a CSV to populate columns (optional)</span>
             </label>

@@ -37,6 +37,7 @@ import {
   Popover, PopoverContent, PopoverTrigger,
 } from "@/components/ui/popover";
 import { Conversations } from "@/components/inbox/Conversations";
+import { listInboxLeadsFn } from "@/lib/server-fns/inbox";
 
 export const Route = createFileRoute("/inbox/")({
   component: InboxPage,
@@ -99,10 +100,29 @@ function InboxPage() {
   const [createdWin, setCreatedWin] = useState<DateWindow>("all");
   const [interactedWin, setInteractedWin] = useState<DateWindow>("all");
 
+  // -------------------- leads source --------------------
+  // Seed the list with `LEAD_RECORDS` so first paint is instant, then hydrate
+  // from D1 on mount. Same pattern as `campaigns.index.tsx`: D1 wins when
+  // present, seed stays as the fallback (cold prod, D1 unbound, read failure).
+  const [leads, setLeads] = useState<LeadRecord[]>(LEAD_RECORDS);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await listInboxLeadsFn();
+        if (cancelled || !r.ok || !r.leads.length) return;
+        setLeads(r.leads);
+      } catch {
+        /* silent — LEAD_RECORDS keeps rendering */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
   // -------------------- filtered + sorted list --------------------
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    const rows = LEAD_RECORDS.filter((l) => {
+    const rows = leads.filter((l) => {
       if (q) {
         const idMatch = l.id.toLowerCase().includes(q);
         const phoneMatch = l.phone.replace(/\s+/g, "").toLowerCase().includes(q.replace(/\s+/g, ""));
@@ -119,7 +139,7 @@ function InboxPage() {
     // Sort by last interaction descending — the WhatsApp-web convention.
     rows.sort((a, b) => b.lastInteractionAt.localeCompare(a.lastInteractionAt));
     return rows;
-  }, [search, campaigns, createdWin, interactedWin]);
+  }, [leads, search, campaigns, createdWin, interactedWin]);
 
   // -------------------- selection --------------------
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -181,7 +201,7 @@ function InboxPage() {
             )}
           </div>
           <div className="shrink-0 border-t border-border px-3 py-2 text-[11px] text-muted-foreground">
-            {filtered.length} of {LEAD_RECORDS.length} leads
+            {filtered.length} of {leads.length} leads
           </div>
         </aside>
 

@@ -24,3 +24,4 @@ export * as tools from "./tools";
 export * as broadcasts from "./broadcasts";
 export * as reports from "./reports";
 export * as freeformWorkflows from "./freeform-workflows";
+export * as inbox from "./inbox";
