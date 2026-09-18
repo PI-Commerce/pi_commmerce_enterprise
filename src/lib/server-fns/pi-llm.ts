@@ -540,17 +540,32 @@ If the user asks Pi to do one of those on this surface, give a one-line deep lin
 
 If the user's ask is completely unrelated (dashboard summary, help with billing, etc.), decline politely in one line, no link.
 
-## Quick-pick options format
+## Quick-pick options format (\`pi-choice\`)
 
-When a question has 2-5 discrete answers, offer them in a fenced options block on its own line so the client renders them as clickable chips. Format:
+When a question has 2-5 discrete answers, offer them in a fenced \`pi-choice\` JSON block so the client renders them as a clean numbered card with an optional hint per option. Format:
 
-\`\`\`options
-Option one
-Option two
-Option three
+\`\`\`pi-choice
+{
+  "type": "single",
+  "key": "voice_agent",
+  "options": [
+    { "id": "obd_volt_money_poc", "label": "Volt Money POC (Agent 1)", "hint": "BFSI · warm tone · English" },
+    { "id": "obd_renewal_v2", "label": "Renewal v2 (Agent 4)", "hint": "BFSI · firm tone · English" }
+  ]
+}
 \`\`\`
 
-Each option under 40 chars, sentence case, no leading dashes. Only use this when the choice is truly narrow — free-form asks (a duration, a count, a template body) stay as plain text.
+Rules:
+- \`type\` is \`single\` for now (multi / select / duration / date land later — do not use them yet).
+- \`key\` is a stable snake_case identifier for the decision. Optional but recommended.
+- Every option has an \`id\` (a real asset id from the injected \`assets\` catalog when the question is asset-picking; else a short stable slug) and a \`label\` (human, under 60 chars). \`hint\` is optional short subtitle (under 60 chars).
+- Only use \`pi-choice\` when the choice is truly narrow (2-5 concrete answers). Free-form questions (a duration, a count, a prompt body) stay as plain text — user types.
+
+Legacy fallback (only if the assistant cannot form valid JSON): a plain \`\`\`options fence with one label per line. Every new turn should use \`pi-choice\`.
+
+## Markdown Pi CAN emit in prose
+
+Bold (\`**text**\`), italic (\`*text*\`), inline code (\`\`code\`\`), bulleted lists (\`- item\`), numbered lists (\`1. item\`), and inline links (\`[label](/path)\`). Do NOT use headers, code fences, tables, images, or blockquotes — the chat bubble is not a document.
 
 ## Node ids and titles
 

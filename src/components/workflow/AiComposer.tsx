@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Sparkles, X, PenLine } from "lucide-react";
-import { Link } from "@tanstack/react-router";
 import { CANVAS_CONTEXT } from "@/lib/ask-pi-context";
+import { renderChatMarkdown } from "@/lib/chat-markdown";
 import { getSuggestion } from "@/lib/pi-node-suggestions";
 import { askPi } from "@/lib/server-fns/pi-llm";
 import { summarizePiEdits, type PiToolCallLog } from "@/lib/pi-canvas-apply";
@@ -18,13 +18,35 @@ import {
 type State = "collapsed" | "open" | "thinking";
 
 /**
+ * A rich quick-pick block parsed out of a ```pi-choice fenced JSON. Beats
+ * the flat `options: string[]` form when Pi wants to attach hint text or
+ * pass a stable key back on selection.
+ */
+export type ChatChoice = {
+  /** Only `single` today. `multi` / `select` / `duration` / `date` land in
+   *  Phase C.2 — the schema below is already forwards compatible. */
+  type: "single" | "multi" | "select" | "duration" | "date";
+  /** Stable key Pi assigned to this decision. Optional; if present, the
+   *  client echoes it back so multi-turn chains stay clean. */
+  key?: string;
+  /** Optional question override; usually the surrounding message text
+   *  already asks the question, so this stays empty. */
+  question?: string;
+  options: Array<{ id: string; label: string; hint?: string }>;
+};
+
+/**
  * One turn of the Ask Pi conversation. Rendered as a bubble in the chat log.
  */
 type ChatMessage = {
   role: "user" | "assistant";
   content: string;
-  /** Quick-pick options parsed from a ```options fenced block on this turn. */
+  /** Legacy quick-pick options — a ```options fenced block, one label per
+   *  line. Kept for backwards compatibility with existing prompts. */
   options?: string[];
+  /** Rich quick-pick — a ```pi-choice fenced JSON block. Preferred going
+   *  forward. When both are present, `choice` wins. */
+  choice?: ChatChoice;
   /** One-line diff summary of nodes/edges Pi added on this turn. */
   edits?: string[];
 };
@@ -202,7 +224,7 @@ export function AiComposer({
         }
         const toolCalls = (r.toolCalls ?? []) as PiToolCallLog[];
         if (toolCalls.length > 0) onPiToolCalls?.(toolCalls);
-        const { text: bodyText, options } = parseOptionsBlock(r.answer);
+        const { text: bodyText, options, choice } = parsePiFencedBlocks(r.answer);
         const edits = summarizePiEdits(toolCalls);
         setMessages((prev) => [
           ...prev,
@@ -210,6 +232,7 @@ export function AiComposer({
             role: "assistant",
             content: bodyText || (edits.length > 0 ? "Done." : "Not sure what to do with that — could you rephrase?"),
             options,
+            choice,
             edits: edits.length > 0 ? edits : undefined,
           },
         ]);
@@ -321,12 +344,22 @@ export function AiComposer({
       {isOpen && (
         <div className="pointer-events-none" style={{ transform: `translateX(${dragX}px)` }}>
           <PiPanel innerRef={containerRef} className="w-[700px] max-w-[92vw]">
-            {/* Header */}
+            {/* Header — third-person is fine here because it's a UI chrome
+                surface tag, not Pi speaking. Shows the current activity
+                clearly: "Drafting…" while a request is in flight, "Ready"
+                otherwise. */}
             <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
               <div className="flex items-center gap-2">
-                <Sparkles className="h-3.5 w-3.5 text-ai" />
-                <span className="text-[12.5px] font-medium text-foreground">Ask Pi</span>
-                {messages.length > 0 && (
+                <Sparkles
+                  className={cn(
+                    "h-3.5 w-3.5 text-ai",
+                    state === "thinking" && "animate-pulse",
+                  )}
+                />
+                <span className="text-[12.5px] font-medium text-foreground">
+                  {state === "thinking" ? "Paytm Intelligence at work" : "Ask Pi"}
+                </span>
+                {messages.length > 0 && state !== "thinking" && (
                   <span className="text-[10.5px] text-muted-foreground">
                     · {messages.length} {messages.length === 1 ? "turn" : "turns"}
                   </span>
@@ -417,44 +450,6 @@ export function AiComposer({
  * of quick-pick chips (parsed from ```options blocks) — but only for the
  * MOST RECENT assistant turn, so old options don't stay tappable.
  */
-/** Inline Markdown-lite renderer. Handles `**bold**` and `[label](href)` so
- *  Pi's copy renders correctly right now — including the deep links Pi
- *  surfaces when a required asset is missing ("Go to Agents"). Phase C
- *  replaces this with a proper Markdown pass (bold, italic, code, list, link,
- *  paragraph). Until then this covers the two forms Pi actually emits.
- *
- *  Links go through TanStack Router's `Link` when the href starts with `/`
- *  (SPA navigation, keeps route state). External hrefs become plain
- *  `<a target="_blank">`. */
-function renderInlineMarkdown(text: string): React.ReactNode[] {
-  const out: React.ReactNode[] = [];
-  // Combined regex: matches EITHER `**bold**` OR `[label](href)`. Alternation
-  // captures four groups: [1]=bold body, [2]=link label, [3]=link href.
-  const re = /\*\*([^*]+)\*\*|\[([^\]]+)\]\(([^)]+)\)/g;
-  let last = 0;
-  let m: RegExpExecArray | null;
-  let key = 0;
-  while ((m = re.exec(text)) !== null) {
-    if (m.index > last) out.push(text.slice(last, m.index));
-    if (m[1] !== undefined) {
-      out.push(<strong key={`b${key++}`} className="font-semibold">{m[1]}</strong>);
-    } else if (m[2] !== undefined && m[3] !== undefined) {
-      const label = m[2];
-      const href = m[3];
-      out.push(
-        href.startsWith("/") ? (
-          <Link key={`l${key++}`} to={href} className="font-medium text-ai underline underline-offset-2 hover:text-ai/80">{label}</Link>
-        ) : (
-          <a key={`l${key++}`} href={href} target="_blank" rel="noreferrer" className="font-medium text-ai underline underline-offset-2 hover:text-ai/80">{label}</a>
-        ),
-      );
-    }
-    last = m.index + m[0].length;
-  }
-  if (last < text.length) out.push(text.slice(last));
-  return out.length ? out : [text];
-}
-
 function ChatBubble({
   message,
   showOptions,
@@ -467,18 +462,25 @@ function ChatBubble({
   if (message.role === "user") {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[80%] rounded-2xl rounded-tr-sm bg-foreground px-3 py-2 text-[13px] leading-relaxed text-background">
+        <div className="max-w-[80%] whitespace-pre-wrap rounded-2xl rounded-tr-sm bg-foreground px-3 py-2 text-[13px] leading-relaxed text-background">
           {message.content}
         </div>
       </div>
     );
   }
+
+  // Prefer the rich `choice` block when present. Falls back to the flat
+  // `options` list from a legacy ```options fence.
+  const richOptions = message.choice?.options.map((o) => ({ id: o.id, label: o.label, hint: o.hint }));
+  const flatOptions = message.options?.map((o) => ({ id: o, label: o, hint: undefined as string | undefined }));
+  const picker = richOptions ?? flatOptions;
+
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-start gap-2">
         <Sparkles className="mt-1 h-3.5 w-3.5 shrink-0 text-ai" />
-        <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-tl-sm border border-border bg-card px-3 py-2 text-[13px] leading-relaxed text-foreground">
-          {renderInlineMarkdown(message.content)}
+        <div className="max-w-[85%] rounded-2xl rounded-tl-sm border border-border bg-card px-3 py-2 text-[13px] leading-relaxed text-foreground">
+          {renderChatMarkdown(message.content)}
           {message.edits && message.edits.length > 0 && (
             <div className="mt-2 space-y-0.5 border-t border-border pt-2 font-mono text-[11px] text-muted-foreground">
               {message.edits.map((e, i) => (
@@ -488,29 +490,32 @@ function ChatBubble({
           )}
         </div>
       </div>
-      {showOptions && message.options && message.options.length > 0 && (
-        // Vertical numbered-row picker (matches the Claude-style options UI).
-        // Beats the flat pill row when there are more than a couple of
-        // options; also gives Pi room to attach short hint text per option
-        // in Phase C. For now every option is a bare label.
+      {showOptions && picker && picker.length > 0 && (
+        // Numbered-row picker. Each row shows the label + an optional hint
+        // subtitle (from `pi-choice`), and the whole card sits under the
+        // assistant bubble. Escape hatch at the bottom points the user at
+        // the free-form input for anything the chips don't cover.
         <div className="ml-6 flex flex-col overflow-hidden rounded-2xl border border-border bg-card/60">
-          {message.options.map((opt, i) => (
+          {picker.map((opt, i) => (
             <button
-              key={opt}
-              onClick={() => onPick(opt)}
+              key={opt.id}
+              onClick={() => onPick(opt.label)}
               className={cn(
-                "group flex items-center gap-3 border-b border-border/60 px-3 py-2.5 text-left last:border-b-0",
+                "group flex items-start gap-3 border-b border-border/60 px-3 py-2.5 text-left last:border-b-0",
                 "transition-colors hover:bg-ai/5",
               )}
             >
-              <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md border border-border bg-background text-[10.5px] font-medium text-muted-foreground group-hover:border-ai/60 group-hover:text-ai">
+              <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border border-border bg-background text-[10.5px] font-medium text-muted-foreground group-hover:border-ai/60 group-hover:text-ai">
                 {i + 1}
               </span>
-              <span className="text-[13px] leading-snug text-foreground">{opt}</span>
+              <span className="flex min-w-0 flex-col">
+                <span className="text-[13px] leading-snug text-foreground">{opt.label}</span>
+                {opt.hint && (
+                  <span className="mt-0.5 text-[11.5px] leading-snug text-muted-foreground">{opt.hint}</span>
+                )}
+              </span>
             </button>
           ))}
-          {/* Escape hatch: user can always type a free-form answer instead.
-              Not a button — just a visual cue pointing them at the input. */}
           <div className="flex items-center gap-3 border-t border-border/60 bg-muted/30 px-3 py-2 text-[12px] text-muted-foreground">
             <PenLine className="h-3.5 w-3.5" />
             <span>Or type something else…</span>
@@ -522,25 +527,73 @@ function ChatBubble({
 }
 
 /**
- * Parse a ```options fenced block out of an assistant message. Returns the
- * remaining prose plus the list of options. Any of:
- *   ```options
- *   Option A
- *   Option B
+ * Extract any Pi-fenced control blocks (`pi-choice` JSON, legacy `options`
+ * plain-list) out of an assistant message. Returns the remaining prose plus
+ * whichever control block Pi emitted.
+ *
+ * Precedence: if BOTH `pi-choice` and `options` appear (Pi shouldn't do
+ * this but LLMs sometimes emit both for safety), the rich `choice` wins
+ * and the flat `options` is dropped.
+ *
+ * `pi-choice` schema (Pi is instructed to emit this in SYSTEM_BUILDER):
+ *   ```pi-choice
+ *   {
+ *     "type": "single",
+ *     "key": "voice_agent",
+ *     "options": [
+ *       { "id": "agent_1", "label": "Amber", "hint": "BFSI · warm tone" },
+ *       { "id": "agent_2", "label": "Meera", "hint": "BFSI · firm tone" }
+ *     ]
+ *   }
  *   ```
- * Also tolerates optional leading bullets ("- ", "* ") in each option line.
+ *
+ * Malformed JSON degrades to `undefined choice` — the surrounding prose
+ * still renders, so the user isn't stuck.
  */
-function parseOptionsBlock(md: string): { text: string; options?: string[] } {
-  const re = /```options\s*\n([\s\S]*?)```/i;
-  const m = md.match(re);
-  if (!m || m.index === undefined) return { text: md.trim() };
-  const raw = m[1];
-  const options = raw
-    .split("\n")
-    .map((s) => s.replace(/^\s*[-*]\s+/, "").trim())
-    .filter((s) => s.length > 0 && s.length < 80);
-  const before = md.slice(0, m.index).trim();
-  const after = md.slice(m.index + m[0].length).trim();
-  const text = [before, after].filter(Boolean).join("\n\n");
-  return { text, options: options.length > 0 ? options : undefined };
+function parsePiFencedBlocks(md: string): { text: string; options?: string[]; choice?: ChatChoice } {
+  let working = md;
+  let choice: ChatChoice | undefined;
+  let options: string[] | undefined;
+
+  // pi-choice (rich)
+  const choiceRe = /```pi-choice\s*\n([\s\S]*?)```/i;
+  const cm = working.match(choiceRe);
+  if (cm && cm.index !== undefined) {
+    try {
+      const parsed = JSON.parse(cm[1]) as ChatChoice;
+      if (parsed && Array.isArray(parsed.options) && parsed.options.length > 0) {
+        // Coerce optional fields to safe defaults.
+        choice = {
+          type: parsed.type ?? "single",
+          key: parsed.key,
+          question: parsed.question,
+          options: parsed.options
+            .filter((o) => o && typeof o.label === "string")
+            .map((o) => ({ id: o.id ?? o.label, label: o.label, hint: o.hint })),
+        };
+      }
+    } catch {
+      // Malformed JSON — leave `choice` undefined; the prose still renders.
+    }
+    working = (working.slice(0, cm.index).trim() + "\n\n" + working.slice(cm.index + cm[0].length).trim()).trim();
+  }
+
+  // Legacy options (flat)
+  const optRe = /```options\s*\n([\s\S]*?)```/i;
+  const om = working.match(optRe);
+  if (om && om.index !== undefined) {
+    const raw = om[1];
+    const list = raw
+      .split("\n")
+      .map((s) => s.replace(/^\s*[-*]\s+/, "").trim())
+      .filter((s) => s.length > 0 && s.length < 80);
+    if (list.length > 0) options = list;
+    working = (working.slice(0, om.index).trim() + "\n\n" + working.slice(om.index + om[0].length).trim()).trim();
+  }
+
+  return {
+    text: working.trim(),
+    // Rich choice wins if both are present.
+    ...(choice ? { choice } : options ? { options } : {}),
+  };
 }
