@@ -25,6 +25,7 @@ import * as rcsDb from "@/lib/db/rcs-templates";
 import * as toolsDb from "@/lib/db/tools";
 import { CANONICAL_CONSTRUCT_RULES } from "@/lib/pi-construct-rules";
 import { BUILDER_ALLOWED_KINDS, summarizeRegistryForContext } from "@/lib/node-registry";
+import { computeAllValidity } from "@/lib/node-validity";
 
 export type BuilderContext = {
   surface: "campaigns.builder";
@@ -33,6 +34,10 @@ export type BuilderContext = {
     nodes: Array<{ id: string; kind: string; title: string; subtitle?: string; config?: unknown }>;
     edges: Array<{ id: string; source: string; target: string; sourceHandle?: string }>;
   } | null;
+  /** Per-node validity, one entry per node in `dsl.nodes`. Pi cites this
+   *  when asking about missing config ("your Voice node is missing an
+   *  agent — pick one?") or when confirming a save is safe. */
+  validity: Array<{ nodeId: string; kind: string; valid: boolean; error?: string }>;
   rules: string;
   nodeKinds: ReturnType<typeof summarizeRegistryForContext>;
   assets: {
@@ -166,10 +171,16 @@ export async function assembleBuilderContext(campaignId: string | undefined): Pr
     diag,
   }));
 
+  // Registry-driven per-node validity for the current DSL. Cheap to
+  // compute (pure), and Pi uses it to proactively point out "your Voice
+  // node is missing an agent" without needing a separate tool call.
+  const validity = dsl ? computeAllValidity(dsl.nodes) : [];
+
   return {
     surface: "campaigns.builder",
     campaign,
     dsl,
+    validity,
     rules: CANONICAL_CONSTRUCT_RULES,
     nodeKinds: summarizeRegistryForContext(BUILDER_ALLOWED_KINDS),
     assets: { voiceAgents, waTemplates, smsTemplates, rcsTemplates, tools },

@@ -14,9 +14,10 @@
  * Pi answers — no round-trip, no rebuild.
  */
 import type { Edge, Node } from "reactflow";
-import type { WorkflowNodeData } from "@/lib/campaign-types";
+import type { WorkflowNodeData, NodeKind, PresetConfig } from "@/lib/campaign-types";
 import { validateAndHealPiToolCalls, type ValidatorHeal, type ValidatorError } from "@/lib/pi-construct-validator";
 import { stripDraftSkeletons, hasDraftSkeletons } from "@/lib/pi-draft-skeleton";
+import { computeNodeValidity } from "@/lib/node-validity";
 
 /** One entry in the server fn's `toolCalls` array. */
 export type PiToolCallLog = {
@@ -102,6 +103,16 @@ export function applyPiToolCallsToGraph(
           ? Math.round(ns.reduce((s, n) => s + n.position.y, 0) / ns.length)
           : 0;
         const pos = node.position ?? { x: maxX + 260, y: avgY };
+        // Compute real validity for the freshly-inserted node using the
+        // registry's `requires` list. Pi's insert_node calls almost never
+        // arrive with a fully-populated config, so this typically lands
+        // as { valid: false, error: "Missing a voice agent" } — the
+        // canvas shows a red error tag, the config panel guides the fix,
+        // and the next update_node from Pi (or user) flips it green.
+        const validity = computeNodeValidity(
+          node.kind as NodeKind,
+          node.config as PresetConfig | undefined,
+        );
         ns = [
           ...ns,
           {
@@ -115,9 +126,8 @@ export function applyPiToolCallsToGraph(
               subtitle: node.subtitle,
               kind: node.kind,
               config: node.config,
-              // Real validity is computed downstream by the config panel and
-              // the construct validator (Phase B). We start `undefined` so the
-              // canvas shows a "needs config" state instead of a false green.
+              valid: validity.valid,
+              ...(validity.error ? { error: validity.error } : {}),
             } as unknown as WorkflowNodeData,
           },
         ];
@@ -164,6 +174,16 @@ export function applyPiToolCallsToGraph(
         const idx = ns.findIndex((n) => n.id === nodeId);
         if (idx < 0) break;
         const existing = ns[idx];
+        // Merge the config first, then recompute validity from the merged
+        // shape so a patch that satisfies the last missing `requires` key
+        // flips valid: false → true (and clears the error line).
+        const nextConfig = patch.config !== undefined
+          ? { ...(existing.data.config ?? {}), ...patch.config }
+          : existing.data.config;
+        const validity = computeNodeValidity(
+          existing.data.kind as NodeKind,
+          nextConfig as PresetConfig | undefined,
+        );
         ns = [
           ...ns.slice(0, idx),
           {
@@ -172,9 +192,9 @@ export function applyPiToolCallsToGraph(
               ...existing.data,
               ...(patch.title !== undefined ? { title: patch.title } : {}),
               ...(patch.subtitle !== undefined ? { subtitle: patch.subtitle } : {}),
-              ...(patch.config !== undefined
-                ? { config: { ...(existing.data.config ?? {}), ...patch.config } }
-                : {}),
+              ...(patch.config !== undefined ? { config: nextConfig } : {}),
+              valid: validity.valid,
+              ...(validity.error ? { error: validity.error } : { error: undefined }),
             } as WorkflowNodeData,
           },
           ...ns.slice(idx + 1),
