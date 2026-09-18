@@ -425,6 +425,12 @@ export function WorkflowCanvas({
   // updates the moment Pi's answer arrives — no refetch, no round-trip.
   // The same tool calls also wrote to D1 server-side (via the askPi
   // handler), so the change survives refresh.
+  // Ref-held handle to autoArrange (defined further down). Populated by
+  // an effect so `applyDraftSkeleton` and `applyPiToolCalls` (both
+  // declared above autoArrange) can trigger a relayout without hitting
+  // TDZ on the const reference.
+  const autoArrangeRef = useRef<(() => Promise<void>) | null>(null);
+
   // Confirm-Draft accepted — insert shape-aware pulsating skeletons that
   // mirror Pi's proposed plan (one placeholder per channel per branch,
   // laid out LTR, converging into `end`). Pi's real insert_node calls
@@ -432,21 +438,28 @@ export function WorkflowCanvas({
   // just before applying the real inserts so the swap is atomic.
   const applyDraftSkeleton = useCallback(
     (draft: ProposedDraft) => {
-      const { skeletonNodes, skeletonEdges } = buildDraftSkeleton(draft, nodes);
+      const { skeletonNodes, skeletonEdges, endPositionUpdate } = buildDraftSkeleton(draft, nodes);
       if (skeletonNodes.length === 0) return;
-      setNodes((ns) => [...ns, ...skeletonNodes]);
+      setNodes((ns) => {
+        const withEndMoved = endPositionUpdate
+          ? ns.map((n) => (n.id === endPositionUpdate.id ? { ...n, position: endPositionUpdate.position } : n))
+          : ns;
+        return [...withEndMoved, ...skeletonNodes];
+      });
       setEdges((es) => [...es, ...skeletonEdges]);
       onDirty?.();
-      // Refit so the pulsating shape lands in the viewport centre.
-      refit();
+      // Two rAFs then ELK relayout — same pattern as applyPiToolCalls.
+      // ReactFlow needs to mount + measure the new pulsating nodes before
+      // ELK can size them correctly. Without this the skeleton lays out
+      // haphazardly even with a well-formed proposal.
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          void autoArrangeRef.current?.();
+        });
+      });
     },
-    [nodes, setNodes, setEdges, onDirty, refit],
+    [nodes, setNodes, setEdges, onDirty],
   );
-
-  // Held as a ref so `applyPiToolCalls` (declared above `autoArrange`)
-  // can trigger a relayout without hitting TDZ on the const reference.
-  // Populated by the effect below once autoArrange is defined.
-  const autoArrangeRef = useRef<(() => Promise<void>) | null>(null);
 
   const applyPiToolCalls = useCallback(
     (toolCalls: PiToolCallLog[]) => {

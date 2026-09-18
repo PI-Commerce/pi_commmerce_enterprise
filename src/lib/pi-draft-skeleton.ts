@@ -24,11 +24,19 @@ const SKELETON_PREFIX = "_skel_";
 
 /** Build the skeleton graph from a proposed draft. Positions are LTR
  *  hints (ELK re-lays anyway); the middle band aligns to the audience
- *  row Y. */
+ *  row Y. Also returns an updated position for the End node so it stays
+ *  the rightmost node (the caller applies it before rendering the
+ *  skeleton, otherwise End sits in the middle of the skeleton band and
+ *  edges route through it looking chaotic). */
 export function buildDraftSkeleton(
   draft: ProposedDraft,
   currentNodes: Node<WorkflowNodeData>[],
-): { skeletonNodes: Node<WorkflowNodeData>[]; skeletonEdges: Edge[] } {
+): {
+  skeletonNodes: Node<WorkflowNodeData>[];
+  skeletonEdges: Edge[];
+  /** New position for the End node (push it right of the skeleton band). */
+  endPositionUpdate?: { id: string; position: { x: number; y: number } };
+} {
   const skeletonNodes: Node<WorkflowNodeData>[] = [];
   const skeletonEdges: Edge[] = [];
 
@@ -51,6 +59,10 @@ export function buildDraftSkeleton(
     skeletonNodes.push(makeSkeletonNode(splitterId, "conditional", anchorX, anchorY, "Route by condition"));
   }
 
+  // Track the max X the skeleton band will reach — used to push End
+  // beyond it so edges to End never route through the skeleton.
+  let maxSkeletonX = anchorX;
+
   // For each branch, walk channels left-to-right.
   draft.branches.forEach((branch, bIdx) => {
     // Center branches vertically around the audience row.
@@ -72,6 +84,7 @@ export function buildDraftSkeleton(
         type: "routed",
       });
       prevId = id;
+      if (x > maxSkeletonX) maxSkeletonX = x;
       x += stepGap;
     });
 
@@ -85,7 +98,15 @@ export function buildDraftSkeleton(
     });
   });
 
-  return { skeletonNodes, skeletonEdges };
+  // Push End to the right of the rightmost skeleton pill so the final
+  // convergence edges route cleanly left-to-right. Only fire if we know
+  // where the current End sits.
+  const endNode = currentNodes.find((n) => n.data.kind === "end");
+  const endPositionUpdate = endNode
+    ? { id: endNode.id, position: { x: maxSkeletonX + stepGap, y: anchorY } }
+    : undefined;
+
+  return { skeletonNodes, skeletonEdges, endPositionUpdate };
 }
 
 function makeSkeletonNode(

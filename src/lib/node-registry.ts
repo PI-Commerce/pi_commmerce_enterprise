@@ -111,15 +111,14 @@ export const NODE_REGISTRY: Record<NodeKind, NodeRegistryEntry> = {
     kind: "abSplit",
     label: "A/B Split",
     group: "logic",
-    purpose: "Splits the flow by percentage into named variants for experimentation. Not for logical branching — use Conditional for that.",
+    purpose: "Splits the flow by percentage into named variants for experimentation (e.g. 60/40 template split, 50/50 timing split). Use when the user wants to compare variants of the SAME channel or timing — not for logical routing (that's `conditional`).",
     requires: ["splitVariants"],
     emits: [
       { kind: "dynamic", source: "conditional.branches", hint: "One per configured A/B variant." },
     ],
     undeletable: false,
     layoutRole: "standard",
-    // Reserved for user-driven experimentation. Pi doesn't reach for it.
-    allowedForBuilder: false,
+    allowedForBuilder: true,
   },
   delay: {
     kind: "delay",
@@ -223,14 +222,12 @@ export const NODE_REGISTRY: Record<NodeKind, NodeRegistryEntry> = {
     kind: "aiTransform",
     label: "AI Transformation",
     group: "ai",
-    purpose: "Runs a per-lead AI transformation (translate, transliterate, numerical parsing, custom prompt) on a variable. Reserved for advanced pipelines — Pi does not reach for this on its own; users add it via the palette when needed.",
+    purpose: "Runs a per-lead AI transformation on an existing variable (translate a name to Hindi, format a phone number, parse a number, run a custom prompt on a string). ONLY use when the user needs to derive a NEW variable from an existing one before a downstream node consumes it. NEVER use as a stand-in for voice calling (that's `voiceCall`), for messaging (that's `whatsapp` / `sms` / `rcs`), or for asset authoring.",
     requires: ["transforms"],
     emits: [{ kind: "static", id: "default", label: "default" }],
     undeletable: false,
     layoutRole: "standard",
-    // Explicitly OFF for builder scope — Pi has misused this in the past as a
-    // stand-in for `voiceCall`. Keep it out of Pi's tool surface entirely.
-    allowedForBuilder: false,
+    allowedForBuilder: true,
   },
 };
 
