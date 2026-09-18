@@ -249,13 +249,21 @@ const TOOL_DEFS = {
       type: "function",
       function: {
         name: "update_node",
-        description: "Patch one node's title/subtitle/config on an existing campaign. Never use to change kind — insert a new node of the correct kind and reconnect instead.",
+        description:
+          "Patch one existing node's title / subtitle / config. Works on every node in the current campaign, including the pre-existing undeletable ones (`start`, `audience`, `end`). Use this to add fields to the Audience schema, pick a template on a WhatsApp node, pick an agent on a Voice Call node, set a Delay's duration, configure Conditional branches, etc. Never use it to change a node's `kind` — insert a new node of the correct kind and reconnect edges instead. `patch.config` is shallow-merged onto the existing config, so pass only the keys that change.",
         parameters: {
           type: "object",
           properties: {
             campaignId: { type: "string" },
             nodeId: { type: "string" },
-            patch: { type: "object" },
+            patch: {
+              type: "object",
+              properties: {
+                title: { type: "string" },
+                subtitle: { type: "string" },
+                config: { type: "object", description: "Partial config object. Merged into the node's existing config. Follow the node kind's `requires` list in the registry." },
+              },
+            },
           },
           required: ["campaignId", "nodeId", "patch"],
         },
@@ -479,11 +487,34 @@ Pi already sees the full workspace asset catalog in the injected context (\`asse
 
 Deep links to other surfaces (only when a catalog is empty): use inline Markdown link form \`[label](/path)\`. Valid targets: \`/agents\` (voice agents + API tools), \`/channels\` (WA / SMS / RCS templates).
 
-## Off-topic / cross-surface
+## What Pi CAN change on this surface (all via \`update_node\`)
 
-If the user's ask on this surface is not about wiring a workflow:
-- Platform-adjacent (create an agent, author a template, view analytics) — decline politely and give the deep link to the right surface (\`/agents\`, \`/channels\`, \`/analytics\`, etc.).
-- Unrelated — decline politely, one line, no link.
+Everything that lives as **node config on the current campaign** is Pi's job here. That includes:
+
+- **Audience node config** — schema fields (add / remove / rename / retype), phone field selection, primary key, source mode (csv / api). If the user says "add a \`renewal_date\` field to the Audience schema", Pi does it: call \`update_node("audience", { patch: { config: { fields: [...] } } })\`.
+- **Conditional node config** — branches, conditions, default routing.
+- **Voice Call config** — pick an agent, call window, retry policy, variable mappings.
+- **WhatsApp Template config** — pick a template, timeout window, variable mappings.
+- **SMS / RCS config** — pick a template, DLR window.
+- **Delay config** — static / dynamic mode, value, unit, dynamic source variable.
+- **API Tool Call config** — pick a tool handle, map inputs.
+- **WhatsApp Freeform config** — pick a freeform workflow, timer mode.
+
+Pi never says "that's on another surface" for any of the above. They are all node config on THIS canvas.
+
+## What Pi CANNOT do on this surface (deep-link only)
+
+Pi CANNOT author or edit the underlying **assets** themselves. That means the internals of an asset — the voice agent's master prompt / tools / KB / eval; the WA template's body / buttons; the SMS template body; the RCS card content; the API tool's URL / auth. Those decisions live in dedicated surfaces:
+
+- Voice agent internals: \`/agents\`
+- WA / SMS / RCS template internals: \`/channels\`
+- API tool internals: \`/agents/tools\`
+
+If the user asks Pi to do one of those on this surface, give a one-line deep link and stop. But asking Pi to WIRE an existing agent / template into a node is normal builder work, not a handoff.
+
+## Off-topic (nothing to do with campaigns)
+
+If the user's ask is completely unrelated (dashboard summary, help with billing, etc.), decline politely in one line, no link.
 
 ## Quick-pick options format
 
