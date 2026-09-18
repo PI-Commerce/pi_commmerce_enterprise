@@ -114,6 +114,29 @@ export const createBlankCampaignFn = createServerFn({ method: "POST" })
     }
   });
 
+export type ResetCampaignResult =
+  | { ok: true }
+  | { ok: false; error: string };
+
+/**
+ * Wipe every non-canonical node + edge for a campaign. Fired by the
+ * canvas when the user accepts a new Draft this, so Pi's fresh build
+ * doesn't accumulate on top of the previous draft. Start / Audience
+ * / End stay put; everything Pi inserted in prior turns goes.
+ */
+export const resetCampaignForNewDraftFn = createServerFn({ method: "POST" })
+  .inputValidator((r: { campaignId: string }) => r)
+  .handler(async ({ data }): Promise<ResetCampaignResult> => {
+    const bail = bailWithoutDb();
+    if (bail) return bail;
+    try {
+      await campaignsDb.resetCampaignForNewDraft(data.campaignId);
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: `d1_write_failed: ${(e as Error).message}` };
+    }
+  });
+
 export type UpdateNodePositionsResult =
   | { ok: true }
   | { ok: false; error: string };

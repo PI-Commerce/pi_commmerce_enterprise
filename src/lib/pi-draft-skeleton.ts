@@ -159,6 +159,34 @@ export function stripDraftSkeletons(
   return { nodes: outNodes, edges: outEdges, stripped: outNodes.length + outEdges.length !== before };
 }
 
+/**
+ * Strip EVERY non-canonical node from the canvas — the three blank-canvas
+ * anchors (start, audience, end) stay, everything else goes. Called when
+ * the user accepts a new Draft this so Pi rebuilds from a clean slate
+ * instead of piling nodes on top of a previous plan.
+ *
+ * Without this, every propose_draft cycle would accumulate: after 5 iterations
+ * the canvas has 30+ nodes and edges routing across each other. The user
+ * expects "Draft this" to REPLACE the flow, not append to it.
+ *
+ * Also strips the audience > end auto-edge if it happens to exist, since
+ * Pi's fresh build will re-wire from audience to whatever the first real
+ * downstream node is.
+ */
+const CANONICAL_IDS = new Set(["start", "audience", "end"]);
+
+export function resetCanvasForNewDraft(
+  nodes: Node<WorkflowNodeData>[],
+  edges: Edge[],
+): { nodes: Node<WorkflowNodeData>[]; edges: Edge[]; strippedCount: number } {
+  const outNodes = nodes.filter((n) => CANONICAL_IDS.has(n.id));
+  const outEdges = edges.filter(
+    (e) => CANONICAL_IDS.has(e.source) && CANONICAL_IDS.has(e.target),
+  );
+  const strippedCount = (nodes.length - outNodes.length) + (edges.length - outEdges.length);
+  return { nodes: outNodes, edges: outEdges, strippedCount };
+}
+
 /** Does the graph currently carry any draft skeletons? Used to gate
  *  the "Drafting…" pill state on the chat. */
 export function hasDraftSkeletons(nodes: Node<WorkflowNodeData>[]): boolean {

@@ -122,9 +122,17 @@ function renderInline(text: string, keyPrefix: string): React.ReactNode[] {
   return out.length ? out : [text];
 }
 
+/** Scrub the AI-fluff dashes Pi occasionally slips into replies despite
+ *  the prompt banning them. Em-dash (U+2014), en-dash (U+2013), and
+ *  horizontal-bar (U+2015) all become plain " - ". Applied to the raw
+ *  source before block parsing so downstream rendering never sees them. */
+function scrubDashes(source: string): string {
+  return source.replace(/[–—―]/g, " - ").replace(/\s+-\s+/g, " - ");
+}
+
 /** Render a full assistant/user message as a paragraph + list stack. */
 export function renderChatMarkdown(source: string): React.ReactNode {
-  const blocks = parseBlocks(source);
+  const blocks = parseBlocks(scrubDashes(source));
   if (!blocks.length) return null;
   return (
     <>

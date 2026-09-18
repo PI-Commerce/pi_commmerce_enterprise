@@ -16,8 +16,8 @@ import { EXAMPLE_CAMPAIGNS } from "@/lib/campaign-examples";
 import { getSuggestion } from "@/lib/pi-node-suggestions";
 import { applyPiToolCallsToGraph, type PiToolCallLog } from "@/lib/pi-canvas-apply";
 import type { ProposedDraft } from "@/lib/pi-propose-draft";
-import { buildDraftSkeleton } from "@/lib/pi-draft-skeleton";
-import { readCampaignFn, updateNodePositionsFn } from "@/lib/server-fns/campaigns";
+import { buildDraftSkeleton, resetCanvasForNewDraft } from "@/lib/pi-draft-skeleton";
+import { readCampaignFn, updateNodePositionsFn, resetCampaignForNewDraftFn } from "@/lib/server-fns/campaigns";
 import { dslToReactFlow } from "@/lib/dsl-convert";
 import { elkLayout, type Point } from "@/lib/flow-layout";
 import { useRegion, localizeTzAbbrev, localizeCurrency } from "@/lib/region";
@@ -438,16 +438,32 @@ export function WorkflowCanvas({
   // just before applying the real inserts so the swap is atomic.
   const applyDraftSkeleton = useCallback(
     (draft: ProposedDraft) => {
-      const { skeletonNodes, skeletonEdges, endPositionUpdate } = buildDraftSkeleton(draft, nodes);
+      // First: strip every non-canonical node from the canvas. Draft this
+      // replaces the flow, doesn't append to it. Without this, iterated
+      // drafts pile nodes on top of previous drafts and the canvas ends
+      // up with dozens of orphaned nodes across multiple sessions.
+      const reset = resetCanvasForNewDraft(nodes, edges);
+      const baseNodes = reset.nodes;
+      const baseEdges = reset.edges;
+      const { skeletonNodes, skeletonEdges, endPositionUpdate } = buildDraftSkeleton(draft, baseNodes);
       if (skeletonNodes.length === 0) return;
-      setNodes((ns) => {
+      setNodes(() => {
         const withEndMoved = endPositionUpdate
-          ? ns.map((n) => (n.id === endPositionUpdate.id ? { ...n, position: endPositionUpdate.position } : n))
-          : ns;
+          ? baseNodes.map((n) => (n.id === endPositionUpdate.id ? { ...n, position: endPositionUpdate.position } : n))
+          : baseNodes;
         return [...withEndMoved, ...skeletonNodes];
       });
-      setEdges((es) => [...es, ...skeletonEdges]);
+      setEdges(() => [...baseEdges, ...skeletonEdges]);
       onDirty?.();
+
+      // Persist the reset to D1 too — otherwise a refresh mid-build would
+      // re-hydrate the old accumulated nodes. Fire-and-forget: canvas
+      // already looks clean; D1 catches up in the background.
+      if (reset.strippedCount > 0 && campaignId && campaignId !== "new") {
+        void resetCampaignForNewDraftFn({ data: { campaignId } }).catch(() => {
+          /* silent — Pi's follow-up inserts will overwrite anyway */
+        });
+      }
       // Two rAFs then ELK relayout — same pattern as applyPiToolCalls.
       // ReactFlow needs to mount + measure the new pulsating nodes before
       // ELK can size them correctly. Without this the skeleton lays out
@@ -458,7 +474,7 @@ export function WorkflowCanvas({
         });
       });
     },
-    [nodes, setNodes, setEdges, onDirty],
+    [nodes, edges, setNodes, setEdges, onDirty, campaignId],
   );
 
   const applyPiToolCalls = useCallback(

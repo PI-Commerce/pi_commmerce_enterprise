@@ -176,6 +176,31 @@ export async function writeCampaign(dsl: CampaignDsl): Promise<void> {
 }
 
 /**
+ * Delete every non-canonical node + edge from a campaign, leaving only
+ * the three pre-existing anchors (start, audience, end) and any edges
+ * strictly between them. Called when the user accepts a new Draft this
+ * so Pi rebuilds from a clean slate instead of piling nodes on top of
+ * a previous plan.
+ *
+ * Ordering matters: edges are deleted first (they reference nodes; if
+ * we drop nodes first the DB is fine because there are no FKs, but the
+ * ordering is cleaner). Uses a single batch call so the campaign is
+ * never in a half-cleaned state.
+ */
+export async function resetCampaignForNewDraft(campaignId: string): Promise<void> {
+  const db = getDb();
+  await db.batch([
+    db.prepare(
+      "DELETE FROM campaign_edges WHERE campaign_id = ? AND (source_id NOT IN ('start','audience','end') OR target_id NOT IN ('start','audience','end'))",
+    ).bind(campaignId),
+    db.prepare(
+      "DELETE FROM campaign_nodes WHERE campaign_id = ? AND id NOT IN ('start','audience','end')",
+    ).bind(campaignId),
+  ]);
+  await bumpUpdatedAt(campaignId);
+}
+
+/**
  * Bulk-update node positions for a campaign. Fired by the client after
  * ELK re-lays out (either the manual Wand2 button or the auto-arrange
  * that runs after Pi's inserts / skeleton insertion). Without this,
