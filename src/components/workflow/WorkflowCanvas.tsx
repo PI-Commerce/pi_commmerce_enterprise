@@ -72,9 +72,27 @@ const DEFAULT_NODE_DATA: Record<NodeKind, Partial<WorkflowNodeData>> = {
 
 let nodeCounter = 100;
 
+/**
+ * The canonical blank-canvas graph. Every fresh campaign renders these three
+ * nodes with Start > Audience already wired, matching the exact shape written
+ * to D1 by `createBlankCampaign`. On mount the D1 hydrate replaces this in
+ * place — but even if the D1 write hasn't landed yet, or D1 is unavailable,
+ * the user still sees the three canonical nodes instead of just Start.
+ *
+ * Positions are LEFT-to-RIGHT (ELK re-lays anyway once branches spread out).
+ * Start and End are locked so the delete key can't remove them.
+ */
 const BLANK_NODES: Node<WorkflowNodeData>[] = [
   { id: "start", type: "workflow", position: { x: 0, y: 0 },
     data: { kind: "start", title: "Start", locked: true, valid: true } },
+  { id: "audience", type: "workflow", position: { x: 240, y: 0 },
+    data: { kind: "audience", title: "Audience", subtitle: "Configure the source", valid: false, error: "Select source" } },
+  { id: "end", type: "workflow", position: { x: 480, y: 0 },
+    data: { kind: "end", title: "End", locked: true, valid: true } },
+];
+
+const BLANK_EDGES: Edge[] = [
+  { id: "e_start_audience", source: "start", target: "audience", type: "routed" },
 ];
 
 /**
@@ -125,7 +143,7 @@ export function WorkflowCanvas({
     isNew ? BLANK_NODES : example?.nodes ?? SEED_NODES,
   );
   const [edges, setEdges, onEdgesChange] = useEdgesState(
-    isNew ? [] : example?.edges ?? SEED_EDGES,
+    isNew ? BLANK_EDGES : example?.edges ?? SEED_EDGES,
   );
   const [selected, setSelected] = useState<{ id: string; data: WorkflowNodeData } | null>(null);
   const [askPiOpen, setAskPiOpen] = useState(false);
@@ -157,7 +175,13 @@ export function WorkflowCanvas({
   // from D1, canvas shows the updated graph. Falls back gracefully if D1
   // isn't bound (prod pre-provisioning): the seed graph already rendered.
   useEffect(() => {
-    if (isNew || !campaignId) return;
+    // Skip only when there's no real id (unlikely; the /campaigns/new URL
+    // path was retired in favour of minting a real id on Create). `isNew`
+    // no longer gates D1 hydration — a freshly created campaign has its
+    // baseline (Start, Audience, End) written to D1 at create time by
+    // `createBlankCampaignFn`, so hydrating on mount is what makes Ask
+    // Pi's context (`getBuilderContext`) see the same state the user does.
+    if (!campaignId || campaignId === "new") return;
     let cancelled = false;
     (async () => {
       try {
@@ -178,7 +202,7 @@ export function WorkflowCanvas({
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [campaignId, isNew]);
+  }, [campaignId]);
 
   // Localize region-sensitive node text — timezone abbreviations (e.g. the Voice
   // "Call window … IST" subtitle) and currency symbols in conditional labels
@@ -550,7 +574,7 @@ export function WorkflowCanvas({
       {!previewOnly && (
         <AiComposer
           mode={isNew ? "wizard" : "chat"}
-          nudge={{ label: "Ask Pi to build your campaign", active: autoStartAskPi }}
+          nudge={{ label: "Ask Pi to design the campaign workflow", active: autoStartAskPi }}
           autoOpenWizard={askPiOpen}
           campaignId={campaignId}
           onBuildingChange={setAiBuilding}

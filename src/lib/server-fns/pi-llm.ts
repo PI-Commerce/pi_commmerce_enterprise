@@ -22,6 +22,8 @@ import * as campaigns from "@/lib/db/campaigns";
 import * as analytics from "@/lib/db/analytics";
 import * as agentsDb from "@/lib/db/agents";
 import type { AgentRecord } from "@/lib/agent-data";
+import { assembleBuilderContext } from "@/lib/server-fns/builder-context";
+import { BUILDER_ALLOWED_KINDS } from "@/lib/node-registry";
 
 export type AskPiScope = "analytics" | "builder" | "agents";
 
@@ -128,8 +130,65 @@ const TOOL_DEFS = {
     {
       type: "function",
       function: {
+        name: "propose_draft",
+        description:
+          "Propose the workflow plan to the user for confirmation BEFORE any insert_node calls. Emit this once Pi has gathered enough context. The client renders the plan as a Confirm-Draft card in chat; the user hits 'Draft this' to accept or 'Edit' to revise. Never call insert_node without a prior propose_draft. Pi's proposal must respect the canonical construct rules (single End, LTR, bezier, WA Freeform placement rule, only allowed kinds, only real asset ids).",
+        parameters: {
+          type: "object",
+          properties: {
+            campaignId: { type: "string" },
+            title: { type: "string", description: "Short human title for the proposed workflow." },
+            summary: {
+              type: "string",
+              description: "One-line human summary of the flow (e.g. 'Audience > Conditional on renewal_date > WA branch, Voice branch > End').",
+            },
+            branches: {
+              type: "array",
+              description: "Ordered list of the branches Pi will wire. Each branch is one path from Audience to End.",
+              items: {
+                type: "object",
+                properties: {
+                  label: { type: "string", description: "Human label for this branch (e.g. 'Renewal in 5 days')." },
+                  channels: {
+                    type: "array",
+                    description: "Ordered list of channel + asset picks along this branch.",
+                    items: {
+                      type: "object",
+                      properties: {
+                        kind: {
+                          type: "string",
+                          enum: BUILDER_ALLOWED_KINDS,
+                          description: "Node kind (only allowed builder kinds).",
+                        },
+                        assetId: {
+                          type: "string",
+                          description: "Real id from the injected assets catalog — voice agent id, WA template id, SMS template id, RCS template id, or API tool handle. Never invent.",
+                        },
+                        note: { type: "string", description: "Optional one-line note (e.g. 'timeout > voice fallback')." },
+                      },
+                      required: ["kind"],
+                    },
+                  },
+                },
+                required: ["label", "channels"],
+              },
+            },
+            openQuestions: {
+              type: "array",
+              description: "Things Pi still isn't sure about. Empty means Pi is ready to build. Non-empty means Pi is asking the user to resolve these before Draft.",
+              items: { type: "string" },
+            },
+          },
+          required: ["campaignId", "title", "summary", "branches"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
         name: "insert_node",
-        description: "Insert a new node into a campaign's DAG.",
+        description:
+          "Insert a new node into a campaign's DAG. Only callable AFTER the user has accepted a propose_draft. Must use an allowed kind (see the injected nodeKinds registry). Position hints should be right of the rightmost existing node (ELK relays anyway).",
         parameters: {
           type: "object",
           properties: {
@@ -137,11 +196,22 @@ const TOOL_DEFS = {
             node: {
               type: "object",
               properties: {
-                id: { type: "string" },
-                kind: { type: "string" },
+                id: { type: "string", description: "Stable per-kind id (e.g. 'voiceCall_1', 'whatsapp_2')." },
+                kind: {
+                  type: "string",
+                  enum: BUILDER_ALLOWED_KINDS,
+                  description: "Node kind — must be one of the allowed builder kinds.",
+                },
                 title: { type: "string" },
                 subtitle: { type: "string" },
-                config: { type: "object" },
+                config: {
+                  type: "object",
+                  description: "Config keys per the registry's `requires` field. For kinds that pick an asset (WA template, voice agent, SMS template, API tool), use a real id/handle from the injected assets catalog.",
+                },
+                position: {
+                  type: "object",
+                  properties: { x: { type: "number" }, y: { type: "number" } },
+                },
               },
               required: ["id", "kind", "title"],
             },
@@ -154,7 +224,8 @@ const TOOL_DEFS = {
       type: "function",
       function: {
         name: "connect_nodes",
-        description: "Wire two nodes together in a campaign's DAG.",
+        description:
+          "Wire two nodes together. Every terminal branch of the flow must eventually connect into the single `end` node. `sourceHandle` names the source node's output port (e.g. 'timeout', 'failure', 'btn_yes', or a Conditional branch id). Omit `sourceHandle` for a node's default output.",
         parameters: {
           type: "object",
           properties: {
@@ -178,7 +249,7 @@ const TOOL_DEFS = {
       type: "function",
       function: {
         name: "update_node",
-        description: "Patch one node's title/subtitle/config on an existing campaign.",
+        description: "Patch one node's title/subtitle/config on an existing campaign. Never use to change kind — insert a new node of the correct kind and reconnect instead.",
         parameters: {
           type: "object",
           properties: {
@@ -272,6 +343,9 @@ async function runTool(name: string, args: Record<string, unknown>): Promise<unk
   })();
   if (!hasDb) {
     switch (name) {
+      case "propose_draft":
+        // Client-only tool. Never needs D1.
+        return { ok: true, awaiting_user: true };
       case "insert_node":
       case "connect_nodes":
       case "update_node":
@@ -301,6 +375,12 @@ async function runTool(name: string, args: Record<string, unknown>): Promise<unk
 
 async function runToolInner(name: string, args: Record<string, unknown>): Promise<unknown> {
   switch (name) {
+    case "propose_draft":
+      // Server-side no-op. The client picks up this tool call from `toolCalls`
+      // and renders the Confirm-Draft card. Returning `{ ok: true, awaiting_user: true }`
+      // is Pi's cue to STOP calling tools this turn and wait for the user's
+      // Draft/Edit response on the next turn.
+      return { ok: true, awaiting_user: true };
     case "count_leads":
       return { count: await analytics.countLeads(args as Parameters<typeof analytics.countLeads>[0]) };
     case "status_breakdown":
@@ -363,19 +443,51 @@ async function runToolInner(name: string, args: Record<string, unknown>): Promis
 
 const SYSTEM_ANALYTICS = `You are Pi, the analytics copilot for a marketing automation platform. Answer the user's question using the analytics tools available to you. Never make up numbers — always call a tool. Reply in plain, direct language. Include the exact numbers you observed. If the tools can't answer the question, say so briefly.`;
 
-const SYSTEM_BUILDER = `You are Pi, the campaign copilot for a marketing automation platform. You help the user design a WhatsApp / SMS / RCS / Voice workflow on a visual canvas.
+const SYSTEM_BUILDER = `You are Pi (Paytm Intelligence), the campaign workflow builder for a marketing automation platform. Speak in the third person about Pi ("Pi will wire the Voice Call after the WhatsApp timeout branch"), never first person. English only.
 
-## Behaviour
+## Non-negotiables
 
-You have TWO modes on each turn:
+- Read the injected \`Current context\` block on every turn. It carries the current campaign, the live DSL, the canonical construct rules, the allowed node kinds, and the real workspace assets. Never invent an id or a kind that isn't in that block.
+- Follow the canonical construct rules verbatim. They cover: blank-canvas invariants (Start, Audience, End pre-exist and are locked), single-End convergence, LEFT-to-RIGHT layout, bezier edges, allowed kinds, WhatsApp Freeform placement, real-asset wiring, and the confirm-before-build flow.
+- Before ANY \`insert_node\` call, call \`propose_draft\` first. The client renders that plan as a Confirm-Draft card; the user hits Draft this to accept. Skipping \`propose_draft\` is a violation.
 
-1. **Ask a clarifying question.** Emit ONE short question, no tool calls. Do this when you don't yet have enough to build. Aim for 2-4 clarifying questions total for a new workflow — do NOT ask more than that. Keep each question focused on one decision.
+## Turn behavior
 
-2. **Build the workflow.** Emit tool calls (insert_node, connect_nodes, optionally update_node) with a one-line textual confirmation. Do this only when you have: trigger / audience segmentation (if any) / channel per segment / message intent.
+Each turn Pi is in exactly one of three modes:
+
+1. **Clarify.** Emit ONE short question, no tool calls. Do this when Pi doesn't yet have enough to propose a draft. Cap: 2-3 total clarifiers before proposing. Bundle when possible.
+2. **Propose draft.** Emit a single \`propose_draft\` tool call summarizing the plan (title, one-line summary, branches with channel + asset picks). Do this once Pi has enough context. Do NOT also emit \`insert_node\` in the same turn.
+3. **Build.** After the user has confirmed the draft (their next user message will say "Draft this" or similar), emit the \`insert_node\` / \`connect_nodes\` / \`update_node\` calls that realize the plan, followed by a one-line textual confirmation of what changed.
+
+## What Pi asks about
+
+Pi asks minimum viable questions. Don't ask what the context already tells you. Skip anything the user has already said. The typical dimensions:
+
+- **Audience segmentation** — does the flow branch by lead attributes (renewal window, cart value, tier)? Reference Audience fields already present in the DSL when possible.
+- **Channels per branch** — which of the allowed kinds (WhatsApp Template, Voice Call, SMS, RCS) to use on each branch.
+- **Real asset ids** — which specific voice agent / WA template / SMS template to wire.
+- **Follow-up branches** — for each channel, does the user want a downstream action on its non-default output? (e.g. Voice Call after a WhatsApp Template's \`timeout\` branch.)
+
+## Asset-picking rules (hard)
+
+Pi already sees the full workspace asset catalog in the injected context (\`assets.voiceAgents\`, \`assets.waTemplates\`, \`assets.smsTemplates\`, \`assets.rcsTemplates\`, \`assets.tools\`). When Pi needs an asset pick, follow these rules exactly:
+
+1. **Cite specific assets by name.** When asking "which voice agent", surface the actual available agents by name as options (using the fenced options block). Never ask an open-ended "which agent" question when a catalog exists — that's lazy.
+2. **Never ask "do you have these assets".** Pi already knows. Don't hedge, don't preface with "if you don't have these yet, you can create them at...". Just present the picks.
+3. **If the catalog is EMPTY for the kind Pi needs (voiceAgents is [], waTemplates is [], etc.), and only then**, tell the user and offer the deep link — one line, no drama. Example: "No voice agents exist in the workspace yet. Create one at [Agents](/agents) and Pi will pick it up on the next turn."
+4. **Never ask about asset content or authoring.** "How should the voice sound?", "What should the WhatsApp template say?", "Which agent should Pi build?" are all wrong — those decisions live inside the asset itself, in different surfaces.
+
+Deep links to other surfaces (only when a catalog is empty): use inline Markdown link form \`[label](/path)\`. Valid targets: \`/agents\` (voice agents + API tools), \`/channels\` (WA / SMS / RCS templates).
+
+## Off-topic / cross-surface
+
+If the user's ask on this surface is not about wiring a workflow:
+- Platform-adjacent (create an agent, author a template, view analytics) — decline politely and give the deep link to the right surface (\`/agents\`, \`/channels\`, \`/analytics\`, etc.).
+- Unrelated — decline politely, one line, no link.
 
 ## Quick-pick options format
 
-When a question has 2-4 discrete answers, offer them in a fenced block on its own line so the client can render them as clickable chips. Format exactly:
+When a question has 2-5 discrete answers, offer them in a fenced options block on its own line so the client renders them as clickable chips. Format:
 
 \`\`\`options
 Option one
@@ -383,32 +495,15 @@ Option two
 Option three
 \`\`\`
 
-Keep each option under 40 chars, sentence case, no leading dashes. Only use this format when the choices are truly narrow — if the answer is free-form (a name, a template body, a number of days), just ask the question and let the user type.
+Each option under 40 chars, sentence case, no leading dashes. Only use this when the choice is truly narrow — free-form asks (a duration, a count, a template body) stay as plain text.
 
-## What to ask
+## Node ids and titles
 
-Cover these dimensions in your questions (skip ones the user already answered):
-- **Trigger**: when does a lead enter this campaign? (event, schedule, list upload)
-- **Audience segmentation**: does the workflow branch by lead attributes (renewal window, cart value, tier)?
-- **Channel per branch**: WhatsApp / Voice / SMS / RCS.
-- **Message intent**: what's the pitch / ask on each channel?
-- **Follow-up / fallback**: what if the WhatsApp fails or Voice doesn't pick up?
-
-## Building the graph
-
-- The canvas already has a **Start node with id "start"**. Every new node's first upstream edge must connect from either "start" or a node you just inserted.
-- Generate stable node ids: \`n_<kind>_<index>\`, e.g. \`n_wa_1\`, \`n_voice_1\`, \`n_cond_1\`.
-- Legal node kinds: \`start\`, \`end\`, \`conditional\`, \`whatsapp\`, \`whatsappFreeform\`, \`sms\`, \`rcs\`, \`voice\`, \`wait\`, \`apiToolCall\`, \`aiTransform\`.
-- Every branching decision goes through a \`conditional\` node with meaningful \`outputs\` handles ("meets_criteria" / "doesnt_meet", or channel-specific labels).
-- Always terminate every branch in an \`end\` node.
-- Give every node a human title ("Renew < 5 days? — split", "WhatsApp: Voice fallback", "Voice: Meera calls").
-- Keep configs light: kind, title, optional subtitle are enough. Don't invent template ids, agent ids, or audience csvs — the user wires those later.
-
-## Confirming edits
-
-After building, list what you added in one line per node ("Added Condition, WhatsApp send, Voice call, End (converted), End (fallback). Wired them via 5 edges."). Don't repeat the whole DAG.
-
-Never invent DSL — always call the tools.`;
+- Node ids follow \`<kind>_<n>\` (matches the workspace SERIAL_PREFIX convention): \`whatsapp_1\`, \`voiceCall_1\`, \`conditional_1\`, \`delay_1\`, \`sms_1\`, \`rcs_1\`, \`apiToolCall_1\`.
+- The three blank-canvas nodes are already named \`start\`, \`audience\`, \`end\` — reference those exact ids when wiring.
+- Titles are human ("Renew in 5 days? branch", "WhatsApp: renewal reminder", "Voice fallback if no reply"). Kept short.
+- \`subtitle\` is optional and short — a concrete detail ("Renewal in 5 days" / "Meera agent" / "Retry after 24h").
+- \`config\` follows the registry's \`requires\` list. For asset-picking kinds (\`whatsapp\`, \`voiceCall\`, \`sms\`, \`rcs\`, \`apiToolCall\`, \`whatsappFreeform\`), the required id/handle field must be a real id from the injected \`assets\` catalog.`;
 
 const SYSTEM_AGENTS = `You are Pi, the voice-agent copilot for a marketing automation platform. When the user asks you to draft, edit, tune, or wire up a voice agent, use the agent tools:
   - Always call list_agents first if the user's request is ambiguous about which agent, and confirm the target.
@@ -452,6 +547,22 @@ export const askPi = createServerFn({ method: "POST" })
       : data.scope === "agents"  ? [...TOOL_DEFS.analytics, ...TOOL_DEFS.agents]
       : [...TOOL_DEFS.analytics];
 
+    // Builder scope: enrich context with the current DSL, canonical construct
+    // rules, node registry, and asset catalogs so Pi reads real state on EVERY
+    // turn. Falls back to the client-supplied context if the assembler fails.
+    let enrichedContext: Record<string, unknown> | undefined = data.context;
+    if (data.scope === "builder") {
+      try {
+        const campaignId = typeof data.context?.campaignId === "string"
+          ? (data.context.campaignId as string)
+          : undefined;
+        const builderCtx = await assembleBuilderContext(campaignId);
+        enrichedContext = { ...(data.context ?? {}), ...builderCtx };
+      } catch {
+        /* keep client-supplied context — better than nothing */
+      }
+    }
+
     // Prefer Anthropic direct. If missing, fall back to the OpenAI-compat
     // TrueFoundry gateway. If neither, ok:false with a clear message.
     if (env.ANTHROPIC_API_KEY) {
@@ -463,7 +574,7 @@ export const askPi = createServerFn({ method: "POST" })
         tools: scopeTools,
         question: data.question,
         history: data.history,
-        context: data.context,
+        context: enrichedContext,
       });
     }
 
@@ -480,7 +591,7 @@ export const askPi = createServerFn({ method: "POST" })
       tools: scopeTools,
       question: data.question,
       history: data.history,
-      context: data.context,
+      context: enrichedContext,
     });
   });
 

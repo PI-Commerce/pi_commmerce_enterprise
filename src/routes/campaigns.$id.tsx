@@ -22,10 +22,15 @@ import {
 
 export const Route = createFileRoute("/campaigns/$id")({
   component: CampaignBuilder,
-  validateSearch: (search: Record<string, unknown>): { name?: string; description?: string; objective?: string } => ({
+  validateSearch: (search: Record<string, unknown>): { name?: string; description?: string; objective?: string; fresh?: string } => ({
     name: typeof search.name === "string" ? search.name : undefined,
     description: typeof search.description === "string" ? search.description : undefined,
     objective: typeof search.objective === "string" ? search.objective : undefined,
+    // `fresh=1` on the URL is set by the Campaigns index "Create" flow —
+    // signals to the builder that this is a just-created blank canvas so
+    // Ask Pi's wizard auto-opens and the name/description seed values are
+    // used. The id itself is always a real, D1-persisted id now.
+    fresh: typeof search.fresh === "string" ? search.fresh : undefined,
   }),
   head: ({ params }) => ({
     meta: [
@@ -37,9 +42,16 @@ export const Route = createFileRoute("/campaigns/$id")({
 
 function CampaignBuilder() {
   const { id } = Route.useParams();
-  const { name: seedName, description: seedDescription, objective: seedObjective } = Route.useSearch();
+  const { name: seedName, description: seedDescription, objective: seedObjective, fresh } = Route.useSearch();
   const navigate = useNavigate();
-  const isNew = id === "new";
+  // `isNew` now means "user just created this campaign from the Campaigns
+  // index" (fresh=1 on the URL), not "the id is literally 'new'". The id
+  // is always a real, D1-persisted id — the Create flow mints one and
+  // writes the blank baseline (Start, Audience, End) before navigating.
+  // This distinction matters because on `fresh=1` we auto-open Ask Pi and
+  // seed the name/description from search params; on subsequent visits to
+  // the same campaign we don't.
+  const isNew = fresh === "1";
   const example = EXAMPLE_CAMPAIGNS[id];
 
   const [name, setName] = useState(
@@ -144,6 +156,8 @@ function CampaignBuilder() {
     setConfirmSaveOpen(false);
 
     // D1 persist: build DSL from the live canvas snapshot + head fields.
+    // The `id !== "new"` guard is kept for the very rare case a legacy link
+    // still hits `/campaigns/new`; the modern Create flow mints a real id.
     const getGraph = getGraphRef.current;
     if (getGraph && id && id !== "new") {
       const { nodes, edges } = getGraph();

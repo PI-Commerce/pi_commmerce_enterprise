@@ -14,7 +14,10 @@ import type { CampaignDsl, DslNode, DslEdge } from "@/lib/db/campaigns";
 export function dslNodeToReactFlow(n: DslNode): Node<WorkflowNodeData> {
   return {
     id: n.id,
-    type: n.kind,
+    // Only the "workflow" node type is registered (see nodes.tsx `nodeTypes`).
+    // The node's semantic kind lives in `data.kind`. Using `n.kind` here
+    // would render every non-workflow node as an empty box on hydrate.
+    type: "workflow",
     position: n.position ?? { x: 0, y: 0 },
     data: {
       kind: n.kind,
@@ -23,6 +26,9 @@ export function dslNodeToReactFlow(n: DslNode): Node<WorkflowNodeData> {
       serial: n.serial,
       config: n.config as WorkflowNodeData["config"],
       outputs: n.outputs,
+      // Preserve Start / End immutability across hydrate — matches the
+      // WorkflowCanvas INITIAL seed where these two are `locked: true`.
+      ...(n.kind === "start" || n.kind === "end" ? { locked: true } : {}),
     },
   };
 }
@@ -33,7 +39,10 @@ export function dslEdgeToReactFlow(e: DslEdge): Edge {
     source: e.source,
     target: e.target,
     sourceHandle: e.sourceHandle,
-    type: "smoothstep",
+    // Canonical bezier edge (see edges.tsx `RoutedEdge`). `smoothstep` gives
+    // the wrong shape — square right-angle edges that clash with authored
+    // example campaigns.
+    type: "routed",
   };
 }
 

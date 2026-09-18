@@ -229,15 +229,23 @@ const ROUTES: { match: (p: string) => boolean; ctx: PiContext }[] = [
       scope: "Campaign builder",
       // On a specific campaign, Pi can actually edit the DAG. Builder scope
       // adds insert_node / update_node / connect_nodes on top of the reads.
+      // The real system prompt (in `pi-llm.ts`) references the canonical
+      // construct rules from `pi-construct-rules.ts` — this hint is a short
+      // surface tag, not the full grammar.
       scopeMode: "builder",
-      systemHint: "The user is viewing a specific campaign's canvas. Read the campaign with read_campaign before proposing edits, then use insert_node / update_node / connect_nodes to apply changes. Never invent DSL — always call a tool.",
-      placeholder: "Ask Pi to edit, extend, or explain this campaign…",
-      chips: ["Add a WhatsApp follow-up after Voice fail", "Why is this run dropping at Sent → Delivered?", "Insert a wait 24h before the reminder"],
-      thinking: ["Reading the campaign graph…", "Planning the minimal edit…", "Drafting the proposal…"],
+      systemHint: "The user is on the campaign builder canvas. Pi wires WhatsApp / SMS / RCS / Voice / Delay / Conditional / API Tool nodes into the flow, using real assets from the workspace catalog. Off-topic asks (creating agents, authoring templates) get declined with a deep link.",
+      placeholder: "Describe the campaign…",
+      // No contextual chips on this surface — pure chat experience per the
+      // v1 design decision (efficiency over template shelves).
+      chips: [],
+      thinking: [
+        "Paytm Intelligence is reading the current flow…",
+        "Checking assets and node kinds available…",
+        "Drafting the plan…",
+      ],
       result: {
-        text: "I can insert a Voice AI Agent on the WhatsApp failure branch and route accepted users back into the nurture loop. Review before applying.",
-        diff: ["+ insert  Voice AI Agent · after wa_send_1", "+ connect wa_send_1.failed → voice_agent"],
-        cta: "Apply changes",
+        text: "Pi is ready to draft the flow. Describe the campaign and Pi will ask a couple of clarifiers before proposing the workflow.",
+        cta: "Draft this",
       },
     },
   },
@@ -271,17 +279,17 @@ export function getPiContext(pathname: string): PiContext {
 export const CANVAS_CONTEXT: PiContext = {
   scope: "Campaign canvas",
   scopeMode: "builder",
-  systemHint: "The user is inside the campaign canvas composer. Propose a minimal, valid edit to the current graph and apply it via insert_node / update_node / connect_nodes. Never emit raw DSL — always call the tools.",
-  placeholder: "Ask Pi anything…",
-  chips: ["Add dormant trader reactivation", "Insert Voice AI after WhatsApp fail"],
+  systemHint: "The user is inside the campaign canvas composer. Pi reads the injected context (current DSL, canonical rules, allowed kinds, real assets), asks minimum viable clarifiers, then calls propose_draft to confirm the plan before wiring nodes. Third-person tone.",
+  placeholder: "Describe the campaign…",
+  // No chips on canvas. Pure chat experience.
+  chips: [],
   thinking: [
-    "Reading current graph (10 nodes, 10 edges)…",
-    "Identifying failure branch on WhatsApp send…",
-    "Proposing Voice AI Agent insertion…",
+    "Paytm Intelligence is reading the current flow…",
+    "Checking assets and node kinds available…",
+    "Drafting the plan…",
   ],
   result: {
-    text: "I'll add a Voice AI Agent after the WhatsApp failure branch, then route accepted users back into the nurture loop.",
-    diff: ["+ insert  Voice AI Agent · after node wa_send_1", "+ connect edge wa_send_1.failed → voice_agent"],
-    cta: "Apply changes",
+    text: "Pi is ready to draft the flow.",
+    cta: "Draft this",
   },
 };

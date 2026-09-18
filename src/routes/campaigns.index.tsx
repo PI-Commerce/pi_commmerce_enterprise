@@ -32,7 +32,8 @@ import { CreateRunDialog, type CampaignOption, type CreateRunPayload } from "@/c
 import { CSV_LIBRARY, makeCsvAsset, generateCsvContent, type CsvAsset } from "@/lib/data-library";
 import { downloadCsv } from "@/lib/analytics-leads";
 import { listRunStatusesFn, updateRunStatusFn } from "@/lib/server-fns/runs";
-import { listCampaignsFn } from "@/lib/server-fns/campaigns";
+import { listCampaignsFn, createBlankCampaignFn } from "@/lib/server-fns/campaigns";
+import type { CampaignVertical } from "@/lib/db/campaigns";
 
 
 export const Route = createFileRoute("/campaigns/")({
@@ -344,10 +345,33 @@ function CampaignList() {
 
   // Duplicate & Archive campaign are OOS for v1 (scope D1/D2) — handlers removed.
 
-  const handleCreate = (name: string, description?: string, objective?: string) => {
+  // Best-guess vertical mirrors `campaigns.$id.tsx#detectVertical`. Kept here
+  // (not shared) because the create flow doesn't have a running canvas yet.
+  const detectVerticalFromName = (n: string): CampaignVertical => {
+    const l = n.toLowerCase();
+    if (l.includes("bfsi") || l.includes("insurance") || l.includes("loan")) return "bfsi";
+    if (l.includes("retail") || l.includes("loyalty")) return "retail";
+    if (l.includes("b2b") || l.includes("merchant") || l.includes("soundbox")) return "b2b";
+    return "d2c";
+  };
+
+  const handleCreate = async (name: string, description?: string, objective?: string) => {
     setCreateOpen(false);
+    // Mint the id client-side so we can navigate immediately AND fire the D1
+    // baseline write in parallel. The baseline (Start, Audience, End + start
+    // > audience edge) is what makes Ask Pi see a real 3-node DSL on turn 1
+    // instead of an empty stub. Fire-and-forget: canvas has BLANK_NODES as
+    // its initial state so the user sees the same three nodes immediately,
+    // then D1 hydration replaces them once the write lands (a no-op visually
+    // since positions and kinds match).
+    const id = `c_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
+    void createBlankCampaignFn({
+      data: { id, name, vertical: detectVerticalFromName(name), description },
+    }).catch(() => {
+      /* silent — canvas still functions on BLANK_NODES; user can Save later */
+    });
     toast.success("Campaign created", { description: `${name} · opening builder in Draft` });
-    navigate({ to: "/campaigns/$id", params: { id: "new" }, search: { name, description, objective } as never });
+    navigate({ to: "/campaigns/$id", params: { id }, search: { name, description, objective, fresh: "1" } as never });
   };
 
   // After an API-sourced run is created, surface its unique trigger endpoint in a

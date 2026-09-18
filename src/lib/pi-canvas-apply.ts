@@ -61,20 +61,22 @@ export function applyPiToolCallsToGraph(
           | undefined;
         if (!node?.id || !node?.kind || !node?.title) break;
         if (ns.some((n) => n.id === node.id)) break;
-        // Compute a position: below the current bottom-most node.
-        const maxY = ns.length ? Math.max(...ns.map((n) => n.position.y)) : 0;
-        const avgX = ns.length
-          ? Math.round(ns.reduce((s, n) => s + n.position.x, 0) / ns.length)
+        // Canonical layout direction is LEFT-to-RIGHT (ELK is configured with
+        // `elk.direction: RIGHT` in flow-layout.ts). Position hints go RIGHT
+        // of the rightmost node, not below the bottom, so the first render
+        // pre-ELK doesn't visually clash with the canonical direction. ELK
+        // will re-lay anyway once the graph is stable.
+        const maxX = ns.length ? Math.max(...ns.map((n) => n.position.x)) : 0;
+        const avgY = ns.length
+          ? Math.round(ns.reduce((s, n) => s + n.position.y, 0) / ns.length)
           : 0;
-        const pos = node.position ?? { x: avgX, y: maxY + 140 };
+        const pos = node.position ?? { x: maxX + 260, y: avgY };
         ns = [
           ...ns,
           {
             id: node.id,
-            // All non-start/end nodes render through the shared "workflow"
-            // node type; kind lives in `data.kind`. Using node.kind as the
-            // ReactFlow `type` renders an empty box because no custom
-            // nodeType is registered for e.g. "voice" or "conditional".
+            // Only the "workflow" node type is registered (see nodes.tsx).
+            // Kind lives in `data.kind`, which drives the icon + config panel.
             type: "workflow",
             position: pos,
             data: {
@@ -82,7 +84,9 @@ export function applyPiToolCallsToGraph(
               subtitle: node.subtitle,
               kind: node.kind,
               config: node.config,
-              valid: true,
+              // Real validity is computed downstream by the config panel and
+              // the construct validator (Phase B). We start `undefined` so the
+              // canvas shows a "needs config" state instead of a false green.
             } as unknown as WorkflowNodeData,
           },
         ];
@@ -107,7 +111,10 @@ export function applyPiToolCallsToGraph(
             source: edge.source,
             target: edge.target,
             sourceHandle: edge.sourceHandle,
-            type: "smoothstep",
+            // Canonical edge type is the workspace's bezier `routed` edge
+            // (see edges.tsx `RoutedEdge`). `smoothstep` produces the square
+            // right-angle edges that don't match the rest of the canvas.
+            type: "routed",
           },
         ];
         changed = true;

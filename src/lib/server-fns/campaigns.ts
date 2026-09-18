@@ -89,6 +89,31 @@ export const writeCampaignFn = createServerFn({ method: "POST" })
     }
   });
 
+export type CreateBlankCampaignResult =
+  | { ok: true }
+  | { ok: false; error: string };
+
+/**
+ * Create a fresh campaign with the canonical blank canvas already persisted
+ * (Start, Audience, End + start > audience edge). Called from the Campaigns
+ * index "Create" flow so Ask Pi sees a real 3-node DSL on turn 1 instead of
+ * an empty stub.
+ */
+export const createBlankCampaignFn = createServerFn({ method: "POST" })
+  .inputValidator(
+    (r: { id: string; name: string; vertical: campaignsDb.CampaignVertical; description?: string }) => r,
+  )
+  .handler(async ({ data }): Promise<CreateBlankCampaignResult> => {
+    const bail = bailWithoutDb();
+    if (bail) return bail;
+    try {
+      await campaignsDb.createBlankCampaign(data.id, data.name, data.vertical, data.description);
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: `d1_write_failed: ${(e as Error).message}` };
+    }
+  });
+
 /** Delete a campaign (and cascading nodes/edges/runs via app-level cleanup). */
 export const deleteCampaignFn = createServerFn({ method: "POST" })
   .inputValidator((id: string) => id)

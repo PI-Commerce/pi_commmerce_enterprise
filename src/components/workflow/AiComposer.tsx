@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Sparkles, X } from "lucide-react";
+import { Link } from "@tanstack/react-router";
 import { CANVAS_CONTEXT } from "@/lib/ask-pi-context";
 import { getSuggestion } from "@/lib/pi-node-suggestions";
 import { askPi } from "@/lib/server-fns/pi-llm";
@@ -74,8 +75,11 @@ export function AiComposer({
     mode === "wizard"
       ? [{
           role: "assistant",
+          // Third-person, crisp. Pi = Paytm Intelligence. `**Pi**` renders
+          // as bold via `renderInlineMarkdown`. See pi-construct-rules.ts for
+          // the full canonical grammar Pi obeys.
           content:
-            "Tell me what you want to build — the trigger, who it targets, and how you want to reach them. I'll ask what I need and then draw the workflow.",
+            "Describe your campaign flow, and let **Pi** do the magic-wiring!",
         }]
       : [],
   );
@@ -252,7 +256,8 @@ export function AiComposer({
       mode === "wizard"
         ? [{
             role: "assistant",
-            content: "Fresh start. Describe the campaign you want to build.",
+            content:
+              "Fresh start. Describe your campaign flow, and let **Pi** do the magic-wiring!",
           }]
         : [],
     );
@@ -405,6 +410,44 @@ export function AiComposer({
  * of quick-pick chips (parsed from ```options blocks) — but only for the
  * MOST RECENT assistant turn, so old options don't stay tappable.
  */
+/** Inline Markdown-lite renderer. Handles `**bold**` and `[label](href)` so
+ *  Pi's copy renders correctly right now — including the deep links Pi
+ *  surfaces when a required asset is missing ("Go to Agents"). Phase C
+ *  replaces this with a proper Markdown pass (bold, italic, code, list, link,
+ *  paragraph). Until then this covers the two forms Pi actually emits.
+ *
+ *  Links go through TanStack Router's `Link` when the href starts with `/`
+ *  (SPA navigation, keeps route state). External hrefs become plain
+ *  `<a target="_blank">`. */
+function renderInlineMarkdown(text: string): React.ReactNode[] {
+  const out: React.ReactNode[] = [];
+  // Combined regex: matches EITHER `**bold**` OR `[label](href)`. Alternation
+  // captures four groups: [1]=bold body, [2]=link label, [3]=link href.
+  const re = /\*\*([^*]+)\*\*|\[([^\]]+)\]\(([^)]+)\)/g;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  let key = 0;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) out.push(text.slice(last, m.index));
+    if (m[1] !== undefined) {
+      out.push(<strong key={`b${key++}`} className="font-semibold">{m[1]}</strong>);
+    } else if (m[2] !== undefined && m[3] !== undefined) {
+      const label = m[2];
+      const href = m[3];
+      out.push(
+        href.startsWith("/") ? (
+          <Link key={`l${key++}`} to={href} className="font-medium text-ai underline underline-offset-2 hover:text-ai/80">{label}</Link>
+        ) : (
+          <a key={`l${key++}`} href={href} target="_blank" rel="noreferrer" className="font-medium text-ai underline underline-offset-2 hover:text-ai/80">{label}</a>
+        ),
+      );
+    }
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) out.push(text.slice(last));
+  return out.length ? out : [text];
+}
+
 function ChatBubble({
   message,
   showOptions,
@@ -428,7 +471,7 @@ function ChatBubble({
       <div className="flex items-start gap-2">
         <Sparkles className="mt-1 h-3.5 w-3.5 shrink-0 text-ai" />
         <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-tl-sm border border-border bg-card px-3 py-2 text-[13px] leading-relaxed text-foreground">
-          {message.content}
+          {renderInlineMarkdown(message.content)}
           {message.edits && message.edits.length > 0 && (
             <div className="mt-2 space-y-0.5 border-t border-border pt-2 font-mono text-[11px] text-muted-foreground">
               {message.edits.map((e, i) => (

@@ -249,6 +249,56 @@ export async function disconnectNodes(campaignId: string, edgeId: string): Promi
   await bumpUpdatedAt(campaignId);
 }
 
+/**
+ * Create a fresh campaign with the canonical blank-canvas invariants:
+ *   - Start (locked, undeletable)
+ *   - Audience (schema seeder, undeletable)
+ *   - End (locked, undeletable)
+ *   - one edge: start > audience
+ *
+ * Every campaign in the workspace starts from this baseline. Pi builds
+ * BETWEEN Audience and End; it never inserts or deletes these three. The
+ * write is a single batch so a partial baseline can never exist in D1.
+ *
+ * Positions match the LEFT-to-RIGHT canonical direction (ELK re-lays anyway
+ * once branches spread out).
+ */
+export async function createBlankCampaign(
+  id: string,
+  name: string,
+  vertical: CampaignVertical,
+  description?: string,
+): Promise<void> {
+  const db = getDb();
+  const now = Date.now();
+  await db.batch([
+    db.prepare(
+      `INSERT INTO campaigns (id, name, vertical, status, description, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(id, name, vertical, "draft", description ?? null, now, now),
+    // Start
+    db.prepare(
+      `INSERT INTO campaign_nodes (id, campaign_id, kind, title, subtitle, serial, position_x, position_y, config_json, outputs_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind("start", id, "start", "Start", null, "start_1", 0, 0, "{}", "[]"),
+    // Audience (blank schema — user or Pi fills the CSV / API config)
+    db.prepare(
+      `INSERT INTO campaign_nodes (id, campaign_id, kind, title, subtitle, serial, position_x, position_y, config_json, outputs_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind("audience", id, "audience", "Audience", "Configure the source", "audience_1", 240, 0, "{}", "[]"),
+    // End
+    db.prepare(
+      `INSERT INTO campaign_nodes (id, campaign_id, kind, title, subtitle, serial, position_x, position_y, config_json, outputs_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind("end", id, "end", "End", null, "end_1", 480, 0, "{}", "[]"),
+    // Start > Audience — the only pre-wired edge on a blank canvas.
+    db.prepare(
+      `INSERT INTO campaign_edges (id, campaign_id, source_id, target_id, source_handle)
+       VALUES (?, ?, ?, ?, ?)`,
+    ).bind("e_start_audience", id, "start", "audience", null),
+  ]);
+}
+
 async function bumpUpdatedAt(campaignId: string): Promise<void> {
   await getDb()
     .prepare("UPDATE campaigns SET updated_at = ? WHERE id = ?")
