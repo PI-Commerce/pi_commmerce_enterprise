@@ -84,15 +84,26 @@ export async function runSurface(
     ? surface.systemPrompt(ctx)
     : surface.systemPrompt;
 
+  // Merge unconditional tools with any per-request additions from
+  // `contextualTools`. Name collisions win to `tools` so a surface can't
+  // accidentally shadow its own permanent tools from context.
+  const unconditional = surface.tools;
+  const contextual = surface.contextualTools ? surface.contextualTools(ctx) : [];
+  const seen = new Set(unconditional.map((t) => t.name));
+  const allTools = [
+    ...unconditional,
+    ...contextual.filter((t) => !seen.has(t.name)),
+  ];
+
   // Normalize tool defs — the kernel loop only wants { name, description, parameters }.
-  const normalizedTools: NormalizedToolDef[] = surface.tools.map((t) => ({
+  const normalizedTools: NormalizedToolDef[] = allTools.map((t) => ({
     name: t.name,
     description: t.description,
     parameters: t.parameters,
   }));
 
   // Handler map built once per turn; kernel calls this per tool_use block.
-  const handlerByName = new Map(surface.tools.map((t) => [t.name, t.handler]));
+  const handlerByName = new Map(allTools.map((t) => [t.name, t.handler]));
   const executor = async (name: string, args: Record<string, unknown>) => {
     const h = handlerByName.get(name);
     if (!h) return { error: `unknown_tool: ${name}` };

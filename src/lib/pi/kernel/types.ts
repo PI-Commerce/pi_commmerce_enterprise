@@ -146,9 +146,16 @@ export type SurfaceModule<Ctx = Record<string, unknown>> = {
    *  if the prompt needs to vary by surface subtype (e.g. adding a
    *  screen-tools addendum when a specific surfaceId is active). */
   systemPrompt: string | ((ctx: SurfaceContext<Ctx>) => string);
-  /** Tools this surface owns (schema + handler colocated). Shared-pool
+  /** Tools this surface owns unconditionally (schema + handler colocated).
+   *  Merged with `contextualTools(ctx)` at dispatch time. Shared-pool
    *  tools come from `uses:` in Phase 3. */
   tools: SurfaceTool<Ctx>[];
+  /** Tools whose availability depends on the request (typically the
+   *  client-published `surfaceId` inside `ctx.request.context`). Used by
+   *  the `lists` surface to expose only the screen tools relevant to
+   *  the current page. Merged with `tools` — dedup is caller's
+   *  responsibility (name collisions win to `tools`). */
+  contextualTools?: (ctx: SurfaceContext<Ctx>) => SurfaceTool<Ctx>[];
   /** Shared pools this surface borrows tools from. Phase 3 placeholder;
    *  kernel currently ignores. Values: `"analytics-reads"`, `"asset-reads"`,
    *  `"graph-reads"`, `"classification"`, etc. */
