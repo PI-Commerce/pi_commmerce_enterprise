@@ -187,24 +187,21 @@ export function AskPiDock() {
     const query = q.trim();
     if (!query) return;
     if (q !== value) setValue(q);
-    setState("thinking");
-    setLiveAnswer(null);
-    setLiveActionLinks(null);
 
-    // Optimistic "get inside the builder immediately" flow for the /agents
-    // surface. If the query looks like a draft request, we synthesize an id +
-    // name, insert an empty shell into the agent-store (local-only — no D1
-    // write; Pi's save_agent tool call is the authoritative write), and
-    // navigate into /agents/<id> BEFORE calling askPi. The builder detects
-    // the empty-draft state and shows a shimmer overlay while Pi generates.
-    // We pass draftHint on the request context so Pi uses the SAME id + name
-    // in its save_agent call (no collision, no dupe).
+    // Decide agent flow FIRST, before touching state. Agent flows never
+    // show the "thinking" panel or the result card — the pill IS the
+    // notification, the fresh content in the builder IS the confirmation.
+    // Non-agent flows still use the classic idle→thinking→result path.
     let draftHint:
       | { id: string; name: string; topic: string; label: string }
       | undefined;
+    let agentFlow: "drafting" | "updating" | null = null;
+
     if (ctx.scopeMode === "agents") {
       const intent = detectDraftAgentIntent(query);
       if (intent) {
+        agentFlow = "drafting";
+        draftHint = intent;
         saveAgent(
           intent.id,
           {
@@ -218,37 +215,40 @@ export function AskPiDock() {
           },
           { skipRemote: true },
         );
-        // Close the panel so nothing hides the builder while Pi drafts. The
-        // dock pill slot flips to the PiDraftingPill (label + live timer +
-        // rotating step microcopy) so the user has an engagement anchor in
-        // the same place Pi already lives.
         const startedAt = Date.now();
         setState("collapsed");
         setValue("");
+        setLiveAnswer(null);
+        setLiveActionLinks(null);
         setDrafting({ label: intent.name, startedAt, verb: "drafting" });
-        // Publish to the shared "Pi working on this agent" signal so
-        // AgentBuilder can render its own bottom overlay (no AppShell on
-        // /agents/$id, so the dock's pill can't render there).
         setPiAgentWork({ id: intent.id, verb: "drafting", startedAt });
         navigate({ to: "/agents/$id", params: { id: intent.id } });
-        draftHint = intent;
       } else {
-        // Edit flow: user is on /agents/<id> and asking Pi to tune the
-        // current agent. Any /agents/<id> submit that isn't a fresh-draft
-        // intent gets treated as an edit — flip the pill to "updating"
-        // with the current agent's name, close the composer so the
-        // builder is unobstructed while section-scoped tools fire.
+        // Edit flow: /agents/<id> submit that isn't a fresh-draft intent.
+        // Pill flips to "updating" with the current agent's name; the
+        // composer collapses so the builder is unobstructed while
+        // section-scoped tools fire. No result card at the end.
         const editMatch = pathname.match(/^\/agents\/([^/]+)$/);
         const editingId = editMatch?.[1];
         if (editingId) {
+          agentFlow = "updating";
           const currentName = getAgents()[editingId]?.name ?? editingId;
           const startedAt = Date.now();
           setState("collapsed");
           setValue("");
+          setLiveAnswer(null);
+          setLiveActionLinks(null);
           setDrafting({ label: currentName, startedAt, verb: "updating" });
           setPiAgentWork({ id: editingId, verb: "updating", startedAt });
         }
       }
+    }
+
+    // Non-agent flows: standard thinking→result path.
+    if (!agentFlow) {
+      setState("thinking");
+      setLiveAnswer(null);
+      setLiveActionLinks(null);
     }
 
     // Every non-/analytics surface — call askPi with the current route's scope +
@@ -279,7 +279,11 @@ export function AskPiDock() {
           },
         },
       });
-      if (r.ok && r.answer.trim().length > 0) {
+      // Only surface Pi's free-text reply for non-agent flows. Agent
+      // flows (drafts, edits) rely on the pill + the fresh builder
+      // content as feedback — a result card on top of that reads as
+      // clutter and re-opens the panel over the builder.
+      if (!agentFlow && r.ok && r.answer.trim().length > 0) {
         setLiveAnswer(r.answer);
       }
       // Agents-scope mutations: if Pi wrote to the agents table (via any
@@ -315,8 +319,10 @@ export function AskPiDock() {
         dispatchScreenToolCalls(surface, r.toolCalls ?? []);
       }
       // P3 escape-hatch — Pi's emit_action_link calls become prominent
-      // buttons above the accept/dismiss row. New-tab so this dock stays.
-      if (r.ok) {
+      // buttons above the accept/dismiss row. Non-agent flows only (agent
+      // flows don't render a result card, so action links have nowhere
+      // to attach).
+      if (!agentFlow && r.ok) {
         const links = extractActionLinksFromToolCalls(r.toolCalls ?? []);
         if (links.length > 0) setLiveActionLinks(links);
       }

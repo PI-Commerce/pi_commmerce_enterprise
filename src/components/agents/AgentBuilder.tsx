@@ -364,13 +364,13 @@ export function AgentBuilder({
               </Button>
             }
           >
-            {effectivePreviewMaster ? (
-              <div
-                className="min-h-[400px] rounded-lg border border-border bg-secondary/20 px-4 py-3 text-[13px]"
-                dangerouslySetInnerHTML={{ __html: renderMarkdown(masterPrompt) }}
-              />
-            ) : (
-              <div className="relative">
+            <div className="relative">
+              {effectivePreviewMaster ? (
+                <div
+                  className="min-h-[400px] rounded-lg border border-border bg-secondary/20 px-4 py-3 text-[13px]"
+                  dangerouslySetInnerHTML={{ __html: renderMarkdown(masterPrompt) }}
+                />
+              ) : (
                 <Textarea
                   value={masterPrompt}
                   onChange={(e) => mark(setMasterPrompt)(e.target.value)}
@@ -378,9 +378,9 @@ export function AgentBuilder({
                   placeholder={piDrafting ? "" : "# 1. Persona\nYou are…"}
                   disabled={piDrafting}
                 />
-                {piDrafting && <PiDraftingShimmer />}
-              </div>
-            )}
+              )}
+              {overlayVisible && <PiDraftingShimmer />}
+            </div>
           </Card>
 
           {/* Knowledge base */}
@@ -401,13 +401,13 @@ export function AgentBuilder({
               </Button>
             }
           >
-            {effectivePreviewKB ? (
-              <div
-                className="min-h-[200px] rounded-lg border border-border bg-secondary/20 px-4 py-3 text-[13px]"
-                dangerouslySetInnerHTML={{ __html: renderMarkdown(knowledgeBase) }}
-              />
-            ) : (
-              <div className="relative">
+            <div className="relative">
+              {effectivePreviewKB ? (
+                <div
+                  className="min-h-[200px] rounded-lg border border-border bg-secondary/20 px-4 py-3 text-[13px]"
+                  dangerouslySetInnerHTML={{ __html: renderMarkdown(knowledgeBase) }}
+                />
+              ) : (
                 <Textarea
                   value={knowledgeBase}
                   onChange={(e) => mark(setKnowledgeBase)(e.target.value)}
@@ -415,9 +415,9 @@ export function AgentBuilder({
                   placeholder={piDrafting ? "" : "## Product basics…"}
                   disabled={piDrafting}
                 />
-                {piDrafting && <PiDraftingShimmer />}
-              </div>
-            )}
+              )}
+              {overlayVisible && <PiDraftingShimmer />}
+            </div>
           </Card>
 
           {/* Post-call variables */}
