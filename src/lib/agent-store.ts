@@ -88,6 +88,47 @@ export function subscribeAgents(cb: () => void): () => void {
   };
 }
 
+/* ---------------- Ask Pi "working on this agent" signal ---------------- */
+
+/**
+ * Shared signal for "Ask Pi is currently drafting or editing agent <id>".
+ * The dock (AskPiDock) sets this when it fires an agents-scope request;
+ * AgentBuilder reads it to render its own bottom-centre overlay pill
+ * (the builder has no AppShell, so the dock's own PiDraftingPill can't
+ * render on /agents/$id).
+ *
+ * `verb` distinguishes fresh drafts ("Pi is drafting…") from edits
+ * ("Pi is updating…"). Cleared to null when askPi resolves.
+ */
+export type PiAgentWork = {
+  id: string;
+  verb: "drafting" | "updating";
+  startedAt: number;
+};
+
+let workingState: PiAgentWork | null = null;
+const workListeners = new Set<() => void>();
+
+export function setPiAgentWork(next: PiAgentWork | null): void {
+  workingState = next;
+  for (const l of workListeners) l();
+}
+
+function subscribeWork(cb: () => void): () => void {
+  workListeners.add(cb);
+  return () => {
+    workListeners.delete(cb);
+  };
+}
+
+function readWork(): PiAgentWork | null {
+  return workingState;
+}
+
+export function usePiAgentWork(): PiAgentWork | null {
+  return useSyncExternalStore(subscribeWork, readWork, readWork);
+}
+
 /** Imperative read — handy outside React (analytics / wa-outputs / etc.). */
 export function getAgents(): Record<string, AgentRecord> {
   return db();

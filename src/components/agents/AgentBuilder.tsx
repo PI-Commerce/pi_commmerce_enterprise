@@ -9,7 +9,7 @@ import { ChevronLeft, Wrench, Search, Plus, Trash2, Eye, EyeOff } from "lucide-r
 import { cn } from "@/lib/utils";
 import { TOOLS } from "@/lib/tool-registry";
 import { renderMarkdown } from "@/lib/markdown";
-import { saveAgent } from "@/lib/agent-store";
+import { saveAgent, usePiAgentWork } from "@/lib/agent-store";
 import type { AgentType, AgentRecord, PostCallVar } from "@/lib/agent-data";
 import { PiDraftingOverlay, PiDraftingShimmer } from "./PiDraftingOverlay";
 
@@ -84,10 +84,23 @@ export function AgentBuilder({
     knowledgeBase.length === 0 &&
     postCall.length === 0;
 
+  // Shared "Pi is working on this agent" signal set by AskPiDock on any
+  // agents-scope submit. Used to render the same bottom-centre overlay
+  // for EDITS as we do for drafts — the builder page has no AppShell so
+  // the dock's own pill can't render here. Scoped to this record's id.
+  const piWork = usePiAgentWork();
+  const piEditing =
+    !piDrafting && !!record && piWork?.id === record.id && piWork.verb === "updating";
+  const overlayVisible = piDrafting || piEditing;
+  const overlayVerb: "drafting" | "updating" = piEditing ? "updating" : "drafting";
+  const overlayStartedAt = piWork?.id === record?.id ? piWork.startedAt : undefined;
+
   // While Pi is drafting into an empty shell, force edit-mode on the
   // prompt/KB textareas so the shimmer overlay is visible. Once content
   // lands, honour the user's toggle (defaults to preview so reviewers
-  // see the polished output first).
+  // see the polished output first). Edit flow keeps the user's toggle
+  // choice — the section content is already in place; we just paint the
+  // bottom pill.
   const effectivePreviewMaster = piDrafting ? false : previewMaster;
   const effectivePreviewKB = piDrafting ? false : previewKB;
 
@@ -197,7 +210,13 @@ export function AgentBuilder({
           AskPiDock (and its PiDraftingPill) doesn't render here. Mount a
           builder-local version in the same middle-bottom slot so the
           "Pi is working" cue is present on every surface that expects it. */}
-      {piDrafting && <PiDraftingOverlay label={name.trim() || undefined} />}
+      {overlayVisible && (
+        <PiDraftingOverlay
+          label={name.trim() || undefined}
+          verb={overlayVerb}
+          startedAt={overlayStartedAt}
+        />
+      )}
       {/* Header */}
       <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-border bg-background/90 px-3 backdrop-blur-xl">
         <div className="flex min-w-0 items-center gap-2">

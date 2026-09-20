@@ -170,6 +170,13 @@ const PI_DRAFT_STEPS = [
   "Finalising guardrails",
 ];
 
+const PI_EDIT_STEPS = [
+  "Reading the current agent",
+  "Deciding what to change",
+  "Rewriting the section",
+  "Saving the update",
+];
+
 function formatDraftElapsed(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 1000));
   const m = Math.floor(total / 60);
@@ -177,51 +184,57 @@ function formatDraftElapsed(ms: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
+export type PiWorkingVerb = "drafting" | "updating";
+
 export function PiDraftingPill({
   label,
   startedAt,
   pillHandlers,
+  verb = "drafting",
 }: {
   label: string;
   startedAt: number;
   pillHandlers: PiPillHandlers;
+  verb?: PiWorkingVerb;
 }) {
   const [now, setNow] = useState(() => Date.now());
   const [stepIndex, setStepIndex] = useState(0);
+  const steps = verb === "updating" ? PI_EDIT_STEPS : PI_DRAFT_STEPS;
 
   useEffect(() => {
     const tick = setInterval(() => setNow(Date.now()), 1000);
     const step = setInterval(
-      () => setStepIndex((i) => (i + 1) % PI_DRAFT_STEPS.length),
+      () => setStepIndex((i) => (i + 1) % steps.length),
       1800,
     );
     return () => {
       clearInterval(tick);
       clearInterval(step);
     };
-  }, []);
+  }, [steps.length]);
 
   const elapsed = formatDraftElapsed(now - startedAt);
+  const verbText = verb === "updating" ? "updating" : "drafting";
 
   return (
     <div
       {...pillHandlers}
       className="pi-drafting-pill pointer-events-auto flex max-w-[440px] cursor-grab touch-none items-center gap-2.5 rounded-full border border-ai/40 bg-card px-3.5 py-2 text-[12.5px] shadow-[0_10px_30px_-10px_color-mix(in_oklch,var(--ai)_55%,transparent)] active:cursor-grabbing animate-slide-up"
-      aria-label={`Pi is drafting ${label}`}
-      title={`Pi is drafting ${label}. Drag to reposition.`}
+      aria-label={`Pi is ${verbText} ${label}`}
+      title={`Pi is ${verbText} ${label}. Drag to reposition.`}
     >
       <span className="relative flex h-5 w-5 shrink-0 items-center justify-center">
         <span className="absolute inset-0 rounded-full bg-ai/25 pi-drafting-pulse" />
         <Sparkle className="relative h-3.5 w-3.5 fill-ai text-ai" />
       </span>
       <span className="min-w-0 truncate font-medium text-foreground">
-        Pi is drafting <span className="font-mono">{label}</span>
+        Pi is {verbText} <span className="font-mono">{label}</span>
       </span>
       <span className="shrink-0 rounded-md border border-border bg-background/70 px-1.5 py-0.5 font-mono text-[11px] tabular-nums text-muted-foreground">
         {elapsed}
       </span>
       <span className="hidden shrink-0 truncate text-[11.5px] text-muted-foreground sm:inline">
-        · {PI_DRAFT_STEPS[stepIndex]}…
+        · {steps[stepIndex]}…
       </span>
       <style>{`
         @keyframes piDraftingPulse {

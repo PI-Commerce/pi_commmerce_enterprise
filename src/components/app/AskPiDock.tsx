@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { getPiContext } from "@/lib/ask-pi-context";
 import { askPi } from "@/lib/server-fns/pi-llm";
-import { refreshAgentsFromDb, saveAgent } from "@/lib/agent-store";
+import { getAgents, refreshAgentsFromDb, saveAgent, setPiAgentWork } from "@/lib/agent-store";
 import { detectDraftAgentIntent } from "@/lib/pi-agent-intent";
 import { usePiScreenContext } from "@/lib/pi-screen-context";
 import { usePiSurface, dispatchScreenToolCalls, usePiDisabledCopy } from "@/lib/pi-screen-actions";
@@ -60,11 +60,15 @@ export function AskPiDock() {
   // liveAnswer on submit / reset so a stale link from a previous
   // question never sticks around under a fresh answer.
   const [liveActionLinks, setLiveActionLinks] = useState<Array<{ label: string; href: string; hint?: string }> | null>(null);
-  // Ask Pi "drafting an agent" background state. When set, the dock pill slot
-  // renders a PiDraftingPill (label + live timer + rotating step microcopy)
-  // instead of the normal Ask Pi pill. Populated by the /agents optimistic
-  // draft flow in submit(); cleared when askPi returns or the request throws.
-  const [drafting, setDrafting] = useState<{ label: string; startedAt: number } | null>(null);
+  // Ask Pi "working on an agent" background state. When set, the dock pill
+  // slot renders a PiDraftingPill (label + live timer + rotating step
+  // microcopy) instead of the normal Ask Pi pill. Populated by the /agents
+  // optimistic draft flow AND by edit-flow submits on /agents/$id.
+  // `verb`: 'drafting' for new agents, 'updating' for edits — only the
+  // copy differs.
+  const [drafting, setDrafting] = useState<
+    { label: string; startedAt: number; verb: "drafting" | "updating" } | null
+  >(null);
   // I4 — retired nudge ids (✕-dismissed are also persisted; used-nudges are session-only).
   const [hiddenNudges, setHiddenNudges] = useState<string[]>(() => loadDismissedNudges());
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -218,11 +222,32 @@ export function AskPiDock() {
         // dock pill slot flips to the PiDraftingPill (label + live timer +
         // rotating step microcopy) so the user has an engagement anchor in
         // the same place Pi already lives.
+        const startedAt = Date.now();
         setState("collapsed");
         setValue("");
-        setDrafting({ label: intent.name, startedAt: Date.now() });
+        setDrafting({ label: intent.name, startedAt, verb: "drafting" });
+        // Publish to the shared "Pi working on this agent" signal so
+        // AgentBuilder can render its own bottom overlay (no AppShell on
+        // /agents/$id, so the dock's pill can't render there).
+        setPiAgentWork({ id: intent.id, verb: "drafting", startedAt });
         navigate({ to: "/agents/$id", params: { id: intent.id } });
         draftHint = intent;
+      } else {
+        // Edit flow: user is on /agents/<id> and asking Pi to tune the
+        // current agent. Any /agents/<id> submit that isn't a fresh-draft
+        // intent gets treated as an edit — flip the pill to "updating"
+        // with the current agent's name, close the composer so the
+        // builder is unobstructed while section-scoped tools fire.
+        const editMatch = pathname.match(/^\/agents\/([^/]+)$/);
+        const editingId = editMatch?.[1];
+        if (editingId) {
+          const currentName = getAgents()[editingId]?.name ?? editingId;
+          const startedAt = Date.now();
+          setState("collapsed");
+          setValue("");
+          setDrafting({ label: currentName, startedAt, verb: "updating" });
+          setPiAgentWork({ id: editingId, verb: "updating", startedAt });
+        }
       }
     }
 
@@ -265,7 +290,18 @@ export function AskPiDock() {
       // drafting pill / dispatch open_agent — those must see a fresh
       // store, otherwise the builder flashes "Agent not found" or the
       // shimmer runs after the record is already saved.
-      const AGENT_MUTATION_TOOLS = new Set(["save_agent", "save_agent_from_topic"]);
+      // Every server-side mutation on the agents table. Keep in sync with
+      // agent-crud.ts + agent-edit.ts. Missing a name here means the store
+      // doesn't refresh and the builder shows stale content.
+      const AGENT_MUTATION_TOOLS = new Set([
+        "save_agent",
+        "save_agent_from_topic",
+        "rewrite_master_prompt_section",
+        "rewrite_knowledge_section",
+        "update_tools",
+        "update_postcall_vars",
+        "rename_agent",
+      ]);
       if (r.ok && ctx.scopeMode === "agents") {
         const mutated = r.toolCalls?.some((tc) => AGENT_MUTATION_TOOLS.has(tc.name));
         if (mutated) await refreshAgentsFromDb();
@@ -288,14 +324,14 @@ export function AskPiDock() {
     } catch {
       // Network / RPC failure — same fallback.
     }
-    // If we optimistically launched a draft, the widget was showing a
-    // PiDraftingPill (timer + rotating steps). Clear it once askPi resolves
-    // (success or fail) so the dock returns to the normal Ask Pi pill and
-    // the builder's own hydrate has already refreshed the record.
-    if (draftHint) {
+    // If we showed a PiDraftingPill (drafting OR editing on /agents), clear
+    // it once askPi resolves. Keep the panel collapsed — the user is
+    // already inside the builder reading the freshly-updated record; don't
+    // pop a result card at them. Clear the shared signal too so the
+    // builder-local overlay dismisses.
+    if (drafting) {
       setDrafting(null);
-      // Keep the panel collapsed — the user is already inside the builder
-      // reading the freshly-filled draft. Don't pop a result card at them.
+      setPiAgentWork(null);
       return;
     }
     setState("result");
@@ -358,6 +394,7 @@ export function AskPiDock() {
               label={drafting.label}
               startedAt={drafting.startedAt}
               pillHandlers={pillHandlers}
+              verb={drafting.verb}
             />
           ) : (
             <PiPill onOpen={() => setState("idle")} pillHandlers={pillHandlers} suppressClick={suppressClick} />

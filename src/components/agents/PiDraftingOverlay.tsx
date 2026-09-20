@@ -17,7 +17,7 @@ import { Sparkle } from "lucide-react";
  * `startedAt` defaults to first-mount time so the timer is honest even
  * when the parent doesn't track when the draft began.
  */
-const STEPS = [
+const DRAFT_STEPS = [
   "Picking a persona",
   "Drafting the call flow",
   "Setting pronunciation rules",
@@ -27,6 +27,15 @@ const STEPS = [
   "Adding post-call variables",
   "Finalising guardrails",
 ];
+
+const EDIT_STEPS = [
+  "Reading the current agent",
+  "Deciding what to change",
+  "Rewriting the section",
+  "Saving the update",
+];
+
+export type PiOverlayVerb = "drafting" | "updating";
 
 function formatElapsed(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 1000));
@@ -38,25 +47,29 @@ function formatElapsed(ms: number): string {
 export function PiDraftingOverlay({
   label,
   startedAt,
+  verb = "drafting",
 }: {
   label?: string;
   startedAt?: number;
+  verb?: PiOverlayVerb;
 }) {
   const started = useMemo(() => startedAt ?? Date.now(), [startedAt]);
   const [now, setNow] = useState(() => Date.now());
   const [stepIndex, setStepIndex] = useState(0);
+  const steps = verb === "updating" ? EDIT_STEPS : DRAFT_STEPS;
 
   useEffect(() => {
     const tick = setInterval(() => setNow(Date.now()), 1000);
-    const step = setInterval(() => setStepIndex((i) => (i + 1) % STEPS.length), 1800);
+    const step = setInterval(() => setStepIndex((i) => (i + 1) % steps.length), 1800);
     return () => {
       clearInterval(tick);
       clearInterval(step);
     };
-  }, []);
+  }, [steps.length]);
 
   const elapsed = formatElapsed(now - started);
   const target = label?.trim() || "your agent";
+  const verbText = verb === "updating" ? "updating" : "drafting";
 
   return (
     <div className="pointer-events-none fixed inset-x-0 bottom-5 z-40 flex justify-center px-4">
@@ -66,13 +79,13 @@ export function PiDraftingOverlay({
           <Sparkle className="relative h-3.5 w-3.5 fill-ai text-ai" />
         </span>
         <span className="min-w-0 truncate font-medium text-foreground">
-          Pi is drafting <span className="font-mono">{target}</span>
+          Pi is {verbText} <span className="font-mono">{target}</span>
         </span>
         <span className="shrink-0 rounded-md border border-border bg-background/70 px-1.5 py-0.5 font-mono text-[11px] tabular-nums text-muted-foreground">
           {elapsed}
         </span>
         <span className="hidden shrink-0 truncate text-[11.5px] text-muted-foreground sm:inline">
-          · {STEPS[stepIndex]}…
+          · {steps[stepIndex]}…
         </span>
       </div>
       <style>{`
