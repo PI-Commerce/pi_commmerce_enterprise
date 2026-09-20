@@ -10,7 +10,7 @@ import {
 
 import { Toaster } from "@/components/ui/sonner";
 import { RegionProvider } from "@/lib/region";
-import { PiSurfaceProvider, PiDisabledProvider } from "@/lib/pi-screen-actions";
+import { PiSurfaceProvider, PiDisabledProvider, PiSurfaceHintProvider } from "@/lib/pi-screen-actions";
 
 import appCss from "../styles.css?url";
 
@@ -129,8 +129,10 @@ function RootComponent() {
             no-op context and Pi would never see the surfaceId. */}
         <PiSurfaceProvider>
           <PiDisabledProvider>
-            <Outlet />
-            <Toaster position="bottom-right" closeButton />
+            <PiSurfaceHintProvider>
+              <Outlet />
+              <Toaster position="bottom-right" closeButton />
+            </PiSurfaceHintProvider>
           </PiDisabledProvider>
         </PiSurfaceProvider>
       </RegionProvider>

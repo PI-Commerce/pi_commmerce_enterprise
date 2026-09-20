@@ -39,8 +39,9 @@ import { agentsSurface } from "@/lib/pi/surfaces/agents";
 import { builderSurface } from "@/lib/pi/surfaces/builder";
 import { listsSurface } from "@/lib/pi/surfaces/lists";
 import { integrationsSurface } from "@/lib/pi/surfaces/integrations";
+import { developerSurface } from "@/lib/pi/surfaces/developer";
 
-export type AskPiScope = "analytics" | "builder" | "agents" | "integrations";
+export type AskPiScope = "analytics" | "builder" | "agents" | "integrations" | "developer";
 
 export type AskPiRequest = {
   scope: AskPiScope;
@@ -98,6 +99,10 @@ const SCOPE_TO_SURFACE: Record<AskPiScope, string> = {
   // docs). Kept out of the analytics/lists path because it has zero D1
   // reads and its answer shape is cite-a-doc, not filter-a-list.
   integrations: "integrations",
+  // /developer is the sibling docs-RAG surface (search_docs over API Docs
+  // + Release Notes chunks). Same reasoning as integrations — no D1, no
+  // mutations, cite-a-doc answer shape.
+  developer: "developer",
 };
 
 /**
@@ -131,6 +136,7 @@ export const askPi = createServerFn({ method: "POST" })
       !builderSurface.id ||
       !listsSurface.id ||
       !integrationsSurface.id ||
+      !developerSurface.id ||
       analyticsReadTools.length === 0 ||
       assetReadTools.length === 0
     ) {

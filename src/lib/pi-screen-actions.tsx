@@ -149,6 +149,50 @@ export function usePiDisabledCopy() {
   return useContext(PiDisabledCtx).copy;
 }
 
+// ---------------------------------------------------------------------------
+// Ask Pi "surface hint" channel — a short one-line label describing what
+// the user is CURRENTLY looking at within a surface (usually the active
+// tab). Consumed by dedicated chat shells (DeveloperChat, IntegrationsChat)
+// so they can display it in the "Answering about" ribbon AND forward it to
+// Pi as prefix context on every turn, without any prop drilling.
+//
+// Not a full context object — deliberately just a display / prompt-injection
+// string. If a surface needs richer per-turn context (filter state, selected
+// row), it should use PiScreenContextRoot (see pi-screen-context.tsx).
+// ---------------------------------------------------------------------------
+
+type HintBus = {
+  hint: string | null;
+  publish: (h: string | null) => void;
+};
+
+const PiSurfaceHintCtx = createContext<HintBus>({ hint: null, publish: () => {} });
+
+/** Wrap once at the app root alongside PiSurfaceProvider / PiDisabledProvider. */
+export function PiSurfaceHintProvider({ children }: { children: ReactNode }) {
+  const [hint, setHint] = useState<string | null>(null);
+  const value = useMemo<HintBus>(() => ({ hint, publish: setHint }), [hint]);
+  return <PiSurfaceHintCtx.Provider value={value}>{children}</PiSurfaceHintCtx.Provider>;
+}
+
+/**
+ * Page-level hook to publish the user's current sub-surface / tab label
+ * (e.g. "Release Notes", "API Docs", "Overview"). Pass `null` to clear.
+ * Effect re-publishes on change and clears on unmount.
+ */
+export function usePiSurfaceHint(hint: string | null) {
+  const { publish } = useContext(PiSurfaceHintCtx);
+  useEffect(() => {
+    publish(hint);
+    return () => publish(null);
+  }, [hint, publish]);
+}
+
+/** Chat-shell reader. `null` when no page has published a hint. */
+export function usePiSurfaceHintValue() {
+  return useContext(PiSurfaceHintCtx).hint;
+}
+
 /**
  * Convenience for the dock — takes the toolCalls array from an askPi
  * response and dispatches every entry whose name matches a registered
