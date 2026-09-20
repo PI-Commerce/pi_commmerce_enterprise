@@ -261,11 +261,38 @@ export async function insertFreeformSkeleton(
     ? Math.round(rec.nodes.reduce((s, n) => s + n.position.y, 0) / rec.nodes.length)
     : 60;
 
+  // Pre-scan the edges to figure out which nodes need HOW MANY branching
+  // handles seeded. If Pi wired edges from image_1 with sourceHandles
+  // btn_b1 and btn_b2, we need to seed 2 quick-reply buttons on image_1
+  // so those handles exist on the rendered node. Same for list rows.
+  // Without this, the edges dangle and the node stays invalid.
+  const buttonIdsPerNode = new Map<string, Set<string>>();
+  const rowIdsPerNode = new Map<string, Set<string>>();
+  for (const e of skeleton.edges) {
+    const h = e.sourceHandle;
+    if (!h) continue;
+    if (h.startsWith("btn_")) {
+      const set = buttonIdsPerNode.get(e.source) ?? new Set<string>();
+      set.add(h.slice(4));
+      buttonIdsPerNode.set(e.source, set);
+    } else if (h.startsWith("row_")) {
+      const set = rowIdsPerNode.get(e.source) ?? new Set<string>();
+      set.add(h.slice(4));
+      rowIdsPerNode.set(e.source, set);
+    }
+  }
+
   const newNodes: FreeformNodeRecord[] = skeleton.nodes.map((n, idx) => {
     // Seed structural config so branching handles are real from turn 1.
     // Content fields (text bodies, captions, media urls, list body) stay
-    // empty — that's what Phase 2 fills in.
-    const seededConfig = seedFreeformStructuralConfig(n.kind, n.needs);
+    // empty — that's what Phase 2 fills in. Handles are derived from the
+    // edges wired to this node (buttonIdsPerNode / rowIdsPerNode).
+    const seededConfig = seedFreeformStructuralConfig(
+      n.kind,
+      n.needs,
+      Array.from(buttonIdsPerNode.get(n.id) ?? []),
+      Array.from(rowIdsPerNode.get(n.id) ?? []),
+    );
     const validity = validateFreeformNode(
       n.kind,
       seededConfig as FreeformNodeConfig,
@@ -407,36 +434,49 @@ export function suggestFreeformNextStep(
 function seedFreeformStructuralConfig(
   kind: FreeformNodeKind,
   needs: string[] | undefined,
+  wiredButtonIds: string[],
+  wiredRowIds: string[],
 ): FreeformNodeConfig | undefined {
-  const wantsButtons = Array.isArray(needs) && needs.includes("buttonsBlock");
-  const wantsRows = kind === "list" || (Array.isArray(needs) && needs.includes("rows"));
+  const wantsButtons =
+    wiredButtonIds.length > 0
+    || (Array.isArray(needs) && needs.includes("buttonsBlock"));
+  const wantsRows =
+    wiredRowIds.length > 0
+    || kind === "list"
+    || (Array.isArray(needs) && needs.includes("rows"));
 
-  if (kind === "text" && wantsButtons) {
-    return {
+  // Text / image / video / document may all carry a buttonsBlock. If
+  // edges wired specific button ids (btn_b1, btn_b2, ...), seed those
+  // exact ids so the handles exist and the edges land. Otherwise seed a
+  // default trio.
+  const canHaveButtons =
+    kind === "text" || kind === "image" || kind === "video" || kind === "document";
+  if (canHaveButtons && wantsButtons) {
+    const buttonIds = wiredButtonIds.length > 0
+      ? wiredButtonIds
+      : ["b1", "b2", "b3"];
+    const config: FreeformNodeConfig = {
       buttonsBlock: {
         mode: "quick_reply",
-        buttons: [
-          { id: "b1", label: "" },
-          { id: "b2", label: "" },
-          { id: "b3", label: "" },
-        ],
+        buttons: buttonIds.map((id) => ({ id, label: "" })),
       },
     };
+    return config;
   }
 
   if (wantsRows) {
+    // Same principle for list rows: if edges wired specific row ids,
+    // seed those; else seed a default trio. Meta caps at 10 rows; if
+    // Pi's plan wires more we truncate rather than send invalid state.
+    const rowIds = wiredRowIds.length > 0 ? wiredRowIds.slice(0, 10) : ["r1", "r2", "r3"];
     return {
-      rows: [
-        { id: "r1", title: "" },
-        { id: "r2", title: "" },
-        { id: "r3", title: "" },
-      ],
+      rows: rowIds.map((id) => ({ id, title: "" })),
     };
   }
 
-  // Text without buttons, image / video / document skeleton: no structural
-  // seeding needed — everything they need is content (text / caption /
-  // media source).
+  // Text without buttons, image / video / document skeleton without
+  // buttons: no structural seeding needed — everything they need is
+  // content (text / caption / media source).
   return undefined;
 }
 

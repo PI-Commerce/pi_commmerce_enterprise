@@ -46,7 +46,13 @@ type CanvasNode = Node<Record<string, unknown>>;
 /** Build the freeform skeleton graph from a proposed draft. Positions are
  *  LTR hints (ELK re-lays anyway); branches stack vertically around the
  *  Start node's Y. Also returns an updated position for the End node so
- *  it stays the rightmost node. */
+ *  it stays the rightmost node.
+ *
+ *  Prefers the real-graph path (`draft.skeleton.nodes` + `draft.skeleton.edges`)
+ *  when Pi supplied one — that's how freeform proposes today, since the
+ *  campaign-style `branches[]` shape forces duplication of shared nodes.
+ *  Falls back to expanding branches[] into a synthetic per-path layout
+ *  for back-compat with any Pi turn that still emits the old shape. */
 export function buildFreeformDraftSkeleton(
   draft: ProposedDraft,
   currentNodes: CanvasNode[],
@@ -56,6 +62,14 @@ export function buildFreeformDraftSkeleton(
   /** New position for the End node (push it right of the skeleton band). */
   endPositionUpdate?: { id: string; position: { x: number; y: number } };
 } {
+  // Preferred path — Pi supplied a real graph. Render node-for-node,
+  // edge-for-edge, with LTR position hints. ELK relayout runs on the
+  // canvas after mount anyway, so exact coordinates don't matter — only
+  // the max X so we can push End rightward.
+  if (draft.skeleton && draft.skeleton.nodes.length > 0) {
+    return buildSkeletonFromGraph(draft.skeleton, currentNodes);
+  }
+
   const skeletonNodes: CanvasNode[] = [];
   const skeletonEdges: Edge[] = [];
 
@@ -129,6 +143,115 @@ export function buildFreeformDraftSkeleton(
 
   // Push End to the right of the rightmost skeleton pill so convergence
   // edges route cleanly LTR.
+  const endNode = currentNodes.find((n) => getKind(n) === "end");
+  const endPositionUpdate = endNode
+    ? { id: endNode.id, position: { x: maxSkeletonX + stepGap, y: anchorY } }
+    : undefined;
+
+  return { skeletonNodes, skeletonEdges, endPositionUpdate };
+}
+
+/**
+ * Real-graph skeleton builder. Consumes Pi's `propose_draft.skeleton`
+ * (nodes[] + edges[]) as-is — one placeholder per node, one edge per
+ * edge. Correctly handles shared prefix nodes (multiple outgoing edges
+ * from the same node) and convergence nodes (multiple incoming edges
+ * into the same node) — the branches[] path can't do this because each
+ * branch is a linear path and shared nodes would appear multiple times.
+ */
+function buildSkeletonFromGraph(
+  graph: NonNullable<ProposedDraft["skeleton"]>,
+  currentNodes: CanvasNode[],
+): {
+  skeletonNodes: CanvasNode[];
+  skeletonEdges: Edge[];
+  endPositionUpdate?: { id: string; position: { x: number; y: number } };
+} {
+  const start = currentNodes.find((n) => getKind(n) === "start");
+  const anchorX = start ? start.position.x + 260 : 240;
+  const anchorY = start ? start.position.y : 0;
+  const stepGap = 260;
+  const branchGap = 160;
+
+  // Simple LTR layout — group nodes by their edge-graph depth from any
+  // upstream anchor (start / a node with no predecessors in the plan).
+  // ELK re-lays anyway on the canvas; this is just so the pulsating
+  // skeleton doesn't stack at one point during the brief pre-relayout
+  // render.
+  const nodeIds = new Set(graph.nodes.map((n) => n.id));
+  const incoming = new Map<string, number>();
+  for (const n of graph.nodes) incoming.set(n.id, 0);
+  for (const e of graph.edges) {
+    if (nodeIds.has(e.target)) incoming.set(e.target, (incoming.get(e.target) ?? 0) + 1);
+  }
+  // BFS from every node with 0 incoming edges (from within the plan) to
+  // assign depth. Nodes with only external incomings (from start / end)
+  // still get depth 0 which is fine.
+  const depth = new Map<string, number>();
+  const queue: string[] = [];
+  for (const n of graph.nodes) {
+    if ((incoming.get(n.id) ?? 0) === 0) { depth.set(n.id, 0); queue.push(n.id); }
+  }
+  while (queue.length) {
+    const cur = queue.shift()!;
+    const curD = depth.get(cur) ?? 0;
+    for (const e of graph.edges) {
+      if (e.source !== cur) continue;
+      if (!nodeIds.has(e.target)) continue;
+      const next = (curD + 1);
+      if ((depth.get(e.target) ?? -1) < next) {
+        depth.set(e.target, next);
+        queue.push(e.target);
+      }
+    }
+  }
+  // Column count by depth for vertical stacking.
+  const byDepth = new Map<number, string[]>();
+  for (const n of graph.nodes) {
+    const d = depth.get(n.id) ?? 0;
+    if (!byDepth.has(d)) byDepth.set(d, []);
+    byDepth.get(d)!.push(n.id);
+  }
+
+  const skeletonNodes: CanvasNode[] = [];
+  let maxSkeletonX = anchorX;
+  for (const n of graph.nodes) {
+    const d = depth.get(n.id) ?? 0;
+    const col = byDepth.get(d) ?? [];
+    const idx = col.indexOf(n.id);
+    const y = anchorY + (idx - (col.length - 1) / 2) * branchGap;
+    const x = anchorX + d * stepGap;
+    if (x > maxSkeletonX) maxSkeletonX = x;
+    skeletonNodes.push(
+      makeFreeformSkeletonNode(
+        `${SKELETON_PREFIX}${n.id}`,
+        normalizeFreeformKind(n.kind),
+        x,
+        y,
+        n.title,
+        n.description,
+      ),
+    );
+  }
+
+  // Skeleton edges — rewrite source/target to their skeleton-prefixed ids
+  // when they reference plan nodes; leave references to `start` / `end`
+  // as-is (those exist on the canvas already). Preserve sourceHandle so
+  // the branching visual reads correctly.
+  const skeletonEdges: Edge[] = graph.edges.map((e) => {
+    const sourceInPlan = nodeIds.has(e.source);
+    const targetInPlan = nodeIds.has(e.target);
+    return {
+      id: `${SKELETON_PREFIX}${e.id}`,
+      source: sourceInPlan ? `${SKELETON_PREFIX}${e.source}` : e.source,
+      target: targetInPlan ? `${SKELETON_PREFIX}${e.target}` : e.target,
+      ...(e.sourceHandle ? { sourceHandle: e.sourceHandle } : {}),
+      type: "routed",
+    };
+  });
+
+  // Push End to the right of the skeleton band so convergence edges route
+  // cleanly LTR when the graph's terminal nodes wire into End.
   const endNode = currentNodes.find((n) => getKind(n) === "end");
   const endPositionUpdate = endNode
     ? { id: endNode.id, position: { x: maxSkeletonX + stepGap, y: anchorY } }

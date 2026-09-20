@@ -10,7 +10,17 @@
 import { Check, PencilLine, Sparkles } from "lucide-react";
 import { NODE_LABELS } from "@/lib/campaign-types";
 import type { NodeKind } from "@/lib/campaign-types";
+import { FREEFORM_NODE_LABELS, type FreeformNodeKind } from "@/lib/freeform-types";
 import type { ProposedDraft } from "@/lib/pi-propose-draft";
+
+/** Resolve a human label for a node kind — freeform kinds first, then
+ *  campaign kinds. Falls back to the raw kind so unknown values still
+ *  render something readable. */
+function labelForKind(kind: string): string {
+  const ff = FREEFORM_NODE_LABELS[kind as FreeformNodeKind];
+  if (ff) return ff;
+  return NODE_LABELS[kind as NodeKind] ?? kind;
+}
 
 export function ConfirmDraftCard({
   draft,
@@ -24,6 +34,13 @@ export function ConfirmDraftCard({
   disabled?: boolean;
 }) {
   const openQuestions = draft.openQuestions?.filter((q) => q.trim().length > 0) ?? [];
+  // Freeform proposes as a real graph (nodes + edges) to support shared
+  // prefixes / convergence / arbitrary shapes. When `skeleton` is present,
+  // render the graph directly (grouped node list + edge summary) instead
+  // of the campaign-style branches[] — branches force duplication of any
+  // node touched by more than one path, which produced the 5-repeat
+  // "Issue N" bug.
+  const useGraph = !!draft.skeleton && draft.skeleton.nodes.length > 0;
   return (
     <div className="ml-6 overflow-hidden rounded-2xl border border-ai/40 bg-card shadow-[0_10px_30px_-12px_color-mix(in_oklch,var(--ai)_30%,transparent)]">
       {/* Header */}
@@ -38,41 +55,65 @@ export function ConfirmDraftCard({
         </div>
       </div>
 
-      {/* Branches */}
-      <div className="divide-y divide-border/60">
-        {draft.branches.map((branch, bi) => (
-          <div key={`b-${bi}`} className="px-3.5 py-2.5">
-            <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-              {branch.label || `Branch ${bi + 1}`}
-            </div>
-            <div className="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[12.5px] text-foreground">
-              {branch.channels.map((c, ci) => {
-                const label = NODE_LABELS[c.kind as NodeKind] ?? c.kind;
-                return (
-                  <span key={`c-${bi}-${ci}`} className="inline-flex items-center gap-1.5">
-                    {ci > 0 && <ArrowGlyph />}
-                    <span className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-1.5 py-0.5 text-[11.5px] font-medium">
-                      {label}
-                      {c.assetId && (
-                        <span className="text-[10.5px] text-muted-foreground">· {c.assetId}</span>
-                      )}
-                    </span>
-                  </span>
-                );
-              })}
-            </div>
-            {branch.channels.some((c) => c.note) && (
-              <ul className="mt-1.5 space-y-0.5 text-[11.5px] text-muted-foreground">
-                {branch.channels
-                  .filter((c) => c.note)
-                  .map((c, ci) => (
-                    <li key={`n-${bi}-${ci}`}>• {c.note}</li>
-                  ))}
-              </ul>
-            )}
+      {/* Plan body — graph-shaped for freeform (nodes + edges),
+          branches-shaped for the campaign builder. */}
+      {useGraph && draft.skeleton ? (
+        <div className="px-3.5 py-2.5">
+          <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            {draft.skeleton.nodes.length} nodes · {draft.skeleton.edges.length} edges
           </div>
-        ))}
-      </div>
+          <ul className="mt-2 space-y-1.5 text-[12.5px] text-foreground">
+            {draft.skeleton.nodes.map((n) => (
+              <li key={`gn-${n.id}`} className="flex items-start gap-2">
+                <span className="mt-0.5 inline-flex shrink-0 items-center rounded-md border border-border bg-background px-1.5 py-0.5 text-[11px] font-medium">
+                  {labelForKind(n.kind)}
+                </span>
+                <span className="min-w-0">
+                  <span className="font-medium">{n.title}</span>
+                  {n.description && (
+                    <span className="ml-1 text-[11.5px] text-muted-foreground">{n.description}</span>
+                  )}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : (
+        <div className="divide-y divide-border/60">
+          {draft.branches.map((branch, bi) => (
+            <div key={`b-${bi}`} className="px-3.5 py-2.5">
+              <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                {branch.label || `Branch ${bi + 1}`}
+              </div>
+              <div className="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[12.5px] text-foreground">
+                {branch.channels.map((c, ci) => {
+                  const label = labelForKind(c.kind);
+                  return (
+                    <span key={`c-${bi}-${ci}`} className="inline-flex items-center gap-1.5">
+                      {ci > 0 && <ArrowGlyph />}
+                      <span className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-1.5 py-0.5 text-[11.5px] font-medium">
+                        {label}
+                        {c.assetId && (
+                          <span className="text-[10.5px] text-muted-foreground">· {c.assetId}</span>
+                        )}
+                      </span>
+                    </span>
+                  );
+                })}
+              </div>
+              {branch.channels.some((c) => c.note) && (
+                <ul className="mt-1.5 space-y-0.5 text-[11.5px] text-muted-foreground">
+                  {branch.channels
+                    .filter((c) => c.note)
+                    .map((c, ci) => (
+                      <li key={`n-${bi}-${ci}`}>• {c.note}</li>
+                    ))}
+                </ul>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Open questions block — if Pi flagged anything it wasn't sure
           about, show it here so the user can address before drafting. */}

@@ -59,11 +59,19 @@ export const listFreeformWorkflows: SurfaceTool = {
 
 /** Announce the plan to the user for confirmation. Client-only tool:
  *  server always returns `{ ok, awaiting_user: true }` and the client
- *  reads the args to render the Confirm-Draft card. */
+ *  reads the args to render the Confirm-Draft card.
+ *
+ *  The plan is a REAL GRAPH (nodes + edges) — same shape as
+ *  insert_skeleton's payload. This is deliberate: propose_draft's plan
+ *  and insert_skeleton's install target are literally the same object.
+ *  On "Draft this", Pi calls insert_skeleton and passes THIS exact
+ *  skeleton. No branch abstraction, no repeated shared nodes, no
+ *  translation. Shared prefixes and convergence nodes appear ONCE in
+ *  nodes[] and are referenced by many edges. */
 export const proposeDraft: SurfaceTool = {
   name: "propose_draft",
   description:
-    "Propose the freeform workflow plan to the user for confirmation BEFORE any insert_node calls. Emit this once Pi has gathered enough context. The client renders the plan as a Confirm-Draft card; the user hits 'Draft this' to accept or 'Edit' to revise. Never call insert_node without a prior propose_draft. Pi's proposal must respect the freeform canonical rules (single End, LTR, bezier edges, only allowed kinds, buttons/list branching, Meta character limits).",
+    "Propose the freeform workflow plan to the user for confirmation BEFORE any insert_skeleton call. The plan IS the graph (nodes + edges) — the same skeleton that will be installed on 'Draft this'. Every node appears ONCE in nodes[], even when many edges reference it. Shared prefix nodes (e.g. an opening image that feeds two branches) are ONE node with two outgoing edges. Convergence nodes (e.g. a shared thank-you that many branches feed into) are ONE node with many incoming edges. Never duplicate a node across branches. Never call insert_skeleton or insert_node without a prior propose_draft with the same graph.",
   parameters: {
     type: "object",
     properties: {
@@ -71,49 +79,80 @@ export const proposeDraft: SurfaceTool = {
       title: { type: "string", description: "Short human title for the proposed workflow." },
       summary: {
         type: "string",
-        description: "One-line human summary of the flow (e.g. 'Greeting > List of 3 slots > Confirm > End').",
-      },
-      branches: {
-        type: "array",
         description:
-          "Ordered list of the branches Pi will wire. Each branch is one path from Start to End. Branches diverge at the message node that carries buttons or list rows; the branch label should match the button label or row title.",
-        items: {
-          type: "object",
-          properties: {
-            label: { type: "string", description: "Human label for this branch (e.g. 'Morning slot')." },
-            channels: {
-              type: "array",
-              description:
-                "Ordered list of nodes along this branch. `channels` is named to match the campaign builder's propose_draft shape so client-side rendering + the skeleton generator stay consistent; on freeform each entry is a message / logic node, not a channel pick.",
-              items: {
-                type: "object",
-                properties: {
-                  kind: {
-                    type: "string",
-                    enum: FREEFORM_ALLOWED_KINDS,
-                    description: "Node kind — must be one of the allowed freeform kinds.",
-                  },
-                  assetId: {
-                    type: "string",
-                    description:
-                      "Only meaningful for apiToolCall: the handle from assets.tools. All other freeform kinds carry content inline (no asset pick).",
-                  },
-                  note: { type: "string", description: "Optional one-line note (e.g. 'quick reply Yes/No' or 'caption once uploaded')." },
+          "One-line human summary of the flow (e.g. 'Image with 2 buttons → callback API OR issue list → shared thank-you → End').",
+      },
+      skeleton: {
+        type: "object",
+        description:
+          "The plan as a real graph. nodes[] lists every node ONCE (unique ids). edges[] wires them. Shared prefix nodes appear once with multiple outgoing edges. Shared convergence nodes appear once with multiple incoming edges. This IS the payload passed to insert_skeleton on 'Draft this'.",
+        properties: {
+          nodes: {
+            type: "array",
+            description:
+              "Every node in the workflow, appearing ONCE. Do NOT list a shared node in multiple 'branches' — list it once with a stable id. Use ids like text_1, text_2, list_1, image_1, apiToolCall_1, text_thanks.",
+            items: {
+              type: "object",
+              properties: {
+                id: {
+                  type: "string",
+                  description: "Stable unique id, e.g. text_1 / list_1 / image_1 / apiToolCall_1 / text_thanks.",
                 },
-                required: ["kind"],
+                kind: {
+                  type: "string",
+                  enum: FREEFORM_ALLOWED_KINDS,
+                  description: "Node kind — must be one of the allowed freeform kinds.",
+                },
+                title: {
+                  type: "string",
+                  description: "Short human title shown on the node card, e.g. 'Callback confirm' or 'Thank you'.",
+                },
+                description: {
+                  type: "string",
+                  description: "Optional short subtitle, e.g. 'converges from api + all 5 issue replies'.",
+                },
+                needs: {
+                  type: "array",
+                  items: { type: "string" },
+                  description:
+                    "Config keys still needed after the skeleton lands (e.g. ['text'] for a text node, ['body', 'buttonLabel', 'rows'] for a list, ['text', 'buttonsBlock'] for a text with buttons). Feeds the 'open config' summary.",
+                },
               },
+              required: ["id", "kind", "title"],
             },
           },
-          required: ["label", "channels"],
+          edges: {
+            type: "array",
+            description:
+              "Every edge in the workflow. `source` and `target` reference node ids from nodes[]. `sourceHandle` names the source node's output port: `btn_<id>` for a quick-reply button (e.g. btn_b1), `row_<id>` for a list row (e.g. row_r1). Omit for the default output.",
+            items: {
+              type: "object",
+              properties: {
+                id: {
+                  type: "string",
+                  description: "Stable unique edge id, e.g. e_start_image_1 or e_image_1_apiToolCall_1.",
+                },
+                source: { type: "string" },
+                target: { type: "string" },
+                sourceHandle: {
+                  type: "string",
+                  description: "For branching from a message with buttons or list: btn_b1/btn_b2/btn_b3 or row_r1/row_r2/... Omit for a node's default output.",
+                },
+              },
+              required: ["id", "source", "target"],
+            },
+          },
         },
+        required: ["nodes", "edges"],
       },
       openQuestions: {
         type: "array",
-        description: "Things Pi still isn't sure about. Empty means Pi is ready to build. Non-empty means Pi is asking the user to resolve these before Draft.",
+        description:
+          "Things Pi still isn't sure about. Empty means Pi is ready to build. Non-empty means Pi is asking the user to resolve these before Draft.",
         items: { type: "string" },
       },
     },
-    required: ["workflowId", "title", "summary", "branches"],
+    required: ["workflowId", "title", "summary", "skeleton"],
   },
   handler: () => ({ ok: true, awaiting_user: true }),
 };
