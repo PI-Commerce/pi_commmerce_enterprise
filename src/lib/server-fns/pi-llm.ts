@@ -20,13 +20,24 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getEnv } from "@/lib/db/client";
 import { runSurface } from "@/lib/pi/kernel";
-// Side-effect imports — pools register FIRST so surfaces that opt into
-// them via `uses:` see them at dispatch time. Registry is idempotent
-// so import order between surfaces themselves doesn't matter.
-import "@/lib/pi/common/pools";
-import "@/lib/pi/surfaces/agents";
-import "@/lib/pi/surfaces/builder";
-import "@/lib/pi/surfaces/lists";
+// Value imports — each surface + pool module self-registers on load via
+// top-level `registerSurface` / `registerPool` calls, BUT the TanStack
+// Start server-fn bundler DCEs bare `import "…"` side-effect statements
+// and tree-shakes re-exports around them. Prod bundles that only saw
+// bare imports shipped without any surface registered and every request
+// returned `unknown_surface: <scope>`. See the pi-analytics.ts hotfix
+// at 2632bd1 for the same pattern.
+//
+// Importing a real VALUE from each module and touching it inside the
+// handler prevents the bundler from proving the module unused. The
+// registration side-effect happens as a byproduct of the module load.
+// The pools barrel itself is bare-imports of its children, so import
+// directly from the leaf files (agents / builder / lists / lists sub-tools).
+import { analyticsReadTools } from "@/lib/pi/common/pools/analytics-reads";
+import { assetReadTools } from "@/lib/pi/common/pools/asset-reads";
+import { agentsSurface } from "@/lib/pi/surfaces/agents";
+import { builderSurface } from "@/lib/pi/surfaces/builder";
+import { listsSurface } from "@/lib/pi/surfaces/lists";
 
 export type AskPiScope = "analytics" | "builder" | "agents";
 
@@ -98,6 +109,18 @@ export const askPi = createServerFn({ method: "POST" })
     } catch (e) {
       return { ok: false, error: `runtime_env_missing: ${(e as Error).message}` };
     }
+
+    // Runtime touch to defeat bundler DCE on the surface + pool imports.
+    // Without at least one live reference the TanStack Start server-fn
+    // bundler drops the module init and the surface / pool registrations
+    // never run — the kernel then returns `unknown_surface`. Cheap no-op
+    // that the minifier can't eliminate because the array reads have
+    // observable-ish side effects behind an `if` guard on a runtime value.
+    if (!agentsSurface.id || !builderSurface.id || !listsSurface.id) {
+      throw new Error("pi surfaces missing at load — check registrations");
+    }
+    void analyticsReadTools;
+    void assetReadTools;
 
     const surfaceId = SCOPE_TO_SURFACE[data.scope];
     const r = await runSurface(surfaceId, {
