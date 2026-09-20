@@ -20,8 +20,10 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getEnv } from "@/lib/db/client";
 import { runSurface } from "@/lib/pi/kernel";
-// Side-effect imports — each surface self-registers with the kernel
-// on first import. Order doesn't matter (registry is idempotent).
+// Side-effect imports — pools register FIRST so surfaces that opt into
+// them via `uses:` see them at dispatch time. Registry is idempotent
+// so import order between surfaces themselves doesn't matter.
+import "@/lib/pi/common/pools";
 import "@/lib/pi/surfaces/agents";
 import "@/lib/pi/surfaces/builder";
 import "@/lib/pi/surfaces/lists";

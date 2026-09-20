@@ -12,10 +12,7 @@
  * Self-registers with the kernel registry on import.
  */
 import { registerSurface, type SurfaceModule, type SurfaceContext } from "@/lib/pi/kernel";
-import {
-  emitActionLink,
-  analyticsReadTools,
-} from "@/lib/pi/common/tools";
+import { emitActionLink } from "@/lib/pi/common/tools";
 import { SYSTEM_ANALYTICS, buildScreenToolsSystemAddendum } from "./system";
 import { screenToolsForContext } from "./tools/screen";
 
@@ -31,9 +28,6 @@ export const listsSurface: SurfaceModule = {
     return SYSTEM_ANALYTICS + addendum;
   },
   tools: [
-    // Base analytics reads — Pi answers "how many leads?" etc. without
-    // ever needing a screen tool.
-    ...analyticsReadTools,
     // Escape hatch — deep-link out when the user is dead-ended on the
     // current page (no WA number connected, no CSV in library, etc.).
     emitActionLink,
@@ -42,10 +36,11 @@ export const listsSurface: SurfaceModule = {
   // and we hand Pi ONLY the subset that map to that page. Matches the
   // pre-refactor `screenToolsForSurface(surfaceId)` filter exactly.
   contextualTools: screenToolsForContext,
-  // No context assembler — the client passes the surface state
-  // (filters, selected rows) via `data.context` and Pi reads it from
-  // there. Adding a server-side assembler is a natural Phase 3 win
-  // once the pattern is proven.
+  // Shared pool opt-ins:
+  //   analytics-reads — the 5 D1 read primitives (count_leads, ...)
+  //   asset-reads     — NEW: read_asset lets lists Pi answer "what does
+  //     the Renewal template say?" without a handoff to /channels
+  uses: ["analytics-reads", "asset-reads"],
 };
 
 registerSurface(listsSurface);

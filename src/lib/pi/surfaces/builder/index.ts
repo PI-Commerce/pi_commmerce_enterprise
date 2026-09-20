@@ -11,7 +11,6 @@ import { registerSurface, type SurfaceModule } from "@/lib/pi/kernel";
 import {
   emitActionLink,
   emitChoiceTool,
-  analyticsReadTools,
 } from "@/lib/pi/common/tools";
 import { SYSTEM_BUILDER } from "./system";
 import {
@@ -25,18 +24,24 @@ export const builderSurface: SurfaceModule = {
   id: "builder",
   systemPrompt: SYSTEM_BUILDER,
   tools: [
-    // Analytics reads — Pi can answer "how many leads went through this
-    // WhatsApp node in the last run?" without a handoff.
-    ...analyticsReadTools,
     // Canvas + campaign mutations — the DAG editing surface.
     ...canvasTools,
     // Skill tools — classify_brief, suggest_skeleton, insert_skeleton,
-    // find_relevant_assets, read_asset, suggest_next_step.
+    // find_relevant_assets, suggest_next_step.
+    // (read_asset used to live here; it moved to the asset-reads pool
+    //  so analytics + lists can share it. The surface's kernel merge
+    //  gives Pi the same tool via the pool below.)
     ...skillTools,
     // Chips-first + escape-hatch — shared across every surface.
     emitChoiceTool,
     emitActionLink,
   ],
+  // Shared pool opt-ins:
+  //   analytics-reads — "how many leads went through this WhatsApp
+  //     node in the last run?"
+  //   asset-reads     — read_asset for comparing template bodies /
+  //     voice-agent prompts when the user asks "why pick this one?"
+  uses: ["analytics-reads", "asset-reads"],
   assembleContext: assembleBuilderSurfaceContext,
   attachDiagnostic: attachBuilderDiagnostic,
   // Loop config: builder can burn more rounds than agents/analytics —

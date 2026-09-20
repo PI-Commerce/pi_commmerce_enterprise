@@ -15,7 +15,6 @@ import { assembleBuilderContext } from "@/lib/server-fns/builder-context";
 import {
   classifyBrief,
   findRelevantAssets,
-  readAsset,
   suggestSkeleton,
   insertSkeleton,
   suggestNextStep,
@@ -140,22 +139,6 @@ export const findRelevantAssetsTool: SurfaceTool = {
     ),
 };
 
-/** Fetch the FULL internals of one asset — voice agent prompt, template body, etc. */
-export const readAssetTool: SurfaceTool = {
-  name: "read_asset",
-  description:
-    "Fetch the FULL internals of a single asset (voiceAgent → masterPrompt + KB + tools + postCall; waTemplate → body + buttons + variables; smsTemplate → body; rcsTemplate → cards; freeformWorkflow → steps; tool → spec). Use this when you need to compare candidate templates by content, not just by name — for example to explain to the user WHY one WA template fits the brief better than another. Do NOT dump the returned content back verbatim to the user; summarize.",
-  parameters: {
-    type: "object",
-    properties: {
-      kind: { type: "string", enum: ["voiceAgent", "waTemplate", "smsTemplate", "rcsTemplate", "freeformWorkflow", "tool"] },
-      id: { type: "string" },
-    },
-    required: ["kind", "id"],
-  },
-  handler: async (args) => await readAsset(args.kind as AssetKind, args.id as string),
-};
-
 /** 2-4 next-best actions given current DSL + classified brief. */
 export const suggestNextStepTool: SurfaceTool = {
   name: "suggest_next_step",
@@ -186,6 +169,5 @@ export const skillTools: SurfaceTool[] = [
   suggestSkeletonTool,
   insertSkeletonTool,
   findRelevantAssetsTool,
-  readAssetTool,
   suggestNextStepTool,
 ];

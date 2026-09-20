@@ -17,6 +17,7 @@
  */
 import type { LoopResult, NormalizedToolDef, SurfaceContext } from "./types";
 import { getSurface } from "./registry";
+import { resolvePools } from "./pool-registry";
 import { runAnthropicLoop } from "./transport/anthropic";
 import { runTfyLoop } from "./transport/tfy";
 
@@ -84,16 +85,26 @@ export async function runSurface(
     ? surface.systemPrompt(ctx)
     : surface.systemPrompt;
 
-  // Merge unconditional tools with any per-request additions from
-  // `contextualTools`. Name collisions win to `tools` so a surface can't
-  // accidentally shadow its own permanent tools from context.
+  // Merge tools from three sources with a stable precedence:
+  //   1. surface.tools           (unconditional; wins collisions)
+  //   2. contextualTools(ctx)    (per-request; e.g. surface-filtered screen tools)
+  //   3. pools resolved from `uses:` (shared cross-surface bundles)
+  // A surface can therefore override a pool tool by declaring its own
+  // with the same name — useful when e.g. analytics-dashboard needs a
+  // fixture-aware count_leads that the pool's version doesn't have.
   const unconditional = surface.tools;
   const contextual = surface.contextualTools ? surface.contextualTools(ctx) : [];
-  const seen = new Set(unconditional.map((t) => t.name));
+  const pooled = resolvePools(surface.uses);
+  const seen = new Set<string>();
   const allTools = [
     ...unconditional,
-    ...contextual.filter((t) => !seen.has(t.name)),
-  ];
+    ...contextual,
+    ...pooled,
+  ].filter((t) => {
+    if (seen.has(t.name)) return false;
+    seen.add(t.name);
+    return true;
+  });
 
   // Normalize tool defs — the kernel loop only wants { name, description, parameters }.
   const normalizedTools: NormalizedToolDef[] = allTools.map((t) => ({

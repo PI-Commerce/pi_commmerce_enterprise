@@ -17,7 +17,10 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getEnv } from "@/lib/db/client";
 import { runSurface } from "@/lib/pi/kernel";
-// Side-effect import — self-registers the analytics surface.
+// Side-effect imports — pools register FIRST so the analytics-dashboard
+// surface (which uses asset-reads) sees them at dispatch time. Registry
+// is idempotent so the double-import from pi-llm.ts is fine.
+import "@/lib/pi/common/pools";
 import {
   normalizeAnswer,
   type AnalyticsScreenContext,

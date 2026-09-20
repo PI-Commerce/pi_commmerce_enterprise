@@ -28,3 +28,4 @@ export type { TfyLoopInput } from "./transport/tfy";
 
 export { runSurface } from "./dispatch";
 export { registerSurface, getSurface, listSurfaces } from "./registry";
+export { registerPool, resolvePools, listPools } from "./pool-registry";
