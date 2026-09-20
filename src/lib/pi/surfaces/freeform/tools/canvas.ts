@@ -117,6 +117,11 @@ export const proposeDraft: SurfaceTool = {
                   description:
                     "Config keys still needed after the skeleton lands (e.g. ['text'] for a text node, ['body', 'buttonLabel', 'rows'] for a list, ['text', 'buttonsBlock'] for a text with buttons). Feeds the 'open config' summary.",
                 },
+                config: {
+                  type: "object",
+                  description:
+                    "Optional Phase-1 config to seed on the node. Use this whenever the user's brief NAMES concrete content: list row titles, quick-reply button labels, cta_url links. Skip it for content the user hasn't named (body copy, media source, captions). Shape matches the node kind:\n  - list node: { rows: [{ id: 'r1', title: 'Battery issue' }, ...] }\n  - text/image/video/document with quick-reply buttons: { buttonsBlock: { mode: 'quick_reply', buttons: [{ id: 'b1', label: 'Call me' }, ...] } }\n  - text/image/video/document with a CTA URL: { buttonsBlock: { mode: 'cta_url', button: { id: 'b1', label: 'Learn more', url: 'https://...' } } }\n  - apiToolCall: { apiTool: '<handle from assets.tools>' } — only when the brief names the tool.\nAny keys you omit fall back to auto-seeded placeholders ('Option 1', 'Option 2', ...).",
+                },
               },
               required: ["id", "kind", "title"],
             },

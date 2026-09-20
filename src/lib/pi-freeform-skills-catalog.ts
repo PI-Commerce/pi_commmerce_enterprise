@@ -40,6 +40,12 @@ export type FreeformSkeletonNode = {
   /** Config keys still needed after the skeleton lands. Drives
    *  suggest_next_step + the "open config" tally the client shows. */
   needs?: string[];
+  /** Optional Phase-1 config Pi seeds when the brief NAMED concrete
+   *  content (list row titles, quick-reply button labels, cta_url link
+   *  URLs, apiTool handle). Merged over the auto-seeded structural
+   *  scaffold in insertFreeformSkeleton — auto handles fill in for
+   *  anything Pi omits. */
+  config?: Record<string, unknown>;
 };
 
 export type FreeformSkeletonEdge = {

@@ -298,14 +298,22 @@ export async function insertFreeformSkeleton(
   const newNodes: FreeformNodeRecord[] = skeleton.nodes.map((n, idx) => {
     // Seed structural config so branching handles are real from turn 1.
     // Content fields (text bodies, captions, media urls, list body) stay
-    // empty — that's what Phase 2 fills in. Handles are derived from the
-    // edges wired to this node (buttonIdsPerNode / rowIdsPerNode).
-    const seededConfig = seedFreeformStructuralConfig(
+    // empty when Pi didn't name them — that's what Phase 2 fills in.
+    // Handles are derived from the edges wired to this node
+    // (buttonIdsPerNode / rowIdsPerNode).
+    const autoSeededConfig = seedFreeformStructuralConfig(
       n.kind,
       n.needs,
       Array.from(buttonIdsPerNode.get(n.id) ?? []),
       Array.from(rowIdsPerNode.get(n.id) ?? []),
     );
+    // Merge Pi's per-node config over the auto-seeded structural
+    // scaffold. Pi uses `config` on the propose_draft skeleton to name
+    // concrete content the brief mentioned (row titles, quick-reply
+    // button labels, cta_url links, apiTool handle). Merge is arrays-
+    // by-id for rows / buttons so Pi's labels attach to the handle ids
+    // wired in the edges.
+    const seededConfig = mergePiConfig(autoSeededConfig, n.config);
     // Validity + ReactFlow node type split — freeform-owned kinds render
     // through the "freeform" node type + get validated by
     // validateFreeformNode. The two shared logic kinds (apiToolCall,
@@ -459,6 +467,63 @@ export function suggestFreeformNextStep(
  * with quick-reply buttons; `needs: ["body", "buttonLabel", "rows"]`
  * means a list node.
  */
+/**
+ * Merge Pi's per-node config over the auto-seeded structural scaffold.
+ *
+ *  - list.rows: Pi's rows override placeholders BY ID. If Pi supplies
+ *    a title for row id "r1", that replaces "Option 1" while r2..r5
+ *    keep their placeholders. New row ids Pi wired but didn't seed
+ *    stay as placeholders.
+ *  - buttonsBlock: if Pi supplies a full buttonsBlock (mode + buttons /
+ *    button), it replaces the auto-seeded quick_reply trio. This lets Pi
+ *    switch to cta_url when the brief mentions a link ("text node with
+ *    link" → mode: cta_url + button.url).
+ *  - other keys (text body, caption, mediaUrl, etc.): Pi's values pass
+ *    through unchanged; the auto-seed never sets these.
+ */
+function mergePiConfig(
+  auto: FreeformNodeConfig | undefined,
+  pi: FreeformNodeConfig | Record<string, unknown> | undefined,
+): FreeformNodeConfig | undefined {
+  if (!pi) return auto;
+  const merged: FreeformNodeConfig = { ...(auto ?? {}) };
+  const piCast = pi as FreeformNodeConfig;
+
+  // Rows — merge by id so Pi's per-row titles land on the wired handles.
+  if (Array.isArray(piCast.rows)) {
+    const autoRows = Array.isArray(merged.rows) ? merged.rows : [];
+    const piRows = piCast.rows as Array<{ id?: string; title?: string; description?: string }>;
+    const byId = new Map(autoRows.map((r) => [r.id, r] as const));
+    for (const r of piRows) {
+      if (!r.id) continue;
+      const existing = byId.get(r.id);
+      byId.set(r.id, {
+        id: r.id,
+        title: r.title ?? existing?.title ?? "",
+        ...(r.description ? { description: r.description } : existing?.description ? { description: existing.description } : {}),
+      });
+    }
+    merged.rows = Array.from(byId.values());
+  }
+
+  // buttonsBlock — Pi's full block replaces auto (mode switch is
+  // meaningful; can't be partial).
+  if (piCast.buttonsBlock) {
+    merged.buttonsBlock = piCast.buttonsBlock;
+  }
+
+  // Content fields Pi may seed if the brief was explicit.
+  for (const key of [
+    "text", "body", "header", "footer", "buttonLabel",
+    "caption", "mediaSource", "mediaUrl", "mediaFileName",
+  ] as const) {
+    const v = (piCast as Record<string, unknown>)[key];
+    if (v !== undefined) (merged as Record<string, unknown>)[key] = v;
+  }
+
+  return Object.keys(merged).length ? merged : undefined;
+}
+
 function seedFreeformStructuralConfig(
   kind: string,
   needs: string[] | undefined,

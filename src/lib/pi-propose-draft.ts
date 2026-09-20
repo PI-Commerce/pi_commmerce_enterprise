@@ -53,6 +53,11 @@ export type ProposedSkeletonNode = {
   /** Config keys still needed after the skeleton lands. Feeds the "open
    *  config" summary in the Confirm-Draft card + suggest_next_step. */
   needs?: string[];
+  /** Optional Phase-1 config Pi seeds when the brief NAMED concrete
+   *  content — list row titles, quick-reply button labels, cta_url
+   *  URLs, apiTool handle. Passed through to insert_skeleton so the
+   *  same graph installs with real labels/links from turn 1. */
+  config?: Record<string, unknown>;
 };
 
 /** One edge in a proposed skeleton. `sourceHandle` names the source
@@ -131,6 +136,7 @@ export function extractProposedDraft(toolCalls: PiToolCallLog[]): ProposedDraft 
           title: n?.title ?? "",
           ...(n?.description ? { description: n.description } : {}),
           ...(Array.isArray(n?.needs) ? { needs: n.needs } : {}),
+          ...(n?.config && typeof n.config === "object" ? { config: n.config } : {}),
         })).filter((n) => n.id && n.kind && n.title),
         edges: args.skeleton.edges.map((e) => ({
           id: e?.id ?? "",

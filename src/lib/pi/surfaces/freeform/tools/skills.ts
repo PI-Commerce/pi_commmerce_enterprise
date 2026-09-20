@@ -93,6 +93,11 @@ export const insertSkeletonTool: SurfaceTool = {
                 title: { type: "string" },
                 description: { type: "string" },
                 needs: { type: "array", items: { type: "string" } },
+                config: {
+                  type: "object",
+                  description:
+                    "Optional Phase-1 config to seed on the node — same shape you passed to propose_draft. list.rows / buttonsBlock.buttons / buttonsBlock.button (cta_url) get merged onto the auto-seeded structural handles.",
+                },
               },
               required: ["id", "kind", "title"],
             },

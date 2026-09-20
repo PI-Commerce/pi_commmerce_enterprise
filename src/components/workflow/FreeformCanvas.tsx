@@ -2,9 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactFlow, {
   Background,
   BackgroundVariant,
+  ControlButton,
   Controls,
   MiniMap,
   addEdge,
+  getNodesBounds,
   useEdgesState,
   useNodesState,
   type Connection,
@@ -13,6 +15,8 @@ import ReactFlow, {
   type NodeMouseHandler,
   type ReactFlowInstance,
 } from "reactflow";
+import { Wand2 } from "lucide-react";
+import { elkLayout, type Point } from "@/lib/flow-layout";
 import { freeformNodeTypes, type FreeformNodeData } from "./FreeformNodes";
 import { nodeTypes as campaignNodeTypes } from "./nodes";
 import { edgeTypes } from "./edges";
@@ -507,11 +511,43 @@ export function FreeformCanvas({
 
   const defaultEdgeOptions = useMemo(() => ({ type: "routed" as const }), []);
 
+  // One-click cleanup: re-run ELK left-to-right layout on the current
+  // graph and fit it to the viewport. Same mechanic the campaign
+  // WorkflowCanvas ships — see WorkflowCanvas.tsx autoArrange for the
+  // reference. Ref-held so `applyPiToolCalls` / `applyDraftSkeleton`
+  // (declared above) can trigger a re-lay after Pi's mutations land,
+  // without hitting TDZ on the const reference.
+  const autoArrangeRef = useRef<(() => Promise<void>) | null>(null);
+  const autoArrange = useCallback(async () => {
+    const rf = rfRef.current;
+    if (!rf) return;
+    const ns = rf.getNodes();
+    const es = rf.getEdges();
+    if (ns.length === 0) return;
+    const laid = await elkLayout(ns, es);
+    const posById = new Map(laid.nodes.map((n) => [n.id, n.position] as const));
+    const ptsById = new Map(
+      laid.edges.map((e) => [e.id, (e.data?.points as Point[] | undefined) ?? []] as const),
+    );
+    setNodes((nds) => nds.map((n) => ({ ...n, position: posById.get(n.id) ?? n.position })));
+    setEdges((eds) => eds.map((e) => ({
+      ...e,
+      type: "routed",
+      data: { ...(e.data ?? {}), points: ptsById.get(e.id) ?? [] },
+    })));
+    onDirty?.();
+    setTimeout(() => rfRef.current?.fitView({ padding: 0.2, duration: 400 }), 60);
+  }, [setNodes, setEdges, onDirty]);
+  useEffect(() => { autoArrangeRef.current = autoArrange; }, [autoArrange]);
+
   // Ask Pi (in-canvas composer) — mutation dispatch. Every LLM turn's
   // insert_node / connect_nodes / update_node tool calls fold into the
   // live ReactFlow state via applyFreeformPiToolCallsToGraph. Server
   // already wrote the change to D1, so this is purely the "make the
-  // canvas visibly update the moment Pi answers" path.
+  // canvas visibly update the moment Pi answers" path. After the batch
+  // lands, kick off ELK auto-arrange so the fresh nodes read cleanly
+  // LTR — two rAFs give ReactFlow time to mount + measure the new
+  // handles before ELK sizes them.
   const applyPiToolCalls = useCallback(
     (toolCalls: PiToolCallLog[]) => {
       const next = applyFreeformPiToolCallsToGraph(toolCalls, nodes, edges);
@@ -519,6 +555,11 @@ export function FreeformCanvas({
       setNodes(next.nodes);
       setEdges(next.edges);
       onDirty?.();
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          void autoArrangeRef.current?.();
+        });
+      });
     },
     [nodes, edges, setNodes, setEdges, onDirty],
   );
@@ -527,7 +568,9 @@ export function FreeformCanvas({
   // draft doesn't pile on top of a previous one, then render pulsating
   // skeleton placeholders for Pi's proposed shape. Pi's real insert_node
   // calls arrive in the next turn; applyFreeformPiToolCallsToGraph
-  // strips the skeleton before applying the real inserts.
+  // strips the skeleton before applying the real inserts. Then ELK
+  // re-lay so the skeleton itself reads cleanly (Pi's position hints
+  // are crude — grid math based on node index, not graph structure).
   const applyDraftSkeleton = useCallback(
     (draft: ProposedDraft) => {
       const reset = resetFreeformCanvasForNewDraft(nodes, edges);
@@ -548,6 +591,11 @@ export function FreeformCanvas({
       });
       setEdges(() => [...baseEdges, ...skeletonEdges]);
       onDirty?.();
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          void autoArrangeRef.current?.();
+        });
+      });
     },
     [nodes, edges, setNodes, setEdges, onDirty],
   );
@@ -596,7 +644,13 @@ export function FreeformCanvas({
           size={1}
           color="var(--canvas-dot)"
         />
-        <Controls position="bottom-left" showInteractive={false} />
+        <Controls position="bottom-left" showInteractive={false}>
+          {!previewOnly && (
+            <ControlButton onClick={autoArrange} title="Auto-arrange & fit">
+              <Wand2 />
+            </ControlButton>
+          )}
+        </Controls>
         <MiniMap
           position="bottom-right"
           pannable

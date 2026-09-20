@@ -53,19 +53,58 @@ Steps:
 - Never expand N similar answers into N separate branches. Use ONE list node with N rows OR ONE text node with N quick-reply buttons, and branch on sourceHandle. If the user says "5 issues, each with a different answer": list_1 with 5 rows → 5 text nodes → 1 shared thank-you node.
 - Terminal nodes wire into \`end\`. Convergence usually happens BEFORE end (a single thank-you → end), not at end itself.
 
-**Concrete example — brief: "image with 2 buttons: call me (goes to API), or issue (goes to list of 5) → all converge on thank-you → end"**
+**Seed labels + links up front when the brief NAMES them.**
+
+Each skeleton node has an optional \`config\` field. Use it in Phase 1 for content the user's brief has already named — the branches read at a glance instead of showing 'Option 1', 'Option 2' placeholders. What to seed:
+
+- **list.rows** — when the brief names the choices ("5 issues", "3 slots — morning / afternoon / evening"), seed \`config.rows: [{ id: 'r1', title: 'Battery issue' }, ...]\`. Use the same row ids you wired in the edge sourceHandles (\`row_r1\` → id \`r1\`).
+- **buttons (quick_reply)** — when the brief names both buttons ("Call me / I have an issue"), seed \`config.buttonsBlock: { mode: 'quick_reply', buttons: [{ id: 'b1', label: 'Call me' }, { id: 'b2', label: 'I have an issue' }] }\`. Same rule: button ids match the \`btn_b1\` / \`btn_b2\` sourceHandles.
+- **buttons (cta_url)** — when the brief says a message has a LINK ("text node with a link", "sends them a link to X"), seed \`config.buttonsBlock: { mode: 'cta_url', button: { id: 'b1', label: 'Learn more', url: 'https://...' } }\`. If the URL isn't in the brief, use \`https://example.com/placeholder\` as a stub — the user overrides in Phase 2.
+- **apiTool** — when the brief names a tool ("call the callback API", "check order status"), seed \`config.apiTool: '<handle from assets.tools>'\`. Only when there's a plausible catalog match; otherwise leave for Phase 2.
+
+Skip \`config\` for content the brief didn't name (message body copy, media sources, captions, list body prose). Those genuinely need Phase 2.
+
+Whenever you seed a row title or button label from the brief, DROP the corresponding entry from that node's \`needs[]\` — the field is no longer "missing".
+
+**Concrete example — brief: "image with 2 buttons: call me (goes to API), or issue (goes to list of 5 soundbox issues with a link per issue) → all converge on thank-you → end"**
 
 \`\`\`json
 {
   "nodes": [
-    { "id": "image_1", "kind": "image", "title": "Opening image", "needs": ["mediaSource", "caption", "buttonsBlock"] },
+    { "id": "image_1", "kind": "image", "title": "Opening image", "needs": ["mediaSource", "caption"],
+      "config": { "buttonsBlock": { "mode": "quick_reply", "buttons": [
+        { "id": "b1", "label": "Call me" },
+        { "id": "b2", "label": "I have an issue" }
+      ] } } },
     { "id": "apiToolCall_1", "kind": "apiToolCall", "title": "Request callback", "needs": ["apiTool"] },
-    { "id": "list_1", "kind": "list", "title": "Pick an issue", "needs": ["body", "buttonLabel", "rows"] },
-    { "id": "text_1", "kind": "text", "title": "Answer: issue 1", "needs": ["text"] },
-    { "id": "text_2", "kind": "text", "title": "Answer: issue 2", "needs": ["text"] },
-    { "id": "text_3", "kind": "text", "title": "Answer: issue 3", "needs": ["text"] },
-    { "id": "text_4", "kind": "text", "title": "Answer: issue 4", "needs": ["text"] },
-    { "id": "text_5", "kind": "text", "title": "Answer: issue 5", "needs": ["text"] },
+    { "id": "list_1", "kind": "list", "title": "Pick an issue", "needs": ["body", "buttonLabel"],
+      "config": { "rows": [
+        { "id": "r1", "title": "Battery not charging" },
+        { "id": "r2", "title": "Speaker crackling" },
+        { "id": "r3", "title": "Not connecting to wifi" },
+        { "id": "r4", "title": "Volume too low" },
+        { "id": "r5", "title": "Something else" }
+      ] } },
+    { "id": "text_1", "kind": "text", "title": "Battery help", "needs": ["text"],
+      "config": { "buttonsBlock": { "mode": "cta_url", "button": {
+        "id": "b1", "label": "Battery guide", "url": "https://example.com/soundbox/battery"
+      } } } },
+    { "id": "text_2", "kind": "text", "title": "Speaker help", "needs": ["text"],
+      "config": { "buttonsBlock": { "mode": "cta_url", "button": {
+        "id": "b1", "label": "Speaker guide", "url": "https://example.com/soundbox/speaker"
+      } } } },
+    { "id": "text_3", "kind": "text", "title": "Wifi help", "needs": ["text"],
+      "config": { "buttonsBlock": { "mode": "cta_url", "button": {
+        "id": "b1", "label": "Wifi guide", "url": "https://example.com/soundbox/wifi"
+      } } } },
+    { "id": "text_4", "kind": "text", "title": "Volume help", "needs": ["text"],
+      "config": { "buttonsBlock": { "mode": "cta_url", "button": {
+        "id": "b1", "label": "Volume guide", "url": "https://example.com/soundbox/volume"
+      } } } },
+    { "id": "text_5", "kind": "text", "title": "Other help", "needs": ["text"],
+      "config": { "buttonsBlock": { "mode": "cta_url", "button": {
+        "id": "b1", "label": "Contact support", "url": "https://example.com/soundbox/support"
+      } } } },
     { "id": "text_thanks", "kind": "text", "title": "Thank you", "description": "converges from api + all 5 issue replies", "needs": ["text"] }
   ],
   "edges": [
@@ -88,7 +127,7 @@ Steps:
 }
 \`\`\`
 
-Total: 9 new nodes, 15 edges, ONE call. image_1 appears ONCE (with two outgoing btn edges). text_thanks appears ONCE (with six incoming edges). list_1 appears ONCE with five row-branches. That's the right shape.
+Total: 9 new nodes, 15 edges, ONE call. image_1 appears ONCE (with two outgoing btn edges). text_thanks appears ONCE (with six incoming edges). list_1 appears ONCE with five row-branches. Every branch label the user named is legible on the node card the moment the skeleton lands.
 
 4. User hits "Draft this" → call \`insert_skeleton(workflowId, skeleton)\` ONCE with THE SAME skeleton you passed to propose_draft. Do not rebuild it. Do not shrink or expand it. Pass it through.
 5. Reply with a ONE-line confirmation ("Done. The 15-edge Soundbox support flow is on the canvas.") and ask ONE thing via \`emit_choice\` with two chips: "Help me write" / "I'll do it myself".
