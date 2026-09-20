@@ -26,7 +26,7 @@ import * as toolsDb from "@/lib/db/tools";
 import * as freeformDb from "@/lib/db/freeform-workflows";
 import { CANONICAL_CONSTRUCT_RULES } from "@/lib/pi-construct-rules";
 import { BUILDER_ALLOWED_KINDS, summarizeRegistryForContext } from "@/lib/node-registry";
-import { computeAllValidity } from "@/lib/node-validity";
+import { computeGraphValidity } from "@/lib/node-validators";
 import { summarizeCatalogForContext } from "@/lib/pi-skills-catalog";
 
 export type BuilderContext = {
@@ -134,12 +134,11 @@ export async function assembleBuilderContext(campaignId: string | undefined): Pr
     (async () => {
       if (!hasDb) return [];
       try {
-        const list = await freeformDb.listFreeformWorkflows();
-        // Only workflows in `ready` status are pickable (matches the config
-        // panel's own picker gate). Draft / locked workflows are hidden.
-        return list
-          .filter((w) => w.status === "ready")
-          .map((w) => ({ id: w.id, name: w.name, status: w.status }));
+        // Fetch full workflow bodies here — the validator needs `nodes` to
+        // compute placeholders for the WA Freeform variable-mapping check.
+        // Pi's `assets.freeformWorkflows` slice below strips the body back
+        // down to `{ id, name, status }` so the prompt stays cheap.
+        return await freeformDb.listFreeformWorkflows();
       } catch (e) {
         diag.freeformWorkflowsErr = (e as Error).message;
         return [];
@@ -193,10 +192,14 @@ export async function assembleBuilderContext(campaignId: string | undefined): Pr
     diag,
   }));
 
-  // Registry-driven per-node validity for the current DSL. Cheap to
-  // compute (pure), and Pi uses it to proactively point out "your Voice
-  // node is missing an agent" without needing a separate tool call.
-  const validity = dsl ? computeAllValidity(dsl.nodes) : [];
+  // Deep, edge-aware per-node validity for the current DSL. Every check
+  // that lives inside a ConfigPanel `useEffect(mark)` (traffic totals,
+  // phone-field type, freeform variable mapping, WhatsApp button wiring,
+  // ...) is mirrored server-side so Pi's `validity` array agrees with
+  // what the user sees on the canvas even before opening each node.
+  const validity = dsl
+    ? computeGraphValidity(dsl.nodes, dsl.edges, freeformWorkflows)
+    : [];
 
   return {
     surface: "campaigns.builder",
@@ -206,7 +209,18 @@ export async function assembleBuilderContext(campaignId: string | undefined): Pr
     rules: CANONICAL_CONSTRUCT_RULES,
     nodeKinds: summarizeRegistryForContext(BUILDER_ALLOWED_KINDS),
     skillCatalog: summarizeCatalogForContext(),
-    assets: { voiceAgents, waTemplates, freeformWorkflows, smsTemplates, rcsTemplates, tools },
+    assets: {
+      voiceAgents,
+      waTemplates,
+      // Ready-only + slim shape for Pi's asset catalog. Matches the config
+      // panel's own picker gate (locked / draft workflows aren't offered).
+      freeformWorkflows: freeformWorkflows
+        .filter((w) => w.status === "ready")
+        .map((w) => ({ id: w.id, name: w.name, status: w.status })),
+      smsTemplates,
+      rcsTemplates,
+      tools,
+    },
     _diag: diag,
   };
 }
