@@ -149,6 +149,97 @@ export function PiDeadZonePill({
 }
 
 /**
+ * Drafting-state pill — replaces the collapsed Ask Pi pill while Pi is
+ * generating an agent draft in the background (client optimistically
+ * navigated the user into the builder and now needs to keep them engaged
+ * without a giant chat panel).
+ *
+ * Same middle-bottom slot + drag geometry as PiPill so the widget position
+ * doesn't jump between states. Shows: pulsing sparkle, "Pi is drafting X",
+ * live elapsed timer (mm:ss), and rotating step microcopy. Non-clickable
+ * (Pi is working; opening the composer mid-draft would be confusing).
+ */
+const PI_DRAFT_STEPS = [
+  "Picking a persona",
+  "Drafting the call flow",
+  "Setting pronunciation rules",
+  "Wiring the tools",
+  "Composing objections",
+  "Writing the knowledge base",
+  "Adding post-call variables",
+  "Finalising guardrails",
+];
+
+function formatDraftElapsed(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+export function PiDraftingPill({
+  label,
+  startedAt,
+  pillHandlers,
+}: {
+  label: string;
+  startedAt: number;
+  pillHandlers: PiPillHandlers;
+}) {
+  const [now, setNow] = useState(() => Date.now());
+  const [stepIndex, setStepIndex] = useState(0);
+
+  useEffect(() => {
+    const tick = setInterval(() => setNow(Date.now()), 1000);
+    const step = setInterval(
+      () => setStepIndex((i) => (i + 1) % PI_DRAFT_STEPS.length),
+      1800,
+    );
+    return () => {
+      clearInterval(tick);
+      clearInterval(step);
+    };
+  }, []);
+
+  const elapsed = formatDraftElapsed(now - startedAt);
+
+  return (
+    <div
+      {...pillHandlers}
+      className="pi-drafting-pill pointer-events-auto flex max-w-[440px] cursor-grab touch-none items-center gap-2.5 rounded-full border border-ai/40 bg-card px-3.5 py-2 text-[12.5px] shadow-[0_10px_30px_-10px_color-mix(in_oklch,var(--ai)_55%,transparent)] active:cursor-grabbing animate-slide-up"
+      aria-label={`Pi is drafting ${label}`}
+      title={`Pi is drafting ${label}. Drag to reposition.`}
+    >
+      <span className="relative flex h-5 w-5 shrink-0 items-center justify-center">
+        <span className="absolute inset-0 rounded-full bg-ai/25 pi-drafting-pulse" />
+        <Sparkle className="relative h-3.5 w-3.5 fill-ai text-ai" />
+      </span>
+      <span className="min-w-0 truncate font-medium text-foreground">
+        Pi is drafting <span className="font-mono">{label}</span>
+      </span>
+      <span className="shrink-0 rounded-md border border-border bg-background/70 px-1.5 py-0.5 font-mono text-[11px] tabular-nums text-muted-foreground">
+        {elapsed}
+      </span>
+      <span className="hidden shrink-0 truncate text-[11.5px] text-muted-foreground sm:inline">
+        · {PI_DRAFT_STEPS[stepIndex]}…
+      </span>
+      <style>{`
+        @keyframes piDraftingPulse {
+          0%, 100% { transform: scale(1);    opacity: 0.55; }
+          50%      { transform: scale(1.45); opacity: 0.15; }
+        }
+        .pi-drafting-pulse { animation: piDraftingPulse 1.6s ease-in-out infinite; }
+        @keyframes piDraftingGlow {
+          0%, 100% { box-shadow: 0 10px 30px -12px color-mix(in oklch, var(--ai) 40%, transparent); }
+          50%      { box-shadow: 0 16px 44px -10px color-mix(in oklch, var(--ai) 75%, transparent); }
+        }
+        .pi-drafting-pill { animation: piDraftingGlow 2.4s ease-in-out infinite; }
+      `}</style>
+    </div>
+  );
+}
+
+/**
  * Persistent nudge bubble for dead-zone surfaces — same shape as `PiNudge` so
  * the visual language is unbroken, but with no dismiss, no pulse, no click.
  * It's a signpost: "Pi can't help here, do your thing." Copy should be playful

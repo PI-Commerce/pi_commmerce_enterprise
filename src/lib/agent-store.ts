@@ -116,6 +116,16 @@ export function useAgents(): Record<string, AgentRecord> {
 export function saveAgent(
   id: string,
   patch: Partial<AgentRecord> & { id?: string },
+  opts?: {
+    /**
+     * Skip the background D1 write. Used by the Ask Pi "optimistic shell"
+     * flow: the dock inserts an empty draft locally and navigates the user
+     * into the builder while Pi drafts server-side. Pi's own save_agent
+     * tool call is the authoritative write; if we also fired a client
+     * write for the shell, it could race the real one and clobber content.
+     */
+    skipRemote?: boolean;
+  },
 ): void {
   const map = db();
   const existing = map[id];
@@ -132,6 +142,7 @@ export function saveAgent(
   const next: AgentRecord = { ...base, ...patch, id };
   store = { ...map, [id]: next };
   emit();
+  if (opts?.skipRemote) return;
   // Background persist. Only from the client — server callers (campaign
   // resolvers) don't have a Save button so they wouldn't call this anyway.
   if (typeof window !== "undefined") {

@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState } from "react";
-import { useRouterState } from "@tanstack/react-router";
+import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { getPiContext } from "@/lib/ask-pi-context";
 import { askPi } from "@/lib/server-fns/pi-llm";
-import { refreshAgentsFromDb } from "@/lib/agent-store";
+import { refreshAgentsFromDb, saveAgent } from "@/lib/agent-store";
+import { detectDraftAgentIntent } from "@/lib/pi-agent-intent";
 import { usePiScreenContext } from "@/lib/pi-screen-context";
 import { usePiSurface, dispatchScreenToolCalls, usePiDisabledCopy } from "@/lib/pi-screen-actions";
 import { extractActionLinksFromToolCalls } from "@/lib/pi-canvas-apply";
 import { AnalyticsChat } from "@/components/analytics/AnalyticsChat";
 import { IntegrationsChat } from "@/components/integrations/IntegrationsChat";
+import { DeveloperChat } from "@/components/developer/DeveloperChat";
 import {
   PiPill,
   PiNudge,
@@ -19,6 +21,7 @@ import {
   PiInputIcon,
   PiDeadZonePill,
   PiDeadZoneNudge,
+  PiDraftingPill,
   usePiDrag,
 } from "./ask-pi-ui";
 
@@ -57,6 +60,11 @@ export function AskPiDock() {
   // liveAnswer on submit / reset so a stale link from a previous
   // question never sticks around under a fresh answer.
   const [liveActionLinks, setLiveActionLinks] = useState<Array<{ label: string; href: string; hint?: string }> | null>(null);
+  // Ask Pi "drafting an agent" background state. When set, the dock pill slot
+  // renders a PiDraftingPill (label + live timer + rotating step microcopy)
+  // instead of the normal Ask Pi pill. Populated by the /agents optimistic
+  // draft flow in submit(); cleared when askPi returns or the request throws.
+  const [drafting, setDrafting] = useState<{ label: string; startedAt: number } | null>(null);
   // I4 — retired nudge ids (✕-dismissed are also persisted; used-nudges are session-only).
   const [hiddenNudges, setHiddenNudges] = useState<string[]>(() => loadDismissedNudges());
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -67,6 +75,7 @@ export function AskPiDock() {
   // always match the surface Pi is summoned from.
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const ctx = getPiContext(pathname);
+  const navigate = useNavigate();
 
   // /analytics gets a dedicated multi-turn chat with structured answers
   // (insight + recommendation + infographic + follow-ups). Everywhere else keeps
@@ -78,6 +87,11 @@ export function AskPiDock() {
   // whole point. The single-shot idle→thinking→result flow is wrong for
   // that shape.
   const isIntegrationsSurface = pathname === "/integrations";
+  // /developer is the sibling docs-RAG surface (API Docs + Release Notes).
+  // Same reasoning as /integrations — dedicated chat shell so the question
+  // stays visible, markdown answers render cleanly, and follow-ups are one
+  // click away.
+  const isDeveloperSurface = pathname === "/developer";
   const screenCtx = usePiScreenContext();
   // Surface published by the current page — carries the surfaceId (so the
   // server exposes the right screen tools) and the handler map the dock
@@ -152,6 +166,8 @@ export function AskPiDock() {
     // state, the dock's `state` stays "idle", and click-outside would
     // collapse a live conversation on every card click. ✕ / Esc only.
     if (isIntegrationsSurface) return;
+    // Same rationale for DeveloperChat on /developer.
+    if (isDeveloperSurface) return;
     const onDown = (e: MouseEvent) => {
       if (!panelRef.current) return;
       if (panelRef.current.contains(e.target as Node)) return;
@@ -161,7 +177,7 @@ export function AskPiDock() {
     };
     document.addEventListener("mousedown", onDown, true);
     return () => document.removeEventListener("mousedown", onDown, true);
-  }, [isOpen, value, state, isAnalyticsSurface, isIntegrationsSurface]);
+  }, [isOpen, value, state, isAnalyticsSurface, isIntegrationsSurface, isDeveloperSurface]);
 
   const submit = async (q: string = value) => {
     const query = q.trim();
@@ -170,6 +186,44 @@ export function AskPiDock() {
     setState("thinking");
     setLiveAnswer(null);
     setLiveActionLinks(null);
+
+    // Optimistic "get inside the builder immediately" flow for the /agents
+    // surface. If the query looks like a draft request, we synthesize an id +
+    // name, insert an empty shell into the agent-store (local-only — no D1
+    // write; Pi's save_agent tool call is the authoritative write), and
+    // navigate into /agents/<id> BEFORE calling askPi. The builder detects
+    // the empty-draft state and shows a shimmer overlay while Pi generates.
+    // We pass draftHint on the request context so Pi uses the SAME id + name
+    // in its save_agent call (no collision, no dupe).
+    let draftHint: { id: string; name: string; label: string } | undefined;
+    if (ctx.scopeMode === "agents") {
+      const intent = detectDraftAgentIntent(query);
+      if (intent) {
+        saveAgent(
+          intent.id,
+          {
+            name: intent.name,
+            type: "voice",
+            status: "draft",
+            tools: [],
+            masterPrompt: "",
+            knowledgeBase: "",
+            postCall: [],
+          },
+          { skipRemote: true },
+        );
+        // Close the panel so nothing hides the builder while Pi drafts. The
+        // dock pill slot flips to the PiDraftingPill (label + live timer +
+        // rotating step microcopy) so the user has an engagement anchor in
+        // the same place Pi already lives.
+        setState("collapsed");
+        setValue("");
+        setDrafting({ label: intent.name, startedAt: Date.now() });
+        navigate({ to: "/agents/$id", params: { id: intent.id } });
+        draftHint = intent;
+      }
+    }
+
     // Every non-/analytics surface — call askPi with the current route's scope +
     // system hint. If it fails (missing D1 binding, missing TFY key, endpoint
     // unreachable from local without VPN), gracefully fall back to the surface's
@@ -192,6 +246,9 @@ export function AskPiDock() {
             // which screen-tool subset to expose for this turn. Undefined
             // on surfaces without any UI-mutation tools registered.
             surfaceId: surface?.surfaceId,
+            // Client-derived id + name for a draft-agent flow. Pi uses
+            // these instead of picking its own so we don't get dupe rows.
+            ...(draftHint ? { draftHint } : {}),
           },
         },
       });
@@ -226,6 +283,16 @@ export function AskPiDock() {
       // If !ok we simply leave liveAnswer null and the result card shows ctx.result.
     } catch {
       // Network / RPC failure — same fallback.
+    }
+    // If we optimistically launched a draft, the widget was showing a
+    // PiDraftingPill (timer + rotating steps). Clear it once askPi resolves
+    // (success or fail) so the dock returns to the normal Ask Pi pill and
+    // the builder's own hydrate has already refreshed the record.
+    if (draftHint) {
+      setDrafting(null);
+      // Keep the panel collapsed — the user is already inside the builder
+      // reading the freshly-filled draft. Don't pop a result card at them.
+      return;
     }
     setState("result");
   };
@@ -275,14 +342,22 @@ export function AskPiDock() {
     <div ref={wrapRef} className="pointer-events-none absolute inset-x-0 bottom-5 z-30 flex justify-center px-4">
       {!isOpen && (
         <div className="pointer-events-none flex flex-col items-center" style={{ transform: `translateX(${dragX}px)` }}>
-          {showNudge && (
+          {showNudge && !drafting && (
             <PiNudge
               label={nudge!.label}
               onOpen={openFromNudge}
               onDismiss={() => retireNudge(nudge!.id, true)}
             />
           )}
-          <PiPill onOpen={() => setState("idle")} pillHandlers={pillHandlers} suppressClick={suppressClick} />
+          {drafting ? (
+            <PiDraftingPill
+              label={drafting.label}
+              startedAt={drafting.startedAt}
+              pillHandlers={pillHandlers}
+            />
+          ) : (
+            <PiPill onOpen={() => setState("idle")} pillHandlers={pillHandlers} suppressClick={suppressClick} />
+          )}
         </div>
       )}
 
@@ -313,7 +388,19 @@ export function AskPiDock() {
         </div>
       )}
 
-      {isOpen && !isAnalyticsSurface && !isIntegrationsSurface && (
+      {isOpen && isDeveloperSurface && (
+        // /developer is the sibling docs-RAG surface (API Docs + Release Notes).
+        // Same reasoning as /integrations — dedicated chat shell so the question
+        // stays visible above Pi's answer, markdown answers render cleanly, and
+        // follow-ups are one click away.
+        <div className="pointer-events-none" style={{ transform: `translateX(${dragX}px)` }}>
+          <PiPanel innerRef={panelRef} className="w-[680px] max-w-[94vw]">
+            <DeveloperChat onClose={() => setState("collapsed")} />
+          </PiPanel>
+        </div>
+      )}
+
+      {isOpen && !isAnalyticsSurface && !isIntegrationsSurface && !isDeveloperSurface && (
         <div className="pointer-events-none" style={{ transform: `translateX(${dragX}px)` }}>
           <PiPanel innerRef={panelRef} className="w-[680px] max-w-full">
             {expanded && (
@@ -333,8 +420,8 @@ export function AskPiDock() {
                     result={{ text: liveAnswer, cta: ctx.result.cta, actionLinks: liveActionLinks ?? undefined }}
                     onAccept={reset}
                     onDismiss={reset}
-                    renderMarkdown={ctx.scopeMode === "integrations"}
-                    hideAccept={ctx.scopeMode === "integrations"}
+                    renderMarkdown={ctx.scopeMode === "integrations" || ctx.scopeMode === "developer"}
+                    hideAccept={ctx.scopeMode === "integrations" || ctx.scopeMode === "developer"}
                   />
                 ) : (
                   <PiResultCard result={ctx.result} onAccept={reset} onDismiss={reset} />

@@ -11,6 +11,7 @@ import { TOOLS } from "@/lib/tool-registry";
 import { renderMarkdown } from "@/lib/markdown";
 import { saveAgent } from "@/lib/agent-store";
 import type { AgentType, AgentRecord, PostCallVar } from "@/lib/agent-data";
+import { PiDraftingOverlay, PiDraftingShimmer } from "./PiDraftingOverlay";
 
 const DEFAULT_EVAL_PROMPT =
   "Review the full transcript and extract the following variables. Answer concisely, staying strictly within the definition of each variable. If a value can't be determined, respond with `unknown`.";
@@ -43,10 +44,21 @@ export function AgentBuilder({
   const [previewMaster, setPreviewMaster] = useState(false);
   const [previewKB, setPreviewKB] = useState(false);
 
-  // Re-hydrate if the parent hands us a different record (route change on the
-  // same component instance).
+  // Re-hydrate whenever the parent hands us a materially different record.
+  // Two triggers:
+  //   1. Route change (record.id differs).
+  //   2. Same id but content grew — this is the Ask Pi optimistic-draft flow:
+  //      the dock inserts an empty shell + navigates the user in, then Pi's
+  //      save_agent + hydrate fills the record. Without a content-based dep,
+  //      the builder keeps showing the empty shell until refresh.
+  // Never hydrate while the user has unsaved edits — that would clobber the
+  // in-progress typing.
+  const recordContentKey = record
+    ? `${record.id}|${record.masterPrompt.length}|${record.knowledgeBase.length}|${record.postCall.length}|${record.tools.length}|${record.name}|${record.status}`
+    : "";
   useEffect(() => {
     if (!record) return;
+    if (dirty) return;
     setName(record.name);
     setStatus(record.status);
     setTools(record.tools);
@@ -55,7 +67,20 @@ export function AgentBuilder({
     setEvalPrompt(record.evalPrompt ?? DEFAULT_EVAL_PROMPT);
     setPostCall(record.postCall);
     setDirty(false);
-  }, [record?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [recordContentKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Ask Pi is actively drafting when we're editing an existing shell whose
+  // content is still empty. The dock inserted the shell and navigated us in
+  // before firing save_agent; this state paints a shimmer + overlay so the
+  // user has something to watch while Pi generates. Auto-clears when the
+  // record hydrates (masterPrompt fills).
+  const piDrafting =
+    mode === "edit" &&
+    status === "draft" &&
+    !dirty &&
+    masterPrompt.length === 0 &&
+    knowledgeBase.length === 0 &&
+    postCall.length === 0;
 
   const filteredTools = useMemo(() => {
     const q = toolQuery.trim().toLowerCase();
@@ -159,6 +184,11 @@ export function AgentBuilder({
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground">
+      {/* Pi drafting bubble — builder page has no AppShell, so the global
+          AskPiDock (and its PiDraftingPill) doesn't render here. Mount a
+          builder-local version in the same middle-bottom slot so the
+          "Pi is working" cue is present on every surface that expects it. */}
+      {piDrafting && <PiDraftingOverlay label={name.trim() || undefined} />}
       {/* Header */}
       <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-border bg-background/90 px-3 backdrop-blur-xl">
         <div className="flex min-w-0 items-center gap-2">
@@ -311,12 +341,16 @@ export function AgentBuilder({
                 dangerouslySetInnerHTML={{ __html: renderMarkdown(masterPrompt) }}
               />
             ) : (
-              <Textarea
-                value={masterPrompt}
-                onChange={(e) => mark(setMasterPrompt)(e.target.value)}
-                className="min-h-[400px] font-mono text-xs"
-                placeholder="# 1. Persona&#10;You are…"
-              />
+              <div className="relative">
+                <Textarea
+                  value={masterPrompt}
+                  onChange={(e) => mark(setMasterPrompt)(e.target.value)}
+                  className="min-h-[400px] font-mono text-xs"
+                  placeholder={piDrafting ? "" : "# 1. Persona\nYou are…"}
+                  disabled={piDrafting}
+                />
+                {piDrafting && <PiDraftingShimmer />}
+              </div>
             )}
           </Card>
 
@@ -343,12 +377,16 @@ export function AgentBuilder({
                 dangerouslySetInnerHTML={{ __html: renderMarkdown(knowledgeBase) }}
               />
             ) : (
-              <Textarea
-                value={knowledgeBase}
-                onChange={(e) => mark(setKnowledgeBase)(e.target.value)}
-                className="min-h-[200px] font-mono text-xs"
-                placeholder="## Product basics…"
-              />
+              <div className="relative">
+                <Textarea
+                  value={knowledgeBase}
+                  onChange={(e) => mark(setKnowledgeBase)(e.target.value)}
+                  className="min-h-[200px] font-mono text-xs"
+                  placeholder={piDrafting ? "" : "## Product basics…"}
+                  disabled={piDrafting}
+                />
+                {piDrafting && <PiDraftingShimmer />}
+              </div>
             )}
           </Card>
 
