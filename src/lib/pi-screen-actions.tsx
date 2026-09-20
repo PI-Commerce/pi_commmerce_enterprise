@@ -150,6 +150,56 @@ export function usePiDisabledCopy() {
 }
 
 // ---------------------------------------------------------------------------
+// Ask Pi "dock suppressed" channel — pages that mount their OWN in-canvas
+// composer (campaign builder canvas, freeform builder canvas) publish here
+// to hide the global AskPiDock, so the user doesn't see two Ask Pi pills
+// on the same page. Different from usePiDisabled which shows a muted pill:
+// this hides the pill entirely because another Pi entry point IS present.
+// ---------------------------------------------------------------------------
+
+type SuppressBus = {
+  count: number;
+  claim: () => () => void;
+};
+
+const PiDockSuppressCtx = createContext<SuppressBus>({
+  count: 0,
+  claim: () => () => {},
+});
+
+/** Wrap once at the app root alongside PiSurfaceProvider + PiDisabledProvider. */
+export function PiDockSuppressProvider({ children }: { children: ReactNode }) {
+  const [count, setCount] = useState(0);
+  const value = useMemo<SuppressBus>(
+    () => ({
+      count,
+      claim: () => {
+        setCount((n) => n + 1);
+        return () => setCount((n) => Math.max(0, n - 1));
+      },
+    }),
+    [count],
+  );
+  return <PiDockSuppressCtx.Provider value={value}>{children}</PiDockSuppressCtx.Provider>;
+}
+
+/**
+ * Page-level hook: call from any component that mounts its own in-canvas Pi
+ * composer to hide the global AskPiDock while that component is mounted.
+ * Ref-counted so multiple claimants stack safely and only the last unmount
+ * un-suppresses.
+ */
+export function useSuppressPiDock() {
+  const { claim } = useContext(PiDockSuppressCtx);
+  useEffect(() => claim(), [claim]);
+}
+
+/** Dock-side reader. `true` when any page has claimed suppression. */
+export function useIsPiDockSuppressed(): boolean {
+  return useContext(PiDockSuppressCtx).count > 0;
+}
+
+// ---------------------------------------------------------------------------
 // Ask Pi "surface hint" channel — a short one-line label describing what
 // the user is CURRENTLY looking at within a surface (usually the active
 // tab). Consumed by dedicated chat shells (DeveloperChat, IntegrationsChat)

@@ -10,7 +10,12 @@ import {
 
 import { Toaster } from "@/components/ui/sonner";
 import { RegionProvider } from "@/lib/region";
-import { PiSurfaceProvider, PiDisabledProvider, PiSurfaceHintProvider } from "@/lib/pi-screen-actions";
+import {
+  PiSurfaceProvider,
+  PiDisabledProvider,
+  PiSurfaceHintProvider,
+  PiDockSuppressProvider,
+} from "@/lib/pi-screen-actions";
 import { PiScreenContextRoot } from "@/lib/pi-screen-context";
 import { AskPiDock } from "@/components/app/AskPiDock";
 
@@ -131,18 +136,23 @@ function RootComponent() {
             no-op context and Pi would never see the surfaceId. */}
         <PiSurfaceProvider>
           <PiDisabledProvider>
-            <PiSurfaceHintProvider>
-              {/* AskPiDock lives at the root so ⌘K + the drafting pill are
-                  available on every route, including the full-screen
-                  builders (AgentBuilder, campaign canvas) that don't mount
-                  AppShell. PiScreenContextRoot must wrap it because the
-                  dock reads usePiScreenContext() for analytics chat. */}
-              <PiScreenContextRoot>
-                <Outlet />
-                <AskPiDock />
-                <Toaster position="bottom-right" closeButton />
-              </PiScreenContextRoot>
-            </PiSurfaceHintProvider>
+            <PiDockSuppressProvider>
+              <PiSurfaceHintProvider>
+                {/* AskPiDock lives at the root so ⌘K + the drafting pill
+                    are available on every route, including the full-screen
+                    builders (AgentBuilder) that don't mount AppShell.
+                    Canvases with their own in-page AiComposer (campaign
+                    canvas, freeform canvas) call useSuppressPiDock() to
+                    hide the global pill and avoid two Ask Pi entry points.
+                    PiScreenContextRoot must wrap the dock because it
+                    reads usePiScreenContext() for analytics chat. */}
+                <PiScreenContextRoot>
+                  <Outlet />
+                  <AskPiDock />
+                  <Toaster position="bottom-right" closeButton />
+                </PiScreenContextRoot>
+              </PiSurfaceHintProvider>
+            </PiDockSuppressProvider>
           </PiDisabledProvider>
         </PiSurfaceProvider>
       </RegionProvider>

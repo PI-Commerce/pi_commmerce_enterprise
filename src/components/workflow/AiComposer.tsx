@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Sparkles, X, PenLine, ArrowUpRight } from "lucide-react";
 import { CANVAS_CONTEXT } from "@/lib/ask-pi-context";
+import { useSuppressPiDock } from "@/lib/pi-screen-actions";
 import { renderChatMarkdown } from "@/lib/chat-markdown";
 import { extractProposedDraft, type ProposedDraft } from "@/lib/pi-propose-draft";
 import { ConfirmDraftCard } from "./ConfirmDraftCard";
@@ -132,6 +133,11 @@ export function AiComposer({
   onPiToolCalls,
   onDraftAccepted,
 }: AiComposerProps = {}) {
+  // Hide the global AskPiDock while this in-canvas composer is mounted —
+  // the canvas is authoritative on graph edits and the global pill would
+  // give the user two Ask Pi entry points on the same page.
+  useSuppressPiDock();
+
   const [state, setState] = useState<State>(autoOpenWizard ? "open" : "collapsed");
   const [value, setValue] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>(() =>

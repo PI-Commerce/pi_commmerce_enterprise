@@ -5,7 +5,7 @@ import { askPi } from "@/lib/server-fns/pi-llm";
 import { getAgents, refreshAgentsFromDb, saveAgent, setPiAgentWork } from "@/lib/agent-store";
 import { detectDraftAgentIntent } from "@/lib/pi-agent-intent";
 import { usePiScreenContext } from "@/lib/pi-screen-context";
-import { usePiSurface, dispatchScreenToolCalls, usePiDisabledCopy } from "@/lib/pi-screen-actions";
+import { usePiSurface, dispatchScreenToolCalls, usePiDisabledCopy, useIsPiDockSuppressed } from "@/lib/pi-screen-actions";
 import { extractActionLinksFromToolCalls } from "@/lib/pi-canvas-apply";
 import { AnalyticsChat } from "@/components/analytics/AnalyticsChat";
 import { IntegrationsChat } from "@/components/integrations/IntegrationsChat";
@@ -113,6 +113,13 @@ export function AskPiDock() {
   const tabDeadZoneCopy = usePiDisabledCopy();
   const deadZoneCopy = tabDeadZoneCopy ?? ctx.deadZone?.nudge ?? null;
   const inDeadZone = deadZoneCopy !== null;
+
+  // Suppress the global dock when a page has mounted its own in-canvas
+  // AiComposer (campaign canvas, freeform canvas). Prevents two Ask Pi
+  // pills on the same page — the in-canvas composer is authoritative on
+  // those surfaces because it carries the graph editing context. Hooks
+  // above this line still fire because they must run on every render.
+  const dockSuppressed = useIsPiDockSuppressed();
 
   const isOpen = state !== "collapsed";
   const expanded = state === "thinking" || state === "result";
@@ -373,6 +380,11 @@ export function AskPiDock() {
   // other surfaces carries over — presence stays consistent, function is
   // honestly off. `deadZoneCopy` resolves to the page's `usePiDisabled` string
   // if published, otherwise the route's static `ctx.deadZone.nudge`.
+  // Page mounted its own in-canvas composer — hide the global dock so
+  // there aren't two Ask Pi pills on screen. Kept BELOW every hook call
+  // above so React sees the same hook order every render.
+  if (dockSuppressed) return null;
+
   if (inDeadZone) {
     return (
       <div ref={wrapRef} className="pointer-events-none fixed inset-x-0 bottom-5 z-30 flex justify-center px-4">
