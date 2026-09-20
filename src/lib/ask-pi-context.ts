@@ -81,13 +81,17 @@ const DEFAULT: PiContext = {
   scope: "Workspace",
   scopeMode: "analytics",
   systemHint: "The user is on a general workspace surface. Answer any workspace question using the read tools; if the question would need mutations, describe what you would do without acting.",
-  placeholder: "Ask Pi to plan, build, or explain anything…",
-  chips: ["Summarize my workspace", "Create a campaign", "Explain a metric"],
+  placeholder: "Ask Pi about campaigns, agents, or a metric…",
+  // Truthful chips — the workspace scope has analytics reads only, so
+  // each chip resolves to a read (list_campaigns / latest_runs) instead
+  // of a mutation Pi cannot perform from here.
+  chips: ["List my active campaigns", "What ran in the last hour?", "Which agents are live?"],
   thinking: ["Reading current context…", "Gathering recent activity…", "Drafting a response…"],
   result: {
     text: "Here's a quick read of your workspace. Tell me what you'd like to dig into and I'll take it from there.",
     cta: "Got it",
   },
+  nudge: { id: "workspace-recent-runs", label: "Peek at recent runs with Pi.", prompt: "What ran in the last hour?" },
 };
 
 // Ordered most-specific → least-specific; first prefix match wins.
@@ -126,6 +130,7 @@ const ROUTES: { match: (p: string) => boolean; ctx: PiContext }[] = [
       chips: [],
       thinking: [],
       result: { text: "", cta: "" },
+      nudge: { id: "analytics-dropoffs", label: "Curious where leads drop off? Ask Pi.", prompt: "Where do leads drop off the most in the latest run?" },
     },
   },
   {
@@ -146,6 +151,7 @@ const ROUTES: { match: (p: string) => boolean; ctx: PiContext }[] = [
         diff: ["+ agent  “Win-back Voice” (voice)", "+ tools  @place_call, @order_lookup", "+ guardrail  no discounts above 15%"],
         cta: "Review & open",
       },
+      nudge: { id: "agents-draft-win-back", label: "Want a win-back voice agent drafted?", prompt: "Draft a win-back voice agent for lapsed premium customers." },
     },
   },
   {
@@ -167,6 +173,7 @@ const ROUTES: { match: (p: string) => boolean; ctx: PiContext }[] = [
         text: "Pi can walk you through connecting any listed vendor. Ask about Paytm Payment Gateway, CleverTap, or Shopify — Pi will cite the doc section it's reading from.",
         cta: "Got it",
       },
+      nudge: { id: "integrations-shopify", label: "Stuck on a vendor setup? Ask Pi.", prompt: "How do I connect Shopify?" },
     },
   },
   {
@@ -190,6 +197,7 @@ const ROUTES: { match: (p: string) => boolean; ctx: PiContext }[] = [
         text: "Pi can answer questions about the API Docs and Release Notes — endpoints, webhooks, auth, error codes, rate limits, and what shipped when. Pi will cite the section it's reading from.",
         cta: "Got it",
       },
+      nudge: { id: "developer-auth", label: "Pi knows the API docs. Ask away.", prompt: "How do I authenticate?" },
     },
   },
   {
@@ -240,6 +248,7 @@ const ROUTES: { match: (p: string) => boolean; ctx: PiContext }[] = [
         text: "For a WhatsApp renewal blast to lapsed Insurance customers, aim for Tue-Thu 11am IST — that window historically opens 34% higher than weekends. Estimated audience: 8.4k contacts.",
         cta: "Draft this broadcast",
       },
+      nudge: { id: "broadcasts-new", label: "New send in mind? Pi opens the modal.", prompt: "I want to send a WhatsApp broadcast." },
     },
   },
   // ----- Channels > WhatsApp > Freeform Workflow builder (canvas) -----
@@ -281,6 +290,7 @@ const ROUTES: { match: (p: string) => boolean; ctx: PiContext }[] = [
         text: "Pi can search the templates and freeform workflows lists, and start a new one with a prefilled name and category. Say what you want to draft.",
         cta: "Got it",
       },
+      nudge: { id: "channels-wa-find", label: "Looking for a template? Ask Pi.", prompt: "Find renewal templates" },
     },
   },
   // ----- Channels > SMS (Templates list) -----
@@ -300,6 +310,7 @@ const ROUTES: { match: (p: string) => boolean; ctx: PiContext }[] = [
         text: "Pi can search and filter this DLT-approved list. New SMS templates are added on your DLT portal and imported — Pi can't author those here.",
         cta: "Got it",
       },
+      nudge: { id: "channels-sms-otp", label: "Hunt an SMS template with Pi.", prompt: "Find OTP templates" },
     },
   },
   // ----- Channels > RCS (Templates list) -----
@@ -319,6 +330,7 @@ const ROUTES: { match: (p: string) => boolean; ctx: PiContext }[] = [
         text: "Pi can search, narrow by agent type or approval status, and start a new template with a prefilled name and shape.",
         cta: "Got it",
       },
+      nudge: { id: "channels-rcs-approved", label: "Filter or draft with Pi.", prompt: "Show only Approved" },
     },
   },
   // Fallback for /channels itself. There is no landing page today (the
@@ -397,6 +409,7 @@ const ROUTES: { match: (p: string) => boolean; ctx: PiContext }[] = [
         diff: ["+ create  campaign “New Trader Onboarding”", "+ nodes   Audience → AI Copy → WhatsApp → Wait 24h → Voice AI"],
         cta: "Review & apply",
       },
+      nudge: { id: "campaigns-filter-drafts", label: "Filter, sort, run actions — just ask Pi.", prompt: "Show only drafts" },
     },
   },
 ];

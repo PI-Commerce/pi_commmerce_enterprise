@@ -21,6 +21,7 @@ import {
   type AnalyticsScreenContext,
 } from "@/lib/server-fns/pi-analytics";
 import { InfographicRenderer } from "./InfographicRenderer";
+import { renderChatMarkdown } from "@/lib/chat-markdown";
 
 type Turn = {
   id: string;
@@ -375,7 +376,7 @@ function AssistantBubble({
     <div className="space-y-2">
       <div className="flex items-start gap-2">
         <Sparkle className="mt-1 h-3.5 w-3.5 shrink-0 fill-ai text-ai" />
-        <div className="text-[13px] leading-relaxed text-foreground">{answer.insight}</div>
+        <div className="text-[13px] leading-relaxed text-foreground">{renderChatMarkdown(answer.insight)}</div>
       </div>
 
       {answer.recommendation && (
@@ -384,7 +385,7 @@ function AssistantBubble({
             <Sparkle className="h-3 w-3 fill-ai text-ai" />
             <span className="text-[10.5px] font-semibold tracking-wide text-ai">Pi recommends</span>
           </div>
-          <div>{answer.recommendation}</div>
+          <div>{renderChatMarkdown(answer.recommendation)}</div>
         </div>
       )}
 

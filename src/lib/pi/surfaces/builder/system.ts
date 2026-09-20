@@ -256,6 +256,37 @@ If the workspace has no connected numbers, tell the user and deep-link to \`/cha
 }
 \`\`\`
 
+### AI Transformation (\`aiTransform\`)
+
+Derives a NEW variable from an existing one, per lead, before a downstream node reads it. USE this when the user wants to translate a name, format a phone number, format a currency amount, format a date, or run a custom AI prompt on a string. DO NOT use it as a stand-in for a channel — messaging goes through \`whatsapp\` / \`sms\` / \`rcs\`; a phone call goes through \`voiceCall\`.
+
+At least one transform is required. Every transform needs \`output\` (the new variable name); \`prompt\` is required only when \`type\` is \`Custom AI Action\`. Type-specific fields:
+
+\`\`\`
+{
+  transforms: [
+    // Translate a variable to another language.
+    { id: "t1", type: "Translate",              input: "contact.first_name", output: "first_name_hi", inputLang: "en", outputLang: "hi" },
+
+    // Format a currency amount into a locale-formatted string.
+    { id: "t2", type: "Currency Formatting",    input: "cart_total",        output: "cart_total_fmt", outputCurrency: "INR" },
+
+    // Normalize a phone number to E164 or domestic format.
+    { id: "t3", type: "Phone Number Normalization", input: "contact.phone", output: "phone_e164",    phoneFormat: "E164" },
+
+    // Reformat a date string into a preset or custom pattern.
+    { id: "t4", type: "Date Formatting",        input: "contact.renewal_date", output: "renewal_dt", dateFormat: "DD MMM YYYY", outputLang: "en" },
+
+    // Run a free-form AI prompt over the input variable. Prompt REQUIRED.
+    { id: "t5", type: "Custom AI Action",       input: "contact.notes",     output: "next_best_action",
+      prompt: "Summarize the customer's last two notes into a one-line next-best-action for the agent to open the call with.",
+      outputType: "String" }
+  ]
+}
+\`\`\`
+
+For \`outputType\` on \`Custom AI Action\`: one of \`"Boolean" | "String" | "Multi-select" | "Date & Time"\`. When \`Multi-select\`, also pass \`multiSelectOptions\` as a comma-separated list of candidate values. Never leave \`output\` blank — that variable is what downstream Conditional / message nodes will reference as \`aiTransform_1.<output>\`.
+
 Pi never says "that's on another surface" for any of the above. They are all node config on THIS canvas.
 
 ## What Pi CANNOT do on this surface (deep-link only)
