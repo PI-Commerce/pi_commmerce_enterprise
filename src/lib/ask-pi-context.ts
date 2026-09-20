@@ -90,21 +90,21 @@ const ROUTES: { match: (p: string) => boolean; ctx: PiContext }[] = [
   {
     match: (p) => p === "/",
     ctx: {
+      // Dashboard is a Pi dead zone (for now). The right job here is a cross-object
+      // router (tiny insight + link to Analytics / Campaigns / Agents), but that
+      // depends on the KPI tiles + runs table getting wired to D1 first — today
+      // they're seed values, so Pi has nothing honest to riff on. Rather than a
+      // hardcoded demo card that lies about the workspace, pill stays visible for
+      // consistency with a persistent caption pointing users into the surfaces
+      // where Pi actually earns its keep.
       scope: "Dashboard",
       scopeMode: "analytics",
-      systemHint: "The user is on the workspace dashboard. Cross-campaign summaries, movers, and week-over-week deltas are the frame. Call latest_runs and status_breakdown to answer; recommend one concrete next click when relevant.",
-      placeholder: "Ask Pi to summarize, plan, or jump into a campaign…",
-      chips: ["Summarize performance this week", "Which campaigns need attention?", "Draft a win-back campaign"],
-      thinking: ["Scanning 6 active campaigns…", "Aggregating the last 7 days of runs…", "Ranking movers by delta…"],
-      result: {
-        text: "Reactivation is your biggest mover — conversions up 6% WoW — while KYC Drop-off Recovery slipped 8%. Want me to open KYC Drop-off and suggest a fix?",
-        cta: "Open KYC Drop-off",
-      },
-      nudge: {
-        id: "dash_attention_kyc",
-        label: "1 campaign needs attention — KYC Drop-off slipped 8%",
-        prompt: "Which campaigns need attention this week?",
-      },
+      systemHint: "",
+      placeholder: "",
+      chips: [],
+      thinking: [],
+      result: { text: "", cta: "" },
+      deadZone: { nudge: "Pi's just people-watching from here. Pop into a campaign, an agent, or Analytics to see the magic." },
     },
   },
   {
