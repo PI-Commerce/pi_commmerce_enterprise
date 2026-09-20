@@ -213,7 +213,7 @@ export function AskPiDock() {
         // multi-turn conversation, screen-context grounding, and infographics.
         // Sized for chart-heavy answers — wider + taller than the generic dock.
         <div className="pointer-events-none" style={{ transform: `translateX(${dragX}px)` }}>
-          <PiPanel innerRef={panelRef} className="w-[720px] max-w-full h-[min(640px,calc(100vh-6rem))]">
+          <PiPanel innerRef={panelRef} className="w-[840px] max-w-[94vw]">
             <AnalyticsChat
               context={screenCtx ?? { pathname: "/analytics" }}
               onClose={() => setState("collapsed")}

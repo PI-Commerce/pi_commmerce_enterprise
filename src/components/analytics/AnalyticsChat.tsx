@@ -58,6 +58,30 @@ export function AnalyticsChat({
   // Carries the freshest chip for the new context so they can pivot in one click.
   const [pendingNudge, setPendingNudge] = useState<string | null>(null);
   const [dismissedNudgeKey, setDismissedNudgeKey] = useState<string | null>(null);
+  // Vertical resize on the header — same interaction as the canvas AiComposer.
+  // Dragging up grows the transcript, dragging down shrinks it. Clamped so it
+  // can't collapse or eat the viewport.
+  const [transcriptHeight, setTranscriptHeight] = useState(420);
+  const resizeRef = useRef<{ startY: number; startH: number } | null>(null);
+  const onResizeMouseDown = (e: React.MouseEvent) => {
+    resizeRef.current = { startY: e.clientY, startH: transcriptHeight };
+    e.preventDefault();
+  };
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      if (!resizeRef.current) return;
+      const delta = resizeRef.current.startY - e.clientY;
+      const next = Math.max(220, Math.min(window.innerHeight - 220, resizeRef.current.startH + delta));
+      setTranscriptHeight(next);
+    };
+    const onUp = () => { resizeRef.current = null; };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, []);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const prevCtxKeyRef = useRef<string | null>(null);
@@ -165,15 +189,21 @@ export function AnalyticsChat({
   const ribbon = friendlyContextLine(context);
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      {/* header */}
-      <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
+    <div className="flex min-h-0 flex-col">
+      {/* header — doubles as the vertical resize handle (drag to grow / shrink
+          the transcript, same interaction as the canvas AiComposer). */}
+      <div
+        onMouseDown={onResizeMouseDown}
+        title="Drag to resize"
+        className="flex cursor-ns-resize items-center justify-between border-b border-border px-4 py-2.5 select-none"
+      >
         <div className="flex items-center gap-1.5">
           <Sparkle className="h-3.5 w-3.5 fill-ai text-ai" />
           <span className="text-[12px] font-medium text-foreground">Ask Pi</span>
         </div>
         <button
-          onClick={onClose}
+          onClick={(e) => { e.stopPropagation(); onClose(); }}
+          onMouseDown={(e) => e.stopPropagation()}
           aria-label="Close"
           className="flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground"
         >
@@ -192,10 +222,11 @@ export function AnalyticsChat({
         </div>
       </div>
 
-      {/* transcript */}
+      {/* transcript — height driven by the header drag-resize state */}
       <div
         ref={scrollRef}
-        className="scrollbar-thin flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-3"
+        style={{ height: transcriptHeight }}
+        className="scrollbar-thin min-h-0 overflow-y-auto px-4 py-3 space-y-3"
       >
         {turns.length === 0 && !thinking && (
           <EmptyState chips={starterChips} loading={chipsLoading} onPick={submit} />
@@ -348,9 +379,12 @@ function AssistantBubble({
       </div>
 
       {answer.recommendation && (
-        <div className="ml-5 rounded-lg border-l-2 border-ai/50 bg-ai/[0.04] px-3 py-1.5 text-[12px] leading-relaxed text-foreground">
-          <span className="text-[10px] uppercase tracking-wider text-ai">Recommendation</span>
-          <div className="mt-0.5">{answer.recommendation}</div>
+        <div className="ml-5 rounded-lg border border-ai/25 bg-gradient-to-br from-ai/[0.06] to-ai/[0.02] px-3 py-2 text-[12.5px] leading-relaxed text-foreground shadow-[0_1px_0_0_color-mix(in_oklch,var(--ai)_10%,transparent)]">
+          <div className="mb-1 flex items-center gap-1.5">
+            <Sparkle className="h-3 w-3 fill-ai text-ai" />
+            <span className="text-[10.5px] font-semibold tracking-wide text-ai">Pi recommends</span>
+          </div>
+          <div>{answer.recommendation}</div>
         </div>
       )}
 
