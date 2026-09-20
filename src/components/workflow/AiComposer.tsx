@@ -299,11 +299,21 @@ export function AiComposer({
         const choice = toolChoice ?? proseChoice;
         const edits = summarizePiEdits(mutationCalls);
         const actionLinks = extractActionLinksFromToolCalls(rawToolCalls);
+        // If Pi went straight to emit_choice without a prose lead-in, the
+        // picker card was rendering with no question above it — bad UX,
+        // just a stack of unlabeled chips. Fall back to the tool's own
+        // `prompt` (surfaced as `choice.question`) so the user always sees
+        // what the choice is for.
+        const fallbackChoiceText =
+          choice && !bodyText && choice.question ? choice.question : "";
         setMessages((prev) => [
           ...prev,
           {
             role: "assistant",
-            content: bodyText || (edits.length > 0 ? "Done." : draft ? "Here's the plan." : choice ? "" : actionLinks.length > 0 ? "" : "Not sure what to do with that — could you rephrase?"),
+            content:
+              bodyText
+              || fallbackChoiceText
+              || (edits.length > 0 ? "Done." : draft ? "Here's the plan." : choice ? "" : actionLinks.length > 0 ? "" : "Not sure what to do with that — could you rephrase?"),
             options,
             choice,
             draft: draft ?? undefined,

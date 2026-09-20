@@ -334,6 +334,51 @@ export function WorkflowCanvas({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [waButtonWiringSig, editable, setNodes]);
 
+  // Reachability — every non-End node needs at least one outgoing edge,
+  // otherwise leads walk into a dead-end. Keyed on a compact signature
+  // of (node ids + whether each has any outgoing edge) so re-runs only
+  // fire when the wiring topology actually changes. Skips draft skeletons
+  // (`_skel_` prefix) because those are transient and get replaced by
+  // Pi's real inserts on the next turn.
+  const reachabilitySig = useMemo(() => {
+    const outgoing = new Set<string>();
+    for (const e of edges) outgoing.add(e.source);
+    return nodes
+      .map((n) => `${n.id}:${outgoing.has(n.id) ? 1 : 0}`)
+      .join("|");
+  }, [nodes, edges]);
+
+  useEffect(() => {
+    if (!editable) return;
+    setNodes((nds) => {
+      const outgoing = new Set<string>();
+      for (const e of edges) outgoing.add(e.source);
+      const REACH_ERROR = "Not wired forward — connect this into the next step or into End.";
+      let changed = false;
+      const next = nds.map((n) => {
+        if (n.id.startsWith("_skel_")) return n;
+        if (n.data.kind === "end") return n;
+        const missingWire = !outgoing.has(n.id);
+        const hadReachError = n.data.error === REACH_ERROR;
+        if (missingWire) {
+          // Config-level errors take precedence — if a per-kind check
+          // already marked this node invalid, don't clobber that message.
+          if (n.data.valid === false && !hadReachError) return n;
+          if (hadReachError) return n;
+          changed = true;
+          return { ...n, data: { ...n.data, valid: false, error: REACH_ERROR } };
+        }
+        if (hadReachError) {
+          changed = true;
+          return { ...n, data: { ...n.data, valid: true, error: undefined } };
+        }
+        return n;
+      });
+      return changed ? next : nds;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reachabilitySig, editable, setNodes]);
+
   const outcomeVariables = useMemo(() => deriveNodeOutcomeVariables(nodes), [nodes]);
 
   // Simulated execution pulse for running state

@@ -114,9 +114,32 @@ export function computeGraphValidity(
   freeformWorkflows?: ValidatorContext["freeformWorkflows"],
 ): Array<{ nodeId: string; kind: string; valid: boolean; error?: string }> {
   const ctx: ValidatorContext = { edges, freeformWorkflows };
+  // Precompute which node ids have any outgoing edge — used by the
+  // reachability layer below. A non-End node with zero outgoing edges
+  // is a lead-path dead-end that the graph-level check would flag as
+  // invalid even when the per-kind config is fine.
+  const hasOutgoing = new Set<string>();
+  for (const e of edges) hasOutgoing.add(e.source);
+
   return nodes.map((n) => {
+    // Layer 1 — kind-specific config validity.
     const v = validateNode(n.id, n.kind as NodeKind, n.config as PresetConfig | undefined, ctx);
-    return { nodeId: n.id, kind: n.kind, valid: v.valid, ...(v.error ? { error: v.error } : {}) };
+    if (!v.valid) {
+      return { nodeId: n.id, kind: n.kind, valid: false, error: v.error };
+    }
+    // Layer 2 — graph reachability. Only End is allowed to have no
+    // outgoing edges. Everything else (Start, Audience, every action
+    // and branch node) must feed into at least one downstream node —
+    // otherwise leads reach that node and get stuck.
+    if (n.kind !== "end" && !hasOutgoing.has(n.id)) {
+      return {
+        nodeId: n.id,
+        kind: n.kind,
+        valid: false,
+        error: "Not wired forward — leads reach a dead-end here. Connect this node into the next step or into End.",
+      };
+    }
+    return { nodeId: n.id, kind: n.kind, valid: true };
   });
 }
 
