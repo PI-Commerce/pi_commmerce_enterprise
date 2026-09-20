@@ -31,8 +31,10 @@ export type PiResult = {
  * "agents" → analytics reads plus agent mutations (list/read/save_agent).
  * "integrations" → docs-RAG only (search_docs over seeded vendor docs). No
  *   D1 reads, no mutations. Used solely by `/integrations`.
+ * "developer" → sibling docs-RAG (search_docs over API Docs + Release Notes
+ *   chunks). No D1 reads, no mutations. Used solely by `/developer`.
  */
-export type PiScopeMode = "analytics" | "builder" | "agents" | "integrations";
+export type PiScopeMode = "analytics" | "builder" | "agents" | "integrations" | "developer";
 
 export type PiContext = {
   /** Short human label for the surface (telemetry / headers). */
@@ -163,6 +165,29 @@ const ROUTES: { match: (p: string) => boolean; ctx: PiContext }[] = [
     },
   },
   {
+    match: (p) => p.startsWith("/developer"),
+    ctx: {
+      // Developer Pi is a docs-RAG surface (not analytics): it answers questions
+      // about the API Docs and Release Notes by retrieving from a seeded corpus
+      // and citing the source + section. See src/lib/pi/surfaces/developer/ for
+      // the tool + system prompt. No D1 reads, no mutations — off-topic asks
+      // get declined with a one-line redirect from the surface's own system
+      // prompt. Sibling of /integrations; AskPiDock mounts the DeveloperChat
+      // shell here for the same reasons (Q&A shape, markdown answers, follow-
+      // ups are the norm, question must stay visible above Pi's answer).
+      scope: "Developer",
+      scopeMode: "developer",
+      systemHint: "The user is on the Developer surface (API Docs + Release Notes + APIs & Webhooks + Logs tabs). Docs Q&A only — answer questions about endpoints, webhooks, auth, error codes, rate limits, idempotency, and what shipped when, using search_docs. Cite source + section. Decline off-topic asks.",
+      placeholder: "Ask about the API docs or release notes…",
+      chips: ["How do I authenticate?", "What's the Idempotency-Key TTL?", "What shipped on 25 August 2026?"],
+      thinking: ["Searching the docs…", "Pulling the relevant section…", "Drafting the answer…"],
+      result: {
+        text: "Pi can answer questions about the API Docs and Release Notes — endpoints, webhooks, auth, error codes, rate limits, and what shipped when. Pi will cite the section it's reading from.",
+        cta: "Got it",
+      },
+    },
+  },
+  {
     match: (p) => p.startsWith("/settings"),
     ctx: {
       // Settings is a Pi dead zone. Config lives in the human's hands; Pi shouldn't
@@ -209,19 +234,100 @@ const ROUTES: { match: (p: string) => boolean; ctx: PiContext }[] = [
       },
     },
   },
+  // ----- Channels > WhatsApp > Freeform Workflow builder (canvas) -----
+  // Full-screen builder canvas (`/channels/whatsapp_/freeform/$id`). Same
+  // shape as the campaign builder but for freeform flows. Route match
+  // stays specific so it wins over `/channels/whatsapp` below. Wiring
+  // for the in-canvas AiComposer is a follow-up — for now the dock uses
+  // this entry when someone opens Pi from the shell.
+  {
+    match: (p) => /^\/channels\/whatsapp_\/freeform\/[^/]+$/.test(p),
+    ctx: {
+      scope: "Freeform workflow canvas",
+      scopeMode: "analytics",
+      systemHint: "",
+      placeholder: "",
+      chips: [],
+      thinking: [],
+      result: { text: "", cta: "" },
+      deadZone: {
+        nudge: "Pi's wiring for freeform canvas is next up. Drag from the palette meanwhile.",
+      },
+    },
+  },
+  // ----- Channels > WhatsApp (Overview / Templates / Freeform list) -----
+  // Overview + template-builder + freeform-canvas dead-zones are declared
+  // by their components via `usePiDisabled`; this entry is what the dock
+  // reads on the Templates + Freeform-list tabs. Chips lean toward the
+  // two things Pi can actually do: search the table and draft a new
+  // template or freeform workflow.
+  {
+    match: (p) => p.startsWith("/channels/whatsapp"),
+    ctx: {
+      scope: "WhatsApp Channel",
+      scopeMode: "analytics",
+      systemHint: "The user is on Channels > WhatsApp. Pi drives the Templates list (search) and the Freeform Workflows list (search) and can open the new-template form or new-workflow dialog with prefill. Overview and the template-builder / freeform-canvas surfaces are dead-zones — Pi is off-duty there.",
+      placeholder: "Ask Pi to search or draft a template / workflow…",
+      chips: ["Find renewal templates", "Draft a new promo template", "Start a freeform test-drive workflow"],
+      thinking: ["Reading the WhatsApp registry…", "Scanning workflows…", "Drafting…"],
+      result: {
+        text: "Pi can search the templates and freeform workflows lists, and start a new one with a prefilled name and category. Say what you want to draft.",
+        cta: "Got it",
+      },
+    },
+  },
+  // ----- Channels > SMS (Templates list) -----
+  // Overview + template-builder are dead-zones. Chips omit "Draft a
+  // template" — SMS templates only enter the registry via DLT approval +
+  // import, not via Pi.
+  {
+    match: (p) => p.startsWith("/channels/sms"),
+    ctx: {
+      scope: "SMS Channel",
+      scopeMode: "analytics",
+      systemHint: "The user is on Channels > SMS. Pi drives the Templates list (search + category filter). SMS templates are DLT-approved and imported — Pi does NOT open the new-template form here. Overview and the template-builder surfaces are dead-zones.",
+      placeholder: "Ask Pi to search or filter SMS templates…",
+      chips: ["Find OTP templates", "Show only Transactional", "Search for payment reminders"],
+      thinking: ["Reading the SMS DLT registry…", "Filtering…", "Summarizing…"],
+      result: {
+        text: "Pi can search and filter this DLT-approved list. New SMS templates are added on your DLT portal and imported — Pi can't author those here.",
+        cta: "Got it",
+      },
+    },
+  },
+  // ----- Channels > RCS (Templates list) -----
+  // Overview + template-builder are dead-zones. Chips highlight the
+  // three real filters (search, agent-type, status) and the draft-new
+  // hook Pi can use to seed the RCS template form.
+  {
+    match: (p) => p.startsWith("/channels/rcs"),
+    ctx: {
+      scope: "RCS Channel",
+      scopeMode: "analytics",
+      systemHint: "The user is on Channels > RCS. Pi drives the Templates list (search + agent-type filter + approval-status filter) and can open the new-template form with prefill. Overview and the template-builder surface are dead-zones.",
+      placeholder: "Ask Pi to search, filter, or draft a template…",
+      chips: ["Show only Approved", "Filter to Transactional agents", "Draft a rich-card promo template"],
+      thinking: ["Reading the RCS registry…", "Filtering by agent…", "Drafting…"],
+      result: {
+        text: "Pi can search, narrow by agent type or approval status, and start a new template with a prefilled name and shape.",
+        cta: "Got it",
+      },
+    },
+  },
+  // Fallback for /channels itself. There is no landing page today (the
+  // index redirects to /channels/whatsapp), so this entry only fires
+  // during the redirect flash. Kept as a generic to avoid the DEFAULT
+  // fallback showing "Workspace" copy on a Channels URL.
   {
     match: (p) => p.startsWith("/channels"),
     ctx: {
       scope: "Channels",
       scopeMode: "analytics",
-      systemHint: "The user is on the Channels surface (template registries for WhatsApp, SMS, RCS). Answer with which templates exist, which are approved, and which campaigns use each. Suggest new template variants when relevant but don't claim to have created them.",
-      placeholder: "Ask Pi about templates, approvals, or usage…",
-      chips: ["Which templates are pending approval?", "What's the best-performing WA template?", "Draft a variant of the renewal template"],
-      thinking: ["Reading template registries…", "Cross-referencing campaign usage…", "Summarizing…"],
-      result: {
-        text: "21 WhatsApp templates are live, 4 SMS, 2 RCS. Renewal-reminder is your highest-performing WA template at 47% read rate. I can draft a shorter variant to A/B test.",
-        cta: "Draft a variant",
-      },
+      systemHint: "The user is on the Channels surface. Pick a channel (WhatsApp / SMS / RCS) to see what Pi can drive on each.",
+      placeholder: "Pick a channel to see Pi's options…",
+      chips: [],
+      thinking: [],
+      result: { text: "", cta: "" },
     },
   },
   {

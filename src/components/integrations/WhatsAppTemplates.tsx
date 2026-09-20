@@ -35,6 +35,7 @@ import {
   type TemplateButton, type TemplateButtonType,
 } from "@/lib/waba-templates";
 import { useWaTemplates, upsertWaTemplate, removeWaTemplate } from "@/lib/waba-store";
+import { usePiDisabled, usePublishSurface } from "@/lib/pi-screen-actions";
 
 /** Max buttons shown inline in the WhatsApp bubble; the rest fold into
  *  "See all options" (Meta shows the first two when there are more than three). */
@@ -78,22 +79,69 @@ const EMOJIS = [
  * everything is rebuilt in the Pi Commerce design system (our tokens, our shadcn
  * primitives) rather than Paytm's blue UI. Mock only — nothing is sent to Meta.
  */
+/**
+ * Ask Pi seed for a brand-new template. When Pi calls `open_new_template`
+ * with prefill (name / category / format), the outer WhatsAppTemplates
+ * component stashes it here and hands it to `<TemplateForm>` as its
+ * initial state — keyed so the form remounts and picks the seed up. Pi
+ * itself goes off-duty inside the form (dead-zone below).
+ */
+type WaTemplatePrefill = {
+  name?: string;
+  category?: TemplateCategory;
+  format?: TemplateFormat;
+};
+
 export function WhatsAppTemplates({ waba }: { waba: ConnectedWaba }) {
   const templates = useWaTemplates();
   const [editing, setEditing] = useState<WaTemplate | null>(null);
   const [creating, setCreating] = useState(false);
+  const [prefill, setPrefill] = useState<WaTemplatePrefill | null>(null);
 
-  const openCreate = () => { setEditing(null); setCreating(true); };
-  const openEdit = (t: WaTemplate) => { setEditing(t); setCreating(true); };
-  const close = () => { setCreating(false); setEditing(null); };
+  const openCreate = (seed?: WaTemplatePrefill) => {
+    setEditing(null);
+    setPrefill(seed ?? null);
+    setCreating(true);
+  };
+  const openEdit = (t: WaTemplate) => { setEditing(t); setPrefill(null); setCreating(true); };
+  const close = () => { setCreating(false); setEditing(null); setPrefill(null); };
 
   const save = (t: WaTemplate) => {
     upsertWaTemplate(t);
     close();
   };
 
+  // Inside the create/edit form Pi has no capability: template builder
+  // is a fully manual surface (compose body, add variables, wire buttons,
+  // submit for Meta approval). Keep the pill visible with a playful
+  // nudge — same pattern as Agents > Tools and Settings.
+  usePiDisabled(
+    creating
+      ? "Pi's off-duty here. Template Builder is your canvas."
+      : null,
+  );
+
   if (creating) {
-    return <TemplateForm waba={waba} initial={editing} onCancel={close} onSave={save} />;
+    return (
+      <TemplateForm
+        // Remount when the prefill seed changes so `useState` inside the
+        // form re-reads the seed as its initial value. Editing an existing
+        // template uses the template id; drafting from Pi uses the seed
+        // fingerprint; a plain empty create uses "blank".
+        key={
+          editing
+            ? `edit-${editing.id}`
+            : prefill
+              ? `draft-${prefill.name ?? ""}-${prefill.category ?? ""}-${prefill.format ?? ""}`
+              : "blank"
+        }
+        waba={waba}
+        initial={editing}
+        prefill={prefill}
+        onCancel={close}
+        onSave={save}
+      />
+    );
   }
   const clone = (t: WaTemplate) => {
     const copy: WaTemplate = {
@@ -136,7 +184,7 @@ function parseCreated(s: string): Date {
 
 function TemplateList({ templates, onCreate, onEdit, onClone, onDelete }: {
   templates: WaTemplate[];
-  onCreate: () => void;
+  onCreate: (prefill?: WaTemplatePrefill) => void;
   onEdit: (t: WaTemplate) => void;
   onClone: (t: WaTemplate) => void;
   onDelete: (id: string) => void;
@@ -146,6 +194,39 @@ function TemplateList({ templates, onCreate, onEdit, onClone, onDelete }: {
   const [end, setEnd] = useState("");
   const [page, setPage] = useState(1);
   const [curlFor, setCurlFor] = useState<WaTemplate | null>(null);
+
+  // Ask Pi surface for the WhatsApp templates list — search + "draft a
+  // new template" (opens the form with prefill). The status/category
+  // filters aren't exposed as tools because the table doesn't have those
+  // filter controls today; Pi silently narrowing the list without a
+  // visible chip would confuse the user. Add UI toggles first, then tools.
+  usePublishSurface({
+    surfaceId: "waba.templates.list",
+    handlers: {
+      template_list_search: (args) => {
+        const query = typeof args.query === "string" ? args.query : "";
+        setQ(query);
+      },
+      open_new_template: (args) => {
+        const rawCat = typeof args.category === "string" ? args.category : "";
+        const rawFmt = typeof args.format === "string" ? args.format : "";
+        const validCategories = TEMPLATE_CATEGORIES as readonly string[];
+        const validFormats: TemplateFormat[] = ["TEXT", "IMAGE", "VIDEO", "DOCUMENT"];
+        const seed: WaTemplatePrefill = {
+          name: typeof args.name === "string" ? args.name : undefined,
+          category: validCategories.includes(rawCat) ? (rawCat as TemplateCategory) : undefined,
+          format: (validFormats as string[]).includes(rawFmt)
+            ? (rawFmt as TemplateFormat)
+            : undefined,
+        };
+        onCreate(seed);
+        toast.message("Drafting a new template", {
+          description: [seed.name, seed.category, seed.format].filter(Boolean).join(" · ")
+            || "Fill in the details.",
+        });
+      },
+    },
+  });
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -191,7 +272,7 @@ function TemplateList({ templates, onCreate, onEdit, onClone, onDelete }: {
           <Input type="date" value={end} onChange={(e) => setEnd(e.target.value)} className="h-9 w-40" />
         </Field>
         <div className="ml-auto">
-          <Button size="sm" onClick={onCreate} className="h-9 gap-1.5 text-xs">
+          <Button size="sm" onClick={() => onCreate()} className="h-9 gap-1.5 text-xs">
             <Plus className="h-4 w-4" /> Create New Template
           </Button>
         </div>
@@ -374,18 +455,28 @@ function todayLabel(): string {
   return `${String(d.getDate()).padStart(2, "0")} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
 }
 
-function TemplateForm({ waba, initial, onCancel, onSave }: {
+function TemplateForm({ waba, initial, prefill, onCancel, onSave }: {
   waba: ConnectedWaba;
   initial: WaTemplate | null;
+  /**
+   * Ask Pi seed for a brand-new template. Ignored when `initial` is set
+   * (edit mode). The parent keys the whole component on the prefill so
+   * `useState` picks it up as the initial value on remount.
+   */
+  prefill?: WaTemplatePrefill | null;
   onCancel: () => void;
   onSave: (t: WaTemplate) => void;
 }) {
   const { templateLanguages, dialCode } = useRegion();
   const [wabaId] = useState(waba.waba.id);
-  const [category, setCategory] = useState<TemplateCategory | "">(initial?.category ?? "");
+  const [category, setCategory] = useState<TemplateCategory | "">(
+    initial?.category ?? prefill?.category ?? "",
+  );
   const [language, setLanguage] = useState(initial?.language ?? "");
-  const [name, setName] = useState(initial?.name ?? "");
-  const [format, setFormat] = useState<TemplateFormat>(initial?.format ?? "TEXT");
+  const [name, setName] = useState(initial?.name ?? prefill?.name ?? "");
+  const [format, setFormat] = useState<TemplateFormat>(
+    initial?.format ?? prefill?.format ?? "TEXT",
+  );
   const [mediaName, setMediaName] = useState("");
   const [header, setHeader] = useState(initial?.header ?? "");
   const [headerParam, setHeaderParam] = useState("");

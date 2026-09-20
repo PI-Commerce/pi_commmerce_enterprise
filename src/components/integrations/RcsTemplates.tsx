@@ -29,6 +29,7 @@ import {
   type RcsButton, type RcsButtonType, type RcsMedia, type RcsMediaType, type RcsCardOrientation,
 } from "@/lib/rcs-templates";
 import { useRcsTemplates, upsertRcsTemplate, removeRcsTemplate } from "@/lib/rcs-store";
+import { usePiDisabled, usePublishSurface } from "@/lib/pi-screen-actions";
 
 /**
  * RCS → Templates tab. The RCS template registry: a searchable list plus a rich
@@ -40,12 +41,28 @@ import { useRcsTemplates, upsertRcsTemplate, removeRcsTemplate } from "@/lib/rcs
  * the list shows a status column and only Approved templates are offered to
  * campaign nodes. Mock only.
  */
+/**
+ * Ask Pi seed for a brand-new RCS template. Set from the surface handler
+ * when Pi calls `open_new_template` with a prefill; handed to the form
+ * as an initial value. Same pattern as `WhatsAppTemplates`.
+ */
+type RcsTemplatePrefill = {
+  name?: string;
+  type?: RcsTemplateType;
+};
+
 export function RcsTemplates({ config }: { config: RcsChannelConfig }) {
   const templates = useRcsTemplates();
   const [editing, setEditing] = useState<RcsTemplate | null>(null);
   const [creating, setCreating] = useState(false);
+  const [prefill, setPrefill] = useState<RcsTemplatePrefill | null>(null);
 
-  const close = () => { setCreating(false); setEditing(null); };
+  const close = () => { setCreating(false); setEditing(null); setPrefill(null); };
+  const openCreate = (seed?: RcsTemplatePrefill) => {
+    setEditing(null);
+    setPrefill(seed ?? null);
+    setCreating(true);
+  };
 
   const save = (t: RcsTemplate) => {
     upsertRcsTemplate(t);
@@ -53,11 +70,29 @@ export function RcsTemplates({ config }: { config: RcsChannelConfig }) {
     close();
   };
 
+  // Inside the RCS create/edit form Pi steps aside: the form is a rich
+  // provider-shaped surface (agent → brand → media → buttons → submit for
+  // approval). Same dead-zone contract as WA/SMS forms.
+  usePiDisabled(
+    creating
+      ? "Pi's off-duty here. Template Builder is your canvas."
+      : null,
+  );
+
   if (creating) {
     return (
       <RcsTemplateForm
+        // Remount so seed lands in the form's initial `useState` values.
+        key={
+          editing
+            ? `edit-${editing.id}`
+            : prefill
+              ? `draft-${prefill.name ?? ""}-${prefill.type ?? ""}`
+              : "blank"
+        }
         config={config}
         initial={editing}
+        prefill={prefill}
         existing={templates}
         onCancel={close}
         onSave={save}
@@ -69,8 +104,8 @@ export function RcsTemplates({ config }: { config: RcsChannelConfig }) {
     <RcsTemplateList
       config={config}
       templates={templates}
-      onCreate={() => { setEditing(null); setCreating(true); }}
-      onEdit={(t) => { setEditing(t); setCreating(true); }}
+      onCreate={openCreate}
+      onEdit={(t) => { setEditing(t); setPrefill(null); setCreating(true); }}
       onClone={(t) => {
         const copy: RcsTemplate = {
           ...t,
@@ -97,7 +132,7 @@ const GRID = "grid-cols-[1.6fr_1.2fr_1fr_0.9fr_1fr_1fr_auto]";
 function RcsTemplateList({ config, templates, onCreate, onEdit, onClone, onDelete }: {
   config: RcsChannelConfig;
   templates: RcsTemplate[];
-  onCreate: () => void;
+  onCreate: (prefill?: RcsTemplatePrefill) => void;
   onEdit: (t: RcsTemplate) => void;
   onClone: (t: RcsTemplate) => void;
   onDelete: (id: string) => void;
@@ -107,6 +142,49 @@ function RcsTemplateList({ config, templates, onCreate, onEdit, onClone, onDelet
   const [typeFilter, setTypeFilter] = useState<RcsAgentType | "all">("all");
   const [status, setStatus] = useState<RcsApprovalStatus | "all">("all");
   const [page, setPage] = useState(1);
+
+  // Ask Pi surface for the RCS templates list — search + agent-type
+  // filter + provider approval status filter (all real UI controls on
+  // the toolbar) + "draft a new template" (opens the form with prefill).
+  usePublishSurface({
+    surfaceId: "rcs.templates.list",
+    handlers: {
+      template_list_search: (args) => {
+        const query = typeof args.query === "string" ? args.query : "";
+        setQ(query);
+      },
+      template_list_filter_status: (args) => {
+        const raw = typeof args.status === "string" ? args.status : "";
+        if (raw === "all") setStatus("all");
+        else if (raw === "Approved" || raw === "Pending" || raw === "Rejected") {
+          setStatus(raw as RcsApprovalStatus);
+        }
+      },
+      template_list_filter_agent_type: (args) => {
+        const raw = typeof args.agent_type === "string" ? args.agent_type : "";
+        const validTypes = RCS_AGENT_TYPES as readonly string[];
+        if (raw === "all") setTypeFilter("all");
+        else if (validTypes.includes(raw)) setTypeFilter(raw as RcsAgentType);
+      },
+      open_new_template: (args) => {
+        const rawType = typeof args.type === "string" ? args.type : "";
+        // RCS_TEMPLATE_TYPES ships as [{value, label}, ...]; map to the
+        // enum values Pi is allowed to pick.
+        const validTypeValues = RCS_TEMPLATE_TYPES.map((t) => t.value) as RcsTemplateType[];
+        const seed: RcsTemplatePrefill = {
+          name: typeof args.name === "string" ? args.name : undefined,
+          type: (validTypeValues as string[]).includes(rawType)
+            ? (rawType as RcsTemplateType)
+            : undefined,
+        };
+        onCreate(seed);
+        toast.message("Drafting a new RCS template", {
+          description: [seed.name, seed.type].filter(Boolean).join(" · ")
+            || "Fill in the details.",
+        });
+      },
+    },
+  });
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -164,7 +242,7 @@ function RcsTemplateList({ config, templates, onCreate, onEdit, onClone, onDelet
             </Select>
           </Field>
           <div className="ml-auto">
-            <Button size="sm" onClick={onCreate} className="h-9 gap-1.5 text-xs">
+            <Button size="sm" onClick={() => onCreate()} className="h-9 gap-1.5 text-xs">
               <Plus className="h-4 w-4" /> Add Template
             </Button>
           </div>
@@ -326,9 +404,15 @@ function StatusTag({ status }: { status: RcsApprovalStatus }) {
 
 /* =============================== Create form =============================== */
 
-function RcsTemplateForm({ config, initial, existing, onCancel, onSave }: {
+function RcsTemplateForm({ config, initial, prefill, existing, onCancel, onSave }: {
   config: RcsChannelConfig;
   initial: RcsTemplate | null;
+  /**
+   * Ask Pi seed for a brand-new template. Ignored in edit mode. The
+   * parent keys the whole component on the prefill so `useState` picks
+   * it up as the initial value on remount.
+   */
+  prefill?: RcsTemplatePrefill | null;
   existing: RcsTemplate[];
   onCancel: () => void;
   onSave: (t: RcsTemplate) => void;
@@ -339,8 +423,8 @@ function RcsTemplateForm({ config, initial, existing, onCancel, onSave }: {
     : soleBrandId;
   const [brandId, setBrandId] = useState(initialBrandId);
   const [agentId, setAgentId] = useState(initial?.agentId ?? "");
-  const [name, setName] = useState(initial?.name ?? "");
-  const [type, setType] = useState<RcsTemplateType>(initial?.type ?? "TEXT");
+  const [name, setName] = useState(initial?.name ?? prefill?.name ?? "");
+  const [type, setType] = useState<RcsTemplateType>(initial?.type ?? prefill?.type ?? "TEXT");
   const [title, setTitle] = useState(initial?.title ?? "");
   const [body, setBody] = useState(initial?.body ?? "");
   const [media, setMedia] = useState<RcsMedia>(

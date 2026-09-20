@@ -5,6 +5,7 @@ import {
 } from "@/components/ui/select";
 import type { SmsChannelConfig } from "@/lib/sms-config";
 import { sendersForEntity } from "@/lib/sms-config";
+import { usePiDisabled } from "@/lib/pi-screen-actions";
 
 /**
  * SMS → Overview tab. A **read-only** view of the DLT setup the Pi Commerce ops
@@ -21,6 +22,10 @@ import { sendersForEntity } from "@/lib/sms-config";
 export function SmsOverview({ config }: { config: SmsChannelConfig }) {
   const [peId, setPeId] = useState(config.principalEntities[0]?.id ?? "");
   const senders = sendersForEntity(config, peId);
+  // SMS onboarding + PE / Sender ID registry is driven by Pi Commerce
+  // ops from the backend. Nothing on this tab is a play surface for Pi
+  // (see feedback_askpi_dead_zones.md).
+  usePiDisabled("Pi's off-duty here. DLT setup lives with ops.");
 
   return (
     <div className="h-full overflow-y-auto px-8 pb-6">

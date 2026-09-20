@@ -118,6 +118,25 @@ export function AskPiDock() {
     if (state === "idle") inputRef.current?.focus();
   }, [state]);
 
+  // Reset the dock's chat state whenever the surface changes underneath it:
+  //  - route navigation (pathname)
+  //  - published surface (tab-level, e.g. Overview → Templates on Channels)
+  //  - dead-zone toggle (e.g. opening the template builder overlay)
+  //
+  // Without this, a "result" bubble from a previous turn leaks back onto
+  // the panel the next time Pi is summoned on a fresh surface — you close
+  // the panel, the state stays "result" + `liveAnswer` intact, and the
+  // stale answer reappears (with a stale CTA from the old route context)
+  // as soon as the panel is visible again. Collapsing back to the pill
+  // and clearing the live-answer buffer makes every reopen a clean start.
+  const surfaceKey = surface?.surfaceId ?? "";
+  useEffect(() => {
+    setState("collapsed");
+    setValue("");
+    setLiveAnswer(null);
+    setLiveActionLinks(null);
+  }, [pathname, surfaceKey, inDeadZone]);
+
   // Click-outside collapses only from the idle composer. Once Pi is working or showing a
   // result, an outside click is ignored so the answer is never lost by accident — close it
   // with the ✕. Also stays open while the user is mid-prompt.

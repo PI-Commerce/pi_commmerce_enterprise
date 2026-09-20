@@ -6,6 +6,7 @@ import {
 import { Button } from "@/components/ui/button";
 import type { ConnectedWaba } from "@/lib/waba-onboarding";
 import { useRegion, localizeTzAbbrev, localizeDialCode } from "@/lib/region";
+import { usePiDisabled } from "@/lib/pi-screen-actions";
 
 /**
  * WhatsApp → Overview tab. The connected-state dashboard for the channel: the
@@ -23,6 +24,11 @@ export function WhatsAppOverview({ data }: { data: ConnectedWaba }) {
   const { tzAbbrev, dialCode } = useRegion();
   const [lastSync, setLastSync] = useState(data.connection.lastSync);
   const [refreshing, setRefreshing] = useState(false);
+  // Overview is a passive read of connection health + sender quality —
+  // there's nothing here for Pi to change. Keep the pill visible for
+  // pattern consistency but off-duty with a playful nudge. See the
+  // dead-zone UX contract in feedback_askpi_dead_zones.md.
+  usePiDisabled("Pi's off-duty here. Just eyeball your connection health.");
 
   // Connected-asset metadata is region-sensitive: show the phone with the active
   // country's dial code and the connection timestamp in its timezone.

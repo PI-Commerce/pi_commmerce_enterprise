@@ -6,6 +6,7 @@ import {
 import { cn } from "@/lib/utils";
 import type { RcsChannelConfig, RcsAgent, RcsBrand } from "@/lib/rcs-config";
 import { brandById, RCS_AGENT_TYPES, providerLabel } from "@/lib/rcs-config";
+import { usePiDisabled } from "@/lib/pi-screen-actions";
 
 /**
  * RCS → Overview tab. A **read-only** view of the brand/agent setup the Pi
@@ -21,6 +22,10 @@ export function RcsOverview({ config }: { config: RcsChannelConfig }) {
   const [brandId, setBrandId] = useState(config.brands[0]?.id ?? "");
   const brand = brandById(config, brandId);
   const agents = brand?.agents ?? [];
+  // RCS brand/agent onboarding lives with ops (provider verification is
+  // off-dashboard). Pi has no play here — keep the pill visible with a
+  // playful nudge instead of a stub chat.
+  usePiDisabled("Pi's off-duty here. Brand and agent setup is on ops.");
 
   return (
     <div className="h-full overflow-y-auto px-8 pb-6">

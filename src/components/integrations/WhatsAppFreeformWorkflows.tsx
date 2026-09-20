@@ -45,6 +45,7 @@ import {
   type FreeformWorkflowRow,
   type FreeformStatus,
 } from "@/lib/freeform-types";
+import { usePublishSurface } from "@/lib/pi-screen-actions";
 
 /**
  * Channels > WhatsApp > Freeform Workflows tab.
@@ -66,6 +67,33 @@ export function WhatsAppFreeformWorkflows() {
   const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
   const [createOpen, setCreateOpen] = useState(false);
+  // Prefill for the Create dialog when Ask Pi calls `open_new_freeform`.
+  // The dialog reads these on open via the prop pair below; a plain
+  // Create-workflow button click passes `null` so the dialog starts empty.
+  const [createPrefill, setCreatePrefill] = useState<
+    { name?: string; description?: string } | null
+  >(null);
+
+  // Ask Pi surface — search + "open create-workflow with prefill". The
+  // canvas Pi (once wired) is a separate surface published from the
+  // freeform builder route, not this list.
+  usePublishSurface({
+    surfaceId: "waba.freeform.list",
+    handlers: {
+      freeform_list_search: (args) => {
+        const query = typeof args.query === "string" ? args.query : "";
+        setQ(query);
+      },
+      open_new_freeform: (args) => {
+        const seed = {
+          name: typeof args.name === "string" ? args.name : undefined,
+          description: typeof args.description === "string" ? args.description : undefined,
+        };
+        setCreatePrefill(seed);
+        setCreateOpen(true);
+      },
+    },
+  });
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -260,8 +288,15 @@ export function WhatsAppFreeformWorkflows() {
 
       <CreateWorkflowDialog
         open={createOpen}
-        onOpenChange={setCreateOpen}
-        onCreated={handleCreated}
+        onOpenChange={(o) => {
+          setCreateOpen(o);
+          if (!o) setCreatePrefill(null);
+        }}
+        prefill={createPrefill}
+        onCreated={(row) => {
+          setCreatePrefill(null);
+          handleCreated(row);
+        }}
       />
     </div>
   );
@@ -388,21 +423,33 @@ function StatusTag({
 function CreateWorkflowDialog({
   open,
   onOpenChange,
+  prefill,
   onCreated,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
+  /**
+   * Optional Ask Pi seed. When set, the dialog opens with these fields
+   * already filled — the user reviews and clicks Create. Cleared when
+   * the dialog closes so the next plain-button open starts empty.
+   */
+  prefill?: { name?: string; description?: string } | null;
   onCreated: (row: FreeformWorkflowRow) => void;
 }) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
 
+  // Re-seed on open so Ask Pi's prefill lands, and clear on close so a
+  // plain reopen doesn't carry the previous seed.
   useEffect(() => {
-    if (!open) {
+    if (open) {
+      setName(prefill?.name ?? "");
+      setDescription(prefill?.description ?? "");
+    } else {
       setName("");
       setDescription("");
     }
-  }, [open]);
+  }, [open, prefill]);
 
   const trimmed = name.trim();
   const canSubmit = trimmed.length > 0;

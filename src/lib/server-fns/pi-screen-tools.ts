@@ -210,6 +210,143 @@ const checkCsvFit: ToolDef = {
   },
 };
 
+/* ------------------------------------------------------------------------ *
+ *  Channels — templates + freeform screen tools
+ *
+ *  These drive the templates registry tables on Channels > WhatsApp / SMS /
+ *  RCS and the WhatsApp Freeform Workflows list. The tool defs are shared
+ *  (one search, one status filter, etc.) — {@link SURFACE_SCREEN_TOOLS}
+ *  gates which surface may call which. On surfaces where the UI doesn't
+ *  expose a given filter (e.g. WhatsApp templates have no status dropdown
+ *  today), the tool simply isn't listed so Pi can't silently narrow the
+ *  list without a visible reason.
+ * ------------------------------------------------------------------------ */
+
+/** Set the templates list search box. Matches name / id / channel-specific fields. */
+const templateListSearch: ToolDef = {
+  type: "function",
+  function: {
+    name: "template_list_search",
+    description:
+      "Set the templates list search box on the current Channels > Templates surface. Matches template name / id (WhatsApp) or name / id / sender (SMS) or name / id / agent (RCS), case-insensitive substring. Pass an empty string to clear.",
+    parameters: {
+      type: "object",
+      properties: { query: { type: "string" } },
+      required: ["query"],
+    },
+  },
+};
+
+/** Filter templates by provider approval status. RCS only in v1 (WA table has no status dropdown; SMS has no status at all). */
+const templateListFilterStatus: ToolDef = {
+  type: "function",
+  function: {
+    name: "template_list_filter_status",
+    description:
+      "Filter the templates list by provider approval status. Use `all` to clear. Only meaningful on channels whose provider approves templates (RCS in v1).",
+    parameters: {
+      type: "object",
+      properties: {
+        status: {
+          type: "string",
+          enum: ["all", "Approved", "Pending", "Rejected"],
+        },
+      },
+      required: ["status"],
+    },
+  },
+};
+
+/** Filter templates by category (channel-specific: SMS DLT categories today). */
+const templateListFilterCategory: ToolDef = {
+  type: "function",
+  function: {
+    name: "template_list_filter_category",
+    description:
+      "Filter the templates list by category. SMS DLT categories = Transactional / Promotional / Service_Explicit / Service_Implicit. Use `all` to clear.",
+    parameters: {
+      type: "object",
+      properties: { category: { type: "string" } },
+      required: ["category"],
+    },
+  },
+};
+
+/** Filter RCS templates by agent type (MAAP vs Jio). */
+const templateListFilterAgentType: ToolDef = {
+  type: "function",
+  function: {
+    name: "template_list_filter_agent_type",
+    description:
+      "Filter the RCS templates list by agent type. `all` clears. Enum values match the RCS agent registry (typically MAAP / Jio).",
+    parameters: {
+      type: "object",
+      properties: { agent_type: { type: "string" } },
+      required: ["agent_type"],
+    },
+  },
+};
+
+/** Open the new-template form on WhatsApp / RCS, optionally with prefilled fields. */
+const openNewTemplate: ToolDef = {
+  type: "function",
+  function: {
+    name: "open_new_template",
+    description:
+      "Open the new-template form on the WhatsApp or RCS Templates tab. Optionally prefill the name / category / format so the user lands in a form that's already partly filled. Do NOT call on SMS — SMS templates must be approved on the DLT portal first and imported. Pi steps aside inside the form itself.",
+    parameters: {
+      type: "object",
+      properties: {
+        name: {
+          type: "string",
+          description: "Suggested template name — human-readable, snake_case is fine.",
+        },
+        category: {
+          type: "string",
+          description:
+            "Provider category (channel-specific). WhatsApp: Utility / Marketing / Authentication. RCS: skip.",
+        },
+        format: {
+          type: "string",
+          description: "WhatsApp only: TEXT / IMAGE / VIDEO / DOCUMENT.",
+        },
+      },
+    },
+  },
+};
+
+/** Set the WhatsApp Freeform Workflows list search box. */
+const freeformListSearch: ToolDef = {
+  type: "function",
+  function: {
+    name: "freeform_list_search",
+    description:
+      "Set the WhatsApp Freeform Workflows list search box. Matches workflow name / description, case-insensitive substring. Empty clears.",
+    parameters: {
+      type: "object",
+      properties: { query: { type: "string" } },
+      required: ["query"],
+    },
+  },
+};
+
+/** Open the Create Freeform Workflow dialog, optionally with prefill. */
+const openNewFreeform: ToolDef = {
+  type: "function",
+  function: {
+    name: "open_new_freeform",
+    description:
+      "Open the Create Freeform Workflow dialog on the WhatsApp Freeform Workflows list. Optionally prefill the workflow name and description so the user lands in a partly-filled dialog. The user finishes and clicks Create — the canvas is where Pi wires the flow itself.",
+    parameters: {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        description: { type: "string" },
+      },
+    },
+  },
+};
+
 /** All screen tools. `pi-llm.ts` imports this and merges with the analytics
  *  set based on the surface. */
 export const ALL_SCREEN_TOOLS: ToolDef[] = [
@@ -221,6 +358,13 @@ export const ALL_SCREEN_TOOLS: ToolDef[] = [
   runAction,
   openNewBroadcast,
   checkCsvFit,
+  templateListSearch,
+  templateListFilterStatus,
+  templateListFilterCategory,
+  templateListFilterAgentType,
+  openNewTemplate,
+  freeformListSearch,
+  openNewFreeform,
 ];
 
 /* ------------------------------------------------------------------------ *
@@ -238,6 +382,26 @@ export const SURFACE_SCREEN_TOOLS: Record<string, string[]> = {
   "campaigns.runs": ["runs_filter", "runs_search", "run_action"],
   "campaigns.data": [CSV_FIT_TOOL_NAME],
   "broadcasts.list": ["open_new_broadcast"],
+  // Channels > WhatsApp > Templates — search + "open a new template with
+  // prefill". No status/category filters today (the UI has neither), so
+  // those tools aren't exposed and Pi can't silently narrow the list.
+  "waba.templates.list": ["template_list_search", "open_new_template"],
+  // Channels > SMS > Templates — search + category filter (both are
+  // real UI controls on the table). No open_new — SMS templates must be
+  // approved on the DLT portal and imported, not authored here.
+  "sms.templates.list": ["template_list_search", "template_list_filter_category"],
+  // Channels > RCS > Templates — search + status + agent-type filters
+  // (both are real UI controls) + open a new template with prefill.
+  "rcs.templates.list": [
+    "template_list_search",
+    "template_list_filter_status",
+    "template_list_filter_agent_type",
+    "open_new_template",
+  ],
+  // Channels > WhatsApp > Freeform Workflows — search + "open a new
+  // workflow with prefill". Wiring the flow itself is the canvas Pi's
+  // job, not a screen tool.
+  "waba.freeform.list": ["freeform_list_search", "open_new_freeform"],
 };
 
 /** Return the screen tools Pi is allowed to call for `surfaceId`. */

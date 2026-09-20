@@ -30,6 +30,7 @@ import {
   type SmsTemplate, type SmsType, type SmsCategory, type SmsBulkResult,
 } from "@/lib/sms-templates";
 import { useSmsTemplates, upsertSmsTemplate, addSmsTemplates, removeSmsTemplate } from "@/lib/sms-store";
+import { usePiDisabled, usePublishSurface } from "@/lib/pi-screen-actions";
 
 /**
  * SMS → Templates tab. The DLT Template Registry: a searchable list of the
@@ -53,6 +54,15 @@ export function SmsTemplates({ config }: { config: SmsChannelConfig }) {
   const [bulkOpen, setBulkOpen] = useState(false);
 
   const close = () => { setCreating(false); setEditing(null); };
+
+  // Inside the SMS create/edit form Pi has no capability: SMS templates
+  // must be approved on the DLT portal first and imported — the form is
+  // just the mirror. Same dead-zone contract as the WA/RCS forms.
+  usePiDisabled(
+    creating
+      ? "Pi's off-duty here. DLT-approved templates only — Pi can't author these."
+      : null,
+  );
 
   const save = (t: SmsTemplate) => {
     upsertSmsTemplate(t);
@@ -121,6 +131,27 @@ function SmsTemplateList({ templates, onCreate, onEdit, onClone, onDelete, onBul
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
   const [page, setPage] = useState(1);
+
+  // Ask Pi surface for the SMS templates list — search + category filter
+  // (both are real UI controls on the toolbar). No `open_new_template`:
+  // SMS templates come in via DLT approval + import, not from Pi.
+  usePublishSurface({
+    surfaceId: "sms.templates.list",
+    handlers: {
+      template_list_search: (args) => {
+        const query = typeof args.query === "string" ? args.query : "";
+        setQ(query);
+      },
+      template_list_filter_category: (args) => {
+        const raw = typeof args.category === "string" ? args.category : "";
+        const validCategories = SMS_CATEGORIES as readonly string[];
+        if (raw === "all") setType("all");
+        else if (validCategories.includes(raw)) setType(raw as SmsCategory);
+        // Silently ignore unknown values — the server-side enum already
+        // guards, this is a belt-and-braces catch for stale tool schemas.
+      },
+    },
+  });
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
