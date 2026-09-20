@@ -1,13 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouterState } from "@tanstack/react-router";
-import { Sparkle, X, Download, LayoutGrid } from "lucide-react";
-import { toast } from "sonner";
 import { getPiContext } from "@/lib/ask-pi-context";
-import { pickThesysFixtureKey, THESYS_FIXTURES, type ThesysFixtureKey } from "@/lib/pi-thesys-fixtures";
-import { askPiThesys } from "@/lib/ask-pi-thesys";
 import { askPi } from "@/lib/server-fns/pi-llm";
 import { refreshAgentsFromDb } from "@/lib/agent-store";
-import { PiThesysResult } from "./PiThesysResult";
+import { usePiScreenContext } from "@/lib/pi-screen-context";
+import { AnalyticsChat } from "@/components/analytics/AnalyticsChat";
 import {
   PiPill,
   PiNudge,
@@ -47,25 +44,26 @@ function loadDismissedNudges(): string[] {
 export function AskPiDock() {
   const [state, setState] = useState<State>("collapsed");
   const [value, setValue] = useState("");
-  // I7 — on the Analytics surface, a question yields a Thesys C1 generative-UI card.
-  // Live path: the C1 API generates a fresh card per question (liveDsl). If the call fails
-  // (no key / offline), we fall back to one of the captured static fixtures (thesysKey).
-  const [thesysKey, setThesysKey] = useState<ThesysFixtureKey | null>(null);
-  const [liveDsl, setLiveDsl] = useState<string | null>(null);
   // Live LLM answer on non-Analytics surfaces. Populated by the askPi server fn.
   // When null, the result panel falls back to the surface's canned ctx.result.
+  // (/analytics uses AnalyticsChat instead and doesn't touch this state.)
   const [liveAnswer, setLiveAnswer] = useState<string | null>(null);
   // I4 — retired nudge ids (✕-dismissed are also persisted; used-nudges are session-only).
   const [hiddenNudges, setHiddenNudges] = useState<string[]>(() => loadDismissedNudges());
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
-  const thesysCaptureRef = useRef<HTMLDivElement>(null);
 
   // Route-driven context. Re-resolves on navigation so chips/placeholder/result
   // always match the surface Pi is summoned from.
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const ctx = getPiContext(pathname);
+
+  // /analytics gets a dedicated multi-turn chat with structured answers
+  // (insight + recommendation + infographic + follow-ups). Everywhere else keeps
+  // the single-shot proposal card path.
+  const isAnalyticsSurface = pathname === "/analytics";
+  const screenCtx = usePiScreenContext();
 
   // Shared horizontal drag (same behaviour + remembered position as the canvas composer).
   const { dragX, pillHandlers, suppressClick } = usePiDrag(wrapRef);
@@ -110,26 +108,9 @@ export function AskPiDock() {
     if (!query) return;
     if (q !== value) setValue(q);
     setState("thinking");
-    // Reset all live-result channels — each submit clears the previous surface's answer.
-    setThesysKey(null);
-    setLiveDsl(null);
     setLiveAnswer(null);
-    if (ctx.scopeMode === "thesys") {
-      // Analytics — generative UI card. Ask C1 to build one from the live question;
-      // fall back to a captured fixture if the API is unreachable so the demo never
-      // dead-ends.
-      try {
-        const r = await askPiThesys({ data: query });
-        if (r.ok) setLiveDsl(r.content);
-        else setThesysKey(pickThesysFixtureKey(query));
-      } catch {
-        setThesysKey(pickThesysFixtureKey(query));
-      }
-      setState("result");
-      return;
-    }
-    // Every other surface — call the real askPi LLM with the current route's scope
-    // + system hint. If it fails (missing D1 binding, missing TFY key, endpoint
+    // Every non-/analytics surface — call askPi with the current route's scope +
+    // system hint. If it fails (missing D1 binding, missing TFY key, endpoint
     // unreachable from local without VPN), gracefully fall back to the surface's
     // canned proposal so nothing dead-ends.
     try {
@@ -161,32 +142,7 @@ export function AskPiDock() {
     setState("result");
   };
 
-  const reset = () => { setThesysKey(null); setLiveDsl(null); setLiveAnswer(null); setValue(""); setState("idle"); };
-
-  // Download the currently rendered Thesys card as a PNG. The Crayon renderer draws
-  // regular DOM (no canvas), so we snapshot the wrapper via html-to-image and force a
-  // download. Same UX as PiChartResult's Download PNG.
-  const downloadThesysPng = async () => {
-    const node = thesysCaptureRef.current;
-    if (!node) return;
-    try {
-      const { toPng } = await import("html-to-image");
-      const dataUrl = await toPng(node, { backgroundColor: "#ffffff", pixelRatio: 2, cacheBust: true });
-      const a = document.createElement("a");
-      a.href = dataUrl;
-      a.download = `pi-analytics-${Date.now()}.png`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-    } catch (err) {
-      toast.error("Could not export PNG", { description: (err as Error).message });
-    }
-  };
-
-  const addThesysAsCard = () => {
-    toast.success("Added to your dashboard");
-    reset();
-  };
+  const reset = () => { setLiveAnswer(null); setValue(""); setState("idle"); };
 
   // I4 — proactive nudge plumbing. The route supplies it; it floats above the pill
   // until retired. `persist` writes the ✕-dismissal to localStorage; using a nudge
@@ -224,48 +180,28 @@ export function AskPiDock() {
         </div>
       )}
 
-      {isOpen && (
+      {isOpen && isAnalyticsSurface && (
+        // On /analytics we bypass the generic idle→thinking→result state machine
+        // and hand the whole panel body to AnalyticsChat, which owns its own
+        // multi-turn conversation, screen-context grounding, and infographics.
+        // Sized for chart-heavy answers — wider + taller than the generic dock.
+        <div className="pointer-events-none" style={{ transform: `translateX(${dragX}px)` }}>
+          <PiPanel innerRef={panelRef} className="w-[720px] max-w-full h-[min(640px,calc(100vh-6rem))]">
+            <AnalyticsChat
+              context={screenCtx ?? { pathname: "/analytics" }}
+              onClose={() => setState("collapsed")}
+            />
+          </PiPanel>
+        </div>
+      )}
+
+      {isOpen && !isAnalyticsSurface && (
         <div className="pointer-events-none" style={{ transform: `translateX(${dragX}px)` }}>
           <PiPanel innerRef={panelRef} className="w-[680px] max-w-full">
             {expanded && (
               <div className="border-b border-border px-5 py-4 animate-fade-in">
                 {state === "thinking" ? (
                   <PiThinking steps={ctx.thinking} />
-                ) : liveDsl || thesysKey ? (
-                  <div className="space-y-2.5">
-                    <div className="flex items-center justify-between">
-                      <span className="flex items-center gap-1 rounded-full border border-ai/30 bg-ai/5 px-2 py-0.5 text-[9.5px] font-medium text-ai">
-                        <Sparkle className="h-2.5 w-2.5 fill-ai" /> Generated by Pi
-                      </span>
-                      <button
-                        onClick={reset}
-                        aria-label="Close"
-                        className="flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground"
-                      >
-                        <X className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                    <div ref={thesysCaptureRef} className="rounded-xl border border-ai/30 bg-card p-2">
-                      <PiThesysResult c1Response={liveDsl ?? THESYS_FIXTURES[thesysKey!]} />
-                    </div>
-                    <div className="flex items-center justify-end gap-1.5">
-                      <button onClick={reset} className="rounded-md px-2.5 py-1 text-[11.5px] text-muted-foreground hover:text-foreground">
-                        Dismiss
-                      </button>
-                      <button
-                        onClick={downloadThesysPng}
-                        className="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[11.5px] font-medium text-foreground hover:bg-accent"
-                      >
-                        <Download className="h-3 w-3" /> Download PNG
-                      </button>
-                      <button
-                        onClick={addThesysAsCard}
-                        className="inline-flex items-center gap-1 rounded-md bg-foreground px-2.5 py-1 text-[11.5px] font-medium text-background"
-                      >
-                        <LayoutGrid className="h-3 w-3" /> Add as card
-                      </button>
-                    </div>
-                  </div>
                 ) : liveAnswer ? (
                   // Real LLM answer over D1 for this surface. Preserve the surface's
                   // canned CTA so the "next action" language stays on-brand.

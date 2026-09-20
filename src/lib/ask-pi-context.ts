@@ -18,13 +18,14 @@ export type PiResult = {
  *
  * "analytics" → read-only tools over D1 (count_leads, status_breakdown,
  *   worst_dropoffs, latest_runs, list_campaigns, read_campaign). Safe on every
- *   surface, so it's the default.
+ *   surface, so it's the default. NOTE: `/analytics` itself bypasses this
+ *   entirely and mounts AnalyticsChat via AskPiDock (dedicated multi-turn
+ *   chat with structured JSON answers + infographics).
  * "builder" → analytics reads plus DAG mutations (insert_node, connect_nodes,
  *   update_node). Only enable on `/campaigns/$id` where an edit could apply.
- * "thesys" → keep the existing generative-UI card path (Analytics). Not a
- *   server-fn scope; the dock branches on this at call time.
+ * "agents" → analytics reads plus agent mutations (list/read/save_agent).
  */
-export type PiScopeMode = "analytics" | "builder" | "agents" | "thesys";
+export type PiScopeMode = "analytics" | "builder" | "agents";
 
 export type PiContext = {
   /** Short human label for the surface (telemetry / headers). */
@@ -88,29 +89,17 @@ const ROUTES: { match: (p: string) => boolean; ctx: PiContext }[] = [
   {
     match: (p) => p.startsWith("/analytics"),
     ctx: {
+      // /analytics is handled entirely by AnalyticsChat (see AskPiDock's
+      // `isAnalyticsSurface` branch). This entry stays as a placeholder so
+      // any generic scope lookup returns something sensible, but the dock
+      // never reads its `result` / `chips` / `thinking` on this route.
       scope: "Analytics",
-      // Analytics keeps the generative-UI card path (Thesys). Text-only answers
-      // sell short here — the visual is the payoff.
-      scopeMode: "thesys",
-      systemHint: "The user is on the analytics surface. Chart or compare metrics; ground every number in the data block.",
-      placeholder: "Ask Pi to chart, compare, or explain a metric…",
-      chips: [
-        "The 20-second cliff: why 42% of calls die early",
-        "Why did reactivation drop 8%?",
-        "Chart conversions by channel",
-        "Compare this run vs last",
-      ],
-      thinking: ["Reading the current dashboard scope…", "Pulling the relevant slice…", "Drafting the insight…"],
-      result: {
-        text: "Across the last 459 voice calls, 42% end inside 20 seconds and convert at roughly zero, while calls past a minute turn interested 40% of the time. I can pin this as a card or export it.",
-        diff: ["+ chart  Conversion by call length", "+ source  Volt Money voice agent · 459 calls"],
-        cta: "Add as card",
-      },
-      nudge: {
-        id: "analytics_20s_cliff",
-        label: "You're losing 43% of voice callers before the pitch. Pi found why.",
-        prompt: "The 20-second cliff: why 42% of calls die early",
-      },
+      scopeMode: "analytics",
+      systemHint: "Handled by AnalyticsChat.",
+      placeholder: "Ask about this run, channel, funnel, or trend…",
+      chips: [],
+      thinking: [],
+      result: { text: "", cta: "" },
     },
   },
   {

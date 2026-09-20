@@ -18,6 +18,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { getEnv, getDb } from "@/lib/db/client";
 import * as analytics from "@/lib/db/analytics";
 import * as campaigns from "@/lib/db/campaigns";
+import * as fx from "./pi-analytics-fixtures";
 
 /* -------------------------------------------------------------------------- */
 /* Types                                                                       */
@@ -238,6 +239,23 @@ const TOOLS = [
   {
     type: "function",
     function: {
+      name: "voice_intent_distribution",
+      description:
+        "Voice-channel intent breakdown for completed calls in scope. Matches the /analytics Voice tab's 'Intent distribution' chart. Returns { totalCompleted, intents:[{intent, count, pct}] }. Use when the user asks about voice intents, post-call analysis, why calls dropped, or 'what did callers say'.",
+      parameters: {
+        type: "object",
+        properties: {
+          campaignId: { type: "string" },
+          runId: { type: "string" },
+          from: { type: "string", description: "ISO yyyy-mm-dd" },
+          to: { type: "string", description: "ISO yyyy-mm-dd" },
+        },
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "emit_answer",
       description:
         "TERMINAL. End the turn by emitting the structured answer. Pi MUST call this exactly once per turn and stop calling tools after. The client renders the payload directly.",
@@ -414,8 +432,35 @@ async function toolCompareRuns(a: string, b: string) {
 }
 
 async function runTool(name: string, args: Record<string, unknown>): Promise<unknown> {
+  // emit_answer is a client-only terminator — never touches D1.
+  if (name === "emit_answer") return { ok: true };
+
   const hasDb = (() => { try { return !!getEnv().DB; } catch { return false; } })();
-  if (!hasDb) return { error: "d1_unavailable — no database bound on this worker" };
+
+  // Local-dev path: no D1 bound. Read from the same fixture data the /analytics
+  // page renders (CAMPAIGNS in analytics-data.ts) so Pi's answers match the UI.
+  if (!hasDb) {
+    try {
+      switch (name) {
+        case "summary":         return fx.fxSummary(args as F);
+        case "time_series":     return fx.fxTimeSeries(args as Parameters<typeof fx.fxTimeSeries>[0]);
+        case "count_leads":     return { count: fx.fxCountLeads(args as F) };
+        case "status_breakdown":return fx.fxStatusBreakdown(args as F);
+        case "worst_dropoffs":  return fx.fxWorstDropoffs(args.runId as string, (args.limit as number) ?? 5);
+        case "compare_channels":return fx.fxCompareChannels(args as F);
+        case "compare_runs":    return fx.fxCompareRuns(args.runIdA as string, args.runIdB as string);
+        case "latest_runs":     return fx.fxLatestRuns((args.limit as number) ?? 10);
+        case "list_campaigns":  return fx.fxListCampaigns();
+        case "read_campaign":   return fx.fxReadCampaign(args.id as string);
+        case "voice_intent_distribution": return fx.fxVoiceIntentDistribution(args as F);
+        default:                return { error: `unknown_tool: ${name}` };
+      }
+    } catch (e) {
+      return { error: `fixture_tool_failed: ${(e as Error).message}` };
+    }
+  }
+
+  // Prod path: D1 is bound.
   try {
     switch (name) {
       case "summary":
@@ -438,10 +483,11 @@ async function runTool(name: string, args: Record<string, unknown>): Promise<unk
         return await campaigns.listCampaigns();
       case "read_campaign":
         return await campaigns.readCampaign(args.id as string);
-      case "emit_answer":
-        // Server-side no-op. The loop treats the presence of this call as the
-        // terminator; the args are the actual response payload.
-        return { ok: true };
+      case "voice_intent_distribution":
+        // No D1-backed source yet — fall through to the fixture derivation so
+        // Pi still gets a coherent shape. When the real intent table lands,
+        // swap this branch for the D1 query.
+        return fx.fxVoiceIntentDistribution(args as F);
       default:
         return { error: `unknown_tool: ${name}` };
     }
@@ -606,6 +652,93 @@ async function runAnthropicLoop(input: {
   return { ok: false, error: "exceeded_tool_rounds" };
 }
 
+/* -------------------------------------------------------------------------- */
+/* TFY OpenAI-compat tool loop (local Paytm-net dev fallback)                   */
+/* -------------------------------------------------------------------------- */
+
+async function runTfyLoop(input: {
+  apiKey: string;
+  baseUrl: string;
+  model: string;
+  question: string;
+  context?: AnalyticsScreenContext;
+  history?: Array<{ role: "user" | "assistant"; content: string }>;
+}): Promise<AskPiAnalyticsResponse> {
+  const messages: Array<Record<string, unknown>> = [
+    { role: "system", content: SYSTEM },
+    ...(input.history ?? []).map((m) => ({ role: m.role, content: m.content })),
+  ];
+  if (input.context && Object.keys(input.context).length > 0) {
+    messages.push({ role: "system", content: `Screen context: ${JSON.stringify(input.context)}` });
+  }
+  messages.push({ role: "user", content: input.question });
+
+  const toolCalls: ToolCallLog[] = [];
+  let capturedAnswer: AnalyticsAnswer | null = null;
+
+  for (let round = 0; round < 8; round++) {
+    const res = await fetch(`${input.baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${input.apiKey}` },
+      body: JSON.stringify({
+        model: input.model,
+        messages,
+        tools: TOOLS,
+        tool_choice: "auto",
+      }),
+    });
+    if (!res.ok) {
+      const body = await res.text();
+      return { ok: false, error: `tfy_${res.status}: ${body.slice(0, 200)}` };
+    }
+    const json = (await res.json()) as {
+      choices?: Array<{
+        message?: {
+          content?: string | null;
+          tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }>;
+        };
+      }>;
+    };
+    const msg = json.choices?.[0]?.message;
+    if (!msg) return { ok: false, error: "empty_response" };
+    messages.push({ role: "assistant", content: msg.content ?? "", tool_calls: msg.tool_calls });
+
+    if (!msg.tool_calls || msg.tool_calls.length === 0) {
+      if (capturedAnswer) return { ok: true, answer: capturedAnswer, toolCalls };
+      const text = (msg.content ?? "").trim();
+      return {
+        ok: true,
+        answer: {
+          insight: text || "I couldn't finish that answer. Try rephrasing?",
+          followUps: ["Summarize this run", "Compare channels", "What went wrong?"],
+        },
+        toolCalls,
+      };
+    }
+
+    for (const tc of msg.tool_calls) {
+      let args: Record<string, unknown> = {};
+      try { args = JSON.parse(tc.function.arguments) as Record<string, unknown>; } catch { /* {} */ }
+      const result = await runTool(tc.function.name, args);
+      const resultStr = JSON.stringify(result);
+      toolCalls.push({ name: tc.function.name, args: JSON.stringify(args), result: resultStr });
+      messages.push({
+        role: "tool",
+        tool_call_id: tc.id,
+        name: tc.function.name,
+        content: resultStr,
+      });
+      if (tc.function.name === "emit_answer") {
+        capturedAnswer = normalizeAnswer(args);
+      }
+    }
+    if (capturedAnswer) return { ok: true, answer: capturedAnswer, toolCalls };
+  }
+
+  if (capturedAnswer) return { ok: true, answer: capturedAnswer, toolCalls };
+  return { ok: false, error: "exceeded_tool_rounds" };
+}
+
 /** Coerce emit_answer args into a shape the client can trust. */
 function normalizeAnswer(args: Record<string, unknown>): AnalyticsAnswer {
   const insight = typeof args.insight === "string" ? args.insight : "";
@@ -637,23 +770,37 @@ export const askPiAnalytics = createServerFn({ method: "POST" })
     try { env = getEnv(); } catch (e) {
       return { ok: false, error: `runtime_env_missing: ${(e as Error).message}` };
     }
-    if (!env.ANTHROPIC_API_KEY) {
-      return { ok: false, error: "ANTHROPIC_API_KEY not configured" };
+    // Prod path — Anthropic direct with extended thinking.
+    if (env.ANTHROPIC_API_KEY) {
+      return await runAnthropicLoop({
+        apiKey: env.ANTHROPIC_API_KEY,
+        model: env.ANTHROPIC_MODEL || "claude-sonnet-4-5",
+        workspaceId: env.ANTHROPIC_WORKSPACE_ID,
+        question: data.question,
+        context: data.context,
+        history: data.history,
+        thinkingBudget: env.ANTHROPIC_THINKING_BUDGET ? Number(env.ANTHROPIC_THINKING_BUDGET) : undefined,
+      });
     }
-    return await runAnthropicLoop({
-      apiKey: env.ANTHROPIC_API_KEY,
-      model: env.ANTHROPIC_MODEL || "claude-sonnet-4-5",
-      workspaceId: env.ANTHROPIC_WORKSPACE_ID,
-      question: data.question,
-      context: data.context,
-      history: data.history,
-      thinkingBudget: env.ANTHROPIC_THINKING_BUDGET ? Number(env.ANTHROPIC_THINKING_BUDGET) : undefined,
-    });
+    // Local dev fallback — TrueFoundry OpenAI-compat (Paytm net).
+    const tfyKey = env.PI_AGENT_API_KEY || env.TFY_API_KEY;
+    const tfyBase = env.PI_AGENT_BASE_URL || env.TFY_BASE_URL;
+    if (tfyKey && tfyBase) {
+      return await runTfyLoop({
+        apiKey: tfyKey,
+        baseUrl: tfyBase,
+        model: env.PI_AGENT_MODEL || env.TFY_MODEL || "pi-agentic/global.anthropic.claude-sonnet-4-6",
+        question: data.question,
+        context: data.context,
+        history: data.history,
+      });
+    }
+    return { ok: false, error: "No LLM gateway configured — set ANTHROPIC_API_KEY or PI_AGENT_API_KEY + PI_AGENT_BASE_URL" };
   });
 
 /**
  * Starter chips generator. Called once on screen-context change to seed the
- * idle-state chips (max 3). Cheap one-shot Anthropic call, NO tool loop.
+ * idle-state chips (max 3). Cheap one-shot call, NO tool loop.
  * The 3 chips are second-order inferences based on the visible filter state.
  */
 export const generateStarterChips = createServerFn({ method: "POST" })
@@ -663,40 +810,74 @@ export const generateStarterChips = createServerFn({ method: "POST" })
     try { env = getEnv(); } catch (e) {
       return { ok: false, error: `runtime_env_missing: ${(e as Error).message}` };
     }
-    if (!env.ANTHROPIC_API_KEY) return { ok: false, error: "ANTHROPIC_API_KEY not configured" };
 
     const prompt = `Given the user's current analytics screen state, return the 3 most-likely first questions they'd want answered. Second-order inferences — not "what is this" but "which node leaks the most?", "why did conversion drop?", "compare this run vs last". Under 60 chars each. Return STRICT JSON: { "chips": ["q1", "q2", "q3"] }. No prose.
 
 Screen context:
 ${JSON.stringify(context, null, 2)}`;
 
-    try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "x-api-key": env.ANTHROPIC_API_KEY,
-          "anthropic-version": "2023-06-01",
-          ...(env.ANTHROPIC_WORKSPACE_ID ? { "anthropic-workspace-id": env.ANTHROPIC_WORKSPACE_ID } : {}),
-        },
-        body: JSON.stringify({
-          model: env.ANTHROPIC_MODEL || "claude-sonnet-4-5",
-          max_tokens: 400,
-          messages: [{ role: "user", content: prompt }],
-        }),
-      });
-      if (!res.ok) return { ok: false, error: `anthropic_${res.status}` };
-      const json = (await res.json()) as { content?: Array<{ type: string; text?: string }> };
-      const text = (json.content ?? []).filter((b) => b.type === "text").map((b) => b.text ?? "").join("");
+    const parseChips = (text: string): { ok: true; chips: string[] } | { ok: false; error: string } => {
       const match = text.match(/\{[\s\S]*\}/);
       if (!match) return { ok: false, error: "no_json_in_response" };
-      const parsed = JSON.parse(match[0]) as { chips?: unknown };
-      const chips = Array.isArray(parsed.chips)
-        ? (parsed.chips as unknown[]).filter((v): v is string => typeof v === "string").slice(0, 3)
-        : [];
-      if (chips.length === 0) return { ok: false, error: "empty_chips" };
-      return { ok: true, chips };
-    } catch (e) {
-      return { ok: false, error: `fetch_failed: ${(e as Error).message}` };
+      try {
+        const parsed = JSON.parse(match[0]) as { chips?: unknown };
+        const chips = Array.isArray(parsed.chips)
+          ? (parsed.chips as unknown[]).filter((v): v is string => typeof v === "string").slice(0, 3)
+          : [];
+        if (chips.length === 0) return { ok: false, error: "empty_chips" };
+        return { ok: true, chips };
+      } catch (e) {
+        return { ok: false, error: `json_parse: ${(e as Error).message}` };
+      }
+    };
+
+    // Prod — Anthropic.
+    if (env.ANTHROPIC_API_KEY) {
+      try {
+        const res = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-api-key": env.ANTHROPIC_API_KEY,
+            "anthropic-version": "2023-06-01",
+            ...(env.ANTHROPIC_WORKSPACE_ID ? { "anthropic-workspace-id": env.ANTHROPIC_WORKSPACE_ID } : {}),
+          },
+          body: JSON.stringify({
+            model: env.ANTHROPIC_MODEL || "claude-sonnet-4-5",
+            max_tokens: 400,
+            messages: [{ role: "user", content: prompt }],
+          }),
+        });
+        if (!res.ok) return { ok: false, error: `anthropic_${res.status}` };
+        const json = (await res.json()) as { content?: Array<{ type: string; text?: string }> };
+        const text = (json.content ?? []).filter((b) => b.type === "text").map((b) => b.text ?? "").join("");
+        return parseChips(text);
+      } catch (e) {
+        return { ok: false, error: `fetch_failed: ${(e as Error).message}` };
+      }
     }
+
+    // Local — TFY OpenAI-compat.
+    const tfyKey = env.PI_AGENT_API_KEY || env.TFY_API_KEY;
+    const tfyBase = env.PI_AGENT_BASE_URL || env.TFY_BASE_URL;
+    if (tfyKey && tfyBase) {
+      try {
+        const res = await fetch(`${tfyBase}/chat/completions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${tfyKey}` },
+          body: JSON.stringify({
+            model: env.PI_AGENT_MODEL || env.TFY_MODEL || "pi-agentic/global.anthropic.claude-sonnet-4-6",
+            messages: [{ role: "user", content: prompt }],
+          }),
+        });
+        if (!res.ok) return { ok: false, error: `tfy_${res.status}` };
+        const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+        const text = json.choices?.[0]?.message?.content ?? "";
+        return parseChips(text);
+      } catch (e) {
+        return { ok: false, error: `fetch_failed: ${(e as Error).message}` };
+      }
+    }
+
+    return { ok: false, error: "No LLM gateway configured" };
   });

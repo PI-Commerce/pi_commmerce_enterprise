@@ -1,5 +1,5 @@
 /**
- * Ask Pi Analytics chat — replaces the Thesys one-shot card path on /analytics.
+ * Ask Pi Analytics chat — the multi-turn analytics experience on /analytics.
  *
  * - Multi-turn conversation, session-scoped (no D1 persistence).
  * - Every answer is structured: insight → optional recommendation → optional
@@ -11,7 +11,7 @@
  *   per context hash so re-opening the panel doesn't refetch.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Sparkle, Loader2, Download, ArrowUp, Square, X, Lightbulb } from "lucide-react";
+import { Sparkle, Loader2, Download, ArrowUp, Square, X, Lightbulb, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
@@ -54,15 +54,37 @@ export function AnalyticsChat({
   const [thinking, setThinking] = useState(false);
   const [starterChips, setStarterChips] = useState<string[]>([]);
   const [chipsLoading, setChipsLoading] = useState(false);
+  // "Screen changed" nudge — appears when the user changes filters / tab mid-conversation.
+  // Carries the freshest chip for the new context so they can pivot in one click.
+  const [pendingNudge, setPendingNudge] = useState<string | null>(null);
+  const [dismissedNudgeKey, setDismissedNudgeKey] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const prevCtxKeyRef = useRef<string | null>(null);
 
   const ctxKey = useMemo(() => contextKey(context), [context]);
 
-  // Fetch starter chips whenever the screen context changes (cached).
+  // Fetch starter chips whenever the screen context changes (cached). Also
+  // surface a "screen changed" nudge if the user is already in a conversation.
   useEffect(() => {
+    const prev = prevCtxKeyRef.current;
+    prevCtxKeyRef.current = ctxKey;
+
     const cached = CHIP_CACHE.get(ctxKey);
-    if (cached) { setStarterChips(cached); return; }
+    const promoteNudge = (chips: string[]) => {
+      // Only nudge on ACTUAL context changes AND when the user has already
+      // asked at least one question — the empty state already shows chips.
+      if (prev && prev !== ctxKey && turns.length > 0 && chips[0]) {
+        setPendingNudge(chips[0]);
+        setDismissedNudgeKey(null);
+      }
+    };
+
+    if (cached) {
+      setStarterChips(cached);
+      promoteNudge(cached);
+      return;
+    }
     let cancelled = false;
     setChipsLoading(true);
     generateStarterChips({ data: context })
@@ -71,6 +93,7 @@ export function AnalyticsChat({
         if (r.ok) {
           CHIP_CACHE.set(ctxKey, r.chips);
           setStarterChips(r.chips);
+          promoteNudge(r.chips);
         } else {
           setStarterChips([]);
         }
@@ -78,6 +101,8 @@ export function AnalyticsChat({
       .catch(() => { if (!cancelled) setStarterChips([]); })
       .finally(() => { if (!cancelled) setChipsLoading(false); });
     return () => { cancelled = true; };
+    // turns.length intentionally left out — we snapshot at effect time.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ctxKey, context]);
 
   // Auto-scroll to bottom on new turn.
@@ -93,6 +118,7 @@ export function AnalyticsChat({
     const query = q.trim();
     if (!query || thinking) return;
     setInput("");
+    setPendingNudge(null);
     const userTurn: Turn = { id: `u-${Date.now()}`, role: "user", text: query };
     setTurns((prev) => [...prev, userTurn]);
     setThinking(true);
@@ -168,6 +194,30 @@ export function AnalyticsChat({
 
         {thinking && <ThinkingBubble />}
       </div>
+
+      {/* screen-changed nudge — surfaces mid-conversation when the user
+          switches filters/tab. Carries the freshest chip for the new context. */}
+      {pendingNudge && dismissedNudgeKey !== ctxKey && turns.length > 0 && (
+        <div className="border-t border-ai/20 bg-ai/[0.04] px-3 py-1.5 animate-fade-in">
+          <div className="flex items-center gap-2">
+            <RefreshCw className="h-3 w-3 shrink-0 text-ai" />
+            <span className="shrink-0 text-[10.5px] uppercase tracking-wider text-ai">Screen changed</span>
+            <button
+              onClick={() => { const q = pendingNudge; setPendingNudge(null); submit(q); }}
+              className="min-w-0 flex-1 truncate rounded-md border border-ai/30 bg-card px-2 py-1 text-left text-[11.5px] text-foreground transition-colors hover:border-ai/60 hover:bg-ai/[0.06]"
+            >
+              {pendingNudge}
+            </button>
+            <button
+              onClick={() => { setDismissedNudgeKey(ctxKey); setPendingNudge(null); }}
+              aria-label="Dismiss"
+              className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              <X className="h-2.5 w-2.5" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* composer */}
       <div className="border-t border-border px-3 py-2">

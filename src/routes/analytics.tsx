@@ -92,6 +92,7 @@ import {
 import { format as fmtDate } from "date-fns";
 import { useD1RangeRatio, useAnalyticsLeads } from "@/lib/hooks/use-analytics";
 import type { AnalyticsFilter, AnalyticsLead } from "@/lib/server-fns/analytics";
+import { usePublishScreenContext } from "@/lib/pi-screen-context";
 
 /**
  * Adapt a D1 `AnalyticsLead` into the client-side `Lead` shape the existing
@@ -546,6 +547,20 @@ function CampaignAnalytics({
     () => scaleRunToRange(baseRun, dateRange, d1Ratio),
     [baseRun, dateRange, d1Ratio],
   );
+
+  // Publish live screen context so Ask Pi (mounted in AppShell) grounds every
+  // question in the filter the user is actually looking at.
+  usePublishScreenContext({
+    pathname: "/analytics",
+    tab: "campaign",
+    filter: {
+      campaignId,
+      runId: baseRun.id,
+      from: dateRangeToIsoFrom(dateRange),
+      to: dateRangeToIsoTo(dateRange),
+    },
+  });
+
   const [openNode, setOpenNode] = useState<SankeyNode | null>(null);
   // The Sankey node currently being drilled into as an expanded freeform
   // workflow overlay. `null` = campaign canvas is showing normally.
@@ -1876,6 +1891,19 @@ function ChannelAnalytics({
 }) {
   const { kind, mode } = selection;
   const tabMeta = CHANNEL_TABS.find((c) => c.kind === kind)!;
+
+  // Publish live screen context for Ask Pi.
+  usePublishScreenContext({
+    pathname: "/analytics",
+    tab: "channel",
+    filter: {
+      channel: kind,
+      campaignId: selection.campaignId,
+      runId: selection.runId,
+      from: dateRangeToIsoFrom(dateRange),
+      to: dateRangeToIsoTo(dateRange),
+    },
+  });
 
   // ── Static indexes ─────────────────────────────────────────────────────────
   // Every (campaign, run, node) triple belonging to this channel kind.
