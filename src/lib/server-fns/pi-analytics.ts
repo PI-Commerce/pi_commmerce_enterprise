@@ -17,17 +17,24 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getEnv } from "@/lib/db/client";
 import { runSurface } from "@/lib/pi/kernel";
-// Side-effect imports — pools register FIRST so the analytics-dashboard
-// surface (which uses asset-reads) sees them at dispatch time. Registry
-// is idempotent so the double-import from pi-llm.ts is fine.
-import "@/lib/pi/common/pools";
+// Value imports — the surface + pool modules self-register on load via
+// top-level `registerSurface` / `registerPool` calls, BUT the TanStack
+// Start server-fn bundler DCEs bare `import "…"` side-effect statements
+// (and tree-shakes re-exports around them). Prod bundles that only saw
+// bare imports shipped without the analytics surface registered and
+// every request returned `unknown_surface: analytics`.
+//
+// Importing a real value from each module and touching it inside the
+// handler prevents the bundler from dropping the module init. The
+// registration side-effect happens as a byproduct of the module load.
+import { assetReadTools } from "@/lib/pi/common/pools/asset-reads";
 import {
+  analyticsDashboardSurface,
   normalizeAnswer,
   type AnalyticsScreenContext,
   type AnalyticsAnswer,
   type Infographic,
 } from "@/lib/pi/surfaces/analytics";
-import "@/lib/pi/surfaces/analytics";
 
 // Re-export types for external consumers (AnalyticsChat.tsx, AskPiDock).
 export type { AnalyticsScreenContext, AnalyticsAnswer, Infographic };
@@ -58,7 +65,11 @@ export const askPiAnalytics = createServerFn({ method: "POST" })
       return { ok: false, error: `runtime_env_missing: ${(e as Error).message}` };
     }
 
-    const r = await runSurface("analytics", {
+    // Reference the imported values at runtime so the bundler cannot
+    // tree-shake the surface/pool module init. `analyticsDashboardSurface.id`
+    // is the same "analytics" literal, just plumbed through the manifest.
+    void assetReadTools;
+    const r = await runSurface(analyticsDashboardSurface.id, {
       question: data.question,
       // AnalyticsScreenContext is our context shape; kernel accepts any
       // Record<string, unknown> so we cast at the boundary.
