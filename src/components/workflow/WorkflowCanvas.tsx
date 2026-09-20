@@ -348,17 +348,18 @@ export function WorkflowCanvas({
   //     then and the check resumes.
   const hasSkeletons = useMemo(() => nodes.some((n) => n.id.startsWith("_skel_")), [nodes]);
   const reachabilitySig = useMemo(() => {
-    if (hasSkeletons) return "SKELETONS_PRESENT";
+    // ALWAYS compute the real signature — even during skeleton passes —
+    // so the effect fires and clears stale errors the moment wiring is
+    // good. The write-path suppression happens inside the effect body.
     const outgoing = new Set<string>();
     for (const e of edges) outgoing.add(e.source);
     return nodes
       .map((n) => `${n.id}:${outgoing.has(n.id) ? 1 : 0}`)
       .join("|");
-  }, [nodes, edges, hasSkeletons]);
+  }, [nodes, edges]);
 
   useEffect(() => {
     if (!editable) return;
-    if (hasSkeletons) return; // transient wiring — do not flash errors mid-Draft
     setNodes((nds) => {
       const outgoing = new Set<string>();
       for (const e of edges) outgoing.add(e.source);
@@ -370,6 +371,12 @@ export function WorkflowCanvas({
         const missingWire = !outgoing.has(n.id);
         const hadReachError = n.data.error === REACH_ERROR;
         if (missingWire) {
+          // Skeleton-in-progress: DO NOT write new errors. The Draft-this
+          // reset briefly leaves Audience without an outgoing edge one
+          // render before skeleton edges land, and we don't want that
+          // frame's flash to become a persistent red mark. Cleanup still
+          // fires below when wiring is fine — that path is safe.
+          if (hasSkeletons) return n;
           // Config-level errors take precedence — if a per-kind check
           // already marked this node invalid, don't clobber that message.
           if (n.data.valid === false && !hadReachError) return n;
@@ -377,6 +384,10 @@ export function WorkflowCanvas({
           changed = true;
           return { ...n, data: { ...n.data, valid: false, error: REACH_ERROR } };
         }
+        // Wiring IS good now — always clear a stale reach-error, even
+        // during a skeleton pass. Without this, an error written before
+        // the skeleton showed up sticks forever because the write-path
+        // guard above suppresses re-checks. (Regression from 55f6512.)
         if (hadReachError) {
           changed = true;
           return { ...n, data: { ...n.data, valid: true, error: undefined } };
@@ -386,7 +397,7 @@ export function WorkflowCanvas({
       return changed ? next : nds;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reachabilitySig, editable, setNodes, hasSkeletons]);
+  }, [reachabilitySig, editable, setNodes, hasSkeletons, edges]);
 
   const outcomeVariables = useMemo(() => deriveNodeOutcomeVariables(nodes), [nodes]);
 

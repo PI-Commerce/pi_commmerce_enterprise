@@ -156,6 +156,21 @@ export function AiComposer({
   );
   const [nudgeDismissed, setNudgeDismissed] = useState(false);
   const [hasEngaged, setHasEngaged] = useState(false);
+  // Refs (synchronous — no React batching gap) used to bridge acceptDraft
+  // → the immediately-following submit("Draft this") call. Reading
+  // `messages` in submit's closure at that moment shows STALE state
+  // (setMessages from acceptDraft hasn't committed yet), so we use refs
+  // to carry (a) "user has accepted a draft in this conversation" and
+  // (b) the exact skeleton Pi proposed. The next submit picks these up
+  // and tells the server to skip propose_draft and call insert_skeleton
+  // directly with these nodes/edges — cures the loop where Pi kept
+  // re-proposing because its own tool_use history isn't reconstructed
+  // across turns.
+  const acceptedDraftRef = useRef<ProposedDraft | null>(null);
+  // Persistent "any draft ever accepted in this conversation" flag —
+  // survives across turns so re-emitted propose_draft cards get
+  // suppressed even after acceptedDraftRef has been cleared on submit.
+  const hasEverAcceptedRef = useRef(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -288,6 +303,16 @@ export function AiComposer({
       // focus_node, emit_choice, emit_action_link) — the server-side
       // system prompts + context assemblers are what differ.
       const isFreeform = surfaceKind === "freeform";
+      // Draft-this handoff — user just accepted a propose_draft. Pass
+      // the accepted skeleton on the context so the server-side prompt
+      // can tell Pi to skip re-proposing and call insert_skeleton
+      // directly. Consumed once per acceptance, then cleared so a later
+      // ambient user message doesn't keep triggering skeleton installs.
+      const pendingDraft = acceptedDraftRef.current;
+      const draftHint = pendingDraft
+        ? `The user just clicked "Draft this" on your prior propose_draft. Do NOT call propose_draft again — call \`insert_skeleton\` on ${isFreeform ? "workflow" : "campaign"} \`${pendingDraft.campaignId}\` right now with the exact skeleton you proposed: title="${pendingDraft.title}", branches=${JSON.stringify(pendingDraft.branches)}. After the install, emit one crisp confirmation line and ask "Help me configure, or take it from here?" via emit_choice.`
+        : null;
+      if (pendingDraft) acceptedDraftRef.current = null;
       const r = await askPi({
         data: {
           scope: isFreeform ? "freeform" : "builder",
@@ -298,18 +323,22 @@ export function AiComposer({
                 surface: "Freeform canvas",
                 isNew: mode === "wizard",
                 hint:
-                  mode === "wizard"
+                  draftHint
+                  ?? (mode === "wizard"
                     ? "The canvas is blank except for a Start node with id 'start' and an End node with id 'end'. Anchor the first new node to Start."
-                    : "The canvas already has nodes. Read the workflow first before editing.",
+                    : "The canvas already has nodes. Read the workflow first before editing."),
+                ...(pendingDraft ? { pendingDraft } : {}),
               }
             : {
                 campaignId,
                 surface: "Campaign canvas",
                 isNew: mode === "wizard",
                 hint:
-                  mode === "wizard"
+                  draftHint
+                  ?? (mode === "wizard"
                     ? "The canvas is blank except for a Start node with id 'start'. Anchor the first new node to it."
-                    : "The canvas already has nodes. Read the campaign first before editing.",
+                    : "The canvas already has nodes. Read the campaign first before editing."),
+                ...(pendingDraft ? { pendingDraft } : {}),
               },
           history: historyForServer,
         },
@@ -347,7 +376,11 @@ export function AiComposer({
         // which is confusing. The mutation calls in the same turn
         // still flow through — only the plan-announcement UI is
         // suppressed.
-        const alreadyAccepted = messages.some((m) => m.draftAccepted);
+        // Suppress via the ref (synchronous, no stale-closure gap). The
+        // messages-array check we used to do here read the closure from
+        // before setMessages committed, so back-to-back propose_draft
+        // re-emissions on the same turn slipped through.
+        const alreadyAccepted = hasEverAcceptedRef.current;
         const draft = alreadyAccepted ? null : rawDraft;
         const mutationCalls = toolCalls.filter((t) => t.name !== "propose_draft");
         if (mutationCalls.length > 0) onPiToolCalls?.(mutationCalls);
@@ -430,10 +463,18 @@ export function AiComposer({
    *  fires the canvas hook to insert pulsating skeletons, then submits
    *  "Draft this" as the next user message so Pi wires the real nodes. */
   const acceptDraft = (msgIdx: number, draft: ProposedDraft) => {
+    // Set the ref BEFORE setMessages/submit so the next submit call
+    // (which reads the ref synchronously) knows a draft is pending.
+    // React batches the setMessages update — its closure inside submit
+    // would still see draftAccepted:false, hence the ref.
+    acceptedDraftRef.current = draft;
+    hasEverAcceptedRef.current = true;
     setMessages((prev) => prev.map((m, i) => (i === msgIdx ? { ...m, draftAccepted: true } : m)));
     onDraftAccepted?.(draft);
     // Send "Draft this" as if the user typed it. Pi's next turn will be
-    // the real insert_node / connect_nodes batch.
+    // the real insert_node / connect_nodes batch. The submit path picks
+    // up `acceptedDraftRef` and puts the skeleton into the context so
+    // Pi is told to call `insert_skeleton` directly (no re-propose loop).
     submit("Draft this");
   };
 

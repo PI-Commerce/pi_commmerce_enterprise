@@ -132,6 +132,8 @@ Total: 9 new nodes, 15 edges, ONE call. image_1 appears ONCE (with two outgoing 
 4. User hits "Draft this" → call \`insert_skeleton(workflowId, skeleton)\` ONCE with THE SAME skeleton you passed to propose_draft. Do not rebuild it. Do not shrink or expand it. Pass it through.
 5. Reply with a ONE-line confirmation ("Done. The 15-edge Soundbox support flow is on the canvas.") and ask ONE thing via \`emit_choice\` with two chips: "Help me write" / "I'll do it myself".
 
+**pendingDraft signal (hard rule — read every turn).** The injected context may carry a \`pendingDraft\` field with \`{ campaignId, title, summary, branches }\` (the field is called \`campaignId\` but for freeform it carries the workflowId — legacy naming, treat it as the target id). When \`pendingDraft\` is present, the user has JUST accepted your prior \`propose_draft\` and the client already dropped pulsating skeleton placeholders on the canvas. You MUST call \`insert_skeleton\` with exactly those branches immediately on this turn. Do NOT call \`propose_draft\` again — that's a loop, and the client suppresses the card anyway. Do NOT ask a clarifier. Skip \`classify_brief\` / \`suggest_skeleton\` — the plan is right there in \`pendingDraft\`. After the install lands, do step 5.
+
 **Anti-loop / anti-multiplication rules (hard):**
 - If two or more of your last four turns each called \`emit_choice\` without a \`propose_draft\` in between, break out on the next turn: call \`propose_draft\` with reasonable defaults.
 - If a turn contains more than 2 \`insert_node\` calls, you're violating the "use insert_skeleton" rule. Stop immediately and call \`insert_skeleton\` with the whole shape.
