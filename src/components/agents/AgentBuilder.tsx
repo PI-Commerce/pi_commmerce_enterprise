@@ -41,8 +41,10 @@ export function AgentBuilder({
   const [dirty, setDirty] = useState(false);
 
   const [toolQuery, setToolQuery] = useState("");
-  const [previewMaster, setPreviewMaster] = useState(false);
-  const [previewKB, setPreviewKB] = useState(false);
+  // Default to preview mode: reviewers land on the polished markdown,
+  // not the raw source. Toggling to Edit stays a click away.
+  const [previewMaster, setPreviewMaster] = useState(true);
+  const [previewKB, setPreviewKB] = useState(true);
 
   // Re-hydrate whenever the parent hands us a materially different record.
   // Two triggers:
@@ -81,6 +83,13 @@ export function AgentBuilder({
     masterPrompt.length === 0 &&
     knowledgeBase.length === 0 &&
     postCall.length === 0;
+
+  // While Pi is drafting into an empty shell, force edit-mode on the
+  // prompt/KB textareas so the shimmer overlay is visible. Once content
+  // lands, honour the user's toggle (defaults to preview so reviewers
+  // see the polished output first).
+  const effectivePreviewMaster = piDrafting ? false : previewMaster;
+  const effectivePreviewKB = piDrafting ? false : previewKB;
 
   const filteredTools = useMemo(() => {
     const q = toolQuery.trim().toLowerCase();
@@ -329,13 +338,14 @@ export function AgentBuilder({
                 size="sm"
                 className="h-7 gap-1 px-2 text-[11px]"
                 onClick={() => setPreviewMaster((v) => !v)}
+                disabled={piDrafting}
               >
-                {previewMaster ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
-                {previewMaster ? "Edit" : "Preview markdown"}
+                {effectivePreviewMaster ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                {effectivePreviewMaster ? "Edit" : "Preview markdown"}
               </Button>
             }
           >
-            {previewMaster ? (
+            {effectivePreviewMaster ? (
               <div
                 className="min-h-[400px] rounded-lg border border-border bg-secondary/20 px-4 py-3 text-[13px]"
                 dangerouslySetInnerHTML={{ __html: renderMarkdown(masterPrompt) }}
@@ -365,13 +375,14 @@ export function AgentBuilder({
                 size="sm"
                 className="h-7 gap-1 px-2 text-[11px]"
                 onClick={() => setPreviewKB((v) => !v)}
+                disabled={piDrafting}
               >
-                {previewKB ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
-                {previewKB ? "Edit" : "Preview markdown"}
+                {effectivePreviewKB ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                {effectivePreviewKB ? "Edit" : "Preview markdown"}
               </Button>
             }
           >
-            {previewKB ? (
+            {effectivePreviewKB ? (
               <div
                 className="min-h-[200px] rounded-lg border border-border bg-secondary/20 px-4 py-3 text-[13px]"
                 dangerouslySetInnerHTML={{ __html: renderMarkdown(knowledgeBase) }}
