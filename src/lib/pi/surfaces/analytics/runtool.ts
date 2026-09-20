@@ -163,17 +163,17 @@ async function toolCompareRuns(a: string, b: string) {
 export async function runAnalyticsTool(name: string, args: Record<string, unknown>): Promise<unknown> {
   try {
     switch (name) {
-      case "summary":         return fx.fxSummary(args as F);
-      case "time_series":     return fx.fxTimeSeries(args as Parameters<typeof fx.fxTimeSeries>[0]);
-      case "count_leads":     return { count: fx.fxCountLeads(args as F) };
-      case "status_breakdown":return fx.fxStatusBreakdown(args as F);
+      case "summary":         return await fx.fxSummary(args as F);
+      case "time_series":     return await fx.fxTimeSeries(args as Parameters<typeof fx.fxTimeSeries>[0]);
+      case "count_leads":     return { count: await fx.fxCountLeads(args as F) };
+      case "status_breakdown":return await fx.fxStatusBreakdown(args as F);
       case "worst_dropoffs":  return fx.fxWorstDropoffs(args.runId as string, (args.limit as number) ?? 5);
-      case "compare_channels":return fx.fxCompareChannels(args as F);
-      case "compare_runs":    return fx.fxCompareRuns(args.runIdA as string, args.runIdB as string);
+      case "compare_channels":return await fx.fxCompareChannels(args as F);
+      case "compare_runs":    return await fx.fxCompareRuns(args.runIdA as string, args.runIdB as string);
       case "latest_runs":     return fx.fxLatestRuns((args.limit as number) ?? 10);
       case "list_campaigns":  return fx.fxListCampaigns();
       case "read_campaign":   return fx.fxReadCampaign(args.id as string);
-      case "voice_intent_distribution": return fx.fxVoiceIntentDistribution(args as F);
+      case "voice_intent_distribution": return await fx.fxVoiceIntentDistribution(args as F);
       default:                return { error: `unknown_tool: ${name}` };
     }
   } catch (e) {

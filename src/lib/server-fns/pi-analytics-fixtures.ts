@@ -16,6 +16,7 @@
  */
 import { CAMPAIGNS, type RunRow, type SankeyNode, type SankeyNodeKind } from "@/lib/analytics-data";
 import type { PresetConfig } from "@/lib/campaign-types";
+import { getDb } from "@/lib/db/client";
 
 const CHANNEL_KINDS: readonly SankeyNodeKind[] = ["whatsapp", "voice", "sms", "rcs"] as const;
 
@@ -119,6 +120,62 @@ function rangeRatio(from?: string, to?: string): number {
   return Math.max(0.05, Math.min(1, d / 30));
 }
 
+/**
+ * D1-derived range ratio — mirrors `useD1RangeRatio` on the client. Runs two
+ * COUNT queries (scoped vs base) against the leads table and returns
+ * `scoped/base`. Returns `null` when D1 isn't bound, when either query fails,
+ * or when the base count is zero — the caller then falls back to `rangeRatio`.
+ *
+ * This is the whole reason Pi's numbers used to disagree with the KPI cards:
+ * the UI scales fixture KPIs by THIS ratio (real D1 fraction), but the
+ * fixture-only path scaled by `days/30`. For runs where actual D1 data doesn't
+ * distribute evenly across the seeded 30-day window, the two disagree by 2×+.
+ */
+async function d1RangeRatio(f: F): Promise<number | null> {
+  if (!f.from || !f.to) return null;
+  let db;
+  try { db = getDb(); } catch { return null; }
+  try {
+    const scopedWhere = buildLeadsWhere(f);
+    const baseWhere = buildLeadsWhere({ ...f, from: undefined, to: undefined });
+    const scoped = await db
+      .prepare(`SELECT COUNT(*) AS c FROM leads ${scopedWhere.where}`)
+      .bind(...scopedWhere.binds)
+      .first<{ c: number }>();
+    const base = await db
+      .prepare(`SELECT COUNT(*) AS c FROM leads ${baseWhere.where}`)
+      .bind(...baseWhere.binds)
+      .first<{ c: number }>();
+    const bCount = base?.c ?? 0;
+    if (bCount === 0) return null;
+    const ratio = (scoped?.c ?? 0) / bCount;
+    // Same clamp `scaleRunToRange` uses so a tiny slice doesn't zero the KPIs.
+    return Math.max(0.05, Math.min(1, ratio));
+  } catch {
+    return null;
+  }
+}
+
+/** Resolve the ratio for a filter — D1 first, `days/30` fallback. Async. */
+async function resolveRatio(f: F): Promise<number> {
+  const d1 = await d1RangeRatio(f);
+  if (typeof d1 === "number") return d1;
+  return rangeRatio(f.from, f.to);
+}
+
+function buildLeadsWhere(f: F): { where: string; binds: unknown[] } {
+  const clauses: string[] = ["1=1"];
+  const binds: unknown[] = [];
+  if (f.campaignId) { clauses.push("campaign_id = ?"); binds.push(f.campaignId); }
+  if (f.runId) { clauses.push("run_id = ?"); binds.push(f.runId); }
+  if (f.channel) { clauses.push("channel = ?"); binds.push(f.channel); }
+  if (f.stageNodeId) { clauses.push("stage_node_id = ?"); binds.push(f.stageNodeId); }
+  if (f.status) { clauses.push("status = ?"); binds.push(f.status); }
+  if (f.from) { clauses.push("updated_at >= ?"); binds.push(Date.parse(f.from + "T00:00:00Z")); }
+  if (f.to) { clauses.push("updated_at <= ?"); binds.push(Date.parse(f.to + "T23:59:59Z")); }
+  return { where: `WHERE ${clauses.join(" AND ")}`, binds };
+}
+
 const scale = (n: number, ratio: number) => Math.max(0, Math.round(n * ratio));
 
 /** Scale a run's KPIs + sankey by the same rule scaleRunToRange uses. */
@@ -146,8 +203,8 @@ function scaledRun(r: RunRow, ratio: number): RunRow {
 /* Tool implementations (fixture)                                              */
 /* -------------------------------------------------------------------------- */
 
-export function fxSummary(f: F) {
-  const ratio = rangeRatio(f.from, f.to);
+export async function fxSummary(f: F) {
+  const ratio = await resolveRatio(f);
   const scaled = pickRuns(f).map(({ campaignId, campaignName, run }) => ({
     campaignId, campaignName, run: scaledRun(run, ratio),
   }));
@@ -217,9 +274,9 @@ export function fxSummary(f: F) {
   };
 }
 
-export function fxCountLeads(f: F): number {
+export async function fxCountLeads(f: F): Promise<number> {
   // "leads" = unique audience under the filter. Use kpi.totalLeads sum.
-  const ratio = rangeRatio(f.from, f.to);
+  const ratio = await resolveRatio(f);
   const runs = pickRuns(f);
   if (f.channel || f.stageNodeId) {
     // Narrowing by channel/node — return the channel node's scaled entered.
@@ -237,8 +294,8 @@ export function fxCountLeads(f: F): number {
   return runs.reduce((s, { run }) => s + scale(run.kpi.totalLeads, ratio), 0);
 }
 
-export function fxStatusBreakdown(f: F) {
-  return fxSummary(f).byStatus;
+export async function fxStatusBreakdown(f: F) {
+  return (await fxSummary(f)).byStatus;
 }
 
 export function fxWorstDropoffs(runId: string, limit = 5) {
@@ -257,8 +314,8 @@ export function fxWorstDropoffs(runId: string, limit = 5) {
   return rows.sort((a, b) => b.dropPct - a.dropPct).slice(0, limit);
 }
 
-export function fxCompareChannels(f: F) {
-  const s = fxSummary({ ...f, channel: undefined });
+export async function fxCompareChannels(f: F) {
+  const s = await fxSummary({ ...f, channel: undefined });
   return s.byChannel.map((c) => ({
     channel: c.channel,
     sent: c.sent,
@@ -268,9 +325,11 @@ export function fxCompareChannels(f: F) {
   }));
 }
 
-export function fxCompareRuns(runIdA: string, runIdB: string) {
-  const a = fxSummary({ runId: runIdA });
-  const b = fxSummary({ runId: runIdB });
+export async function fxCompareRuns(runIdA: string, runIdB: string) {
+  const [a, b] = await Promise.all([
+    fxSummary({ runId: runIdA }),
+    fxSummary({ runId: runIdB }),
+  ]);
   return {
     a,
     b,
@@ -353,8 +412,8 @@ function hashStr(s: string): number {
   return Math.abs(h);
 }
 
-export function fxVoiceIntentDistribution(f: F) {
-  const ratio = rangeRatio(f.from, f.to);
+export async function fxVoiceIntentDistribution(f: F) {
+  const ratio = await resolveRatio(f);
   const runs = pickRuns(f);
   // Total completed voice calls under scope = sum of voice-node exited (scaled).
   let completed = 0;
@@ -400,8 +459,8 @@ export function fxVoiceIntentDistribution(f: F) {
  * counts, so we spread the metric total across the range with a weekday
  * weight. Approximation — shape-realistic, adequate for trend visualization.
  */
-export function fxTimeSeries(args: { metric: string; from: string; to: string; campaignId?: string; channel?: string }) {
-  const summary = fxSummary({ campaignId: args.campaignId, channel: args.channel, from: args.from, to: args.to });
+export async function fxTimeSeries(args: { metric: string; from: string; to: string; campaignId?: string; channel?: string }) {
+  const summary = await fxSummary({ campaignId: args.campaignId, channel: args.channel, from: args.from, to: args.to });
   const total = (() => {
     switch (args.metric) {
       case "leads":     return summary.totalLeads;
