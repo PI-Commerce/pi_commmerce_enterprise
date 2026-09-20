@@ -335,21 +335,30 @@ export function WorkflowCanvas({
   }, [waButtonWiringSig, editable, setNodes]);
 
   // Reachability — every non-End node needs at least one outgoing edge,
-  // otherwise leads walk into a dead-end. Keyed on a compact signature
-  // of (node ids + whether each has any outgoing edge) so re-runs only
-  // fire when the wiring topology actually changes. Skips draft skeletons
-  // (`_skel_` prefix) because those are transient and get replaced by
-  // Pi's real inserts on the next turn.
+  // otherwise leads walk into a dead-end.
+  //
+  // Skip cases:
+  //   - Nodes with the `_skel_` prefix (transient draft placeholders).
+  //   - The ENTIRE graph while ANY draft skeleton is present. During a
+  //     Draft-this pass the reset strips downstream edges from Audience
+  //     one render before the skeleton edges land — running the check in
+  //     that gap flashes a false "Not wired forward" on Audience for a
+  //     single frame that users see and think is a real error. Skeletons
+  //     get replaced by Pi's real inserts moments later; wiring stabilizes
+  //     then and the check resumes.
+  const hasSkeletons = useMemo(() => nodes.some((n) => n.id.startsWith("_skel_")), [nodes]);
   const reachabilitySig = useMemo(() => {
+    if (hasSkeletons) return "SKELETONS_PRESENT";
     const outgoing = new Set<string>();
     for (const e of edges) outgoing.add(e.source);
     return nodes
       .map((n) => `${n.id}:${outgoing.has(n.id) ? 1 : 0}`)
       .join("|");
-  }, [nodes, edges]);
+  }, [nodes, edges, hasSkeletons]);
 
   useEffect(() => {
     if (!editable) return;
+    if (hasSkeletons) return; // transient wiring — do not flash errors mid-Draft
     setNodes((nds) => {
       const outgoing = new Set<string>();
       for (const e of edges) outgoing.add(e.source);
@@ -377,7 +386,7 @@ export function WorkflowCanvas({
       return changed ? next : nds;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reachabilitySig, editable, setNodes]);
+  }, [reachabilitySig, editable, setNodes, hasSkeletons]);
 
   const outcomeVariables = useMemo(() => deriveNodeOutcomeVariables(nodes), [nodes]);
 
