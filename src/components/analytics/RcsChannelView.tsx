@@ -642,14 +642,12 @@ function MessagesTable({ refs }: { refs: RcsRef[] }) {
   const [q, setQ] = useState("");
   const [status, setStatus] = useState<RcsStatus | "any">("any");
 
-  // Like the SMS / Voice tables: the log shows the most recent run in scope, with
-  // a banner when other runs are folded into the KPIs above.
-  const tableRunId = refs[0]?.run.id;
-  const tableRun = refs[0]?.run;
-  const runCount = useMemo(() => new Set(refs.map((r) => r.run.id)).size, [refs]);
+  // Aggregate every (run, node) the KPI cards aggregate so the "of N messages"
+  // count matches the "Sent" card exactly. `buildRcsMessages` returns exactly
+  // `node.entered` rows, which flows from the date-range-scaled run upstream.
   const messages = useMemo(
-    () => refs.filter((r) => r.run.id === tableRunId).flatMap((ref) => buildRcsMessages(ref)),
-    [refs, tableRunId],
+    () => refs.flatMap((ref) => buildRcsMessages(ref)),
+    [refs],
   );
 
   const filtered = useMemo(
@@ -669,14 +667,8 @@ function MessagesTable({ refs }: { refs: RcsRef[] }) {
   return (
     <Section
       title="Message log"
-      sub="Per-recipient delivery detail for every message in the latest run in scope."
+      sub="Per-recipient delivery detail for every message in scope."
     >
-      {runCount > 1 && tableRun && (
-        <p className="text-[11px] text-muted-foreground">
-          Showing messages from {tableRun.startedAt}. {runCount - 1} other run
-          {runCount - 1 === 1 ? "" : "s"} are aggregated in the KPIs and charts above.
-        </p>
-      )}
       <div className="rounded-xl border border-border bg-card">
         <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-3">
           <div className="relative">

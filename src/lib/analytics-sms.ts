@@ -14,7 +14,7 @@
 import { SMS_DELIVERY_RATES, type RunRow, type SankeyNode } from "@/lib/analytics-data";
 
 export { SMS_DELIVERY_RATES };
-import { generateLeads, phoneCsvCell } from "@/lib/analytics-leads";
+import { generateLeadsForNode, phoneCsvCell } from "@/lib/analytics-leads";
 import { resolveSmsTemplate } from "@/lib/sms-store";
 import { templateSegments, type SmsTemplate } from "@/lib/sms-templates";
 
@@ -141,14 +141,17 @@ function pickStatus(r: number): SmsStatus {
   return "Delivered";
 }
 
-/** Per-recipient records for one SMS node in one run. */
-export function buildSmsMessages({ run, node }: SmsRef, limit = 120): SmsMessage[] {
+/** Per-recipient records for one SMS node in one run. Returns exactly
+ *  `node.entered` rows — same source of truth as the "Sent" KPI card, so the
+ *  Message log count stays locked to the top-of-screen number as filters and
+ *  date range move `node.entered` around via `scaleRunToRange`. */
+export function buildSmsMessages({ run, node }: SmsRef): SmsMessage[] {
   const template = resolveSmsTemplate(node.config?.smsTemplateId);
   const segments = template ? templateSegments(template).segments : 1;
-  const leads = generateLeads(run).filter((l) => l.stageNodeId === node.id);
+  const leads = generateLeadsForNode(run, node.id);
   const r = seed(node.id + run.id);
 
-  return leads.slice(0, limit).map((l) => {
+  return leads.map((l) => {
     const status = pickStatus(r());
     // Submission time, then a realistic operator latency on top of it.
     const sentMinutes = 9 * 60 + Math.floor(r() * 10 * 60);

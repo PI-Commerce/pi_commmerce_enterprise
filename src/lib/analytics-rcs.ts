@@ -13,7 +13,7 @@
 import { RCS_DELIVERY_RATES, type RunRow, type SankeyNode } from "@/lib/analytics-data";
 
 export { RCS_DELIVERY_RATES };
-import { generateLeads, phoneCsvCell } from "@/lib/analytics-leads";
+import { generateLeadsForNode, phoneCsvCell } from "@/lib/analytics-leads";
 import { getRcsConfig, resolveRcsTemplate } from "@/lib/rcs-store";
 import { templateButtons, type RcsTemplate } from "@/lib/rcs-templates";
 import { agentById, providerForAgent, providerLabel } from "@/lib/rcs-config";
@@ -172,18 +172,21 @@ export function templateForNode(node: SankeyNode): RcsTemplate | undefined {
   return resolveRcsTemplate(node.config?.rcsTemplateId);
 }
 
-/** Per-recipient records for one RCS node in one run. */
-export function buildRcsMessages({ run, node }: RcsRef, limit = 120): RcsMessage[] {
+/** Per-recipient records for one RCS node in one run. Returns exactly
+ *  `node.entered` rows — same source of truth as the "Sent" KPI card, so the
+ *  Message log count stays locked to the top-of-screen number as filters and
+ *  date range move `node.entered` around via `scaleRunToRange`. */
+export function buildRcsMessages({ run, node }: RcsRef): RcsMessage[] {
   const template = resolveRcsTemplate(node.config?.rcsTemplateId);
   const buttons = template ? templateButtons(template) : [];
   const config = getRcsConfig();
   const agentIdRef = template?.agentId ?? node.config?.rcsAgentId;
   const agent = agentById(config, agentIdRef);
   const provider = providerForAgent(config, agentIdRef);
-  const leads = generateLeads(run).filter((l) => l.stageNodeId === node.id);
+  const leads = generateLeadsForNode(run, node.id);
   const r = seed(node.id + run.id);
 
-  return leads.slice(0, limit).map((l) => {
+  return leads.map((l) => {
     const status = pickStatus(r());
     const reached =
       status === "Delivered" ||

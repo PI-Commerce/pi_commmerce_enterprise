@@ -38,7 +38,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import {
-  generateLeads,
+  generateLeadsForNode,
   downloadCsv,
   phoneCsvCell,
   type LeadStatus,
@@ -145,9 +145,13 @@ function toVoiceStatus(s: LeadStatus | undefined): VoiceStatus {
 
 function buildCalls({ run, node }: VoiceRef): Call[] {
   const agent = resolveAgent(node.config?.agent);
-  const leads = generateLeads(run).filter((l) => l.stageNodeId === node.id);
+  // Generate exactly `node.entered` calls for this (run,node) pair. `node.entered`
+  // has already been through `scaleRunToRange` upstream, so it reflects the current
+  // date-range picker. This keeps the Calls table row count locked to the "Sent"
+  // KPI above — same pattern as the WhatsApp channel-view fix (6832bbc).
+  const leads = generateLeadsForNode(run, node.id);
   const r = seed(node.id + run.id);
-  return leads.slice(0, 80).map((l) => {
+  return leads.map((l) => {
     const status = VOICE_STATES.includes(toVoiceStatus(l.status))
       ? toVoiceStatus(l.status)
       : "Completed";
@@ -719,20 +723,13 @@ function CallsTable({ refs }: { refs: VoiceRef[] }) {
   const [durF, setDurF] = useState("any");
   const [open, setOpen] = useState<Call | null>(null);
 
-  // Calls table shows the latest selected run only; a banner notes the rest.
-  const tableRunId = refs[0]?.run.id;
-  const tableRefs = useMemo(
-    () => refs.filter((r) => r.run.id === tableRunId),
-    [refs, tableRunId],
-  );
-  const tableRun = refs[0]?.run;
-  const runCount = useMemo(
-    () => new Set(refs.map((r) => r.run.id)).size,
-    [refs],
-  );
+  // Calls table aggregates every (run, node) pair the KPIs above aggregate,
+  // so the row count matches the "Sent" card exactly. Pre-fix the table only
+  // read refs[0] and mismatched by an order of magnitude when the user picked
+  // multiple runs / templates.
   const calls = useMemo(
-    () => tableRefs.flatMap((ref) => buildCalls(ref)),
-    [tableRefs],
+    () => refs.flatMap((ref) => buildCalls(ref)),
+    [refs],
   );
 
   const filtered = useMemo(
@@ -762,13 +759,6 @@ function CallsTable({ refs }: { refs: VoiceRef[] }) {
       title="Calls"
       sub="Every call in scope. Open a completed call for its insights, recording and transcript."
     >
-      {runCount > 1 && tableRun && (
-        <p className="text-[11px] text-muted-foreground">
-          Showing calls from {tableRun.startedAt}. {runCount - 1} other run
-          {runCount - 1 === 1 ? "" : "s"} are aggregated in the KPIs and charts
-          above.
-        </p>
-      )}
       <div className="rounded-xl border border-border bg-card">
         <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-3">
           <div className="relative">

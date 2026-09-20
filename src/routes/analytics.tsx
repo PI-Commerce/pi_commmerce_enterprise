@@ -768,6 +768,7 @@ function KPI({
 function LeadsTable({
   run,
   restrictToNodeIds,
+  channelViewRefs,
   title = "Lead Analytics",
   hideStage = false,
   dateRange,
@@ -775,6 +776,12 @@ function LeadsTable({
 }: {
   run: RunRow;
   restrictToNodeIds?: string[];
+  /** Channel-view path: when set, the table aggregates every (run, node) pair
+   *  the KPI cards above aggregate, generating exactly `node.entered` rows for
+   *  each — so the "of N leads" total tracks the "Sent" card as the user
+   *  changes template / run / campaign / date range. When unset the legacy
+   *  single-run + optional node filter path runs (Campaign view). */
+  channelViewRefs?: Array<{ run: RunRow; nodeId: string }>;
   title?: string;
   hideStage?: boolean;
   /** When provided together with channelForExport, the CSV button gates on
@@ -822,13 +829,18 @@ function LeadsTable({
   const d1LeadsQuery = useAnalyticsLeads(d1Filter, 1, 5000);
 
   const scoped = useMemo(() => {
-    // Channel-view path (restrictToNodeIds set): the KPIs above the
-    // table report "ever entered" for the chosen channel node(s) — e.g.
-    // WA Sent = node.entered. D1's `stage_node_id` filter returns leads
-    // CURRENTLY at that node (in-flight), which is a much smaller
-    // number and gives a table count that disagrees with the KPI Sent
-    // card. Use the synthetic per-node generator instead: it produces
-    // exactly `node.entered` rows so the two agree.
+    // Channel-view path (channelViewRefs set): generate exactly `node.entered`
+    // rows for every (run, node) pair the KPI cards above aggregate. Skips D1
+    // deliberately — D1's `stage_node_id` filter returns leads CURRENTLY at
+    // that node (in-flight subset), which disagrees with the "Sent" KPI that
+    // sums `node.entered` (ever entered). Same principle as the fix in
+    // 6832bbc, generalized to multi-run + multi-node selections.
+    if (channelViewRefs && channelViewRefs.length > 0) {
+      return channelViewRefs.flatMap((ref) => generateLeadsForNode(ref.run, ref.nodeId));
+    }
+
+    // Legacy single-node channel drill-down (kept for callers that only pass
+    // restrictToNodeIds). New channel views should use channelViewRefs instead.
     if (restrictToNodeIds && restrictToNodeIds.length > 0) {
       if (singleScopedId) return generateLeadsForNode(run, singleScopedId);
       const cap = Math.max(0, run.kpi.validLeads);
@@ -849,7 +861,7 @@ function LeadsTable({
       return cap > 0 && adapted.length > cap ? adapted.slice(0, cap) : adapted;
     }
     return generateLeads(run, cap);
-  }, [run, restrictToNodeIds, singleScopedId, d1LeadsQuery.rows]);
+  }, [run, restrictToNodeIds, singleScopedId, channelViewRefs, d1LeadsQuery.rows]);
 
   const [stageSel, setStageSel] = useState<string[]>([]);
   const [statusSel, setStatusSel] = useState<string[]>([]);
@@ -2700,34 +2712,27 @@ function ChannelDetail({
     [funnelOrdered, color],
   );
 
-  // Logs: pick the latest selected run, restrict to that run's selected nodes.
-  //
-  // Range reflow: scale the run through `scaleRunToRange` before handing it
-  // to LeadsTable, so `node.entered` on the scoped channel node matches the
-  // Sent/Delivered KPI cards above the table. Without scaling, the table
-  // reads the raw seeded 30-day volume (~1,500) while the KPIs show the
-  // 7-day slice (~163) — same mismatch the channel-view Logs fix
-  // (6832bbc) was meant to resolve but for date range instead of node id.
-  const logsRun = useMemo<RunRow | undefined>(() => {
-    if (refs.length === 0) return undefined;
-    const lastRef = refs[0];
-    const rawRun = CAMPAIGNS.find((c) => c.id === lastRef.campaignId)?.runs.find(
-      (r) => r.id === lastRef.runId,
-    );
-    if (!rawRun) return undefined;
-    return scaleRunToRange(rawRun, dateRange, d1Ratio);
+  // Logs: build one (run, nodeId) pair per selected ref, with the run scaled
+  // through `scaleRunToRange` so `node.entered` reflects the date-range
+  // picker. LeadsTable then generates exactly `node.entered` rows per pair
+  // and concatenates, which keeps the "of N leads" total locked to the "Sent"
+  // KPI card above (both sum the same scaled `node.entered` values). The
+  // legacy single-run refs[0] path used to freeze the count to one run and
+  // silently mislead when the user picked multiple runs/templates.
+  const channelViewRefs = useMemo(() => {
+    const pairs: Array<{ run: RunRow; nodeId: string }> = [];
+    for (const ref of refs) {
+      const rawRun = CAMPAIGNS.find((c) => c.id === ref.campaignId)?.runs.find(
+        (r) => r.id === ref.runId,
+      );
+      if (!rawRun) continue;
+      pairs.push({ run: scaleRunToRange(rawRun, dateRange, d1Ratio), nodeId: ref.nodeId });
+    }
+    return pairs;
   }, [refs, dateRange, d1Ratio]);
-  const logsNodeIds = useMemo(
-    () =>
-      logsRun
-        ? refs.filter((r) => r.runId === logsRun.id).map((r) => r.nodeId)
-        : [],
-    [refs, logsRun],
-  );
-  const otherRunsInScope = useMemo(
-    () => new Set(refs.map((r) => r.runId)).size,
-    [refs],
-  );
+  // A run for the LeadsTable's export CSV filename / D1 hook fallback path.
+  // The table's actual data comes from channelViewRefs above.
+  const logsRun = channelViewRefs[0]?.run;
 
   const logTitle = "Logs";
 
@@ -2854,23 +2859,14 @@ function ChannelDetail({
       </div>
 
       {logsRun && (
-        <>
-          {otherRunsInScope > 1 && (
-            <p className="mt-3 text-[11px] text-muted-foreground">
-              Showing logs from {logsRun.startedAt}. {otherRunsInScope - 1}{" "}
-              other run{otherRunsInScope - 1 === 1 ? "" : "s"} are aggregated in
-              KPIs and charts above.
-            </p>
-          )}
-          <LeadsTable
-            run={logsRun}
-            restrictToNodeIds={logsNodeIds}
-            title={logTitle}
-            hideStage={kind === "whatsapp"}
-            dateRange={dateRange}
-            channelForExport={kind as ReportChannel}
-          />
-        </>
+        <LeadsTable
+          run={logsRun}
+          channelViewRefs={channelViewRefs}
+          title={logTitle}
+          hideStage={kind === "whatsapp"}
+          dateRange={dateRange}
+          channelForExport={kind as ReportChannel}
+        />
       )}
     </>
   );

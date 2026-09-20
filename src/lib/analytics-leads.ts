@@ -160,6 +160,14 @@ export function generateLeadsForNode(run: RunRow, nodeId: string): Lead[] {
   const rand = rng(`${run.id || "default_run"}_${nodeId}`);
   const total = node.entered;
   const statuses = STATUS_BY_KIND[node.kind];
+  // Offset the L-XXXXX id space by a stable hash of run+node so that when a
+  // channel-view table aggregates rows from multiple (run, node) pairs, ids
+  // don't collide across pairs (which would give React duplicate keys and
+  // show repeated ids to the user). Range 10_000_000 → keeps ids short.
+  let h = 5381;
+  const seedStr = `${run.id || "default_run"}_${nodeId}`;
+  for (let k = 0; k < seedStr.length; k++) h = ((h << 5) + h + seedStr.charCodeAt(k)) | 0;
+  const idBase = 10000 + (Math.abs(h) % 9_990_000);
   const leads: Lead[] = [];
   for (let i = 0; i < total; i++) {
     const status = statuses.length
@@ -169,7 +177,7 @@ export function generateLeadsForNode(run: RunRow, nodeId: string): Lead[] {
     const last = LAST[Math.floor(rand() * LAST.length)];
     const phone = `+91 9${Math.floor(100000000 + rand() * 899999999)}`;
     leads.push({
-      id: `L-${String(10000 + i).padStart(5, "0")}`,
+      id: `L-${String(idBase + i).padStart(5, "0")}`,
       name: `${first} ${last}`,
       phone,
       email: `${first}.${last}@example.com`.toLowerCase(),
