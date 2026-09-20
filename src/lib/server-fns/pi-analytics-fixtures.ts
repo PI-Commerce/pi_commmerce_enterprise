@@ -14,9 +14,58 @@
  *   2. Date-range scaling: when the range is <30 days, every count is scaled
  *      by `days/30`. Matches `scaleRunToRange`'s synthetic-ratio fallback.
  */
-import { CAMPAIGNS, type RunRow, type SankeyNodeKind } from "@/lib/analytics-data";
+import { CAMPAIGNS, type RunRow, type SankeyNode, type SankeyNodeKind } from "@/lib/analytics-data";
+import type { PresetConfig } from "@/lib/campaign-types";
 
 const CHANNEL_KINDS: readonly SankeyNodeKind[] = ["whatsapp", "voice", "sms", "rcs"] as const;
+
+/** Kinds accepted by the `read_asset` tool — kept as a local literal
+ *  union so this fixture module doesn't have to pull in pi-skills. If a
+ *  new AssetKind is added there, mirror it here. */
+type AssetKind = "voiceAgent" | "waTemplate" | "smsTemplate" | "rcsTemplate" | "freeformWorkflow" | "tool";
+type NodeAssetRef = { kind: AssetKind; id: string };
+
+/** Pull the concrete asset refs off a sankey node's saved config so Pi
+ *  can chain `read_campaign` → `read_asset` without guessing at ids.
+ *  The `PresetConfig` field for each node kind holds the same id the
+ *  workspace catalog is keyed on. */
+function extractNodeAssets(kind: SankeyNodeKind, config?: PresetConfig): NodeAssetRef[] {
+  if (!config) return [];
+  switch (kind) {
+    case "voice":
+      return config.agent ? [{ kind: "voiceAgent", id: config.agent }] : [];
+    case "whatsapp":
+      return config.waTemplate ? [{ kind: "waTemplate", id: config.waTemplate }] : [];
+    case "whatsappFreeform":
+      return config.ffWorkflowId ? [{ kind: "freeformWorkflow", id: config.ffWorkflowId }] : [];
+    case "sms":
+      return config.smsTemplateId ? [{ kind: "smsTemplate", id: config.smsTemplateId }] : [];
+    case "rcs":
+      return config.rcsTemplateId ? [{ kind: "rcsTemplate", id: config.rcsTemplateId }] : [];
+    case "apiToolCall":
+      return config.apiTool ? [{ kind: "tool", id: config.apiTool }] : [];
+    default:
+      return [];
+  }
+}
+
+/** Public shape returned by `fxReadCampaign` for each node. Exported so
+ *  future D1-backed dispatch (in runtool.ts) can mirror the same shape. */
+function nodeSummary(n: SankeyNode) {
+  return {
+    id: n.id,
+    serial: n.serial,
+    description: n.description,
+    kind: n.kind,
+    name: n.name,
+    entered: n.entered,
+    exited: n.exited,
+    /** Asset refs Pi can feed straight into `read_asset({ kind, id })`.
+     *  Empty for structural nodes (start/end/audience/conditional/…) and
+     *  for channel nodes that haven't been bound to a specific asset yet. */
+    assets: extractNodeAssets(n.kind, n.config),
+  };
+}
 
 type F = {
   campaignId?: string;
@@ -271,9 +320,11 @@ export function fxReadCampaign(id: string) {
       name: r.name,
       status: r.status,
       kpi: r.kpi,
-      nodes: r.sankey.nodes.map((n) => ({
-        id: n.id, kind: n.kind, name: n.name, entered: n.entered, exited: n.exited,
-      })),
+      // Nodes carry an `assets` array of {kind,id} refs — the ids resolve
+      // directly against `read_asset`, so Pi can go from a node in the
+      // flow to the voice-agent script / template body / tool spec that
+      // drove its numbers, without a handoff to /agents or /channels.
+      nodes: r.sankey.nodes.map(nodeSummary),
     })),
   };
 }

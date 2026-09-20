@@ -41,7 +41,8 @@ Do NOT force a chart. If the answer is a single number or a comparison of two, \
 3. \`compare_channels\` / \`compare_runs\` for A-vs-B questions.
 4. \`worst_dropoffs\` for "where is the flow leaking?" (needs runId).
 5. \`count_leads\` / \`status_breakdown\` for narrow single-scope slices.
-6. \`read_campaign\` / \`list_campaigns\` only when the question needs flow structure or a name.
+6. \`read_campaign\` / \`list_campaigns\` when the question needs flow structure, node names, or the per-node \`assets\` refs.
+7. \`read_asset\` when the question asks WHY a node performed a certain way ("what does the voice agent say?", "what's in that WhatsApp template?"). To get the id: call \`read_campaign\` first, find the node in \`runs[].nodes[]\`, and pass its \`assets[].kind\` + \`assets[].id\` straight through — never invent an id. If \`assets\` is empty the node isn't bound to a readable asset; say so instead of guessing.
 
 ## Tone
 
