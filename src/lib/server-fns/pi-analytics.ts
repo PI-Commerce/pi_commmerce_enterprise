@@ -39,6 +39,13 @@ export type AnalyticsScreenContext = {
   tab?: string;                // "campaign" | "channel"
   selectedNodeId?: string;     // if a node drawer is open
   visibleKpis?: Record<string, unknown>;
+  /** Human labels for the persistent context ribbon in the chat UI. */
+  labels?: {
+    campaignName?: string;     // e.g. "BFSI · Insurance Renewal"
+    runLabel?: string;         // e.g. "Run 1 · RUN-4201"
+    channelLabel?: string;     // e.g. "WhatsApp"
+    rangeLabel?: string;       // e.g. "Sep 14 – Sep 20, 2026"
+  };
 };
 
 /** The chart spec Pi emits. Rendered client-side by ECharts. */

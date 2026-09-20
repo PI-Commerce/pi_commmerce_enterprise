@@ -559,6 +559,13 @@ function CampaignAnalytics({
       from: dateRangeToIsoFrom(dateRange),
       to: dateRangeToIsoTo(dateRange),
     },
+    labels: {
+      campaignName: campaign.name,
+      runLabel: `${baseRun.name} · ${baseRun.code}`,
+      rangeLabel: dateRange?.from && dateRange?.to
+        ? `${fmtDate(dateRange.from, "MMM d")} – ${fmtDate(dateRange.to, "MMM d, yyyy")}`
+        : undefined,
+    },
   });
 
   const [openNode, setOpenNode] = useState<SankeyNode | null>(null);
@@ -1893,6 +1900,11 @@ function ChannelAnalytics({
   const tabMeta = CHANNEL_TABS.find((c) => c.kind === kind)!;
 
   // Publish live screen context for Ask Pi.
+  const _channelCampaign = selection.campaignId
+    ? CAMPAIGNS.find((c) => c.id === selection.campaignId)
+    : undefined;
+  const _channelRun = _channelCampaign?.runs.find((r) => r.id === selection.runId);
+  const _channelLabel = tabMeta.label;
   usePublishScreenContext({
     pathname: "/analytics",
     tab: "channel",
@@ -1902,6 +1914,14 @@ function ChannelAnalytics({
       runId: selection.runId,
       from: dateRangeToIsoFrom(dateRange),
       to: dateRangeToIsoTo(dateRange),
+    },
+    labels: {
+      channelLabel: _channelLabel,
+      campaignName: _channelCampaign?.name,
+      runLabel: _channelRun ? `${_channelRun.name} · ${_channelRun.code}` : undefined,
+      rangeLabel: dateRange?.from && dateRange?.to
+        ? `${fmtDate(dateRange.from, "MMM d")} – ${fmtDate(dateRange.to, "MMM d, yyyy")}`
+        : undefined,
     },
   });
 

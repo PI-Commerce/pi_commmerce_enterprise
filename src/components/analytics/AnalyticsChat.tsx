@@ -162,13 +162,15 @@ export function AnalyticsChat({
     }
   };
 
+  const ribbon = friendlyContextLine(context);
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       {/* header */}
       <div className="flex items-center justify-between border-b border-border px-4 py-2.5">
         <div className="flex items-center gap-1.5">
           <Sparkle className="h-3.5 w-3.5 fill-ai text-ai" />
-          <span className="text-[12px] font-medium text-foreground">Ask Pi · Analytics</span>
+          <span className="text-[12px] font-medium text-foreground">Ask Pi</span>
         </div>
         <button
           onClick={onClose}
@@ -179,13 +181,24 @@ export function AnalyticsChat({
         </button>
       </div>
 
+      {/* persistent context ribbon — always visible, human names, non-technical.
+          Tells the user "what I'm answering about" so they never wonder. */}
+      <div className="border-b border-border/60 bg-muted/30 px-4 py-1.5">
+        <div className="flex items-baseline gap-1.5 text-[11.5px] leading-snug">
+          <span className="shrink-0 text-muted-foreground">Answering about</span>
+          <span className="min-w-0 truncate font-medium text-foreground" title={ribbon.full}>
+            {ribbon.compact}
+          </span>
+        </div>
+      </div>
+
       {/* transcript */}
       <div
         ref={scrollRef}
         className="scrollbar-thin flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-3"
       >
         {turns.length === 0 && !thinking && (
-          <EmptyState chips={starterChips} loading={chipsLoading} onPick={submit} context={context} />
+          <EmptyState chips={starterChips} loading={chipsLoading} onPick={submit} />
         )}
 
         {turns.map((t) =>
@@ -259,25 +272,16 @@ function EmptyState({
   chips,
   loading,
   onPick,
-  context,
 }: {
   chips: string[];
   loading: boolean;
   onPick: (s: string) => void;
-  context: AnalyticsScreenContext;
 }) {
-  const summary = summarizeContext(context);
   return (
     <div className="space-y-3">
-      <div className="rounded-lg border border-ai/20 bg-ai/5 px-3 py-2.5">
-        <div className="flex items-center gap-1.5 text-[11px] font-medium text-ai">
-          <Sparkle className="h-3 w-3 fill-ai" /> On this screen
-        </div>
-        <div className="mt-1 text-[12px] leading-relaxed text-foreground">{summary}</div>
-      </div>
       <div className="space-y-1.5">
         <div className="text-[10.5px] uppercase tracking-wider text-muted-foreground">
-          {loading ? "Reading your screen…" : "Try"}
+          {loading ? "Reading your screen…" : "Suggested"}
         </div>
         {loading && <div className="flex items-center gap-2 text-[12px] text-muted-foreground"><Loader2 className="h-3 w-3 animate-spin" /> Generating suggestions…</div>}
         {!loading && chips.length === 0 && (
@@ -394,16 +398,23 @@ function ThinkingBubble() {
 
 /* ---------- helpers ------------------------------------------------------- */
 
-function summarizeContext(c: AnalyticsScreenContext): string {
+/**
+ * Non-technical one-liner for the persistent ribbon. Prefers HUMAN labels
+ * (campaign / run / channel names, formatted dates) over raw ids. Falls back
+ * to something generic if the page hasn't published labels yet.
+ *
+ * Returned as { compact, full } so the ribbon can show a truncated line and
+ * expose the full text as a tooltip.
+ */
+function friendlyContextLine(c: AnalyticsScreenContext): { compact: string; full: string } {
+  const L = c.labels ?? {};
   const parts: string[] = [];
-  if (c.tab) parts.push(`${c.tab} view`);
-  const f = c.filter ?? {};
-  if (f.campaignId) parts.push(`campaign ${f.campaignId}`);
-  if (f.runId) parts.push(`run ${f.runId}`);
-  if (f.channel) parts.push(`${f.channel} channel`);
-  if (f.stageNodeId) parts.push(`node ${f.stageNodeId}`);
-  if (f.from && f.to) parts.push(`${f.from} → ${f.to}`);
-  if (c.selectedNodeId) parts.push(`selected: ${c.selectedNodeId}`);
-  if (parts.length === 0) return "No filter set — I'll answer across the whole workspace.";
-  return `Grounding on: ${parts.join(", ")}.`;
+  if (L.channelLabel) parts.push(L.channelLabel);
+  if (L.campaignName) parts.push(L.campaignName);
+  else if (c.filter?.campaignId) parts.push("this campaign");
+  if (L.runLabel) parts.push(L.runLabel);
+  const head = parts.join(" · ");
+  const range = L.rangeLabel ? ` — ${L.rangeLabel}` : "";
+  const line = head ? `${head}${range}` : "your whole workspace";
+  return { compact: line, full: line };
 }

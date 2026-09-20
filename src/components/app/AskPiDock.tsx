@@ -95,8 +95,14 @@ export function AskPiDock() {
   // Click-outside collapses only from the idle composer. Once Pi is working or showing a
   // result, an outside click is ignored so the answer is never lost by accident — close it
   // with the ✕. Also stays open while the user is mid-prompt.
+  //
+  // /analytics is a hard exception: the dock's `state` never leaves "idle" there
+  // (AnalyticsChat owns its own turn state), so the default rule would collapse
+  // the panel on every tab / filter click and destroy the conversation. Only
+  // the ✕ (or Esc) should close it on that surface.
   useEffect(() => {
     if (!isOpen) return;
+    if (isAnalyticsSurface) return;
     const onDown = (e: MouseEvent) => {
       if (!panelRef.current) return;
       if (panelRef.current.contains(e.target as Node)) return;
@@ -106,7 +112,7 @@ export function AskPiDock() {
     };
     document.addEventListener("mousedown", onDown, true);
     return () => document.removeEventListener("mousedown", onDown, true);
-  }, [isOpen, value, state]);
+  }, [isOpen, value, state, isAnalyticsSurface]);
 
   const submit = async (q: string = value) => {
     const query = q.trim();
