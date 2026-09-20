@@ -15,7 +15,18 @@
  * it up — no dispatcher changes needed.
  */
 
-export type VendorId = "paytm_pg" | "clevertap" | "shopify";
+/**
+ * Doc corpus ids.
+ *
+ * `picom_platform` is not a third-party vendor — it's the PiCommerce
+ * platform itself. It carries the "how does connecting anything work on
+ * PiCommerce" facts (where PiCommerce's own API keys live, where vendor
+ * credentials get pasted, how the connection lifecycle actually flows).
+ * Pi should reach for these chunks whenever a user asks about "API keys"
+ * or "credentials" without naming a vendor, or when a vendor answer
+ * would otherwise sound like PiCommerce isn't in the picture.
+ */
+export type VendorId = "picom_platform" | "paytm_pg" | "clevertap" | "shopify";
 
 export type DocChunk = {
   /** Machine id of the vendor this chunk belongs to. */
@@ -33,6 +44,40 @@ export type DocChunk = {
 };
 
 export const VENDOR_DOCS: DocChunk[] = [
+  // ────────────────────────────────────────────────────────────────────────
+  // PiCommerce platform basics
+  //
+  // These chunks describe how connecting anything works on our platform
+  // and — crucially — where PiCommerce's OWN API keys live (spoiler:
+  // Developer > APIs & Webhooks, NOT on the Integrations page). Every
+  // vendor-connect walkthrough should end by pointing back to the vendor
+  // card on this page; that's where credentials actually get pasted.
+  // ────────────────────────────────────────────────────────────────────────
+  {
+    vendor: "picom_platform",
+    vendorName: "PiCommerce",
+    section: "Where PiCommerce's own API keys live",
+    body: "PiCommerce's own API keys — the ones you use to call PiCommerce's REST API programmatically, or to authenticate an outbound webhook signature — live under Developer > APIs & Webhooks, NOT on the Integrations page. The Integrations page is only for connecting third-party vendors (Paytm, CleverTap, Shopify, and so on). If someone says \"API keys\" without naming a vendor, they almost always mean the PiCommerce keys under Developer.",
+  },
+  {
+    vendor: "picom_platform",
+    vendorName: "PiCommerce",
+    section: "Where vendor credentials get pasted",
+    body: "Every third-party vendor connection is completed on the Integrations page (this page). Click Connect on the vendor's card, paste the credentials the vendor issued you, and save — PiCommerce validates them with a test call before flipping the card to Connected. Vendor credentials are stored encrypted in PiCommerce; you never re-enter them once connected. Vendor credentials are NOT the same thing as PiCommerce's own API keys under Developer — they authorise PiCommerce to talk to the vendor on your behalf, not the other way around.",
+  },
+  {
+    vendor: "picom_platform",
+    vendorName: "PiCommerce",
+    section: "Terminology — vendors call credentials different things",
+    body: "Every vendor uses their own name for the credential they issue. Paytm Payment Gateway issues a Merchant ID (MID) and a Merchant Key. CleverTap issues an Account ID and a Passcode. Shopify issues an Admin API access token (or completes OAuth for standard stores, no manual token needed). None of these are called \"API keys\" in the vendor's own dashboard — using the vendor's own terminology avoids confusing them with PiCommerce's own API keys under Developer.",
+  },
+  {
+    vendor: "picom_platform",
+    vendorName: "PiCommerce",
+    section: "The connection lifecycle",
+    body: "Connecting a vendor on PiCommerce is a three-step lifecycle: (1) create or fetch credentials on the vendor's own dashboard, (2) click Connect on the vendor card here on Integrations and paste them, (3) PiCommerce runs a validation call and flips the card to Connected. Once connected, campaigns, agents and audiences can reference the vendor by name — no per-node re-authentication. Disconnect from the same card if you rotate credentials; the vendor's data stays intact in PiCommerce.",
+  },
+
   // ────────────────────────────────────────────────────────────────────────
   // Paytm Payment Gateway
   // ────────────────────────────────────────────────────────────────────────
@@ -52,9 +97,15 @@ export const VENDOR_DOCS: DocChunk[] = [
   {
     vendor: "paytm_pg",
     vendorName: "Paytm Payment Gateway",
-    section: "Getting API credentials",
-    body: "Log in to the Paytm for Business dashboard, open Developer Settings > API Keys, and generate a Merchant ID (MID) and Merchant Key. There are separate credentials for Staging and Production — copy both. Never share the Merchant Key; treat it like a password. Rotate it if you suspect a leak from the same screen.",
+    section: "Getting credentials from Paytm",
+    body: "Paytm issues two credentials for the payment gateway: a Merchant ID (MID) and a Merchant Key. Get them from the Paytm for Business dashboard (business.paytm.com) — open the API Keys screen under Developer Settings there, and generate a pair for Staging and a pair for Production. Copy all four values. These are Paytm's credentials, distinct from PiCommerce's own API keys (which live under PiCommerce Developer > APIs & Webhooks and are unrelated to any vendor connection). Never share the Merchant Key; treat it like a password.",
     sourceUrl: "https://business.paytm.com/docs/pg/api-keys/",
+  },
+  {
+    vendor: "paytm_pg",
+    vendorName: "Paytm Payment Gateway",
+    section: "Pasting Paytm credentials into PiCommerce",
+    body: "Once you have Merchant ID + Merchant Key from Paytm, come back to PiCommerce's Integrations page (this page), click Connect on the Paytm Payment Gateway card, and paste the values in the dialog. Pick Environment (Staging for test, Production for live) and save. PiCommerce validates the pair with a test call to Paytm and flips the card to Connected. The credentials are stored encrypted in PiCommerce — you don't re-enter them per campaign.",
   },
   {
     vendor: "paytm_pg",
@@ -94,9 +145,15 @@ export const VENDOR_DOCS: DocChunk[] = [
   {
     vendor: "clevertap",
     vendorName: "CleverTap",
-    section: "Getting API credentials",
-    body: "In the CleverTap dashboard, go to Settings > Project. Copy the Account ID and Passcode (also called the API Passcode, distinct from your login password). If Passcode is not visible, an Admin can regenerate one from the same screen — regenerating invalidates the previous passcode so pause any live integrations first.",
+    section: "Getting credentials from CleverTap",
+    body: "CleverTap issues an Account ID and a Passcode (the API Passcode, distinct from your login password). Get them from the CleverTap dashboard under Settings > Project. If the Passcode isn't visible, an Admin can regenerate one from the same screen — regenerating invalidates the previous passcode, so pause any live integrations first. These are CleverTap's credentials, distinct from PiCommerce's own API keys (which live under PiCommerce Developer > APIs & Webhooks and are unrelated to any vendor connection).",
     sourceUrl: "https://developer.clevertap.com/docs/api-quickstart",
+  },
+  {
+    vendor: "clevertap",
+    vendorName: "CleverTap",
+    section: "Pasting CleverTap credentials into PiCommerce",
+    body: "Once you have Account ID + Passcode from CleverTap, come back to PiCommerce's Integrations page (this page), click Connect on the CleverTap card, paste them, and select your CleverTap data region (US, EU, India-1, Singapore, or Middle East). Save. PiCommerce runs a validation call against CleverTap's profile API — a green Connected badge means credentials and region are correct. Segment sync starts on the next hourly tick.",
   },
   {
     vendor: "clevertap",
@@ -136,8 +193,8 @@ export const VENDOR_DOCS: DocChunk[] = [
   {
     vendor: "shopify",
     vendorName: "Shopify",
-    section: "Getting API credentials",
-    body: "For standard stores, click Connect on the PiCommerce Integrations page and you will be redirected to Shopify to install the app — no manual credentials. For Shopify Plus with a Custom App: in Shopify admin go to Settings > Apps and sales channels > Develop apps, create an app, grant scopes (read_orders, read_products, read_customers, read_checkouts), and copy the Admin API access token.",
+    section: "Getting credentials from Shopify",
+    body: "Standard Shopify stores don't need manual credentials — clicking Connect on the Shopify card in PiCommerce Integrations redirects you to Shopify to install the PiCommerce app, and Shopify handles the token exchange on its own. For Shopify Plus with a Custom App: in Shopify admin go to Settings > Apps and sales channels > Develop apps, create an app, grant scopes (read_orders, read_products, read_customers, read_checkouts), and copy the Admin API access token. That token is Shopify's credential, distinct from PiCommerce's own API keys (which live under PiCommerce Developer > APIs & Webhooks and are unrelated to any vendor connection).",
     sourceUrl: "https://shopify.dev/docs/apps/build/authentication-authorization/access-tokens",
   },
   {
@@ -163,6 +220,7 @@ export const VENDOR_DOCS: DocChunk[] = [
 /** Public catalog id → name map, used by the system prompt to enumerate
  *  what's answerable without leaking the whole doc corpus into the prompt. */
 export const VENDOR_CATALOG: Record<VendorId, string> = {
+  picom_platform: "PiCommerce",
   paytm_pg: "Paytm Payment Gateway",
   clevertap: "CleverTap",
   shopify: "Shopify",

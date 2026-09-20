@@ -59,7 +59,15 @@ function scoreChunk(chunk: DocChunk, queryTokens: string[], rawQuery: string): n
 
 /** Infer a vendor from the raw query text if the caller didn't pass one.
  *  We only need this for the "help me connect Shopify" style prompt where
- *  Pi may not know to pass vendor="shopify" on the first call. */
+ *  Pi may not know to pass vendor="shopify" on the first call.
+ *
+ *  Note: picom_platform is intentionally NOT auto-inferred here. Platform
+ *  chunks (Where PiCommerce's own API keys live, Where vendor credentials
+ *  get pasted, Terminology, Lifecycle) should surface on cross-vendor
+ *  searches via the corpus-wide scoring path so they augment vendor
+ *  answers rather than replace them. Pi can still request them explicitly
+ *  by passing vendor="picom_platform" when a question is purely about
+ *  the platform (e.g. "where do I find my API keys" with no vendor). */
 function inferVendor(query: string): VendorId | undefined {
   const q = query.toLowerCase();
   if (q.includes("shopify")) return "shopify";
@@ -78,18 +86,18 @@ function inferVendor(query: string): VendorId | undefined {
 export const searchDocs: SurfaceTool = {
   name: "search_docs",
   description:
-    "Search the vendor integration docs and return the most relevant chunks. Use this to answer any 'how do I connect / integrate / set up X' question. Always call before answering. Pass `vendor` if the user named one explicitly (paytm_pg, clevertap, shopify) — leave undefined to search across all vendors. Returns up to 4 hits with vendor, section, body snippet and (when known) a source URL for citation.",
+    "Search the integration docs and return the most relevant chunks. Use this to answer any 'how do I connect / integrate / set up X' question, and also anything about PiCommerce platform concepts (where API keys live, how vendor credentials work, the connection lifecycle). Always call before answering. Pass `vendor` if the user named one explicitly (paytm_pg, clevertap, shopify) or if the question is purely about PiCommerce platform basics (picom_platform); leave undefined to search across everything. Returns up to 4 hits with vendor, section, body snippet and (when known) a source URL for citation.",
   parameters: {
     type: "object",
     properties: {
       query: {
         type: "string",
-        description: "The user's information need, verbatim or lightly reworded. Example: 'connect Shopify Plus custom app'.",
+        description: "The user's information need, verbatim or lightly reworded. Example: 'connect Shopify Plus custom app', 'where do I find my API keys'.",
       },
       vendor: {
         type: "string",
-        enum: ["paytm_pg", "clevertap", "shopify"],
-        description: "Optional. Narrow the search to one vendor's docs before scoring.",
+        enum: ["picom_platform", "paytm_pg", "clevertap", "shopify"],
+        description: "Optional. Narrow the search to one corpus before scoring. Use `picom_platform` for pure platform questions (PiCommerce's own API keys, how credentials work, the connection lifecycle).",
       },
     },
     required: ["query"],
