@@ -50,7 +50,7 @@ export const readAgent: SurfaceTool = {
 export const saveAgent: SurfaceTool = {
   name: "save_agent",
   description:
-    "Upsert an agent. Pass a full AgentRecord: { id, name, type: 'voice', status: 'live' | 'draft' | 'paused', tools: string[], masterPrompt: string, knowledgeBase: string, postCall: { id, name, prompt }[], evalPrompt?: string }. Merge on top of the existing record if you're editing — always call read_agent first, then send the merged object back.",
+    "EDIT-ONLY. Upsert a FULL AgentRecord after merging your patch on top of read_agent's output. Never use for a fresh draft — call `save_agent_from_topic` instead (that path renders the whole skeleton from a server template in <1s). Fields: { id, name, type: 'voice', status: 'live' | 'draft' | 'paused', tools: string[], masterPrompt: string, knowledgeBase: string, postCall: { id, name, prompt }[], evalPrompt?: string }.",
   parameters: {
     type: "object",
     properties: {

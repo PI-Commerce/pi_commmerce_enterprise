@@ -255,15 +255,17 @@ export function AskPiDock() {
       if (r.ok && r.answer.trim().length > 0) {
         setLiveAnswer(r.answer);
       }
-      // Agents-scope mutations: if Pi called save_agent, the in-memory
-      // agent-store has stale data. Force a re-hydrate from D1 so the /agents
-      // list and any open AgentBuilder pick up the change without a refresh.
+      // Agents-scope mutations: if Pi wrote to the agents table (via any
+      // of the mutation tool names), the in-memory agent-store is stale.
+      // Force a re-hydrate from D1 so the /agents list AND any open
+      // AgentBuilder pick up the change without a manual refresh. Awaited
+      // (not fire-and-forget) because the very next steps clear the
+      // drafting pill / dispatch open_agent — those must see a fresh
+      // store, otherwise the builder flashes "Agent not found" or the
+      // shimmer runs after the record is already saved.
+      const AGENT_MUTATION_TOOLS = new Set(["save_agent", "save_agent_from_topic"]);
       if (r.ok && ctx.scopeMode === "agents") {
-        const mutated = r.toolCalls?.some((tc) => tc.name === "save_agent");
-        // Awaited (not fire-and-forget) because the very next step may
-        // dispatch an `open_agent` screen tool that navigates into the
-        // builder for the fresh id — without the await, EditAgent flashes
-        // "Agent not found" until the hydrate resolves.
+        const mutated = r.toolCalls?.some((tc) => AGENT_MUTATION_TOOLS.has(tc.name));
         if (mutated) await refreshAgentsFromDb();
       }
       // Screen-tool dispatch — for any tool call Pi made whose name is

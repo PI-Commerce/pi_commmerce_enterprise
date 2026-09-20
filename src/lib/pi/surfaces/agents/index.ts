@@ -26,12 +26,14 @@ export const agentsSurface: SurfaceModule = {
   //   analytics-reads — answer "how many leads did the Meera agent
   //     handle last week?" without a handoff.
   uses: ["analytics-reads"],
-  // Draft flow is deterministic: plan (list_agents + list_tools), then
-  // author (save_agent + open_agent), then confirm. 6 rounds gives
-  // headroom for a retry or clarifier without letting Pi over-think.
-  // Extended thinking at the Anthropic minimum keeps latency down.
+  // Draft flow: ONE tool call (save_agent_from_topic) then ONE line of
+  // confirmation. That's 2 rounds. Edit flow: read_agent, save_agent,
+  // confirm = 3 rounds. Cap at 3 so Pi can't loop into re-drafting or
+  // authoring supplemental content that would blow the <10s budget.
+  // Extended thinking at the Anthropic minimum keeps latency down; this
+  // surface's job is structural, not analytical.
   loop: {
-    maxRounds: 6,
+    maxRounds: 3,
     thinkingBudget: 1024,
   },
   // No context assembler — agents Pi reads workspace state via
