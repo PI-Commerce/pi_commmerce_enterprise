@@ -54,6 +54,18 @@ export type PiContext = {
    * retired nudge stays gone (per-session when used, persisted when X-dismissed).
    */
   nudge?: { id: string; label: string; prompt: string };
+  /**
+   * Dead-zone marker. On surfaces where Pi genuinely cannot add value (e.g.
+   * Settings, Agents > Tools), we keep the pill visible for pattern consistency
+   * but non-interactive, with a persistent playful message. When present, the
+   * dock ignores click / ⌘K / chips / placeholder / result — only the pill and
+   * the caption render, and the pill is greyed.
+   *
+   * The nudge string is caption copy, not a prompt. Keep it short, playful,
+   * surface-specific. No ✕, no click-through — it's honest signage that Pi is
+   * off-duty here.
+   */
+  deadZone?: { nudge: string };
 };
 
 const DEFAULT: PiContext = {
@@ -145,16 +157,18 @@ const ROUTES: { match: (p: string) => boolean; ctx: PiContext }[] = [
   {
     match: (p) => p.startsWith("/settings"),
     ctx: {
+      // Settings is a Pi dead zone. Config lives in the human's hands; Pi shouldn't
+      // mutate roles / billing / integrations and shouldn't half-answer read-only
+      // questions when the rest of the pattern is action-forward. Pill stays visible
+      // for consistency but is non-interactive with a persistent caption.
       scope: "Settings",
       scopeMode: "analytics",
-      systemHint: "The user is on Settings. There is no D1 data for workspace membership yet; answer from context and describe what changing a setting would do without pretending to change it.",
-      placeholder: "Ask Pi about workspace settings…",
-      chips: ["Who has admin access?", "Change workspace name", "Notification settings"],
-      thinking: ["Reading workspace settings…", "Checking roles & access…", "Summarizing…"],
-      result: {
-        text: "Your workspace ‘ABC Enterprises’ has 3 admins and 11 members. I can walk you to any setting — which one?",
-        cta: "Got it",
-      },
+      systemHint: "",
+      placeholder: "",
+      chips: [],
+      thinking: [],
+      result: { text: "", cta: "" },
+      deadZone: { nudge: "Pi's off-duty here. Settings are a you thing." },
     },
   },
   {
@@ -205,16 +219,21 @@ const ROUTES: { match: (p: string) => boolean; ctx: PiContext }[] = [
   {
     match: (p) => p.startsWith("/reports"),
     ctx: {
+      // Reports is a Pi dead zone. It's a passive drop for async exports — the
+      // useful intelligence (queue an export, answer without downloading, schedule
+      // recurring) lives upstream in Analytics / Campaigns where Pi is already
+      // active. Rather than a half-baked chatbox on a file cabinet, pill stays
+      // visible for consistency with a persistent caption pointing users back.
+      // Wire real Pi behaviour here only once the agent-loop overhaul lands and
+      // there's a clear job Pi does on this specific surface.
       scope: "Reports",
       scopeMode: "analytics",
-      systemHint: "The user is on Reports. Answer with what data would be exported and offer to shape a CSV/report. Use count_leads and status_breakdown to preview report totals.",
-      placeholder: "Ask Pi to shape, preview, or schedule a report…",
-      chips: ["Weekly performance report", "Voice agent handoff quality report", "Export all Loyalty Gold leads"],
-      thinking: ["Reading run history…", "Aggregating for the report window…", "Drafting the report shape…"],
-      result: {
-        text: "I can build a weekly performance report grouped by vertical, with delivery / conversion / cost per channel. Runs Monday 9am IST.",
-        cta: "Preview report",
-      },
+      systemHint: "",
+      placeholder: "",
+      chips: [],
+      thinking: [],
+      result: { text: "", cta: "" },
+      deadZone: { nudge: "Pi's off-duty here. Just grab your download." },
     },
   },
   {

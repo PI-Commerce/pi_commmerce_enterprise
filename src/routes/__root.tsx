@@ -10,7 +10,7 @@ import {
 
 import { Toaster } from "@/components/ui/sonner";
 import { RegionProvider } from "@/lib/region";
-import { PiSurfaceProvider } from "@/lib/pi-screen-actions";
+import { PiSurfaceProvider, PiDisabledProvider } from "@/lib/pi-screen-actions";
 
 import appCss from "../styles.css?url";
 
@@ -128,8 +128,10 @@ function RootComponent() {
             inside AppShell would leave those calls reading the default
             no-op context and Pi would never see the surfaceId. */}
         <PiSurfaceProvider>
-          <Outlet />
-          <Toaster position="bottom-right" closeButton />
+          <PiDisabledProvider>
+            <Outlet />
+            <Toaster position="bottom-right" closeButton />
+          </PiDisabledProvider>
         </PiSurfaceProvider>
       </RegionProvider>
     </QueryClientProvider>

@@ -4,7 +4,7 @@ import { getPiContext } from "@/lib/ask-pi-context";
 import { askPi } from "@/lib/server-fns/pi-llm";
 import { refreshAgentsFromDb } from "@/lib/agent-store";
 import { usePiScreenContext } from "@/lib/pi-screen-context";
-import { usePiSurface, dispatchScreenToolCalls } from "@/lib/pi-screen-actions";
+import { usePiSurface, dispatchScreenToolCalls, usePiDisabledCopy } from "@/lib/pi-screen-actions";
 import { extractActionLinksFromToolCalls } from "@/lib/pi-canvas-apply";
 import { AnalyticsChat } from "@/components/analytics/AnalyticsChat";
 import {
@@ -16,6 +16,8 @@ import {
   PiChips,
   PiSendButton,
   PiInputIcon,
+  PiDeadZonePill,
+  PiDeadZoneNudge,
   usePiDrag,
 } from "./ask-pi-ui";
 
@@ -78,10 +80,22 @@ export function AskPiDock() {
   // Shared horizontal drag (same behaviour + remembered position as the canvas composer).
   const { dragX, pillHandlers, suppressClick } = usePiDrag(wrapRef);
 
+  // Tab-level dead-zone override — pages call `usePiDisabled(copy)` to declare
+  // that Pi is off-duty on the current tab (e.g. /developer > APIs & Webhooks
+  // when the surrounding route is otherwise live). Bus copy wins over the
+  // route-static `ctx.deadZone` so a page can flip Pi off/on as the user
+  // switches tabs without touching the route context table.
+  const tabDeadZoneCopy = usePiDisabledCopy();
+  const deadZoneCopy = tabDeadZoneCopy ?? ctx.deadZone?.nudge ?? null;
+  const inDeadZone = deadZoneCopy !== null;
+
   const isOpen = state !== "collapsed";
   const expanded = state === "thinking" || state === "result";
 
   useEffect(() => {
+    // Dead-zone surfaces: ⌘K is a no-op. Pi is off duty and we don't want the
+    // shortcut to open a chat that has nothing to say.
+    if (inDeadZone) return;
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
@@ -91,7 +105,7 @@ export function AskPiDock() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [state]);
+  }, [state, inDeadZone]);
 
   useEffect(() => {
     if (state === "idle") inputRef.current?.focus();
@@ -203,6 +217,24 @@ export function AskPiDock() {
     setValue(nudge.prompt);
     setTimeout(() => submit(nudge.prompt), 60);
   };
+
+  // Dead-zone surfaces (e.g. /reports, /settings) and dead-zone tabs (e.g.
+  // /developer > APIs & Webhooks, /developer > Logs): render the muted pill and
+  // a persistent playful caption, then bail before any of the chat state
+  // machinery renders. Pill still drags so the user's remembered position from
+  // other surfaces carries over — presence stays consistent, function is
+  // honestly off. `deadZoneCopy` resolves to the page's `usePiDisabled` string
+  // if published, otherwise the route's static `ctx.deadZone.nudge`.
+  if (inDeadZone) {
+    return (
+      <div ref={wrapRef} className="pointer-events-none absolute inset-x-0 bottom-5 z-30 flex justify-center px-4">
+        <div className="pointer-events-none flex flex-col items-center" style={{ transform: `translateX(${dragX}px)` }}>
+          <PiDeadZoneNudge nudge={deadZoneCopy!} />
+          <PiDeadZonePill pillHandlers={pillHandlers} />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div ref={wrapRef} className="pointer-events-none absolute inset-x-0 bottom-5 z-30 flex justify-center px-4">

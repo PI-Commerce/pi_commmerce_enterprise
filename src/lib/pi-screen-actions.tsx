@@ -107,6 +107,48 @@ export function usePiSurface() {
   return useContext(PiSurfaceCtx).surface;
 }
 
+// ---------------------------------------------------------------------------
+// Ask Pi "dead-zone" channel — shared primitive for surfaces/tabs where Pi
+// genuinely has no capability. Pages call `usePiDisabled("copy string")` to
+// declare a dead zone; the dock renders a greyed, non-interactive pill with a
+// persistent (non-dismissible) playful nudge holding the copy. Pass `null` to
+// re-enable Pi. See feedback_askpi_dead_zones.md for the UX contract and
+// project_askpi_agents_builder.md for the next planned consumer (Agents > Tools).
+// ---------------------------------------------------------------------------
+
+type DisabledBus = {
+  copy: string | null;
+  publish: (c: string | null) => void;
+};
+
+const PiDisabledCtx = createContext<DisabledBus>({ copy: null, publish: () => {} });
+
+/** Wrap once at the app root alongside PiSurfaceProvider. */
+export function PiDisabledProvider({ children }: { children: ReactNode }) {
+  const [copy, setCopy] = useState<string | null>(null);
+  const value = useMemo<DisabledBus>(() => ({ copy, publish: setCopy }), [copy]);
+  return <PiDisabledCtx.Provider value={value}>{children}</PiDisabledCtx.Provider>;
+}
+
+/**
+ * Page-level hook to declare a Pi dead zone. Pass a playful, surface-specific
+ * copy string to disable Pi; pass `null` to re-enable. Safe to call in a
+ * component that toggles between tabs — the effect re-publishes on change and
+ * clears on unmount.
+ */
+export function usePiDisabled(copy: string | null) {
+  const { publish } = useContext(PiDisabledCtx);
+  useEffect(() => {
+    publish(copy);
+    return () => publish(null);
+  }, [copy, publish]);
+}
+
+/** Dock-side reader. `null` when Pi is active on the current surface. */
+export function usePiDisabledCopy() {
+  return useContext(PiDisabledCtx).copy;
+}
+
 /**
  * Convenience for the dock — takes the toolCalls array from an askPi
  * response and dispatches every entry whose name matches a registered

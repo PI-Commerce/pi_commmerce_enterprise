@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { STATUS_LABEL } from "@/lib/tool-registry";
 import { useTools } from "@/lib/tools-store";
 import { useAgents } from "@/lib/agent-store";
+import { usePiDisabled } from "@/lib/pi-screen-actions";
 
 export const Route = createFileRoute("/agents/")({
   component: Agents,
@@ -32,6 +33,16 @@ function Agents() {
   const search = Route.useSearch();
   const navigate = useNavigate();
   const [tab, setTab] = useState<Tab>(search.tab === "tools" ? "tools" : "builder");
+
+  // Tools tab is a Pi dead zone — the agents surface only knows how to draft
+  // and edit voice agents, not to author reusable tool definitions. Keep the
+  // pill visible (per the dead-zone UX pattern) with a playful persistent
+  // caption. Builder tab re-enables Pi by publishing null.
+  usePiDisabled(
+    tab === "tools"
+      ? "Pi's off-duty here. Roll your own tool. New tool button is right there."
+      : null,
+  );
 
   return (
     <AppShell>

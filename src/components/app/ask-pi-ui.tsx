@@ -117,6 +117,54 @@ export function PiPill({
 }
 
 /**
+ * Dead-zone variant of the pill — surfaces where Pi has no useful action yet
+ * (Reports, Agents > Tools tab, …). Same footprint as `PiPill` so the visual
+ * anchor is consistent, but muted-toned, non-interactive, and paired with a
+ * persistent `PiDeadZoneNudge` above it. We keep drag so the user's remembered
+ * position from other surfaces still applies here.
+ *
+ * Contract: Pi's absence of function on this surface is intentional and worth
+ * signalling — never hide the pill, never grey it silently. Pair with copy.
+ */
+export function PiDeadZonePill({
+  pillHandlers,
+}: {
+  pillHandlers: PiPillHandlers;
+}) {
+  return (
+    <div
+      {...pillHandlers}
+      className="pointer-events-auto flex h-9 cursor-grab touch-none items-center gap-2 rounded-full border border-dashed border-border/70 bg-card/70 px-3.5 text-[12.5px] text-muted-foreground/70 shadow-[0_4px_16px_-6px_rgba(0,0,0,0.10)] active:cursor-grabbing animate-slide-up"
+      aria-label="Ask Pi is off duty on this surface"
+      title="Pi's off duty here. Drag to reposition."
+    >
+      <Sparkle className="h-3.5 w-3.5 text-muted-foreground/60" />
+      Ask Pi
+      <span className="ml-0.5 rounded border border-border/60 bg-background/60 px-1 text-[10px] uppercase tracking-wider text-muted-foreground/60">
+        off duty
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Persistent nudge bubble for dead-zone surfaces — same shape as `PiNudge` so
+ * the visual language is unbroken, but with no dismiss, no pulse, no click.
+ * It's a signpost: "Pi can't help here, do your thing." Copy should be playful
+ * and specific to the surface (owned by the route's PiContext.deadZone).
+ */
+export function PiDeadZoneNudge({ nudge }: { nudge: string }) {
+  return (
+    <div className="pointer-events-none relative mb-3 flex max-w-[320px] items-center gap-2 rounded-2xl border border-dashed border-border/70 bg-card/80 px-3 py-2 text-[12.5px] font-medium text-muted-foreground animate-slide-up">
+      <Sparkle className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
+      <span className="truncate">{nudge}</span>
+      {/* tail anchoring the bubble to the pill */}
+      <span className="absolute -bottom-1.5 left-1/2 h-3 w-3 -translate-x-1/2 rotate-45 border-b border-r border-dashed border-border/70 bg-card/80" />
+    </div>
+  );
+}
+
+/**
  * Proactive nudge bubble — floats above the collapsed pill (I4). Pulses gently to
  * draw the eye, stops on hover. The label opens Pi; the ✕ dismisses. Shared so the
  * dock and the canvas composer surface nudges with one identical look.
