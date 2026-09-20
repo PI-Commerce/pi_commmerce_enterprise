@@ -10,6 +10,7 @@ import {
 
 import { Toaster } from "@/components/ui/sonner";
 import { RegionProvider } from "@/lib/region";
+import { PiSurfaceProvider } from "@/lib/pi-screen-actions";
 
 import appCss from "../styles.css?url";
 
@@ -121,8 +122,15 @@ function RootComponent() {
   return (
     <QueryClientProvider client={queryClient}>
       <RegionProvider>
-        <Outlet />
-        <Toaster position="bottom-right" closeButton />
+        {/* PiSurfaceProvider must wrap EVERY route: pages call
+            `usePublishSurface` from their top-level component body which
+            renders OUTSIDE the AppShell subtree, so a provider only
+            inside AppShell would leave those calls reading the default
+            no-op context and Pi would never see the surfaceId. */}
+        <PiSurfaceProvider>
+          <Outlet />
+          <Toaster position="bottom-right" closeButton />
+        </PiSurfaceProvider>
       </RegionProvider>
     </QueryClientProvider>
   );

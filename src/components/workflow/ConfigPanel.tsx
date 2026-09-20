@@ -763,15 +763,37 @@ function ConditionalFields({ config, readOnly, mark, onChange }: { config?: Pres
   );
   const update = (i: number, patch: Partial<PresetBranch>) => {
     setBranches((b) => b.map((x, idx) => idx === i ? { ...x, ...patch } : x));
-    mark(true);
   };
   // Update a single condition within branch `i`.
   const updateCond = (i: number, ci: number, patch: Partial<PresetCondition>) => {
     setBranches((b) => b.map((x, idx) => idx === i
       ? { ...x, conditions: (x.conditions ?? []).map((c, cidx) => cidx === ci ? { ...c, ...patch } : c) }
       : x));
-    mark(true);
   };
+  // Truthful validity — matches `validateConditional` in node-validators.ts
+  // so the banner + Pi + top-bar count all agree. Every branch needs at
+  // least one fully-filled condition (variable + op; value unless the op
+  // is valueless; value2 for range ops).
+  useEffect(() => {
+    const VALUELESS = new Set(["exists", "does not exist"]);
+    const RANGE = new Set(["between", "not between"]);
+    if (branches.length === 0) return mark(false, "Add at least one branch");
+    for (let i = 0; i < branches.length; i++) {
+      const b = branches[i];
+      const label = b.label?.trim() || `Branch ${i + 1}`;
+      const conds = b.conditions ?? [];
+      if (conds.length === 0) return mark(false, `Branch '${label}' has no condition`);
+      for (let ci = 0; ci < conds.length; ci++) {
+        const c = conds[ci];
+        if (!c.variable?.trim()) return mark(false, `Branch '${label}': pick a variable for condition #${ci + 1}`);
+        if (!c.op?.trim()) return mark(false, `Branch '${label}': pick an operator for condition #${ci + 1}`);
+        if (VALUELESS.has(c.op)) continue;
+        if (!c.value?.trim()) return mark(false, `Branch '${label}': set a value for condition #${ci + 1}`);
+        if (RANGE.has(c.op) && !c.value2?.trim()) return mark(false, `Branch '${label}': set the upper bound for condition #${ci + 1}`);
+      }
+    }
+    mark(true);
+  }, [branches]);
   const addCond = (i: number) => update(i, { conditions: [...(branches[i].conditions ?? []), { variable: "", op: "equals", value: "" }] });
   const removeCond = (i: number, ci: number) => update(i, { conditions: (branches[i].conditions ?? []).filter((_, cidx) => cidx !== ci) });
 

@@ -493,32 +493,62 @@ export function WorkflowCanvas({
           toast.warning("Pi's plan needed a fix", { description: err.detail });
         }
       }
+      // Focus intent — Pi called `focus_node` to spotlight a node without
+      // mutating it. Do this BEFORE the graph-mutation branch so a focus
+      // call in a mixed batch still lands even when no nodes changed.
+      const focusCall = toolCalls.find((t) => t.name === "focus_node");
+      const zoomToNode = (id: string, graphNodes: typeof nodes) => {
+        const target = graphNodes.find((n) => n.id === id);
+        if (!target) return;
+        setSelected({ id: target.id, data: target.data as WorkflowNodeData });
+        // Center + zoom in on the node so the user's eye follows Pi.
+        // Two rAFs so ReactFlow finishes any pending measure pass first.
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            try {
+              rfRef.current?.setCenter(target.position.x + 120, target.position.y + 40, { duration: 400, zoom: 1 });
+            } catch { /* ignore — canvas not ready */ }
+          });
+        });
+      };
       // Heals are auto-coercions (bezier edge type, LTR position, etc.) —
       // the graph mutation still lands, just with the corrected values.
       // Skipped from toasts for now; visible in devtools if needed.
-      if (!next.changed) return;
+      if (!next.changed) {
+        // Pure focus turn (no graph change). Fire the focus behaviour
+        // against the CURRENT nodes and exit — no relayout, no dirty.
+        if (focusCall) {
+          try {
+            const args = JSON.parse(focusCall.args) as { nodeId?: string };
+            if (args.nodeId) zoomToNode(args.nodeId, nodes);
+          } catch { /* ignore */ }
+        }
+        return;
+      }
       setNodes(next.nodes);
       setEdges(next.edges);
       // Focus behaviour during Pi-driven edits:
-      //   - If Pi's batch was a single update_node (Phase 2 config assist),
-      //     auto-select that node so the config panel opens on it and the
-      //     canvas visually spotlights it via focusNodeId.
+      //   - `focus_node` in the batch → select + zoom that node (wins over update_node).
+      //   - Otherwise, single-update_node → select the updated node (Phase 2 config assist).
       //   - Otherwise (batch inserts / connects / mixed), clear selection.
-      const updateOnly = toolCalls.filter((t) => t.name === "update_node");
-      const isSingleUpdate = updateOnly.length === 1 && toolCalls.every((t) => t.name === "update_node" || t.name === "propose_draft" || t.name === "emit_choice");
-      if (isSingleUpdate) {
+      if (focusCall) {
         try {
-          const args = JSON.parse(updateOnly[0].args) as { nodeId?: string };
-          const targetId = args.nodeId;
-          const target = next.nodes.find((n) => n.id === targetId);
-          if (target) {
-            setSelected({ id: target.id, data: target.data as WorkflowNodeData });
-          } else {
-            setSelected(null);
-          }
+          const args = JSON.parse(focusCall.args) as { nodeId?: string };
+          if (args.nodeId) zoomToNode(args.nodeId, next.nodes);
         } catch { setSelected(null); }
       } else {
-        setSelected(null);
+        const updateOnly = toolCalls.filter((t) => t.name === "update_node");
+        const isSingleUpdate = updateOnly.length === 1 && toolCalls.every((t) => t.name === "update_node" || t.name === "propose_draft" || t.name === "emit_choice");
+        if (isSingleUpdate) {
+          try {
+            const args = JSON.parse(updateOnly[0].args) as { nodeId?: string };
+            const targetId = args.nodeId;
+            if (targetId) zoomToNode(targetId, next.nodes);
+            else setSelected(null);
+          } catch { setSelected(null); }
+        } else {
+          setSelected(null);
+        }
       }
       onDirty?.();
       // Fire ELK relayout so Pi's new nodes land cleanly aligned — same

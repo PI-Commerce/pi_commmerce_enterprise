@@ -21,7 +21,8 @@
  *     `node-validity.ts` for legacy call-sites (pi-canvas-apply insert /
  *     update handlers). It's a strict subset of `validateNode`.
  */
-import type { NodeKind, PresetConfig, PresetTransform } from "@/lib/campaign-types";
+import type { NodeKind, PresetConfig, PresetTransform, PresetBranch } from "@/lib/campaign-types";
+import { branchConditions } from "@/lib/campaign-types";
 import type { FreeformWorkflowRow, FreeformNodeRecord } from "@/lib/freeform-types";
 import { resolveWaTemplate, isBranchableButton } from "@/lib/wa-outputs";
 import { resolveSmsTemplate } from "@/lib/sms-store";
@@ -144,12 +145,39 @@ function validateAudience(config?: PresetConfig): NodeValidity {
   return { valid: true };
 }
 
-/** Conditional: at least one branch. The panel treats any branches array
- *  with entries as valid (`mark(true)` unconditionally after seeding). */
+/**
+ * Conditional: at least one branch, and each branch must have at least
+ * one FULLY-FILLED condition (variable + op set, value set unless the op
+ * is valueless, value2 set for range operators). ConfigPanel's own
+ * `mark(true)` on every mutation is too optimistic — a branch with a
+ * label and an empty "+ Add condition" shows as valid there. Ours is
+ * strict so Pi cites the truth.
+ */
+const VALUELESS_OPS = new Set(["exists", "does not exist"]);
+const RANGE_OPS = new Set(["between", "not between"]);
+
 function validateConditional(config?: PresetConfig): NodeValidity {
-  const branches = (config?.branches ?? []) as unknown[];
+  const branches = (config?.branches ?? []) as PresetBranch[];
   if (!Array.isArray(branches) || branches.length === 0) {
     return { valid: false, error: "Add at least one branch" };
+  }
+  for (let i = 0; i < branches.length; i++) {
+    const b = branches[i];
+    const label = b.label?.trim() || `Branch ${i + 1}`;
+    const conds = branchConditions(b);
+    if (conds.length === 0) {
+      return { valid: false, error: `Branch '${label}' has no condition` };
+    }
+    for (let ci = 0; ci < conds.length; ci++) {
+      const c = conds[ci];
+      if (!c.variable?.trim()) return { valid: false, error: `Branch '${label}': pick a variable for condition #${ci + 1}` };
+      if (!c.op?.trim()) return { valid: false, error: `Branch '${label}': pick an operator for condition #${ci + 1}` };
+      if (VALUELESS_OPS.has(c.op)) continue;
+      if (!c.value?.trim()) return { valid: false, error: `Branch '${label}': set a value for condition #${ci + 1}` };
+      if (RANGE_OPS.has(c.op) && !c.value2?.trim()) {
+        return { valid: false, error: `Branch '${label}': set the upper bound for condition #${ci + 1}` };
+      }
+    }
   }
   return { valid: true };
 }

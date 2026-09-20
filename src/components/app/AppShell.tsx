@@ -1,7 +1,6 @@
 import { AppSidebar } from "./AppSidebar";
 import { AskPiDock } from "./AskPiDock";
 import { PiScreenContextRoot } from "@/lib/pi-screen-context";
-import { PiSurfaceProvider } from "@/lib/pi-screen-actions";
 import { cn } from "@/lib/utils";
 
 export function AppShell({
@@ -16,17 +15,18 @@ export function AppShell({
 }) {
   return (
     <PiScreenContextRoot>
-      <PiSurfaceProvider>
-        <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground">
-          <AppSidebar />
-          <div className="relative flex min-w-0 flex-1 flex-col">
-            <main className={cn("relative flex-1 overflow-y-auto", !bare && "px-8 py-6")}>{children}</main>
-            {/* I2 — omnipresent, route-aware Ask Pi. Anchored to the content area (not the
-                sidebar); the full-screen builder mounts its own canvas composer instead. */}
-            <AskPiDock />
-          </div>
+      {/* PiSurfaceProvider lives in __root.tsx — pages call
+          usePublishSurface from OUTSIDE this AppShell subtree, so the
+          provider has to be higher in the tree than any page component. */}
+      <div className="flex h-screen w-screen overflow-hidden bg-background text-foreground">
+        <AppSidebar />
+        <div className="relative flex min-w-0 flex-1 flex-col">
+          <main className={cn("relative flex-1 overflow-y-auto", !bare && "px-8 py-6")}>{children}</main>
+          {/* I2 — omnipresent, route-aware Ask Pi. Anchored to the content area (not the
+              sidebar); the full-screen builder mounts its own canvas composer instead. */}
+          <AskPiDock />
         </div>
-      </PiSurfaceProvider>
+      </div>
     </PiScreenContextRoot>
   );
 }

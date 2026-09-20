@@ -451,6 +451,21 @@ const TOOL_DEFS = {
     {
       type: "function",
       function: {
+        name: "focus_node",
+        description:
+          "Spotlight a node on the canvas without mutating it. Use whenever you say 'now on node X' / 'let's fix X next' / 'looking at conditional_1' so the user's canvas selects that node and opens its config panel. Fire this BEFORE talking about a node so the user sees what you're referring to. Pure UI intent — no state change.",
+        parameters: {
+          type: "object",
+          properties: {
+            nodeId: { type: "string", description: "The node id from the current DSL (e.g. `whatsapp_1`)." },
+          },
+          required: ["nodeId"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
         name: "update_node",
         description:
           "Patch one existing node's title / subtitle / config. Works on every node in the current campaign, including the pre-existing undeletable ones (`start`, `audience`, `end`). Use this to add fields to the Audience schema, pick a template on a WhatsApp node, pick an agent on a Voice Call node, set a Delay's duration, configure Conditional branches, etc. Never use it to change a node's `kind` — insert a new node of the correct kind and reconnect edges instead. `patch.config` is shallow-merged onto the existing config, so pass only the keys that change.",
@@ -565,6 +580,8 @@ async function runTool(name: string, args: Record<string, unknown>, surfaceId?: 
       case "emit_choice":
         // Client-only tools. Never need D1.
         return { ok: true, awaiting_user: true };
+      case "focus_node":
+        return { ok: true, ui: true, focused: args.nodeId as string };
       case "classify_brief":
       case "suggest_skeleton":
       case "suggest_next_step":
@@ -698,6 +715,10 @@ async function runToolInner(name: string, args: Record<string, unknown>): Promis
     }
     case "emit_choice":
       return emitChoice(args as Parameters<typeof emitChoice>[0]);
+    case "focus_node":
+      // Pure UI intent — the client picks it up from `toolCalls` and
+      // selects the node + centers the viewport. Server no-op.
+      return { ok: true, ui: true, focused: args.nodeId as string };
     default:
       return { error: `unknown tool: ${name}` };
   }
@@ -786,14 +807,25 @@ Phase 1 ends here. If the user picks "I'll do it myself", stop. Do NOT auto-star
 
 ### Phase 2 — Config assist (optional, only if user opts in)
 
-If the user picked "Help me configure" or explicitly asks for help with a specific node, Pi walks nodes ONE AT A TIME. The chat message that mentions a node id is what the client uses to focus the canvas on that node.
+If the user picked "Help me configure" or explicitly asks for help with a specific node, Pi walks nodes ONE AT A TIME. Feel like a checklist, not a monologue.
 
 For each config walk-through:
 1. \`suggest_next_step\` — get the ordered list of nodes needing config.
-2. Pick the first one. Announce which node ("Now configuring: **Voice Call** (voiceCall_1). It needs a voice agent.") — the node id MUST appear in the message so the canvas can focus.
-3. For asset picks: \`find_relevant_assets(kind, industry, usecase)\` first, then \`emit_choice\` with the 3-5 shortlisted options.
-4. User picks → \`update_node\` with the full valid config for THAT kind (see Config shape spec below).
-5. Ask "Continue to the next node?" via \`emit_choice\` (chips: "Yes, continue" / "I'll finish the rest myself"). Only advance if the user says yes.
+2. **First**, call \`focus_node(nodeId)\` for the node you're about to work on. This selects it on the canvas and opens its config panel for the user. Do this BEFORE saying anything about the node.
+3. Announce it in ONE crisp line, including a progress ticker: "**2 of 5 · \`voiceCall_1\`** (Voice Call) needs a voice agent."
+4. **Auto-apply obvious defaults, then report.** Don't ask about no-brainers:
+   - A/B Split with no variants set → \`update_node\` with 50/50 (\`{ splitVariants: [{ id: "vA", label: "A", pct: 50 }, { id: "vB", label: "B", pct: 50 }] }\`), then say "Set A/B to 50/50. Continue?" via emit_choice.
+   - Delay in fixed mode with no duration → \`update_node\` with 24 hours, then say "Set delay to 24h. Continue?".
+   - Conditional with default seed branches (\`bA\`/\`bB\` still empty) → propose defaults matching the campaign brief, then ask "keep as-is or change?" via emit_choice.
+5. For real decisions (asset picks): \`find_relevant_assets(kind, industry, usecase)\` first, then \`emit_choice\` with the 3-5 shortlisted options — ALWAYS include a "Skip this one" chip so the user can defer.
+6. User picks → \`update_node\` with the full valid config for THAT kind (see Config shape spec below).
+7. After a node lands valid, immediately \`focus_node\` the next needed one and repeat. Include the ticker.
+8. When there's nothing left needing config, stop. Say "All nodes configured. Ready to publish." One line.
+
+Phase 2 rules:
+- ONE node per turn. ONE ask per turn.
+- Skip node = the user's choice. When they say "skip", "leave it", "I'll do this later" — move to the next needed node without editing this one.
+- Dead-ends (no asset available) — say the one line + deep-link path ("No WhatsApp numbers connected. Wire one at Channels > WhatsApp, then say resume."), then STOP. Do not repeat on later turns.
 
 Phase 2 is opt-in per node. Never auto-run through all nodes.
 
