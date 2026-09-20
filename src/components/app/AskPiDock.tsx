@@ -342,7 +342,12 @@ export function AskPiDock() {
     // already inside the builder reading the freshly-updated record; don't
     // pop a result card at them. Clear the shared signal too so the
     // builder-local overlay dismisses.
-    if (drafting) {
+    if (agentFlow) {
+      // Use the LOCAL `agentFlow` variable, not the React `drafting`
+      // state — setDrafting({...}) above is async so `drafting` at this
+      // closure is still the pre-submit value (null) and would fall
+      // through to setState("result"), popping the canned ctx.result
+      // card over the builder.
       setDrafting(null);
       setPiAgentWork(null);
       return;

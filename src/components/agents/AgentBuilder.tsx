@@ -11,7 +11,7 @@ import { TOOLS } from "@/lib/tool-registry";
 import { renderMarkdown } from "@/lib/markdown";
 import { saveAgent, usePiAgentWork } from "@/lib/agent-store";
 import type { AgentType, AgentRecord, PostCallVar } from "@/lib/agent-data";
-import { PiDraftingOverlay, PiDraftingShimmer } from "./PiDraftingOverlay";
+import { PiDraftingShimmer } from "./PiDraftingOverlay";
 
 const DEFAULT_EVAL_PROMPT =
   "Review the full transcript and extract the following variables. Answer concisely, staying strictly within the definition of each variable. If a value can't be determined, respond with `unknown`.";
@@ -91,9 +91,10 @@ export function AgentBuilder({
   const piWork = usePiAgentWork();
   const piEditing =
     !piDrafting && !!record && piWork?.id === record.id && piWork.verb === "updating";
+  // Drives the shimmer strip on prompt + KB when Pi is drafting an empty
+  // shell OR editing a live record. The bottom pill itself is rendered by
+  // the global AskPiDock's PiDraftingPill, so no local overlay here.
   const overlayVisible = piDrafting || piEditing;
-  const overlayVerb: "drafting" | "updating" = piEditing ? "updating" : "drafting";
-  const overlayStartedAt = piWork?.id === record?.id ? piWork.startedAt : undefined;
 
   // While Pi is drafting into an empty shell, force edit-mode on the
   // prompt/KB textareas so the shimmer overlay is visible. Once content
@@ -206,17 +207,10 @@ export function AgentBuilder({
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground">
-      {/* Pi drafting bubble — builder page has no AppShell, so the global
-          AskPiDock (and its PiDraftingPill) doesn't render here. Mount a
-          builder-local version in the same middle-bottom slot so the
-          "Pi is working" cue is present on every surface that expects it. */}
-      {overlayVisible && (
-        <PiDraftingOverlay
-          label={name.trim() || undefined}
-          verb={overlayVerb}
-          startedAt={overlayStartedAt}
-        />
-      )}
+      {/* No local Pi bubble here — the global AskPiDock (hoisted to
+          __root) renders the PiDraftingPill in the same middle-bottom
+          slot for both draft AND edit flows. A second overlay here
+          caused two stacked pills. */}
       {/* Header */}
       <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-border bg-background/90 px-3 backdrop-blur-xl">
         <div className="flex min-w-0 items-center gap-2">
