@@ -33,6 +33,7 @@ import type {
   BroadcastStatus,
 } from "@/lib/broadcasts-seed";
 import { listBroadcastsFn, saveBroadcastFn } from "@/lib/server-fns/broadcasts";
+import { usePublishSurface } from "@/lib/pi-screen-actions";
 import { Phone as PhoneIcon, Building2, Radio } from "lucide-react";
 
 export const Route = createFileRoute("/broadcasts")({
@@ -110,6 +111,29 @@ function BroadcastsPage() {
     })();
     return () => { alive = false; };
   }, []);
+
+  // Ask Pi surface — Pi can open the Create modal with the user's ask
+  // prefilled (channel + template + name + schedule window). Once the
+  // modal is open the user finishes the send; Pi doesn't drive the modal.
+  usePublishSurface({
+    surfaceId: "broadcasts.list",
+    handlers: {
+      open_new_broadcast: (args: Record<string, unknown>) => {
+        const ch = typeof args.channel === "string" && (["whatsapp", "sms", "rcs"] as const).includes(args.channel as Channel)
+          ? (args.channel as Channel)
+          : undefined;
+        const templateId = typeof args.template_id === "string" ? args.template_id : undefined;
+        // Prefill the modal via the same state the ?channel/?templateId
+        // deep-link path uses. Name / dates plumb through when the modal
+        // reads `prefill` on open (best-effort, unspecified fields skipped).
+        setPrefill({ ...(ch ? { channel: ch } : {}), ...(templateId ? { templateId } : {}) });
+        setCreateOpen(true);
+        toast.message("Create broadcast opened", {
+          description: [ch && CHANNEL_LABEL[ch], templateId && `template: ${templateId}`].filter(Boolean).join(" · ") || "Fill in the details.",
+        });
+      },
+    },
+  });
 
   const filtered = rows.filter((r) => {
     if (fChannel !== "all" && r.channel !== fChannel) return false;

@@ -23,6 +23,11 @@ import * as analytics from "@/lib/db/analytics";
 import * as agentsDb from "@/lib/db/agents";
 import type { AgentRecord } from "@/lib/agent-data";
 import { assembleBuilderContext } from "@/lib/server-fns/builder-context";
+import {
+  ALL_SCREEN_TOOLS,
+  executeScreenTool,
+  screenToolsForSurface,
+} from "@/lib/server-fns/pi-screen-tools";
 import { BUILDER_ALLOWED_KINDS } from "@/lib/node-registry";
 import {
   classifyBrief,
@@ -534,7 +539,14 @@ const TOOL_DEFS = {
   ],
 } as const;
 
-async function runTool(name: string, args: Record<string, unknown>): Promise<unknown> {
+async function runTool(name: string, args: Record<string, unknown>, surfaceId?: string): Promise<unknown> {
+  // Screen tools take priority — they're routed by surfaceId and most are
+  // UI-only intents whose real work happens client-side (see
+  // `pi-screen-tools.ts`). The one exception is `check_csv_fit`, which
+  // reads CSV_LIBRARY + a campaign's Audience schema server-side.
+  if (ALL_SCREEN_TOOLS.some((t) => t.function.name === name)) {
+    return await executeScreenTool(name, args, surfaceId);
+  }
   // D1 availability check — mutation tools no-op successfully when D1 isn't
   // bound (the client-side applyPiToolCallsToGraph still updates the canvas
   // from the tool_call args, so the user sees the graph change; only the
@@ -692,6 +704,59 @@ async function runToolInner(name: string, args: Record<string, unknown>): Promis
 }
 
 const SYSTEM_ANALYTICS = `You are Pi, the analytics copilot for a marketing automation platform. Answer the user's question using the analytics tools available to you. Never make up numbers — always call a tool. Reply in plain, direct language. Include the exact numbers you observed. If the tools can't answer the question, say so briefly.`;
+
+/**
+ * Per-surface addendum appended to SYSTEM_ANALYTICS when the client has
+ * published a surfaceId that exposes screen tools (list filters, run
+ * actions, "open the create-broadcast modal", CSV fitness check).
+ *
+ * The goal is Pi calls the tool INSTEAD of writing a paragraph. e.g. on
+ * the Runs tab, "pause the soundbox run" should dispatch `run_action`
+ * with the resolved run id — not just say "You can pause it from the row
+ * menu."
+ */
+function buildScreenToolsSystemAddendum(surfaceId: string): string {
+  const surfaceRules: Record<string, string> = {
+    "campaigns.workflows": `
+
+## You are on the Campaigns list (Workflows tab)
+
+You can directly manipulate the list. When the user asks to narrow, sort, or search:
+- 'show me only drafts' / 'hide the drafts' → call \`list_filter_status\` with the matching status. Use \`all\` to clear.
+- 'find <keyword>' / 'search for insurance' / 'campaigns about renewals' → call \`list_search\` with the substring.
+- 'sort by name' / 'oldest first' / 'newest edits on top' → call \`list_sort\` with the field.
+Call the tool; do NOT describe what the user could do manually. Explicit ask beats implicit ask — if the request is ambiguous, ask one clarifier, then act.`,
+
+    "campaigns.runs": `
+
+## You are on the Runs tab
+
+You can directly manipulate the runs list AND take row actions:
+- Filter by status / run type → \`runs_filter\`. Only one of \`status\` / \`run_type\` is required per call.
+- Search by run id or campaign name → \`runs_search\`.
+- Pause / resume / terminate a specific run → \`run_action\`. NEVER guess the run id. If the user names a campaign but not the run id, first read \`latest_runs\` or ask which run row (there can be several per campaign) before acting.
+Destructive actions (\`terminate\`) — say the run id + action back in one sentence so the user has a clear undo target.`,
+
+    "campaigns.data": `
+
+## You are on the Data tab (CSV library)
+
+Your job here is fitness checks between a CSV in the library and a campaign's Audience schema. When the user asks 'can this file run <campaign>?' or 'what's missing from the <name> file for <campaign>?':
+- Call \`check_csv_fit\` with what the user named (csv_name substring + campaign_name substring).
+- Read the returned diff. Reply with: fits (yes/no), missing required fields (list them), phone-field status. Do NOT dump the whole raw payload. Two sentences max.
+- If csv_name or campaign_name is missing from the user's ask, call the tool with just the one they named — the response carries the list of candidates for the missing side; pick or ask.`,
+
+    "broadcasts.list": `
+
+## You are on the Broadcasts surface
+
+Your one job here is opening the "Create broadcast" modal with the channel (and template, if they named one) prefilled. When the user says 'I want to send a WhatsApp broadcast' or 'send an SMS to gold tier':
+- Call \`open_new_broadcast\` with the channel they named. If they named a specific template you can see in \`assets.waTemplates\` / \`assets.smsTemplates\` / \`assets.rcsTemplates\`, include \`template_id\`; otherwise leave it off.
+- Broadcasts execute immediately (no schedule window in v1). If the user mentioned a date, acknowledge you noted it but the modal fires the send when they submit.
+- Once the modal is open, YOU DO NOT continue. Say one short line ("Opened the create modal, WhatsApp preselected") and stop. The user completes the send from the modal.`,
+  };
+  return surfaceRules[surfaceId] ?? "";
+}
 
 const SYSTEM_BUILDER = `You are Pi (Paytm Intelligence), the campaign workflow builder for a marketing automation platform. In chat replies speak in the first person naturally ("I'll wire the Voice Call after the WhatsApp timeout branch", "let me know which agent", "I found these agents"). Do NOT refer to yourself as "Pi" in the third person inside chat replies — that reads stilted. The word "Pi" only appears in the standalone loading / thinking states, which are handled by the UI, not by you. English only.
 
@@ -1043,14 +1108,29 @@ export const askPi = createServerFn({ method: "POST" })
       return { ok: false, error: `runtime_env_missing: ${(e as Error).message}` };
     }
 
+    // Analytics-scope surfaces (`/campaigns`, `/broadcasts`, `/campaigns/$id`
+    // list-context, etc.) can each expose a handful of UI-mutation tools that
+    // manipulate the page the user is currently on (set a filter, open a
+    // modal). The client passes `surfaceId` on `context`; the server merges
+    // only the tools that map to that surface into the analytics tool set,
+    // and adds a system-prompt addendum so Pi knows they're callable and
+    // when to use each. Builder / Agents scopes intentionally get no screen
+    // tools — those surfaces have their own tool grammars.
+    const surfaceId = typeof data.context?.surfaceId === "string"
+      ? (data.context.surfaceId as string)
+      : undefined;
+
+    const screenTools = data.scope === "analytics" ? screenToolsForSurface(surfaceId) : [];
+    const screenAddendum = screenTools.length ? buildScreenToolsSystemAddendum(surfaceId!) : "";
+
     const systemContent =
       data.scope === "builder" ? SYSTEM_BUILDER
       : data.scope === "agents" ? SYSTEM_AGENTS
-      : SYSTEM_ANALYTICS;
+      : SYSTEM_ANALYTICS + screenAddendum;
     const scopeTools =
       data.scope === "builder" ? [...TOOL_DEFS.analytics, ...TOOL_DEFS.builder]
       : data.scope === "agents"  ? [...TOOL_DEFS.analytics, ...TOOL_DEFS.agents]
-      : [...TOOL_DEFS.analytics];
+      : [...TOOL_DEFS.analytics, ...screenTools];
 
     // Builder scope: enrich context with the current DSL, canonical construct
     // rules, node registry, and asset catalogs so Pi reads real state on EVERY
@@ -1112,6 +1192,7 @@ export const askPi = createServerFn({ method: "POST" })
         history: data.history,
         context: enrichedContext,
         thinkingBudget: env.ANTHROPIC_THINKING_BUDGET ? Number(env.ANTHROPIC_THINKING_BUDGET) : undefined,
+        surfaceId,
       });
       // Attach the builder diagnostic to a successful response so the client
       // console can show which catalogs were empty and why. Non-invasive.
@@ -1133,6 +1214,7 @@ export const askPi = createServerFn({ method: "POST" })
       question: data.question,
       history: data.history,
       context: enrichedContext,
+      surfaceId,
     });
     if (r.ok && builderDiag) return { ...r, diag: builderDiag };
     return r;
@@ -1152,6 +1234,8 @@ type LoopInput = {
   context?: Record<string, unknown>;
   /** Extended thinking budget in tokens (Anthropic path only). */
   thinkingBudget?: number;
+  /** Current UI surface (e.g. `campaigns.runs`) — routes screen-tool exec. */
+  surfaceId?: string;
 };
 
 /**
@@ -1259,7 +1343,7 @@ async function runAnthropicLoop(
     // single user message with N tool_result blocks.
     const resultBlocks: AnthropicBlock[] = [];
     for (const tu of toolUses) {
-      const result = await runTool(tu.name, tu.input ?? {});
+      const result = await runTool(tu.name, tu.input ?? {}, input.surfaceId);
       const resultStr = JSON.stringify(result);
       toolCalls.push({
         name: tu.name,
@@ -1332,7 +1416,7 @@ async function runTfyLoop(
       let args: Record<string, unknown> = {};
       try { args = JSON.parse(tc.function.arguments) as Record<string, unknown>; }
       catch { /* keep as {} */ }
-      const result = await runTool(tc.function.name, args);
+      const result = await runTool(tc.function.name, args, input.surfaceId);
       toolCalls.push({
         name: tc.function.name,
         args: JSON.stringify(args),

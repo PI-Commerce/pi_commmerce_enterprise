@@ -172,9 +172,9 @@ const ROUTES: { match: (p: string) => boolean; ctx: PiContext }[] = [
     ctx: {
       scope: "Broadcasts",
       scopeMode: "analytics",
-      systemHint: "The user is on the Broadcasts surface (one-off template blasts). Help them pick a template, size the audience, and time the send. Use read_campaign to check what templates each vertical uses.",
-      placeholder: "Ask Pi to schedule, size, or design a broadcast…",
-      chips: ["Best time to send a WhatsApp broadcast", "Size the audience for a renewal blast", "Draft a Diwali offer broadcast"],
+      systemHint: "The user is on the Broadcasts surface (one-off template blasts). One job here: open the Create Broadcast modal with the user's ask prefilled (channel + template + name + schedule). Once opened, stop — the user completes the send from the modal.",
+      placeholder: "Ask Pi to open a new broadcast…",
+      chips: ["Send a WhatsApp broadcast", "Open an SMS broadcast for tomorrow", "Draft a Diwali RCS broadcast"],
       thinking: ["Reading approved templates…", "Estimating audience size…", "Drafting the send plan…"],
       result: {
         text: "For a WhatsApp renewal blast to lapsed Insurance customers, aim for Tue-Thu 11am IST — that window historically opens 34% higher than weekends. Estimated audience: 8.4k contacts.",
@@ -243,9 +243,9 @@ const ROUTES: { match: (p: string) => boolean; ctx: PiContext }[] = [
     ctx: {
       scope: "Campaigns",
       scopeMode: "analytics",
-      systemHint: "The user is on the Campaigns list. Answer with list_campaigns and latest_runs; recommend opening a specific campaign when relevant.",
-      placeholder: "Ask Pi to build, find, or compare campaigns…",
-      chips: ["Create an onboarding campaign", "Which campaign converts best?", "Compare WhatsApp vs Voice"],
+      systemHint: "The user is on the Campaigns list (Workflows / Runs / Data tabs). Directly drive the list: filter by status, search by name, sort. On Runs, take row actions (pause / resume / terminate) when the user names both the run and the action. On Data, run CSV fitness checks against a campaign's Audience schema.",
+      placeholder: "Ask Pi to filter, search, sort, or fit-check a CSV…",
+      chips: ["Show only drafts", "Find insurance campaigns", "Sort by newest edits"],
       thinking: ["Reading your campaign list…", "Reviewing recent runs…", "Drafting the proposal…"],
       result: {
         text: "I drafted a 4-step onboarding journey for new traders with no first deposit in 48h. Review the proposed graph before publishing.",

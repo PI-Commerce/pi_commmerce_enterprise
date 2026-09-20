@@ -34,6 +34,7 @@ import { downloadCsv } from "@/lib/analytics-leads";
 import { listRunStatusesFn, updateRunStatusFn } from "@/lib/server-fns/runs";
 import { listCampaignsFn, createBlankCampaignFn } from "@/lib/server-fns/campaigns";
 import type { CampaignVertical } from "@/lib/db/campaigns";
+import { usePublishSurface, type SurfaceRegistration } from "@/lib/pi-screen-actions";
 
 
 export const Route = createFileRoute("/campaigns/")({
@@ -295,6 +296,76 @@ function CampaignList() {
   type SortKey = "name" | "state" | "lastEdited" | "lastRun" | "createdAt";
   const [sortKey, setSortKey] = useState<SortKey>("lastEdited");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+
+  // Ask Pi surface registration — publishes different tools per tab so
+  // Pi's system prompt + tool list narrow to what the user can actually
+  // do on THIS pane. Handler bodies close over the LIVE state setters;
+  // the bus keeps a ref so re-renders don't churn the registration.
+  const CAMPAIGN_STATUSES: Array<"all" | CampaignStatus> = ["all", "draft", "ready", "running", "paused", "locked"];
+  const RUN_STATUSES_ALL: Array<"all" | RunStatus> = ["all", ...RUN_STATUSES];
+  const RUN_TYPES_ALL: Array<"all" | RunType> = ["all", "one-time", "recurring"];
+  const surfaceReg: SurfaceRegistration | null =
+    tab === "campaigns"
+      ? {
+          surfaceId: "campaigns.workflows",
+          handlers: {
+            list_filter_status: (args: Record<string, unknown>) => {
+              const s = String(args.status ?? "all");
+              if ((CAMPAIGN_STATUSES as string[]).includes(s)) setFState(s as "all" | CampaignStatus);
+            },
+            list_search: (args: Record<string, unknown>) => setQuery(String(args.query ?? "")),
+            list_sort: (args: Record<string, unknown>) => {
+              const field = String(args.field ?? "") as SortKey;
+              if (!["name", "state", "lastEdited", "lastRun", "createdAt"].includes(field)) return;
+              setSortKey(field);
+              const dir = args.direction === "asc" || args.direction === "desc"
+                ? (args.direction as "asc" | "desc")
+                : field === "name" || field === "state" ? "asc" : "desc";
+              setSortDir(dir);
+            },
+          },
+        }
+      : tab === "runs"
+        ? {
+            surfaceId: "campaigns.runs",
+            handlers: {
+              runs_filter: (args: Record<string, unknown>) => {
+                if (typeof args.status === "string" && (RUN_STATUSES_ALL as string[]).includes(args.status)) {
+                  setRStatus(args.status as "all" | RunStatus);
+                }
+                if (typeof args.run_type === "string" && (RUN_TYPES_ALL as string[]).includes(args.run_type)) {
+                  setRType(args.run_type as "all" | RunType);
+                }
+              },
+              runs_search: (args: Record<string, unknown>) => setRQuery(String(args.query ?? "")),
+              run_action: (args: Record<string, unknown>) => {
+                const id = String(args.run_id ?? "").trim();
+                const action = String(args.action ?? "").trim();
+                if (!id) return;
+                const nextStatus: RunStatus | null =
+                  action === "pause" ? "paused"
+                  : action === "resume" ? "running"
+                  : action === "terminate" ? "terminated"
+                  : null;
+                if (!nextStatus) return;
+                changeRunStatus(id, nextStatus);
+                toast.success(`Pi ${action === "terminate" ? "terminated" : action + "d"} ${id}`, {
+                  description: nextStatus === "terminated" ? "Run stopped and marked terminated." : `Run is now ${nextStatus}.`,
+                });
+              },
+            },
+          }
+        : tab === "data"
+          ? {
+              // check_csv_fit runs entirely server-side, so no client
+              // handlers — but the surfaceId still needs to be published
+              // so pi-llm.ts exposes the tool for this turn.
+              surfaceId: "campaigns.data",
+              handlers: {},
+            }
+          : null;
+  usePublishSurface(surfaceReg);
+
   const toggleSort = (k: SortKey) => {
     if (sortKey === k) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     else { setSortKey(k); setSortDir(k === "name" || k === "state" ? "asc" : "desc"); }

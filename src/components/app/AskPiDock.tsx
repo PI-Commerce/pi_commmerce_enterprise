@@ -4,6 +4,7 @@ import { getPiContext } from "@/lib/ask-pi-context";
 import { askPi } from "@/lib/server-fns/pi-llm";
 import { refreshAgentsFromDb } from "@/lib/agent-store";
 import { usePiScreenContext } from "@/lib/pi-screen-context";
+import { usePiSurface, dispatchScreenToolCalls } from "@/lib/pi-screen-actions";
 import { AnalyticsChat } from "@/components/analytics/AnalyticsChat";
 import {
   PiPill,
@@ -64,6 +65,10 @@ export function AskPiDock() {
   // the single-shot proposal card path.
   const isAnalyticsSurface = pathname === "/analytics";
   const screenCtx = usePiScreenContext();
+  // Surface published by the current page — carries the surfaceId (so the
+  // server exposes the right screen tools) and the handler map the dock
+  // dispatches to when Pi's response includes screen-tool calls.
+  const surface = usePiSurface();
 
   // Shared horizontal drag (same behaviour + remembered position as the canvas composer).
   const { dragX, pillHandlers, suppressClick } = usePiDrag(wrapRef);
@@ -122,7 +127,15 @@ export function AskPiDock() {
         data: {
           scope: serverScope,
           question: query,
-          context: { pathname, surface: ctx.scope, systemHint: ctx.systemHint },
+          context: {
+            pathname,
+            surface: ctx.scope,
+            systemHint: ctx.systemHint,
+            // The page's published surfaceId (if any) tells the server
+            // which screen-tool subset to expose for this turn. Undefined
+            // on surfaces without any UI-mutation tools registered.
+            surfaceId: surface?.surfaceId,
+          },
         },
       });
       if (r.ok && r.answer.trim().length > 0) {
@@ -134,6 +147,14 @@ export function AskPiDock() {
       if (r.ok && ctx.scopeMode === "agents") {
         const mutated = r.toolCalls?.some((tc) => tc.name === "save_agent");
         if (mutated) void refreshAgentsFromDb();
+      }
+      // Screen-tool dispatch — for any tool call Pi made whose name is
+      // registered by the current surface (list filter, sort, run action,
+      // open-modal, …), fire the page-registered handler with the parsed
+      // args. Server-side execution was a no-op for these; the client is
+      // where the UI mutation actually happens.
+      if (r.ok && surface) {
+        dispatchScreenToolCalls(surface, r.toolCalls ?? []);
       }
       // If !ok we simply leave liveAnswer null and the result card shows ctx.result.
     } catch {
