@@ -14,7 +14,7 @@
  * the tools share the same buildWhere / D1 client / fixture module and
  * co-location keeps the fixture-vs-D1 fork obvious.
  */
-import { getEnv, getDb } from "@/lib/db/client";
+import { getDb } from "@/lib/db/client";
 import * as analytics from "@/lib/db/analytics";
 import * as campaigns from "@/lib/db/campaigns";
 import * as fx from "@/lib/server-fns/pi-analytics-fixtures";
@@ -147,34 +147,48 @@ async function toolCompareRuns(a: string, b: string) {
 
 /** Single-dispatch handler for every analytics tool. Kernel calls this
  *  once per tool_use block; emit_answer is intercepted by the kernel's
- *  `terminateOnToolCall` BEFORE reaching this function, so we never see it. */
+ *  `terminateOnToolCall` BEFORE reaching this function, so we never see it.
+ *
+ *  IMPORTANT: unconditionally routes through the FIXTURE derivations even
+ *  when D1 is bound. Rationale — the /analytics page's KPI cards read from
+ *  the CAMPAIGNS fixture scaled by days/30, not from D1. Pi's answers need
+ *  to match the top-of-screen headline the user reads first; running D1
+ *  COUNTs would report a third, unrelated number alongside the fixture-
+ *  scaled KPI panel (top) and the unrestricted D1 Logs table (bottom).
+ *
+ *  When the analytics page is migrated to read live D1 aggregates into its
+ *  KPI cards, flip this back to the `if (!hasDb) { fixture } else { d1 }`
+ *  fork — the D1 tool bodies below are kept live for that day.
+ */
 export async function runAnalyticsTool(name: string, args: Record<string, unknown>): Promise<unknown> {
-  const hasDb = (() => { try { return !!getEnv().DB; } catch { return false; } })();
-
-  // Local-dev path: no D1 bound. Read from the fixture data the /analytics
-  // page renders so Pi's answers match the UI even offline.
-  if (!hasDb) {
-    try {
-      switch (name) {
-        case "summary":         return fx.fxSummary(args as F);
-        case "time_series":     return fx.fxTimeSeries(args as Parameters<typeof fx.fxTimeSeries>[0]);
-        case "count_leads":     return { count: fx.fxCountLeads(args as F) };
-        case "status_breakdown":return fx.fxStatusBreakdown(args as F);
-        case "worst_dropoffs":  return fx.fxWorstDropoffs(args.runId as string, (args.limit as number) ?? 5);
-        case "compare_channels":return fx.fxCompareChannels(args as F);
-        case "compare_runs":    return fx.fxCompareRuns(args.runIdA as string, args.runIdB as string);
-        case "latest_runs":     return fx.fxLatestRuns((args.limit as number) ?? 10);
-        case "list_campaigns":  return fx.fxListCampaigns();
-        case "read_campaign":   return fx.fxReadCampaign(args.id as string);
-        case "voice_intent_distribution": return fx.fxVoiceIntentDistribution(args as F);
-        default:                return { error: `unknown_tool: ${name}` };
-      }
-    } catch (e) {
-      return { error: `fixture_tool_failed: ${(e as Error).message}` };
+  try {
+    switch (name) {
+      case "summary":         return fx.fxSummary(args as F);
+      case "time_series":     return fx.fxTimeSeries(args as Parameters<typeof fx.fxTimeSeries>[0]);
+      case "count_leads":     return { count: fx.fxCountLeads(args as F) };
+      case "status_breakdown":return fx.fxStatusBreakdown(args as F);
+      case "worst_dropoffs":  return fx.fxWorstDropoffs(args.runId as string, (args.limit as number) ?? 5);
+      case "compare_channels":return fx.fxCompareChannels(args as F);
+      case "compare_runs":    return fx.fxCompareRuns(args.runIdA as string, args.runIdB as string);
+      case "latest_runs":     return fx.fxLatestRuns((args.limit as number) ?? 10);
+      case "list_campaigns":  return fx.fxListCampaigns();
+      case "read_campaign":   return fx.fxReadCampaign(args.id as string);
+      case "voice_intent_distribution": return fx.fxVoiceIntentDistribution(args as F);
+      default:                return { error: `unknown_tool: ${name}` };
     }
+  } catch (e) {
+    return { error: `analytics_tool_failed: ${(e as Error).message}` };
   }
+}
 
-  // Prod path: D1 is bound.
+/* -------------------------------------------------------------------------- */
+/* D1-backed tool bodies — currently unused. Kept live so the day the         */
+/* analytics UI switches its KPI cards from fixtures to real D1 aggregates,   */
+/* the fork above can be flipped back without rewriting anything.             */
+/* -------------------------------------------------------------------------- */
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+async function _d1Dispatch(name: string, args: Record<string, unknown>): Promise<unknown> {
   try {
     switch (name) {
       case "summary":
