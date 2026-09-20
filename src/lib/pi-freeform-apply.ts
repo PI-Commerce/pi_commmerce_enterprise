@@ -19,6 +19,12 @@ import type {
 } from "@/lib/freeform-types";
 import { validateFreeformNode } from "@/lib/freeform-types";
 import type { PiToolCallLog } from "@/lib/pi-canvas-apply";
+import {
+  FREEFORM_OWNED_KINDS,
+  buildFreeformNodeConfig,
+  scanBranchingHandles,
+  type SeedScanEdge,
+} from "@/lib/pi-freeform-seed";
 
 /**
  * Expand a batched `insert_skeleton` server call into per-node
@@ -58,10 +64,28 @@ export function expandFreeformSkeletonCalls(
     const workflowId = args.workflowId;
     const nodes = args.skeleton?.nodes ?? [];
     const edges = args.skeleton?.edges ?? [];
+
+    // Pre-scan the skeleton's edges for wired handle ids (btn_b1..bN /
+    // row_r1..rN). buildFreeformNodeConfig seeds structural handles +
+    // "Option N" placeholders when Pi's per-node `config` omits them —
+    // same pipeline the server's insertFreeformSkeleton runs against
+    // D1. Without this, Pi's raw config (frequently missing rows on
+    // list nodes even when the brief was specific) would render as
+    // blank cards on the canvas while D1 held the fully-seeded state.
+    const handles = scanBranchingHandles(edges as SeedScanEdge[]);
+
     for (const n of nodes) {
+      const nodeId = (n?.id as string | undefined) ?? "";
+      const kind = (n?.kind as string | undefined) ?? "";
+      const needs = Array.isArray(n?.needs) ? (n.needs as string[]) : undefined;
+      const piConfig = n?.config as Record<string, unknown> | undefined;
+      const seededConfig = buildFreeformNodeConfig(nodeId, kind, needs, piConfig, handles);
+      const nWithConfig = seededConfig !== undefined
+        ? { ...n, config: seededConfig }
+        : n;
       out.push({
         name: "insert_node",
-        args: JSON.stringify({ workflowId, node: n }),
+        args: JSON.stringify({ workflowId, node: nWithConfig }),
         result: JSON.stringify({ ok: true, fromSkeleton: true }),
       });
     }
@@ -159,20 +183,11 @@ export function applyFreeformPiToolCallsToGraph(
 
         // Freeform-owned kinds render through the "freeform" node type
         // (FreeformNode). Shared logic kinds (apiToolCall, conditional)
-        // render through the campaign "workflow" node type. Matches
-        // the split the server tool uses when persisting.
-        const nodeType: string =
-          node.kind === "apiToolCall" || node.kind === "conditional"
-            ? "workflow"
-            : "freeform";
-
-        // Compute validity for freeform-owned kinds. Shared logic kinds
-        // are treated as always-valid here (their real validators live
-        // on the campaign side and run when the config panel opens).
-        const isFreeformKind =
-          node.kind === "text" || node.kind === "image" ||
-          node.kind === "video" || node.kind === "document" ||
-          node.kind === "list";
+        // render through the campaign "workflow" node type. Same split
+        // the server tool uses when persisting — driven by the shared
+        // FREEFORM_OWNED_KINDS set so both agree.
+        const isFreeformKind = FREEFORM_OWNED_KINDS.has(node.kind);
+        const nodeType: string = isFreeformKind ? "freeform" : "workflow";
         const validity = isFreeformKind
           ? validateFreeformNode(
               node.kind as FreeformNodeKind,
@@ -251,10 +266,7 @@ export function applyFreeformPiToolCallsToGraph(
           ? { ...(existingData.config ?? {}), ...patch.config }
           : existingData.config;
         const kind = existingData.kind ?? "";
-        const isFreeformKind =
-          kind === "text" || kind === "image" ||
-          kind === "video" || kind === "document" ||
-          kind === "list";
+        const isFreeformKind = FREEFORM_OWNED_KINDS.has(kind);
         const validity = isFreeformKind
           ? validateFreeformNode(
               kind as FreeformNodeKind,

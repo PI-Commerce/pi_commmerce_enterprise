@@ -32,6 +32,11 @@ import type {
   FreeformNodeRecord,
 } from "@/lib/freeform-types";
 import { FREEFORM_SERIAL_PREFIX, validateFreeformNode } from "@/lib/freeform-types";
+import {
+  buildFreeformNodeConfig,
+  scanBranchingHandles,
+  FREEFORM_OWNED_KINDS as SHARED_FREEFORM_OWNED_KINDS,
+} from "@/lib/pi-freeform-seed";
 
 /* -------------------------------------------------------------------------- */
 /* Skill: classify_brief                                                       */
@@ -219,18 +224,9 @@ export async function findRelevantFreeformTools(
 /* node in the shape (5-15 calls) and burns the max-rounds ceiling.           */
 /* -------------------------------------------------------------------------- */
 
-/** Kinds owned by the FreeformNode renderer (react-flow `type: "freeform"`)
- *  vs shared logic kinds owned by the campaign WorkflowNode (`type:
- *  "workflow"`). The set decides which validator + node type each
- *  skeleton node lands with. Getting this wrong = renderer treats the
- *  node as pending/pulsating forever (the bug that kept API pulsating). */
-const FREEFORM_OWNED_KINDS = new Set<string>([
-  "text",
-  "image",
-  "video",
-  "document",
-  "list",
-]);
+/** Local alias for the shared set — kept as the same name so the
+ *  existing insertFreeformSkeleton branch check reads as-is. */
+const FREEFORM_OWNED_KINDS = SHARED_FREEFORM_OWNED_KINDS;
 
 export type FreeformInsertSkeletonResult = {
   ok: true;
@@ -279,41 +275,25 @@ export async function insertFreeformSkeleton(
   // btn_b1 and btn_b2, we need to seed 2 quick-reply buttons on image_1
   // so those handles exist on the rendered node. Same for list rows.
   // Without this, the edges dangle and the node stays invalid.
-  const buttonIdsPerNode = new Map<string, Set<string>>();
-  const rowIdsPerNode = new Map<string, Set<string>>();
-  for (const e of skeleton.edges) {
-    const h = e.sourceHandle;
-    if (!h) continue;
-    if (h.startsWith("btn_")) {
-      const set = buttonIdsPerNode.get(e.source) ?? new Set<string>();
-      set.add(h.slice(4));
-      buttonIdsPerNode.set(e.source, set);
-    } else if (h.startsWith("row_")) {
-      const set = rowIdsPerNode.get(e.source) ?? new Set<string>();
-      set.add(h.slice(4));
-      rowIdsPerNode.set(e.source, set);
-    }
-  }
+  //
+  // Shared with the client apply path so the canvas visually agrees
+  // with what the server writes to D1 — before this split, only the
+  // server seeded and the client rendered blank cards until refresh.
+  const handles = scanBranchingHandles(skeleton.edges);
 
   const newNodes: FreeformNodeRecord[] = skeleton.nodes.map((n, idx) => {
-    // Seed structural config so branching handles are real from turn 1.
-    // Content fields (text bodies, captions, media urls, list body) stay
-    // empty when Pi didn't name them — that's what Phase 2 fills in.
-    // Handles are derived from the edges wired to this node
-    // (buttonIdsPerNode / rowIdsPerNode).
-    const autoSeededConfig = seedFreeformStructuralConfig(
+    // Seed structural config + merge Pi's per-node config in one shared
+    // helper (see pi-freeform-seed.ts). Content fields Pi didn't name
+    // (message body, media source, captions) stay empty — Phase 2 fills
+    // them. Structural handles (buttons, rows) are seeded from the edge
+    // scan so branching is real immediately.
+    const seededConfig = buildFreeformNodeConfig(
+      n.id,
       n.kind,
       n.needs,
-      Array.from(buttonIdsPerNode.get(n.id) ?? []),
-      Array.from(rowIdsPerNode.get(n.id) ?? []),
+      n.config,
+      handles,
     );
-    // Merge Pi's per-node config over the auto-seeded structural
-    // scaffold. Pi uses `config` on the propose_draft skeleton to name
-    // concrete content the brief mentioned (row titles, quick-reply
-    // button labels, cta_url links, apiTool handle). Merge is arrays-
-    // by-id for rows / buttons so Pi's labels attach to the handle ids
-    // wired in the edges.
-    const seededConfig = mergePiConfig(autoSeededConfig, n.config);
     // Validity + ReactFlow node type split — freeform-owned kinds render
     // through the "freeform" node type + get validated by
     // validateFreeformNode. The two shared logic kinds (apiToolCall,
@@ -452,127 +432,10 @@ export function suggestFreeformNextStep(
 /* Helpers                                                                     */
 /* -------------------------------------------------------------------------- */
 
-/**
- * Seed the structural (branching) fields of a freeform node config so
- * the sourceHandle edges in the skeleton land on real handles the moment
- * the skeleton installs. Content fields (text, caption, mediaUrl,
- * buttonLabel copy) are left blank — those are Phase 2's job.
- *
- * Convention (matches the skeleton edges in the catalog):
- *  - quick-reply buttons: ids b1, b2, b3 (up to 3), labels "Option 1", etc.
- *  - list rows: ids r1, r2, r3 (up to 3), titles "Option 1", etc.
- *
- * The needs[] hint from the catalog entry decides which structural
- * shape to seed. `needs: ["text", "buttonsBlock"]` means a text node
- * with quick-reply buttons; `needs: ["body", "buttonLabel", "rows"]`
- * means a list node.
- */
-/**
- * Merge Pi's per-node config over the auto-seeded structural scaffold.
- *
- *  - list.rows: Pi's rows override placeholders BY ID. If Pi supplies
- *    a title for row id "r1", that replaces "Option 1" while r2..r5
- *    keep their placeholders. New row ids Pi wired but didn't seed
- *    stay as placeholders.
- *  - buttonsBlock: if Pi supplies a full buttonsBlock (mode + buttons /
- *    button), it replaces the auto-seeded quick_reply trio. This lets Pi
- *    switch to cta_url when the brief mentions a link ("text node with
- *    link" → mode: cta_url + button.url).
- *  - other keys (text body, caption, mediaUrl, etc.): Pi's values pass
- *    through unchanged; the auto-seed never sets these.
- */
-function mergePiConfig(
-  auto: FreeformNodeConfig | undefined,
-  pi: FreeformNodeConfig | Record<string, unknown> | undefined,
-): FreeformNodeConfig | undefined {
-  if (!pi) return auto;
-  const merged: FreeformNodeConfig = { ...(auto ?? {}) };
-  const piCast = pi as FreeformNodeConfig;
-
-  // Rows — merge by id so Pi's per-row titles land on the wired handles.
-  if (Array.isArray(piCast.rows)) {
-    const autoRows = Array.isArray(merged.rows) ? merged.rows : [];
-    const piRows = piCast.rows as Array<{ id?: string; title?: string; description?: string }>;
-    const byId = new Map(autoRows.map((r) => [r.id, r] as const));
-    for (const r of piRows) {
-      if (!r.id) continue;
-      const existing = byId.get(r.id);
-      byId.set(r.id, {
-        id: r.id,
-        title: r.title ?? existing?.title ?? "",
-        ...(r.description ? { description: r.description } : existing?.description ? { description: existing.description } : {}),
-      });
-    }
-    merged.rows = Array.from(byId.values());
-  }
-
-  // buttonsBlock — Pi's full block replaces auto (mode switch is
-  // meaningful; can't be partial).
-  if (piCast.buttonsBlock) {
-    merged.buttonsBlock = piCast.buttonsBlock;
-  }
-
-  // Content fields Pi may seed if the brief was explicit.
-  for (const key of [
-    "text", "body", "header", "footer", "buttonLabel",
-    "caption", "mediaSource", "mediaUrl", "mediaFileName",
-  ] as const) {
-    const v = (piCast as Record<string, unknown>)[key];
-    if (v !== undefined) (merged as Record<string, unknown>)[key] = v;
-  }
-
-  return Object.keys(merged).length ? merged : undefined;
-}
-
-function seedFreeformStructuralConfig(
-  kind: string,
-  needs: string[] | undefined,
-  wiredButtonIds: string[],
-  wiredRowIds: string[],
-): FreeformNodeConfig | undefined {
-  const wantsButtons =
-    wiredButtonIds.length > 0
-    || (Array.isArray(needs) && needs.includes("buttonsBlock"));
-  const wantsRows =
-    wiredRowIds.length > 0
-    || kind === "list"
-    || (Array.isArray(needs) && needs.includes("rows"));
-
-  // Text / image / video / document may all carry a buttonsBlock. If
-  // edges wired specific button ids (btn_b1, btn_b2, ...), seed those
-  // exact ids so the handles exist and the edges land. Otherwise seed a
-  // default trio. Placeholder labels ("Option 1", "Option 2", ...) so
-  // the branches are visible on the node card until Phase 2 fills them.
-  const canHaveButtons =
-    kind === "text" || kind === "image" || kind === "video" || kind === "document";
-  if (canHaveButtons && wantsButtons) {
-    const buttonIds = wiredButtonIds.length > 0
-      ? wiredButtonIds
-      : ["b1", "b2", "b3"];
-    return {
-      buttonsBlock: {
-        mode: "quick_reply",
-        buttons: buttonIds.map((id, i) => ({ id, label: `Option ${i + 1}` })),
-      },
-    };
-  }
-
-  if (wantsRows) {
-    // Same principle for list rows: if edges wired specific row ids,
-    // seed those; else seed a default trio. Meta caps at 10 rows; if
-    // Pi's plan wires more we truncate rather than send invalid state.
-    // Placeholder titles so branches are visible immediately.
-    const rowIds = wiredRowIds.length > 0 ? wiredRowIds.slice(0, 10) : ["r1", "r2", "r3"];
-    return {
-      rows: rowIds.map((id, i) => ({ id, title: `Option ${i + 1}` })),
-    };
-  }
-
-  // Text without buttons, image / video / document skeleton without
-  // buttons: no structural seeding needed — everything they need is
-  // content (text / caption / media source).
-  return undefined;
-}
+// The seed / merge / build helpers previously defined here have moved
+// to `@/lib/pi-freeform-seed` so the client-side apply path can run
+// the exact same pipeline (fixes the "server seeds rows in D1, client
+// canvas shows blank card until refresh" inconsistency).
 
 /** Compute a stable serial for a skeleton-installed node (matches the
  *  SERIAL_PREFIX convention). Same helper the canvas tool uses; kept
