@@ -369,7 +369,7 @@ export function AskPiDock() {
   // if published, otherwise the route's static `ctx.deadZone.nudge`.
   if (inDeadZone) {
     return (
-      <div ref={wrapRef} className="pointer-events-none absolute inset-x-0 bottom-5 z-30 flex justify-center px-4">
+      <div ref={wrapRef} className="pointer-events-none fixed inset-x-0 bottom-5 z-30 flex justify-center px-4">
         <div className="pointer-events-none flex flex-col items-center" style={{ transform: `translateX(${dragX}px)` }}>
           <PiDeadZoneNudge nudge={deadZoneCopy!} />
           <PiDeadZonePill pillHandlers={pillHandlers} />
@@ -379,7 +379,7 @@ export function AskPiDock() {
   }
 
   return (
-    <div ref={wrapRef} className="pointer-events-none absolute inset-x-0 bottom-5 z-30 flex justify-center px-4">
+    <div ref={wrapRef} className="pointer-events-none fixed inset-x-0 bottom-5 z-30 flex justify-center px-4">
       {!isOpen && (
         <div className="pointer-events-none flex flex-col items-center" style={{ transform: `translateX(${dragX}px)` }}>
           {showNudge && !drafting && (

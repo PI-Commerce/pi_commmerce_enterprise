@@ -11,6 +11,8 @@ import {
 import { Toaster } from "@/components/ui/sonner";
 import { RegionProvider } from "@/lib/region";
 import { PiSurfaceProvider, PiDisabledProvider, PiSurfaceHintProvider } from "@/lib/pi-screen-actions";
+import { PiScreenContextRoot } from "@/lib/pi-screen-context";
+import { AskPiDock } from "@/components/app/AskPiDock";
 
 import appCss from "../styles.css?url";
 
@@ -130,8 +132,16 @@ function RootComponent() {
         <PiSurfaceProvider>
           <PiDisabledProvider>
             <PiSurfaceHintProvider>
-              <Outlet />
-              <Toaster position="bottom-right" closeButton />
+              {/* AskPiDock lives at the root so ⌘K + the drafting pill are
+                  available on every route, including the full-screen
+                  builders (AgentBuilder, campaign canvas) that don't mount
+                  AppShell. PiScreenContextRoot must wrap it because the
+                  dock reads usePiScreenContext() for analytics chat. */}
+              <PiScreenContextRoot>
+                <Outlet />
+                <AskPiDock />
+                <Toaster position="bottom-right" closeButton />
+              </PiScreenContextRoot>
             </PiSurfaceHintProvider>
           </PiDisabledProvider>
         </PiSurfaceProvider>
