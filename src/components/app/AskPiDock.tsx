@@ -5,6 +5,7 @@ import { askPi } from "@/lib/server-fns/pi-llm";
 import { refreshAgentsFromDb } from "@/lib/agent-store";
 import { usePiScreenContext } from "@/lib/pi-screen-context";
 import { usePiSurface, dispatchScreenToolCalls } from "@/lib/pi-screen-actions";
+import { extractActionLinksFromToolCalls } from "@/lib/pi-canvas-apply";
 import { AnalyticsChat } from "@/components/analytics/AnalyticsChat";
 import {
   PiPill,
@@ -49,6 +50,10 @@ export function AskPiDock() {
   // When null, the result panel falls back to the surface's canned ctx.result.
   // (/analytics uses AnalyticsChat instead and doesn't touch this state.)
   const [liveAnswer, setLiveAnswer] = useState<string | null>(null);
+  // P3 escape-hatch buttons for the current turn. Cleared alongside
+  // liveAnswer on submit / reset so a stale link from a previous
+  // question never sticks around under a fresh answer.
+  const [liveActionLinks, setLiveActionLinks] = useState<Array<{ label: string; href: string; hint?: string }> | null>(null);
   // I4 — retired nudge ids (✕-dismissed are also persisted; used-nudges are session-only).
   const [hiddenNudges, setHiddenNudges] = useState<string[]>(() => loadDismissedNudges());
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -120,6 +125,7 @@ export function AskPiDock() {
     if (q !== value) setValue(q);
     setState("thinking");
     setLiveAnswer(null);
+    setLiveActionLinks(null);
     // Every non-/analytics surface — call askPi with the current route's scope +
     // system hint. If it fails (missing D1 binding, missing TFY key, endpoint
     // unreachable from local without VPN), gracefully fall back to the surface's
@@ -162,6 +168,12 @@ export function AskPiDock() {
       if (r.ok && surface) {
         dispatchScreenToolCalls(surface, r.toolCalls ?? []);
       }
+      // P3 escape-hatch — Pi's emit_action_link calls become prominent
+      // buttons above the accept/dismiss row. New-tab so this dock stays.
+      if (r.ok) {
+        const links = extractActionLinksFromToolCalls(r.toolCalls ?? []);
+        if (links.length > 0) setLiveActionLinks(links);
+      }
       // If !ok we simply leave liveAnswer null and the result card shows ctx.result.
     } catch {
       // Network / RPC failure — same fallback.
@@ -169,7 +181,7 @@ export function AskPiDock() {
     setState("result");
   };
 
-  const reset = () => { setLiveAnswer(null); setValue(""); setState("idle"); };
+  const reset = () => { setLiveAnswer(null); setLiveActionLinks(null); setValue(""); setState("idle"); };
 
   // I4 — proactive nudge plumbing. The route supplies it; it floats above the pill
   // until retired. `persist` writes the ✕-dismissal to localStorage; using a nudge
@@ -231,9 +243,10 @@ export function AskPiDock() {
                   <PiThinking steps={ctx.thinking} />
                 ) : liveAnswer ? (
                   // Real LLM answer over D1 for this surface. Preserve the surface's
-                  // canned CTA so the "next action" language stays on-brand.
+                  // canned CTA so the "next action" language stays on-brand. If Pi
+                  // emitted P3 escape-hatch links this turn, they render above the CTA.
                   <PiResultCard
-                    result={{ text: liveAnswer, cta: ctx.result.cta }}
+                    result={{ text: liveAnswer, cta: ctx.result.cta, actionLinks: liveActionLinks ?? undefined }}
                     onAccept={reset}
                     onDismiss={reset}
                   />

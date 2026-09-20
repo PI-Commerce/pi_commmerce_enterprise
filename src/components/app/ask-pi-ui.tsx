@@ -8,7 +8,7 @@
 // only the look-and-feel lives here.
 
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
-import { ArrowUp, Square, Check, Loader2, Sparkle, X } from "lucide-react";
+import { ArrowUp, Square, Check, Loader2, Sparkle, X, ArrowUpRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { PiResult } from "@/lib/ask-pi-context";
 
@@ -228,6 +228,29 @@ export function PiResultCard({
               </span>
               {line.slice(1)}
             </div>
+          ))}
+        </div>
+      )}
+      {result.actionLinks && result.actionLinks.length > 0 && (
+        // P3 escape-hatch — dead-end recovery buttons. Open in a new tab
+        // so this dock (and any in-flight Pi conversation) stays alive.
+        <div className="flex flex-col gap-1.5">
+          {result.actionLinks.map((a, i) => (
+            <a
+              key={`${a.href}-${i}`}
+              href={a.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="group flex items-start justify-between gap-3 rounded-xl border border-ai/30 bg-ai/5 px-3 py-2.5 text-left transition-colors hover:border-ai/60 hover:bg-ai/10"
+            >
+              <span className="flex min-w-0 flex-col">
+                <span className="text-[13px] font-medium leading-snug text-foreground">{a.label}</span>
+                {a.hint && (
+                  <span className="mt-0.5 text-[11.5px] leading-snug text-muted-foreground">{a.hint}</span>
+                )}
+              </span>
+              <ArrowUpRight className="mt-0.5 h-4 w-4 shrink-0 text-ai/70 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+            </a>
           ))}
         </div>
       )}

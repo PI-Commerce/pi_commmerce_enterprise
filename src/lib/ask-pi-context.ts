@@ -11,6 +11,11 @@ export type PiResult = {
   diff?: string[];
   /** Primary CTA label on the result card. */
   cta?: string;
+  /** P3 escape-hatch buttons Pi emitted via `emit_action_link`. Rendered
+   *  as prominent buttons above the dismiss/accept controls. Each opens
+   *  its `href` in a new tab so Pi's context stays alive while the user
+   *  goes to unblock (connect a WA number, create an agent, etc.). */
+  actionLinks?: Array<{ label: string; href: string; hint?: string }>;
 };
 
 /**

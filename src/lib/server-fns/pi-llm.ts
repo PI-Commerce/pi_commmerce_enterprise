@@ -80,6 +80,32 @@ export type AskPiResponse =
 
 type ToolCallLog = { name: string; args: string; result: string };
 
+/**
+ * Escape-hatch tool available in EVERY scope (builder, analytics, agents).
+ * Pi calls it when the user is stuck at a dead-end that needs work on
+ * another surface (no WhatsApp numbers connected → /channels/whatsapp,
+ * no voice agents → /agents, etc.). The client renders it as a
+ * prominent chat button that opens the href in a new tab so Pi's
+ * context survives while the user unblocks.
+ */
+const SHARED_ESCAPE_TOOL = {
+  type: "function",
+  function: {
+    name: "emit_action_link",
+    description:
+      "Render a prominent action button in the chat that opens a workspace route in a new tab. Use ONLY for dead-end situations where the user needs to leave the current surface to unblock (no WhatsApp numbers connected → /channels/whatsapp; no voice agents → /agents; no CSV in library → /campaigns; no API tool → /agents/tools; no template → /channels/whatsapp). Prefer this over a prose link — it stands out, opens in a new tab so the chat stays alive, and reads as a clear next step. NEVER use for optional navigation or informational deep links; use plain markdown links for those.",
+    parameters: {
+      type: "object",
+      properties: {
+        label: { type: "string", description: "Button label, under 40 chars, verb-first ('Connect a WhatsApp number', 'Create a voice agent')." },
+        href: { type: "string", description: "In-app route starting with `/`. Never http(s). Examples: `/channels/whatsapp`, `/agents/new`, `/agents/tools/new`." },
+        hint: { type: "string", description: "Optional one-line subtitle explaining what happens after. e.g. 'Opens in a new tab. Say resume when you're back.'" },
+      },
+      required: ["label", "href"],
+    },
+  },
+} as const;
+
 const TOOL_DEFS = {
   analytics: [
     {
@@ -582,6 +608,16 @@ async function runTool(name: string, args: Record<string, unknown>, surfaceId?: 
         return { ok: true, awaiting_user: true };
       case "focus_node":
         return { ok: true, ui: true, focused: args.nodeId as string };
+      case "emit_action_link":
+        return {
+          ok: true,
+          ui: true,
+          action_link: {
+            label: (args.label as string) ?? "",
+            href: (args.href as string) ?? "",
+            hint: (args.hint as string) ?? undefined,
+          },
+        };
       case "classify_brief":
       case "suggest_skeleton":
       case "suggest_next_step":
@@ -719,6 +755,18 @@ async function runToolInner(name: string, args: Record<string, unknown>): Promis
       // Pure UI intent — the client picks it up from `toolCalls` and
       // selects the node + centers the viewport. Server no-op.
       return { ok: true, ui: true, focused: args.nodeId as string };
+    case "emit_action_link":
+      // Pure UI intent — the client renders an action button in the chat
+      // that opens `href` in a new tab. Server no-op; validate shape.
+      return {
+        ok: true,
+        ui: true,
+        action_link: {
+          label: (args.label as string) ?? "",
+          href: (args.href as string) ?? "",
+          hint: (args.hint as string) ?? undefined,
+        },
+      };
     default:
       return { error: `unknown tool: ${name}` };
   }
@@ -825,7 +873,7 @@ For each config walk-through:
 Phase 2 rules:
 - ONE node per turn. ONE ask per turn.
 - Skip node = the user's choice. When they say "skip", "leave it", "I'll do this later" — move to the next needed node without editing this one.
-- Dead-ends (no asset available) — say the one line + deep-link path ("No WhatsApp numbers connected. Wire one at Channels > WhatsApp, then say resume."), then STOP. Do not repeat on later turns.
+- Dead-ends (no asset available) — say ONE crisp line naming the gap ("No WhatsApp numbers connected."), then call \`emit_action_link\` with a verb-first label and the deep-link href (label: "Connect a WhatsApp number", href: "/channels/whatsapp", hint: "Opens in a new tab. Say 'resume' when you're back."), then STOP. Do not repeat the same dead-end on later turns; assume the user is working on it.
 
 Phase 2 is opt-in per node. Never auto-run through all nodes.
 
@@ -1160,9 +1208,9 @@ export const askPi = createServerFn({ method: "POST" })
       : data.scope === "agents" ? SYSTEM_AGENTS
       : SYSTEM_ANALYTICS + screenAddendum;
     const scopeTools =
-      data.scope === "builder" ? [...TOOL_DEFS.analytics, ...TOOL_DEFS.builder]
-      : data.scope === "agents"  ? [...TOOL_DEFS.analytics, ...TOOL_DEFS.agents]
-      : [...TOOL_DEFS.analytics, ...screenTools];
+      data.scope === "builder" ? [...TOOL_DEFS.analytics, ...TOOL_DEFS.builder, SHARED_ESCAPE_TOOL]
+      : data.scope === "agents"  ? [...TOOL_DEFS.analytics, ...TOOL_DEFS.agents, SHARED_ESCAPE_TOOL]
+      : [...TOOL_DEFS.analytics, ...screenTools, SHARED_ESCAPE_TOOL];
 
     // Builder scope: enrich context with the current DSL, canonical construct
     // rules, node registry, and asset catalogs so Pi reads real state on EVERY

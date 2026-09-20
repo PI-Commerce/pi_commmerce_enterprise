@@ -292,6 +292,45 @@ export type ChipsFromTool = {
   options: Array<{ id: string; label: string; hint?: string }>;
 };
 
+/**
+ * One escape-hatch action button Pi emitted via `emit_action_link`.
+ * Rendered as a prominent button in the chat that opens `href` in a
+ * new tab so Pi's chat context stays alive while the user unblocks.
+ */
+export type ActionLinkFromTool = {
+  label: string;
+  href: string;
+  hint?: string;
+};
+
+/**
+ * Pull every `emit_action_link` tool call off the response as a list of
+ * clickable buttons. Multiple links per turn are allowed (rare — usually
+ * a single dead-end suggests one path) but the array preserves order.
+ * Silently drops calls with a missing / malformed href (must be relative
+ * `/...`) since Pi should never send absolute URLs.
+ */
+export function extractActionLinksFromToolCalls(toolCalls: PiToolCallLog[]): ActionLinkFromTool[] {
+  const out: ActionLinkFromTool[] = [];
+  for (const tc of toolCalls) {
+    if (tc.name !== "emit_action_link") continue;
+    let args: { label?: string; href?: string; hint?: string } = {};
+    try {
+      args = JSON.parse(tc.args);
+    } catch {
+      continue;
+    }
+    const label = args.label?.trim();
+    const href = args.href?.trim();
+    if (!label || !href) continue;
+    // Only in-app routes — no external URLs. Prevents Pi from wandering
+    // off to documentation sites when a workspace surface would do.
+    if (!href.startsWith("/")) continue;
+    out.push({ label, href, ...(args.hint ? { hint: args.hint } : {}) });
+  }
+  return out;
+}
+
 export function extractChipsFromToolCalls(toolCalls: PiToolCallLog[]): ChipsFromTool | undefined {
   for (const tc of toolCalls) {
     if (tc.name === "emit_choice") {

@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { Sparkles, X, PenLine } from "lucide-react";
+import { Sparkles, X, PenLine, ArrowUpRight } from "lucide-react";
 import { CANVAS_CONTEXT } from "@/lib/ask-pi-context";
 import { renderChatMarkdown } from "@/lib/chat-markdown";
 import { extractProposedDraft, type ProposedDraft } from "@/lib/pi-propose-draft";
 import { ConfirmDraftCard } from "./ConfirmDraftCard";
 import { getSuggestion } from "@/lib/pi-node-suggestions";
 import { askPi } from "@/lib/server-fns/pi-llm";
-import { summarizePiEdits, expandSkeletonCalls, extractChipsFromToolCalls, type PiToolCallLog } from "@/lib/pi-canvas-apply";
+import { summarizePiEdits, expandSkeletonCalls, extractChipsFromToolCalls, extractActionLinksFromToolCalls, type PiToolCallLog, type ActionLinkFromTool } from "@/lib/pi-canvas-apply";
 import { cn } from "@/lib/utils";
 import {
   PiPill,
@@ -58,6 +58,11 @@ type ChatMessage = {
   draftAccepted?: boolean;
   /** One-line diff summary of nodes/edges Pi added on this turn. */
   edits?: string[];
+  /** P3 escape-hatch buttons Pi emitted via `emit_action_link` on this
+   *  turn. Rendered as prominent chips that open the workspace route
+   *  in a new tab so the chat context stays alive while the user
+   *  unblocks (e.g. connects a WhatsApp number, creates a voice agent). */
+  actionLinks?: ActionLinkFromTool[];
 };
 
 export type AiComposerProps = {
@@ -293,15 +298,17 @@ export function AiComposer({
         const toolChoice = extractChipsFromToolCalls(rawToolCalls);
         const choice = toolChoice ?? proseChoice;
         const edits = summarizePiEdits(mutationCalls);
+        const actionLinks = extractActionLinksFromToolCalls(rawToolCalls);
         setMessages((prev) => [
           ...prev,
           {
             role: "assistant",
-            content: bodyText || (edits.length > 0 ? "Done." : draft ? "Here's the plan." : choice ? "" : "Not sure what to do with that — could you rephrase?"),
+            content: bodyText || (edits.length > 0 ? "Done." : draft ? "Here's the plan." : choice ? "" : actionLinks.length > 0 ? "" : "Not sure what to do with that — could you rephrase?"),
             options,
             choice,
             draft: draft ?? undefined,
             edits: edits.length > 0 ? edits : undefined,
+            actionLinks: actionLinks.length > 0 ? actionLinks : undefined,
           },
         ]);
       } else {
@@ -597,6 +604,30 @@ function ChatBubble({
           onEdit={onEdit}
           disabled={message.draftAccepted}
         />
+      )}
+      {/* P3 escape-hatch buttons — dead-end recovery. Each opens in a
+          new tab so Pi's chat context stays alive; the arrow icon signals
+          the external navigation. Sits under the message + above chips. */}
+      {message.actionLinks && message.actionLinks.length > 0 && (
+        <div className="ml-6 flex flex-col gap-1.5">
+          {message.actionLinks.map((a, i) => (
+            <a
+              key={`${a.href}-${i}`}
+              href={a.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="group flex items-start justify-between gap-3 rounded-xl border border-ai/30 bg-ai/5 px-3 py-2.5 text-left transition-colors hover:border-ai/60 hover:bg-ai/10"
+            >
+              <span className="flex min-w-0 flex-col">
+                <span className="text-[13px] font-medium leading-snug text-foreground">{a.label}</span>
+                {a.hint && (
+                  <span className="mt-0.5 text-[11.5px] leading-snug text-muted-foreground">{a.hint}</span>
+                )}
+              </span>
+              <ArrowUpRight className="mt-0.5 h-4 w-4 shrink-0 text-ai/70 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+            </a>
+          ))}
+        </div>
       )}
       {showOptions && picker && picker.length > 0 && (
         // Numbered-row picker. Each row shows the label + an optional hint
