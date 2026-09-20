@@ -1313,11 +1313,22 @@ async function runTfyLoop(
     };
     const msg = json.choices?.[0]?.message;
     if (!msg) return { ok: false, error: "empty_response" };
-    messages.push({ role: "assistant", content: msg.content ?? "", tool_calls: msg.tool_calls });
-    if (!msg.tool_calls || msg.tool_calls.length === 0) {
+    // OpenAI convention: assistant messages MAY carry `content: null` when
+    // only tool_calls are present. Bedrock (routed via TFY) is strict — it
+    // rejects `content: ""` on the same turn as tool_calls with an
+    // "aws-bedrock error: The content field in the Message object ... is
+    // empty" 400. Prefer null over "" and omit tool_calls when absent.
+    const hasToolCalls = !!(msg.tool_calls && msg.tool_calls.length > 0);
+    const assistantMsg: Record<string, unknown> = {
+      role: "assistant",
+      content: msg.content && msg.content.trim().length > 0 ? msg.content : null,
+    };
+    if (hasToolCalls) assistantMsg.tool_calls = msg.tool_calls;
+    messages.push(assistantMsg);
+    if (!hasToolCalls) {
       return { ok: true, answer: msg.content ?? "", toolCalls };
     }
-    for (const tc of msg.tool_calls) {
+    for (const tc of msg.tool_calls!) {
       let args: Record<string, unknown> = {};
       try { args = JSON.parse(tc.function.arguments) as Record<string, unknown>; }
       catch { /* keep as {} */ }
