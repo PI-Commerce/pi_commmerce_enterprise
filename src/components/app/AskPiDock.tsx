@@ -357,10 +357,17 @@ export function AskPiDock() {
 
   const reset = () => { setLiveAnswer(null); setLiveActionLinks(null); setValue(""); setState("idle"); };
 
-  // I4 — proactive nudge plumbing. The route supplies it; it floats above the pill
-  // until retired. `persist` writes the ✕-dismissal to localStorage; using a nudge
+  // I4 — proactive nudge plumbing. The route supplies a default; per-tab
+  // surface publishers (usePublishSurface) can override it so sub-tabs
+  // like Workflows / Runs / Data or WA Templates / Freeform each float
+  // a nudge that matches what THAT tab can do. Surface override wins.
+  // `persist` writes the ✕-dismissal to localStorage; using a nudge
   // hides it only for this session so it can resurface on a fresh visit.
-  const nudge = ctx.nudge;
+  const nudge = surface?.nudge ?? ctx.nudge;
+  // Same override precedence for chips + placeholder — a surface
+  // publisher gets the final word so per-tab UI feels honest.
+  const chips = surface?.chips ?? ctx.chips;
+  const placeholder = surface?.placeholder ?? ctx.placeholder;
   const showNudge = state === "collapsed" && !!nudge && !hiddenNudges.includes(nudge.id);
   const retireNudge = (id: string, persist: boolean) => {
     setHiddenNudges((prev) => {
@@ -513,7 +520,7 @@ export function AskPiDock() {
                   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); }
                   if (e.key === "Escape" && !value) setState("collapsed");
                 }}
-                placeholder={ctx.placeholder}
+                placeholder={placeholder}
                 className="scrollbar-thin max-h-32 min-w-0 flex-1 resize-none bg-transparent py-1.5 text-[14px] text-foreground placeholder:text-muted-foreground/80 focus:outline-none"
               />
               <PiSendButton
@@ -524,7 +531,7 @@ export function AskPiDock() {
             </div>
 
             {state === "idle" && value.length === 0 && (
-              <PiChips chips={ctx.chips} onPick={(s) => submit(s)} />
+              <PiChips chips={chips} onPick={(s) => submit(s)} />
             )}
           </PiPanel>
         </div>

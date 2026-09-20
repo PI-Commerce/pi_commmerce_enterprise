@@ -93,6 +93,13 @@ export function WhatsAppFreeformWorkflows() {
         setCreateOpen(true);
       },
     },
+    placeholder: "Search freeform workflows, or start a new one…",
+    chips: [
+      "Find test-drive workflows",
+      "Start a callback slot workflow",
+      "Search returning-customer flows",
+    ],
+    nudge: { id: "waba.freeform.new", label: "Draft a freeform reply flow with Pi.", prompt: "Start a callback slot workflow" },
   });
 
   const filtered = useMemo(() => {

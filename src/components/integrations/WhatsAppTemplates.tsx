@@ -226,6 +226,9 @@ function TemplateList({ templates, onCreate, onEdit, onClone, onDelete }: {
         });
       },
     },
+    placeholder: "Search WA templates, or draft a new one…",
+    chips: ["Find renewal templates", "Draft a Utility template for OTP", "Search promo templates"],
+    nudge: { id: "waba.templates.find-renewal", label: "Find or draft a WA template with Pi.", prompt: "Find renewal templates" },
   });
 
   const filtered = useMemo(() => {

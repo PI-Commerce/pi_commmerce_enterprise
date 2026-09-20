@@ -324,6 +324,9 @@ function CampaignList() {
               setSortDir(dir);
             },
           },
+          placeholder: "Filter, search, or sort the workflows list…",
+          chips: ["Show only drafts", "Find insurance campaigns", "Sort by newest edits"],
+          nudge: { id: "campaigns.workflows.drafts", label: "Filter, search, or sort — Pi drives the list.", prompt: "Show only drafts" },
         }
       : tab === "runs"
         ? {
@@ -354,6 +357,9 @@ function CampaignList() {
                 });
               },
             },
+            placeholder: "Filter runs, or pause / resume / terminate one…",
+            chips: ["Show running only", "Show Always-on runs", "Find soundbox runs"],
+            nudge: { id: "campaigns.runs.pause", label: "Pause, resume, or filter runs — just ask.", prompt: "Show running only" },
           }
         : tab === "data"
           ? {
@@ -362,6 +368,13 @@ function CampaignList() {
               // so pi-llm.ts exposes the tool for this turn.
               surfaceId: "campaigns.data",
               handlers: {},
+              placeholder: "Ask Pi if a CSV fits a campaign…",
+              chips: [
+                "Can dormant_traders.csv run Insurance Renewal?",
+                "Which columns does the Cart Abandonment campaign need?",
+                "Fit-check the Loyalty CSV against Loyalty Card Upsell",
+              ],
+              nudge: { id: "campaigns.data.fit", label: "Fit-check a CSV against a campaign.", prompt: "Can dormant_traders.csv run Insurance Renewal?" },
             }
           : null;
   usePublishSurface(surfaceReg);

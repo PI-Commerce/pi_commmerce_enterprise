@@ -151,6 +151,9 @@ function SmsTemplateList({ templates, onCreate, onEdit, onClone, onDelete, onBul
         // guards, this is a belt-and-braces catch for stale tool schemas.
       },
     },
+    placeholder: "Search SMS templates, or filter by category…",
+    chips: ["Find OTP templates", "Show only Transactional", "Search payment reminders"],
+    nudge: { id: "sms.templates.otp", label: "Search or filter DLT templates with Pi.", prompt: "Find OTP templates" },
   });
 
   const filtered = useMemo(() => {

@@ -38,12 +38,30 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState, type R
 export type ScreenActionHandler = (args: Record<string, unknown>) => void;
 
 /**
- * The bundle a page publishes: its surface id + one handler per tool it
- * supports on that surface.
+ * The bundle a page publishes: its surface id + one handler per tool
+ * it supports on that surface, plus optional per-tab UI overrides that
+ * let a page tighten the dock's chips / nudge / placeholder to what
+ * this exact tab can actually do.
+ *
+ * The route-static `PiContext` (from ask-pi-context.ts) supplies the
+ * defaults. When a page also publishes `chips` / `nudge` / `placeholder`
+ * here, those win — that way a single route (`/campaigns`,
+ * `/channels/whatsapp`, ...) can host multiple sub-tabs with
+ * distinct chip suggestions and a contextual nudge per tab, without
+ * the route context table growing a chip-per-tab tree.
  */
+export type SurfaceChip = string;
+export type SurfaceNudge = { id: string; label: string; prompt: string };
+
 export type SurfaceRegistration = {
   surfaceId: string;
   handlers: Record<string, ScreenActionHandler>;
+  /** Optional per-tab chip overrides. Falls back to `ctx.chips`. */
+  chips?: SurfaceChip[];
+  /** Optional per-tab proactive nudge. Falls back to `ctx.nudge`. */
+  nudge?: SurfaceNudge;
+  /** Optional per-tab input placeholder. Falls back to `ctx.placeholder`. */
+  placeholder?: string;
 };
 
 type BusValue = {
@@ -78,8 +96,18 @@ export function usePublishSurface(reg: SurfaceRegistration | null) {
 
   // A stable identity key so the effect only re-fires when the surface
   // id OR the set of handler names actually changes — not when the
-  // handler functions get recreated (they will, every render).
-  const key = reg ? `${reg.surfaceId}|${Object.keys(reg.handlers).sort().join(",")}` : "";
+  // handler functions get recreated (they will, every render). Chip /
+  // nudge / placeholder text is factored in so a per-tab UI override
+  // change also re-publishes.
+  const key = reg
+    ? [
+        reg.surfaceId,
+        Object.keys(reg.handlers).sort().join(","),
+        (reg.chips ?? []).join("|"),
+        reg.nudge?.id ?? "",
+        reg.placeholder ?? "",
+      ].join("¦")
+    : "";
 
   useEffect(() => {
     if (!reg) {
@@ -92,7 +120,13 @@ export function usePublishSurface(reg: SurfaceRegistration | null) {
     for (const name of Object.keys(reg.handlers)) {
       proxied[name] = (args) => handlersRef.current[name]?.(args);
     }
-    publish({ surfaceId: reg.surfaceId, handlers: proxied });
+    publish({
+      surfaceId: reg.surfaceId,
+      handlers: proxied,
+      ...(reg.chips ? { chips: reg.chips } : {}),
+      ...(reg.nudge ? { nudge: reg.nudge } : {}),
+      ...(reg.placeholder ? { placeholder: reg.placeholder } : {}),
+    });
     return () => publish(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);

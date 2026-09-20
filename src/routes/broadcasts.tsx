@@ -133,6 +133,9 @@ function BroadcastsPage() {
         });
       },
     },
+    placeholder: "Ask Pi to open a new broadcast…",
+    chips: ["Send a WhatsApp broadcast", "Send an SMS broadcast", "Send an RCS broadcast"],
+    nudge: { id: "broadcasts.list.new", label: "One-shot send in mind? Pi opens the modal.", prompt: "Send a WhatsApp broadcast" },
   });
 
   const filtered = rows.filter((r) => {

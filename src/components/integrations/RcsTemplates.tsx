@@ -184,6 +184,9 @@ function RcsTemplateList({ config, templates, onCreate, onEdit, onClone, onDelet
         });
       },
     },
+    placeholder: "Search RCS templates, filter, or draft a new one…",
+    chips: ["Show only Approved", "Filter to Transactional agents", "Draft a rich-card promo template"],
+    nudge: { id: "rcs.templates.approved", label: "Filter or draft an RCS template — Pi drives.", prompt: "Show only Approved" },
   });
 
   const filtered = useMemo(() => {
