@@ -146,8 +146,9 @@ export function AskPiDock() {
     // canned proposal so nothing dead-ends.
     try {
       const serverScope =
-        ctx.scopeMode === "builder" ? "builder"
-        : ctx.scopeMode === "agents"  ? "agents"
+        ctx.scopeMode === "builder"        ? "builder"
+        : ctx.scopeMode === "agents"        ? "agents"
+        : ctx.scopeMode === "integrations"  ? "integrations"
         : "analytics";
       const r = await askPi({
         data: {
@@ -172,7 +173,11 @@ export function AskPiDock() {
       // list and any open AgentBuilder pick up the change without a refresh.
       if (r.ok && ctx.scopeMode === "agents") {
         const mutated = r.toolCalls?.some((tc) => tc.name === "save_agent");
-        if (mutated) void refreshAgentsFromDb();
+        // Awaited (not fire-and-forget) because the very next step may
+        // dispatch an `open_agent` screen tool that navigates into the
+        // builder for the fresh id — without the await, EditAgent flashes
+        // "Agent not found" until the hydrate resolves.
+        if (mutated) await refreshAgentsFromDb();
       }
       // Screen-tool dispatch — for any tool call Pi made whose name is
       // registered by the current surface (list filter, sort, run action,

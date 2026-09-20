@@ -26,6 +26,14 @@ export const agentsSurface: SurfaceModule = {
   //   analytics-reads — answer "how many leads did the Meera agent
   //     handle last week?" without a handoff.
   uses: ["analytics-reads"],
+  // Draft flow is deterministic: plan (list_agents + list_tools), then
+  // author (save_agent + open_agent), then confirm. 6 rounds gives
+  // headroom for a retry or clarifier without letting Pi over-think.
+  // Extended thinking at the Anthropic minimum keeps latency down.
+  loop: {
+    maxRounds: 6,
+    thinkingBudget: 1024,
+  },
   // No context assembler — agents Pi reads workspace state via
   // list_agents / read_agent as needed. Adding a `currentlyOpenAgent`
   // context is a natural Phase 2b+ enhancement.

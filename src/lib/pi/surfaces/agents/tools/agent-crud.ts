@@ -107,4 +107,28 @@ export const listTools: SurfaceTool = {
   },
 };
 
-export const agentCrudTools: SurfaceTool[] = [listAgents, readAgent, saveAgent, listTools];
+/**
+ * Screen-only tool. Signals the client to navigate to the builder page for
+ * the given agent id. Server-side handler is a no-op that returns { ok }; the
+ * real work happens in the AskPiDock dispatcher, which routes the tool call
+ * to the handler registered by the /agents layout via `usePublishSurface`.
+ *
+ * Pi calls this immediately after `save_agent` on a fresh DRAFT so the user
+ * lands inside the builder without a click. Do NOT call on edits (see the
+ * system prompt's edit-flow rule).
+ */
+export const openAgent: SurfaceTool = {
+  name: "open_agent",
+  description:
+    "Navigate the user to the builder page for the agent with the given id. Call this once, immediately after save_agent when drafting a NEW agent, so the user lands inside the builder. Do not call on edits unless the user asks.",
+  parameters: {
+    type: "object",
+    properties: { id: { type: "string" } },
+    required: ["id"],
+  },
+  // No-op on the server. The dock dispatches to the page-registered handler
+  // that actually navigates. Return ok so the model doesn't retry.
+  handler: async (args) => ({ ok: true, id: args.id as string }),
+};
+
+export const agentCrudTools: SurfaceTool[] = [listAgents, readAgent, saveAgent, listTools, openAgent];
