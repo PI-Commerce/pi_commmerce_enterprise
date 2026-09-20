@@ -52,11 +52,22 @@ export function buildDraftSkeleton(
   // If there are multiple branches AND no obvious splitter in the plan,
   // insert a Conditional skeleton right after Audience so the shape
   // reads correctly. Pi's real inserts will replace it either way.
+  //
+  // CRITICAL: also wire audience→splitter here. Without this edge the
+  // splitter is orphaned AND Audience has zero outgoing edges — which
+  // paints Audience red ("Not wired forward"), leaves the whole
+  // skeleton band visually detached from Audience, and looks broken.
   const needsSplitter = draft.branches.length > 1;
   let splitterId: string | undefined;
   if (needsSplitter) {
     splitterId = `${SKELETON_PREFIX}split_1`;
     skeletonNodes.push(makeSkeletonNode(splitterId, "conditional", anchorX, anchorY, "Route by condition"));
+    skeletonEdges.push({
+      id: `${SKELETON_PREFIX}e_audience_${splitterId}`,
+      source: "audience",
+      target: splitterId,
+      type: "routed",
+    });
   }
 
   // Track the max X the skeleton band will reach — used to push End
