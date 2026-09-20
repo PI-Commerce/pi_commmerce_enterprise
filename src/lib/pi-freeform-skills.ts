@@ -219,6 +219,19 @@ export async function findRelevantFreeformTools(
 /* node in the shape (5-15 calls) and burns the max-rounds ceiling.           */
 /* -------------------------------------------------------------------------- */
 
+/** Kinds owned by the FreeformNode renderer (react-flow `type: "freeform"`)
+ *  vs shared logic kinds owned by the campaign WorkflowNode (`type:
+ *  "workflow"`). The set decides which validator + node type each
+ *  skeleton node lands with. Getting this wrong = renderer treats the
+ *  node as pending/pulsating forever (the bug that kept API pulsating). */
+const FREEFORM_OWNED_KINDS = new Set<string>([
+  "text",
+  "image",
+  "video",
+  "document",
+  "list",
+]);
+
 export type FreeformInsertSkeletonResult = {
   ok: true;
   inserted: { nodes: number; edges: number };
@@ -293,14 +306,29 @@ export async function insertFreeformSkeleton(
       Array.from(buttonIdsPerNode.get(n.id) ?? []),
       Array.from(rowIdsPerNode.get(n.id) ?? []),
     );
-    const validity = validateFreeformNode(
-      n.kind,
-      seededConfig as FreeformNodeConfig,
-    );
+    // Validity + ReactFlow node type split — freeform-owned kinds render
+    // through the "freeform" node type + get validated by
+    // validateFreeformNode. The two shared logic kinds (apiToolCall,
+    // conditional) render through the campaign "workflow" node type and
+    // have their own validators on the campaign side; here we mark them
+    // as VALID so the canvas doesn't pulsate them as "pending" (default
+    // undefined valid was the bug that kept API nodes spinning). The
+    // campaign ConfigPanel's own onChange will re-validate when the user
+    // opens the API/conditional config.
+    const isFreeformOwned = FREEFORM_OWNED_KINDS.has(n.kind);
+    const validity = isFreeformOwned
+      ? validateFreeformNode(
+          n.kind as FreeformNodeKind,
+          seededConfig as FreeformNodeConfig,
+        )
+      : { valid: true as const };
+    const nodeType: FreeformNodeRecord["type"] = isFreeformOwned
+      ? "freeform"
+      : "workflow";
     const serial = deriveFreeformSerial(n.id, n.kind, rec.nodes);
     return {
       id: n.id,
-      type: "freeform",
+      type: nodeType,
       position: {
         x: existingMaxX + 260 + (idx % 4) * 40,
         y: existingAvgY + Math.floor(idx / 4) * 140,
@@ -312,7 +340,7 @@ export async function insertFreeformSkeleton(
         ...(serial ? { serial } : {}),
         ...(seededConfig ? { config: seededConfig } : {}),
         valid: validity.valid,
-        ...(validity.error ? { error: validity.error } : {}),
+        ...("error" in validity && validity.error ? { error: validity.error } : {}),
       },
     };
   });
@@ -432,7 +460,7 @@ export function suggestFreeformNextStep(
  * means a list node.
  */
 function seedFreeformStructuralConfig(
-  kind: FreeformNodeKind,
+  kind: string,
   needs: string[] | undefined,
   wiredButtonIds: string[],
   wiredRowIds: string[],
@@ -448,29 +476,30 @@ function seedFreeformStructuralConfig(
   // Text / image / video / document may all carry a buttonsBlock. If
   // edges wired specific button ids (btn_b1, btn_b2, ...), seed those
   // exact ids so the handles exist and the edges land. Otherwise seed a
-  // default trio.
+  // default trio. Placeholder labels ("Option 1", "Option 2", ...) so
+  // the branches are visible on the node card until Phase 2 fills them.
   const canHaveButtons =
     kind === "text" || kind === "image" || kind === "video" || kind === "document";
   if (canHaveButtons && wantsButtons) {
     const buttonIds = wiredButtonIds.length > 0
       ? wiredButtonIds
       : ["b1", "b2", "b3"];
-    const config: FreeformNodeConfig = {
+    return {
       buttonsBlock: {
         mode: "quick_reply",
-        buttons: buttonIds.map((id) => ({ id, label: "" })),
+        buttons: buttonIds.map((id, i) => ({ id, label: `Option ${i + 1}` })),
       },
     };
-    return config;
   }
 
   if (wantsRows) {
     // Same principle for list rows: if edges wired specific row ids,
     // seed those; else seed a default trio. Meta caps at 10 rows; if
     // Pi's plan wires more we truncate rather than send invalid state.
+    // Placeholder titles so branches are visible immediately.
     const rowIds = wiredRowIds.length > 0 ? wiredRowIds.slice(0, 10) : ["r1", "r2", "r3"];
     return {
-      rows: rowIds.map((id) => ({ id, title: "" })),
+      rows: rowIds.map((id, i) => ({ id, title: `Option ${i + 1}` })),
     };
   }
 
@@ -486,11 +515,16 @@ function seedFreeformStructuralConfig(
  *  server tool module. */
 function deriveFreeformSerial(
   id: string,
-  kind: FreeformNodeKind,
+  kind: string,
   existingNodes: FreeformNodeRecord[],
 ): string | undefined {
   if (kind === "start" || kind === "end") return undefined;
-  const prefix = FREEFORM_SERIAL_PREFIX[kind];
+  // Shared logic kinds (apiToolCall, conditional) don't have freeform
+  // serial prefixes — they use the campaign SERIAL_PREFIX convention.
+  // Skip serial derivation for them; the workflow node renderer uses
+  // node.id directly when serial is absent.
+  if (!(kind in FREEFORM_SERIAL_PREFIX)) return undefined;
+  const prefix = FREEFORM_SERIAL_PREFIX[kind as FreeformNodeKind];
   if (!prefix) return undefined;
   const match = new RegExp(`^${prefix}_(\\d+)$`).exec(id);
   if (match) return `${prefix}_${match[1]}`;

@@ -25,10 +25,16 @@ import type { FreeformNodeKind } from "@/lib/freeform-types";
 
 /** One node in a canonical freeform skeleton. `id` follows the workspace
  *  `<kind>_<n>` convention so the canvas + Pi's follow-up update_node
- *  calls can reference the exact node the skeleton installed. */
+ *  calls can reference the exact node the skeleton installed.
+ *
+ *  `kind` includes the two shared logic kinds (`apiToolCall`,
+ *  `conditional`) alongside the freeform-owned kinds — Pi's brief can
+ *  wire an API call or a conditional inside a freeform flow, and
+ *  insertFreeformSkeleton has to handle those. Renderer split (freeform
+ *  node vs campaign workflow node) happens on the client. */
 export type FreeformSkeletonNode = {
   id: string;
-  kind: FreeformNodeKind;
+  kind: FreeformNodeKind | "apiToolCall" | "conditional";
   title: string;
   description?: string;
   /** Config keys still needed after the skeleton lands. Drives
