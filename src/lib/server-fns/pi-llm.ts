@@ -40,8 +40,9 @@ import { builderSurface } from "@/lib/pi/surfaces/builder";
 import { listsSurface } from "@/lib/pi/surfaces/lists";
 import { integrationsSurface } from "@/lib/pi/surfaces/integrations";
 import { developerSurface } from "@/lib/pi/surfaces/developer";
+import { freeformSurface } from "@/lib/pi/surfaces/freeform";
 
-export type AskPiScope = "analytics" | "builder" | "agents" | "integrations" | "developer";
+export type AskPiScope = "analytics" | "builder" | "agents" | "integrations" | "developer" | "freeform";
 
 export type AskPiRequest = {
   scope: AskPiScope;
@@ -103,6 +104,12 @@ const SCOPE_TO_SURFACE: Record<AskPiScope, string> = {
   // + Release Notes chunks). Same reasoning as integrations — no D1, no
   // mutations, cite-a-doc answer shape.
   developer: "developer",
+  // /channels/whatsapp_/freeform/$id is the in-canvas freeform workflow
+  // builder. Mirrors the campaign builder scope (classify_brief +
+  // suggest_skeleton + propose_draft + insert_skeleton + update_node)
+  // for freeform's smaller domain (no audience, inline message content).
+  // See `pi/surfaces/freeform/` for the surface manifest + system prompt.
+  freeform: "freeform",
 };
 
 /**
@@ -137,6 +144,7 @@ export const askPi = createServerFn({ method: "POST" })
       !listsSurface.id ||
       !integrationsSurface.id ||
       !developerSurface.id ||
+      !freeformSurface.id ||
       analyticsReadTools.length === 0 ||
       assetReadTools.length === 0
     ) {

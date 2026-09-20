@@ -194,6 +194,13 @@ function FreeformBuilderInner({ id }: { id: string }) {
           onDirty={isLocked ? undefined : handleDirty}
           onGraphChange={isLocked ? undefined : handleGraphChange}
           previewOnly={isLocked}
+          // Give the in-canvas AiComposer the id it needs to route its
+          // mutation tools to the right D1 row, and flip wizard mode on
+          // a freshly-created workflow (no persisted nodes yet). Both
+          // props are safely ignored in previewOnly / locked mode by the
+          // canvas itself.
+          workflowId={id}
+          isNew={(stored?.nodes.length ?? 0) === 0}
         />
       </div>
     </div>

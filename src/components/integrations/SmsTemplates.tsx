@@ -60,7 +60,7 @@ export function SmsTemplates({ config }: { config: SmsChannelConfig }) {
   // just the mirror. Same dead-zone contract as the WA/RCS forms.
   usePiDisabled(
     creating
-      ? "Pi's off-duty here. DLT-approved templates only — Pi can't author these."
+      ? "Pi's off-duty here. Mirror the DLT copy word for word."
       : null,
   );
 

@@ -117,7 +117,7 @@ export function WhatsAppTemplates({ waba }: { waba: ConnectedWaba }) {
   // nudge — same pattern as Agents > Tools and Settings.
   usePiDisabled(
     creating
-      ? "Pi's off-duty here. Template Builder is your canvas."
+      ? "Pi's off-duty here. Meta's picky, this one's on you."
       : null,
   );
 

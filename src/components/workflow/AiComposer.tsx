@@ -7,6 +7,7 @@ import { ConfirmDraftCard } from "./ConfirmDraftCard";
 import { getSuggestion } from "@/lib/pi-node-suggestions";
 import { askPi } from "@/lib/server-fns/pi-llm";
 import { summarizePiEdits, expandSkeletonCalls, extractChipsFromToolCalls, extractActionLinksFromToolCalls, type PiToolCallLog, type ActionLinkFromTool } from "@/lib/pi-canvas-apply";
+import { expandFreeformSkeletonCalls } from "@/lib/pi-freeform-apply";
 import { cn } from "@/lib/utils";
 import {
   PiPill,
@@ -65,6 +66,17 @@ type ChatMessage = {
   actionLinks?: ActionLinkFromTool[];
 };
 
+/**
+ * Which canvas the composer is mounted on. Drives the askPi scope, the
+ * context payload keys (campaignId vs workflowId), and the wizard
+ * welcome copy. Default "campaign" preserves back-compat with the
+ * existing WorkflowCanvas mount.
+ *
+ * - "campaign" → scope: "builder", context: { campaignId, ... }
+ * - "freeform" → scope: "freeform", context: { workflowId, ... }
+ */
+export type AiComposerSurface = "campaign" | "freeform";
+
 export type AiComposerProps = {
   /** "wizard" mode pre-seeds a welcome from Pi so the blank canvas has a way in. */
   mode?: "chat" | "wizard";
@@ -75,8 +87,16 @@ export type AiComposerProps = {
   onBuildingChange?: (building: boolean) => void;
   /** I3 — confirm a node-level Pi suggestion; the canvas runs its real graph transform. */
   onApplySuggestion?: (s: { nodeId: string; suggestionId: string }) => void;
-  /** Current campaign id — passed to askPi so the LLM's mutation tools write to the right D1 rows. */
+  /**
+   * Which surface this composer is mounted on. Defaults to "campaign" so
+   * existing WorkflowCanvas mounts don't need to change. Set to
+   * "freeform" for the WA Freeform Workflow builder canvas.
+   */
+  surfaceKind?: AiComposerSurface;
+  /** Current campaign id — passed to askPi so the LLM's mutation tools write to the right D1 rows. Used only when surfaceKind = "campaign". */
   campaignId?: string;
+  /** Current freeform workflow id — passed to askPi in the freeform scope's context so mutation tools write to the right D1 row. Used only when surfaceKind = "freeform". */
+  workflowId?: string;
   /** Fired for every LLM turn whose toolCalls include DAG mutations. Canvas applies them. */
   onPiToolCalls?: (toolCalls: PiToolCallLog[]) => void;
   /** Fired when the user hits "Draft this" on a Confirm-Draft card. The
@@ -106,7 +126,9 @@ export function AiComposer({
   autoOpenWizard = false,
   onBuildingChange,
   onApplySuggestion,
+  surfaceKind = "campaign",
   campaignId,
+  workflowId,
   onPiToolCalls,
   onDraftAccepted,
 }: AiComposerProps = {}) {
@@ -117,10 +139,12 @@ export function AiComposer({
       ? [{
           role: "assistant",
           // Third-person, crisp. Pi = Paytm Intelligence. `**Pi**` renders
-          // as bold via `renderInlineMarkdown`. See pi-construct-rules.ts for
-          // the full canonical grammar Pi obeys.
+          // as bold via `renderInlineMarkdown`. See pi-construct-rules.ts /
+          // freeform system prompt for the canonical grammar Pi obeys.
           content:
-            "Describe your campaign flow, and let **Pi** do the magic-wiring!",
+            surfaceKind === "freeform"
+              ? "Describe the reply flow you want in the 24-hour window, and let **Pi** do the magic-wiring!"
+              : "Describe your campaign flow, and let **Pi** do the magic-wiring!",
         }]
       : [],
   );
@@ -253,35 +277,55 @@ export function AiComposer({
     setMessages((prev) => [...prev, { role: "user", content: q }]);
     setState("thinking");
     try {
+      // Route by surfaceKind. Both scopes share the same tool set shape
+      // (propose_draft, insert_node, connect_nodes, update_node,
+      // focus_node, emit_choice, emit_action_link) — the server-side
+      // system prompts + context assemblers are what differ.
+      const isFreeform = surfaceKind === "freeform";
       const r = await askPi({
         data: {
-          scope: "builder",
+          scope: isFreeform ? "freeform" : "builder",
           question: q,
-          context: {
-            campaignId,
-            surface: "Campaign canvas",
-            isNew: mode === "wizard",
-            hint:
-              mode === "wizard"
-                ? "The canvas is blank except for a Start node with id 'start'. Anchor the first new node to it."
-                : "The canvas already has nodes. Read the campaign first before editing.",
-          },
+          context: isFreeform
+            ? {
+                workflowId,
+                surface: "Freeform canvas",
+                isNew: mode === "wizard",
+                hint:
+                  mode === "wizard"
+                    ? "The canvas is blank except for a Start node with id 'start' and an End node with id 'end'. Anchor the first new node to Start."
+                    : "The canvas already has nodes. Read the workflow first before editing.",
+              }
+            : {
+                campaignId,
+                surface: "Campaign canvas",
+                isNew: mode === "wizard",
+                hint:
+                  mode === "wizard"
+                    ? "The canvas is blank except for a Start node with id 'start'. Anchor the first new node to it."
+                    : "The canvas already has nodes. Read the campaign first before editing.",
+              },
           history: historyForServer,
         },
       });
       if (r.ok) {
-        // Diagnostic — logs the builder-context asset counts so we can see
-        // from browser devtools whether Pi got a real catalog or an empty
-        // one, and why (D1 unbound / read threw / really empty).
+        // Diagnostic — logs the surface-context counts (assets, nodes) so
+        // we can see from browser devtools whether Pi got a real catalog
+        // or an empty one, and why (D1 unbound / read threw / really empty).
         if (r.diag) {
           // eslint-disable-next-line no-console
-          console.log("[AskPi] builder context diag:", r.diag);
+          console.log(`[AskPi] ${surfaceKind} context diag:`, r.diag);
         }
         const rawToolCalls = (r.toolCalls ?? []) as PiToolCallLog[];
         // Expand `insert_skeleton` into synthetic insert_node/connect_nodes
         // so the canvas apply flow sees each node/edge individually. Other
-        // tool calls pass through untouched.
-        const toolCalls = expandSkeletonCalls(rawToolCalls);
+        // tool calls pass through untouched. Route by surfaceKind — the
+        // campaign expander reads `args.campaignId`, the freeform expander
+        // reads `args.workflowId`; both emit the same synthetic tool call
+        // shape downstream.
+        const toolCalls = isFreeform
+          ? expandFreeformSkeletonCalls(rawToolCalls)
+          : expandSkeletonCalls(rawToolCalls);
         // Split the batch into (a) the plan-announcement call
         // (`propose_draft` — the client renders the Confirm-Draft card
         // and does NOT touch the canvas yet), and (b) real mutation

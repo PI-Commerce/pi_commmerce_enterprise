@@ -43,6 +43,14 @@ import {
   apiOutcomeOutputs,
   deriveNodeOutcomeVariables,
 } from "@/lib/wa-outputs";
+import { AiComposer } from "./AiComposer";
+import { applyFreeformPiToolCallsToGraph } from "@/lib/pi-freeform-apply";
+import {
+  buildFreeformDraftSkeleton,
+  resetFreeformCanvasForNewDraft,
+} from "@/lib/pi-freeform-skeleton";
+import type { PiToolCallLog } from "@/lib/pi-canvas-apply";
+import type { ProposedDraft } from "@/lib/pi-propose-draft";
 
 /**
  * Freeform workflow canvas.
@@ -106,6 +114,8 @@ export function FreeformCanvas({
   onGraphChange,
   previewOnly = false,
   edgeLabels,
+  workflowId,
+  isNew = false,
 }: {
   /** Optional persisted graph. Falls back to the Start>End blank layout when empty. */
   initialNodes?: FreeformNodeRecord[];
@@ -128,6 +138,18 @@ export function FreeformCanvas({
    *  id. The overlay formats these however it wants (percentages, counts, etc.);
    *  the canvas just renders the string on the edge curve. */
   edgeLabels?: Map<string, string>;
+  /**
+   * Freeform workflow id. Passed to the in-canvas AiComposer so Pi's
+   * mutation tools write to the right D1 row. Undefined suppresses the
+   * composer mount (e.g. previewOnly mode inside the campaign side).
+   */
+  workflowId?: string;
+  /**
+   * True when the parent route just created this workflow (no persisted
+   * graph, only the blank Start > End layout). Drives AiComposer's wizard
+   * mode so Pi auto-opens with a welcome instead of the collapsed pill.
+   */
+  isNew?: boolean;
 }) {
   const seedNodes = useMemo<Node[]>(() => {
     if (!initialNodes || initialNodes.length === 0) return BLANK_NODES;
@@ -485,6 +507,51 @@ export function FreeformCanvas({
 
   const defaultEdgeOptions = useMemo(() => ({ type: "routed" as const }), []);
 
+  // Ask Pi (in-canvas composer) — mutation dispatch. Every LLM turn's
+  // insert_node / connect_nodes / update_node tool calls fold into the
+  // live ReactFlow state via applyFreeformPiToolCallsToGraph. Server
+  // already wrote the change to D1, so this is purely the "make the
+  // canvas visibly update the moment Pi answers" path.
+  const applyPiToolCalls = useCallback(
+    (toolCalls: PiToolCallLog[]) => {
+      const next = applyFreeformPiToolCallsToGraph(toolCalls, nodes, edges);
+      if (!next.changed) return;
+      setNodes(next.nodes);
+      setEdges(next.edges);
+      onDirty?.();
+    },
+    [nodes, edges, setNodes, setEdges, onDirty],
+  );
+
+  // "Draft this" accepted — strip every non-canonical node so a repeat
+  // draft doesn't pile on top of a previous one, then render pulsating
+  // skeleton placeholders for Pi's proposed shape. Pi's real insert_node
+  // calls arrive in the next turn; applyFreeformPiToolCallsToGraph
+  // strips the skeleton before applying the real inserts.
+  const applyDraftSkeleton = useCallback(
+    (draft: ProposedDraft) => {
+      const reset = resetFreeformCanvasForNewDraft(nodes, edges);
+      const baseNodes = reset.nodes as typeof nodes;
+      const baseEdges = reset.edges;
+      const { skeletonNodes, skeletonEdges, endPositionUpdate } =
+        buildFreeformDraftSkeleton(draft, baseNodes);
+      if (skeletonNodes.length === 0) return;
+      setNodes(() => {
+        const withEndMoved = endPositionUpdate
+          ? baseNodes.map((n) =>
+              n.id === endPositionUpdate.id
+                ? { ...n, position: endPositionUpdate.position }
+                : n,
+            )
+          : baseNodes;
+        return [...withEndMoved, ...(skeletonNodes as typeof nodes)];
+      });
+      setEdges(() => [...baseEdges, ...skeletonEdges]);
+      onDirty?.();
+    },
+    [nodes, edges, setNodes, setEdges, onDirty],
+  );
+
   return (
     <div className="relative h-full w-full">
       <ReactFlow
@@ -542,6 +609,23 @@ export function FreeformCanvas({
       </ReactFlow>
 
       {!previewOnly && <FreeformNodePalette onAdd={handleAdd} />}
+
+      {/* In-canvas Ask Pi. Mirrors the campaign builder mount in
+          WorkflowCanvas.tsx — wizard mode on fresh workflows, chat mode
+          on existing ones. Mutations dispatch through applyPiToolCalls;
+          confirmed drafts render pulsating skeletons via applyDraftSkeleton.
+          Suppressed in previewOnly mode and when no workflowId is
+          available (e.g. campaign-side preview modal). */}
+      {!previewOnly && workflowId && (
+        <AiComposer
+          surfaceKind="freeform"
+          mode={isNew ? "wizard" : "chat"}
+          autoOpenWizard={isNew}
+          workflowId={workflowId}
+          onPiToolCalls={applyPiToolCalls}
+          onDraftAccepted={applyDraftSkeleton}
+        />
+      )}
 
       {/* Route to the right config panel by node type. Logic nodes reuse the
   campaign panel so API/Conditional behave identically across builders. */}

@@ -26,7 +26,14 @@ export type ProposedBranch = {
 };
 
 /** The full plan Pi proposes. Rendered as a Confirm-Draft card in chat
- *  and consumed by the canvas skeleton generator on "Draft this". */
+ *  and consumed by the canvas skeleton generator on "Draft this".
+ *
+ *  `campaignId` is really just an opaque target id. For the campaign
+ *  builder it carries the campaign id (Pi's tool call has
+ *  `args.campaignId`); for the freeform builder it carries the freeform
+ *  workflow id (Pi's tool call has `args.workflowId`). Extraction below
+ *  reads either into this field — downstream skeleton / apply code only
+ *  needs branches, so the field name is legacy, not semantic. */
 export type ProposedDraft = {
   campaignId: string;
   title: string;
@@ -46,12 +53,16 @@ export function extractProposedDraft(toolCalls: PiToolCallLog[]): ProposedDraft 
   if (relevant.length === 0) return null;
   const last = relevant[relevant.length - 1];
   try {
-    const args = JSON.parse(last.args) as Partial<ProposedDraft>;
-    if (!args.campaignId || !args.title || !args.summary || !Array.isArray(args.branches)) {
+    const args = JSON.parse(last.args) as Partial<ProposedDraft> & { workflowId?: string };
+    // Campaign builder emits `campaignId`; freeform builder emits
+    // `workflowId`. Accept either into the struct's `campaignId` field
+    // (which is really just an opaque target-id tag downstream).
+    const targetId = args.campaignId ?? args.workflowId;
+    if (!targetId || !args.title || !args.summary || !Array.isArray(args.branches)) {
       return null;
     }
     return {
-      campaignId: args.campaignId,
+      campaignId: targetId,
       title: args.title,
       summary: args.summary,
       branches: args.branches.map((b) => ({

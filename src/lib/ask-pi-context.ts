@@ -33,8 +33,13 @@ export type PiResult = {
  *   D1 reads, no mutations. Used solely by `/integrations`.
  * "developer" → sibling docs-RAG (search_docs over API Docs + Release Notes
  *   chunks). No D1 reads, no mutations. Used solely by `/developer`.
+ * "freeform" → freeform-scope in-canvas builder on
+ *   `/channels/whatsapp_/freeform/$id`. Mirrors "builder" (propose_draft +
+ *   insert_node + connect_nodes + update_node) but on a smaller domain
+ *   (WhatsApp Freeform Workflows — text/media/list messages with buttons /
+ *   row branching, no audience, mostly inline content).
  */
-export type PiScopeMode = "analytics" | "builder" | "agents" | "integrations" | "developer";
+export type PiScopeMode = "analytics" | "builder" | "agents" | "integrations" | "developer" | "freeform";
 
 export type PiContext = {
   /** Short human label for the surface (telemetry / headers). */
@@ -235,24 +240,23 @@ const ROUTES: { match: (p: string) => boolean; ctx: PiContext }[] = [
     },
   },
   // ----- Channels > WhatsApp > Freeform Workflow builder (canvas) -----
-  // Full-screen builder canvas (`/channels/whatsapp_/freeform/$id`). Same
-  // shape as the campaign builder but for freeform flows. Route match
-  // stays specific so it wins over `/channels/whatsapp` below. Wiring
-  // for the in-canvas AiComposer is a follow-up — for now the dock uses
-  // this entry when someone opens Pi from the shell.
+  // Full-screen builder canvas (`/channels/whatsapp_/freeform/$id`). The
+  // canvas renders WITHOUT the AppShell, so the global dock never mounts
+  // here — Pi lives IN the canvas via AiComposer (mirrors the campaign
+  // builder's in-canvas Pi). This entry is defensive: if a future refactor
+  // drops the shell back in, the dock reads this and behaves. The real
+  // in-canvas config lives in {@link CANVAS_FREEFORM_CONTEXT} below.
   {
     match: (p) => /^\/channels\/whatsapp_\/freeform\/[^/]+$/.test(p),
     ctx: {
       scope: "Freeform workflow canvas",
-      scopeMode: "analytics",
-      systemHint: "",
+      scopeMode: "freeform",
+      systemHint:
+        "The user is inside the WhatsApp Freeform Workflow builder canvas. Pi lives IN the canvas via AiComposer, not via the shell dock. If the dock somehow rendered here, stay quiet.",
       placeholder: "",
       chips: [],
       thinking: [],
       result: { text: "", cta: "" },
-      deadZone: {
-        nudge: "Pi's wiring for freeform canvas is next up. Drag from the palette meanwhile.",
-      },
     },
   },
   // ----- Channels > WhatsApp (Overview / Templates / Freeform list) -----
@@ -413,6 +417,31 @@ export const CANVAS_CONTEXT: PiContext = {
   thinking: [
     "Paytm Intelligence is reading the current flow…",
     "Checking assets and node kinds available…",
+    "Drafting the plan…",
+  ],
+  result: {
+    text: "Pi is ready to draft the flow.",
+    cta: "Draft this",
+  },
+};
+
+/**
+ * Canvas (freeform workflow builder) context — used by the in-canvas
+ * AiComposer on `/channels/whatsapp_/freeform/$id`. Same shape as
+ * {@link CANVAS_CONTEXT} but scoped to the freeform surface (freeform
+ * DSL, freeform kinds, Meta interactive limits) so Pi never confuses
+ * itself with the campaign builder's grammar.
+ */
+export const CANVAS_FREEFORM_CONTEXT: PiContext = {
+  scope: "Freeform canvas",
+  scopeMode: "freeform",
+  systemHint: "The user is inside the WhatsApp Freeform Workflow canvas composer. Pi reads the injected context (current graph, freeform canonical rules, allowed kinds, Meta interactive limits), asks minimum viable clarifiers, then calls propose_draft to confirm the plan before wiring nodes. Freeform content is inline (no template picks for messages).",
+  placeholder: "Describe the reply flow…",
+  // No chips on canvas. Pure chat experience.
+  chips: [],
+  thinking: [
+    "Paytm Intelligence is reading the current flow…",
+    "Checking allowed kinds and Meta limits…",
     "Drafting the plan…",
   ],
   result: {

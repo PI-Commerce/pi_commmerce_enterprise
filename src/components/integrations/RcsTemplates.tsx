@@ -75,7 +75,7 @@ export function RcsTemplates({ config }: { config: RcsChannelConfig }) {
   // approval). Same dead-zone contract as WA/SMS forms.
   usePiDisabled(
     creating
-      ? "Pi's off-duty here. Template Builder is your canvas."
+      ? "Pi's off-duty here. Rich cards want a human touch."
       : null,
   );
 
