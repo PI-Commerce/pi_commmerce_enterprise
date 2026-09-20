@@ -827,7 +827,17 @@ function LeadsTable({
       const nodeIds = restrictToNodeIds ? new Set(restrictToNodeIds) : null;
       const seedNodes = new Map(run.sankey.nodes.map((n, i) => [n.id, { name: n.name, serial: i + 1 } as const]));
       const adapted = d1LeadsQuery.rows.map((r): Lead => analyticsLeadToLead(r, seedNodes));
-      return nodeIds ? adapted.filter((l) => nodeIds.has(l.stageNodeId)) : adapted;
+      const restricted = nodeIds ? adapted.filter((l) => nodeIds.has(l.stageNodeId)) : adapted;
+      // Cap to the scaled KPI so the table's count matches the ELIGIBLE
+      // LEADS card at the top. The D1 seed carries far more per-run rows
+      // than the demo's KPI value (which is scaled `run.kpi.validLeads`),
+      // so without a cap the top panel and bottom table disagree wildly
+      // — and the pageSize ceiling (5,000) hides the effect of the date
+      // range because most windows still contain 5,000+ rows. Applying
+      // the cap here keeps table row identities real (real D1 names /
+      // phones) while making the total consistent across the whole page.
+      const cap = Math.max(0, run.kpi.validLeads);
+      return cap > 0 && restricted.length > cap ? restricted.slice(0, cap) : restricted;
     }
     if (singleScopedId) return generateLeadsForNode(run, singleScopedId);
     const all = generateLeads(run, run.kpi.validLeads);
