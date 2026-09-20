@@ -38,8 +38,9 @@ import { assetReadTools } from "@/lib/pi/common/pools/asset-reads";
 import { agentsSurface } from "@/lib/pi/surfaces/agents";
 import { builderSurface } from "@/lib/pi/surfaces/builder";
 import { listsSurface } from "@/lib/pi/surfaces/lists";
+import { integrationsSurface } from "@/lib/pi/surfaces/integrations";
 
-export type AskPiScope = "analytics" | "builder" | "agents";
+export type AskPiScope = "analytics" | "builder" | "agents" | "integrations";
 
 export type AskPiRequest = {
   scope: AskPiScope;
@@ -93,6 +94,10 @@ const SCOPE_TO_SURFACE: Record<AskPiScope, string> = {
   // the free-text list-controls path. The dedicated /analytics
   // dashboard uses its own server fn (askPiAnalytics), not this one.
   analytics: "lists",
+  // /integrations is a docs-RAG surface (search_docs over seeded vendor
+  // docs). Kept out of the analytics/lists path because it has zero D1
+  // reads and its answer shape is cite-a-doc, not filter-a-list.
+  integrations: "integrations",
 };
 
 /**
@@ -116,11 +121,21 @@ export const askPi = createServerFn({ method: "POST" })
     // never run — the kernel then returns `unknown_surface`. Cheap no-op
     // that the minifier can't eliminate because the array reads have
     // observable-ish side effects behind an `if` guard on a runtime value.
-    if (!agentsSurface.id || !builderSurface.id || !listsSurface.id) {
-      throw new Error("pi surfaces missing at load — check registrations");
+    // `void x` is optimized away by the minifier — verified against the
+    // dist bundle: `void assetReadTools` dropped the module init and the
+    // registerPool("asset-reads") call vanished. Use the same throw-guard
+    // pattern the surfaces use, checking `.length` on the tool array so
+    // the module can't be proved unused across bundle boundaries.
+    if (
+      !agentsSurface.id ||
+      !builderSurface.id ||
+      !listsSurface.id ||
+      !integrationsSurface.id ||
+      analyticsReadTools.length === 0 ||
+      assetReadTools.length === 0
+    ) {
+      throw new Error("pi surfaces or pools missing at load — check registrations");
     }
-    void analyticsReadTools;
-    void assetReadTools;
 
     const surfaceId = SCOPE_TO_SURFACE[data.scope];
     const r = await runSurface(surfaceId, {
