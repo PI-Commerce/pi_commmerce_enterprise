@@ -35,6 +35,12 @@ export type FreeformNodeData = {
   error?: string;
   locked?: boolean;
   config?: FreeformNodeConfig;
+  /** Skeleton-wireframe flag set by the Ask Pi draft-skeleton generator
+   *  (pi-freeform-skeleton.ts). When true, the node renders as a
+   *  pulsating placeholder (same visual as the campaign builder's
+   *  WorkflowNode) until Pi's real insert_skeleton lands and strips
+   *  the `_skel_` prefix. See buildFreeformDraftSkeleton for the shape. */
+  building?: boolean;
 };
 
 const ICONS: Record<FreeformNodeKind, LucideIcon> = {
@@ -54,6 +60,53 @@ export function FreeformNode({ data, selected }: NodeProps<FreeformNodeData>) {
   const Icon = ICONS[data.kind] ?? TypeIcon;
   const invalid = data.valid === false;
   const isTerminal = data.kind === "start" || data.kind === "end";
+
+  // Skeleton wireframe placeholder used during Ask Pi build phase.
+  // Mirrors the campaign WorkflowNode's building state so ALL nodes in
+  // Pi's draft-skeleton pulsate uniformly (previously only apiToolCall
+  // pulsated because that renders through the campaign node, which had
+  // building support; freeform-owned kinds rendered as normal cards).
+  if (data.building) {
+    return (
+      <div
+        className={cn(
+          "askpi-freeform-skeleton relative rounded-xl border border-ai/40 bg-ai/[0.04]",
+          isTerminal ? "h-8 w-[120px] rounded-full" : "h-[64px] w-[224px]",
+        )}
+      >
+        {!isTerminal && (
+          <Handle type="target" position={Position.Left} className="!h-2 !w-2 !border-2 !border-background !bg-ai/40" />
+        )}
+        {!isTerminal && (
+          <Handle type="source" position={Position.Right} className="!h-2 !w-2 !border-2 !border-background !bg-ai/40" />
+        )}
+        {isTerminal && data.kind !== "start" && (
+          <Handle type="target" position={Position.Left} className="!h-2 !w-2 !border-2 !border-background !bg-ai/40" />
+        )}
+        {isTerminal && data.kind !== "end" && (
+          <Handle type="source" position={Position.Right} className="!h-2 !w-2 !border-2 !border-background !bg-ai/40" />
+        )}
+        <div className="absolute inset-0 overflow-hidden rounded-[inherit]">
+          <div className="askpi-freeform-skeleton-shimmer h-full w-full" />
+        </div>
+        <style>{`
+          @keyframes askPiFreeformSkelPulse {
+            0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--ai) 0%, transparent); border-color: color-mix(in oklch, var(--ai) 35%, transparent); }
+            50%      { box-shadow: 0 0 22px -2px color-mix(in oklch, var(--ai) 55%, transparent); border-color: color-mix(in oklch, var(--ai) 70%, transparent); }
+          }
+          .askpi-freeform-skeleton { animation: askPiFreeformSkelPulse 1.8s ease-in-out infinite; }
+          @keyframes askPiFreeformSkelShimmer {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(100%); }
+          }
+          .askpi-freeform-skeleton-shimmer {
+            background: linear-gradient(90deg, transparent, color-mix(in oklch, var(--ai) 22%, transparent), transparent);
+            animation: askPiFreeformSkelShimmer 1.8s linear infinite;
+          }
+        `}</style>
+      </div>
+    );
+  }
 
   if (isTerminal) {
     const isStart = data.kind === "start";

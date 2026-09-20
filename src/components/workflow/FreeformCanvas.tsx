@@ -675,6 +675,10 @@ export function FreeformCanvas({
           surfaceKind="freeform"
           mode={isNew ? "wizard" : "chat"}
           autoOpenWizard={isNew}
+          nudge={{
+            label: "Ask Pi to design the reply flow",
+            active: isNew,
+          }}
           workflowId={workflowId}
           onPiToolCalls={applyPiToolCalls}
           onDraftAccepted={applyDraftSkeleton}

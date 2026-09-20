@@ -484,11 +484,20 @@ export function AskPiDock() {
                     result={{ text: liveAnswer, cta: ctx.result.cta, actionLinks: liveActionLinks ?? undefined }}
                     onAccept={reset}
                     onDismiss={reset}
-                    renderMarkdown={ctx.scopeMode === "integrations" || ctx.scopeMode === "developer"}
+                    // Always render markdown on live answers — Pi routinely
+                    // emits bold / inline code / links in normal answers
+                    // (surface names, template ids, deep links), not just
+                    // on docs-RAG surfaces. Rendering them literally as
+                    // `**stars**` looks broken. Docs surfaces still get
+                    // the collapsed accept row via `hideAccept` below.
+                    renderMarkdown
                     hideAccept={ctx.scopeMode === "integrations" || ctx.scopeMode === "developer"}
                   />
                 ) : (
-                  <PiResultCard result={ctx.result} onAccept={reset} onDismiss={reset} />
+                  // Canned surface result (fallback when Pi turn didn't
+                  // return an answer). Also render markdown — the canned
+                  // strings in ask-pi-context often carry bolded terms.
+                  <PiResultCard result={ctx.result} onAccept={reset} onDismiss={reset} renderMarkdown />
                 )}
               </div>
             )}

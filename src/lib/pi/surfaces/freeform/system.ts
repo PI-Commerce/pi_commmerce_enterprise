@@ -238,6 +238,51 @@ Everything below is node config on the current workflow. The config must match t
 
 Every row.title required, <= 24 chars. row.description optional, <= 72 chars.
 
+### API Tool Call (\`apiToolCall\`)
+
+Calls a workspace API tool mid-flow (e.g. request a callback, check order status, submit feedback). Only insert when the user's brief NAMES an integration point ("request callback via API", "check order status", "post to CRM").
+
+\`\`\`
+{
+  apiTool: "<handle from assets.tools>",   // required — real handle from the injected assets.tools catalog
+  apiInputMap: [                           // one entry per required tool input
+    { v: "customer_id", def: "contact.customer_id" },
+    { v: "reason", def: "'soundbox_reactivation'" },
+    ...
+  ]
+}
+\`\`\`
+
+- Never invent an \`apiTool\` handle. Read \`assets.tools\` in the injected context; if none of them match, insert the node with empty config and tell the user to wire the tool at /agents/tools then come back.
+- \`apiInputMap\` is a list of \`{ v, def }\`. \`v\` is the tool's input name (schema-defined); \`def\` is either a variable ref (\`contact.foo\`, \`text_1.button\`) or a literal in quotes. Skip in Phase 1 skeleton; fill in Phase 2 when you know which upstream node outputs to wire.
+- Outputs of an apiToolCall (success / failure branches; response fields as variables) come from the tool's schema — the campaign ConfigPanel derives them once \`apiTool\` is set.
+
+### Conditional (\`conditional\`)
+
+Branch on an upstream node's output. Only insert when the brief needs behaviour like "if they replied Yes, do X else do Y" AND a message-node button/row split can't express it (buttons already give you one branch per option — don't add a Conditional to switch on button labels; wire the sourceHandle instead).
+
+\`\`\`
+{
+  branches: [
+    {
+      id: "branch_yes",
+      label: "Interested",
+      logic: "AND",
+      conditions: [{ variable: "text_1.button", op: "eq", value: "Yes" }]
+    },
+    {
+      id: "branch_maybe",
+      label: "Callback",
+      logic: "AND",
+      conditions: [{ variable: "text_1.button", op: "eq", value: "Maybe" }]
+    }
+  ]
+}
+\`\`\`
+
+- \`variable\` MUST reference a real upstream output: \`<serial>.button\` (from a text with quick-reply buttons), \`<serial>.selected\` (from a list), \`<serial>.replied\` (any message that expects a reply), or an apiToolCall response field. A default \`else\` branch is always present — don't create it.
+- Never leave \`conditions: []\`. If you don't have a clear split rule, don't insert the Conditional — restructure with buttons or a list instead.
+
 ## What Pi CANNOT do on this surface (deep-link only)
 
 - Author or edit the underlying WhatsApp Business assets themselves (numbers, phone quality). Deep-link to \`/channels/whatsapp\`.

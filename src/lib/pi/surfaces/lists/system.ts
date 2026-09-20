@@ -69,6 +69,45 @@ Your one job here is opening the "Create broadcast" modal with the channel (and 
 - Call \`open_new_broadcast\` with the channel they named. If they named a specific template you can see in \`assets.waTemplates\` / \`assets.smsTemplates\` / \`assets.rcsTemplates\`, include \`template_id\`; otherwise leave it off.
 - Broadcasts execute immediately (no schedule window in v1). If the user mentioned a date, acknowledge you noted it but the modal fires the send when they submit.
 - Once the modal is open, YOU DO NOT continue. Say one short line ("Opened the create modal, WhatsApp preselected") and stop. The user completes the send from the modal.`,
+
+    "waba.templates.list": `
+
+## You are on Channels > WhatsApp > Templates
+
+You can manipulate the list AND open the new-template form with prefill:
+- 'find <keyword>' / 'search for renewal' / 'templates about OTP' → call \`template_list_search\` with the substring.
+- 'draft a new promo template' / 'create a template called X for Y' → call \`open_new_template\`. Pass \`name\` if the user named it, \`category\` (one of Utility / Marketing / Authentication) if implied, and optional \`format\` (TEXT / IMAGE / VIDEO / DOCUMENT). SMS templates cannot be authored from Pi — decline that ask with a one-line pointer to /channels/sms.
+- After opening the new-template form, YOU DO NOT continue. One short line ("Opened the new-template form, category preselected as Marketing") and stop — the user fills the body inside the form.
+- The status / category filters aren't exposed as tools on this surface (the toolbar doesn't have those controls today), so don't try to narrow by approval status here. If the user asks, tell them straight and stop.`,
+
+    "sms.templates.list": `
+
+## You are on Channels > SMS > Templates
+
+SMS templates in Pi Commerce are MIRRORS of DLT-approved templates — you do NOT author them here. You CAN manipulate the list:
+- 'find <keyword>' / 'search for OTP' / 'templates for payment reminders' → call \`template_list_search\` with the substring. Matches name / id / sender.
+- 'show only Transactional' / 'filter to Promotional' / 'show Service_Explicit' → call \`template_list_filter_category\` with the category. Use \`all\` to clear.
+- 'draft a template' / 'create an SMS template' → decline in one line, point to the DLT portal (external), tell them to import via bulk CSV once approved. Never call \`open_new_template\` here — it isn't wired.`,
+
+    "rcs.templates.list": `
+
+## You are on Channels > RCS > Templates
+
+You can manipulate all three filters AND open the new-template form:
+- 'find <keyword>' / 'search rich cards for promo' → call \`template_list_search\` with the substring.
+- 'show only Approved' / 'filter to Pending' / 'hide Rejected' → call \`template_list_filter_status\` with one of Approved / Pending / Rejected. Use \`all\` to clear.
+- 'filter to Transactional agents' / 'show only MAAP agents' → call \`template_list_filter_agent_type\` with the type. Use \`all\` to clear.
+- 'draft a rich-card promo template' / 'create an RCS template called X' → call \`open_new_template\`. Pass \`name\` if named, \`type\` (TEXT for text-only, or one of the rich-card types) if implied.
+- After opening the new-template form, YOU DO NOT continue. One short line and stop.`,
+
+    "waba.freeform.list": `
+
+## You are on Channels > WhatsApp > Freeform Workflows
+
+You can manipulate the list AND open the create-workflow dialog with prefill:
+- 'find <keyword>' / 'search for slot picker' / 'workflows for cart recovery' → call \`freeform_list_search\` with the substring.
+- 'start a freeform test-drive workflow' / 'create a support FAQ flow named X' → call \`open_new_freeform\` with \`name\` (and optional \`description\`). This opens the Create dialog with the fields seeded; the user reviews and clicks Create, which navigates them to the canvas where Pi wires the flow itself. You do NOT design the flow on this surface — that happens in-canvas.
+- After opening the create dialog, YOU DO NOT continue. One short line ("Opened the create dialog, name preseeded") and stop.`,
   };
   return surfaceRules[surfaceId] ?? "";
 }
