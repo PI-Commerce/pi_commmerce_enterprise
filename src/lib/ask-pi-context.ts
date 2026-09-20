@@ -29,8 +29,10 @@ export type PiResult = {
  * "builder" → analytics reads plus DAG mutations (insert_node, connect_nodes,
  *   update_node). Only enable on `/campaigns/$id` where an edit could apply.
  * "agents" → analytics reads plus agent mutations (list/read/save_agent).
+ * "integrations" → docs-RAG only (search_docs over seeded vendor docs). No
+ *   D1 reads, no mutations. Used solely by `/integrations`.
  */
-export type PiScopeMode = "analytics" | "builder" | "agents";
+export type PiScopeMode = "analytics" | "builder" | "agents" | "integrations";
 
 export type PiContext = {
   /** Short human label for the surface (telemetry / headers). */
@@ -142,14 +144,20 @@ const ROUTES: { match: (p: string) => boolean; ctx: PiContext }[] = [
   {
     match: (p) => p.startsWith("/integrations"),
     ctx: {
+      // Integrations Pi is a docs-RAG surface (not analytics): it answers
+      // "how do I connect / integrate / troubleshoot X" for the listed
+      // vendors by retrieving from seeded vendor docs and citing the
+      // source. See src/lib/pi/surfaces/integrations/ for the tool + system
+      // prompt. No D1 reads, no mutations — off-topic asks get declined
+      // with a one-line redirect from the surface's own system prompt.
       scope: "Integrations",
-      scopeMode: "analytics",
-      systemHint: "The user is on the Integrations surface. Report which providers are connected and which campaigns depend on them; use list_campaigns and read_campaign to trace dependencies.",
-      placeholder: "Ask Pi about connections, tools, and health…",
-      chips: ["What's connected?", "Show failing integrations", "Set up WhatsApp"],
-      thinking: ["Checking connected providers…", "Reading health signals…", "Summarizing status…"],
+      scopeMode: "integrations",
+      systemHint: "The user is on the Integrations surface. Docs Q&A only — answer how-to-connect and integration-setup questions for the listed vendors using search_docs, and cite the vendor + section. Decline off-topic asks.",
+      placeholder: "Ask how to connect a vendor…",
+      chips: ["How do I connect Shopify?", "Set up Paytm Payment Gateway", "Wire CleverTap events"],
+      thinking: ["Searching vendor docs…", "Pulling the relevant steps…", "Drafting the walkthrough…"],
       result: {
-        text: "8 of 9 tools are healthy. Meta Ads · Push audience is degraded (rate-limited in the last hour). Everything else is nominal.",
+        text: "Pi can walk you through connecting any listed vendor. Ask about Paytm Payment Gateway, CleverTap, or Shopify — Pi will cite the doc section it's reading from.",
         cta: "Got it",
       },
     },

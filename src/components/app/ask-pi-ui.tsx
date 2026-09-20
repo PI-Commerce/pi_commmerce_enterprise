@@ -11,6 +11,7 @@ import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, ty
 import { ArrowUp, Square, Check, Loader2, Sparkle, X, ArrowUpRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { PiResult } from "@/lib/ask-pi-context";
+import { renderChatMarkdown } from "@/lib/chat-markdown";
 
 // ---- Shared floating geometry ----
 export const PI_EXPANDED_W = 680;
@@ -251,21 +252,41 @@ export function PiThinking({ steps }: { steps: string[] }) {
   );
 }
 
-/** Result card — Pi's proposed answer, optional diff, and approve/dismiss controls. */
+/** Result card — Pi's proposed answer, optional diff, and approve/dismiss controls.
+ *
+ *  `renderMarkdown` runs the answer through the shared chat-markdown renderer
+ *  (bold, code, links, lists) instead of dropping it into a `<p>` verbatim.
+ *  Surfaces whose answers are structured prose (docs-RAG on /integrations)
+ *  turn this on so `**bold**` and `` `code` `` don't leak as literal syntax.
+ *
+ *  `hideAccept` collapses the "Dismiss / Got it" row down to a single
+ *  "Close" affordance. Use on informational surfaces (again, docs-RAG)
+ *  where there's nothing to accept — the answer is the whole payload.
+ */
 export function PiResultCard({
   result,
   onAccept,
   onDismiss,
+  renderMarkdown = false,
+  hideAccept = false,
 }: {
   result: PiResult;
   onAccept: () => void;
   onDismiss: () => void;
+  renderMarkdown?: boolean;
+  hideAccept?: boolean;
 }) {
   return (
     <div className="space-y-2.5">
       <div className="flex items-start gap-2">
         <Sparkle className="mt-0.5 h-3.5 w-3.5 shrink-0 fill-ai text-ai" />
-        <p className="text-[13px] leading-relaxed text-foreground">{result.text}</p>
+        {renderMarkdown ? (
+          <div className="min-w-0 flex-1 text-[13px] leading-relaxed text-foreground">
+            {renderChatMarkdown(result.text)}
+          </div>
+        ) : (
+          <p className="text-[13px] leading-relaxed text-foreground">{result.text}</p>
+        )}
       </div>
       {result.diff && result.diff.length > 0 && (
         <div className="rounded-lg border border-ai/30 bg-ai/5 px-2.5 py-2 font-mono text-[11px] leading-relaxed text-foreground">
@@ -303,15 +324,26 @@ export function PiResultCard({
         </div>
       )}
       <div className="flex items-center justify-end gap-1.5">
-        <button onClick={onDismiss} className="rounded-md px-2.5 py-1 text-[11.5px] text-muted-foreground hover:text-foreground">
-          Dismiss
-        </button>
-        <button
-          onClick={onAccept}
-          className="inline-flex items-center gap-1 rounded-md bg-foreground px-2.5 py-1 text-[11.5px] font-medium text-background"
-        >
-          <Check className="h-3 w-3" /> {result.cta ?? "Review & apply"}
-        </button>
+        {hideAccept ? (
+          <button
+            onClick={onDismiss}
+            className="inline-flex items-center gap-1 rounded-md bg-foreground px-2.5 py-1 text-[11.5px] font-medium text-background"
+          >
+            Close
+          </button>
+        ) : (
+          <>
+            <button onClick={onDismiss} className="rounded-md px-2.5 py-1 text-[11.5px] text-muted-foreground hover:text-foreground">
+              Dismiss
+            </button>
+            <button
+              onClick={onAccept}
+              className="inline-flex items-center gap-1 rounded-md bg-foreground px-2.5 py-1 text-[11.5px] font-medium text-background"
+            >
+              <Check className="h-3 w-3" /> {result.cta ?? "Review & apply"}
+            </button>
+          </>
+        )}
       </div>
     </div>
   );

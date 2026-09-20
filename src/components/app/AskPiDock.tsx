@@ -7,6 +7,7 @@ import { usePiScreenContext } from "@/lib/pi-screen-context";
 import { usePiSurface, dispatchScreenToolCalls, usePiDisabledCopy } from "@/lib/pi-screen-actions";
 import { extractActionLinksFromToolCalls } from "@/lib/pi-canvas-apply";
 import { AnalyticsChat } from "@/components/analytics/AnalyticsChat";
+import { IntegrationsChat } from "@/components/integrations/IntegrationsChat";
 import {
   PiPill,
   PiNudge,
@@ -71,6 +72,12 @@ export function AskPiDock() {
   // (insight + recommendation + infographic + follow-ups). Everywhere else keeps
   // the single-shot proposal card path.
   const isAnalyticsSurface = pathname === "/analytics";
+  // /integrations gets its own dedicated multi-turn chat shell
+  // (IntegrationsChat) — same reason /analytics does. It's a Q&A surface
+  // where the user's question must stay on screen and follow-ups are the
+  // whole point. The single-shot idle→thinking→result flow is wrong for
+  // that shape.
+  const isIntegrationsSurface = pathname === "/integrations";
   const screenCtx = usePiScreenContext();
   // Surface published by the current page — carries the surfaceId (so the
   // server exposes the right screen tools) and the handler map the dock
@@ -122,6 +129,10 @@ export function AskPiDock() {
   useEffect(() => {
     if (!isOpen) return;
     if (isAnalyticsSurface) return;
+    // Same rationale as /analytics: IntegrationsChat owns its own turn
+    // state, the dock's `state` stays "idle", and click-outside would
+    // collapse a live conversation on every card click. ✕ / Esc only.
+    if (isIntegrationsSurface) return;
     const onDown = (e: MouseEvent) => {
       if (!panelRef.current) return;
       if (panelRef.current.contains(e.target as Node)) return;
@@ -131,7 +142,7 @@ export function AskPiDock() {
     };
     document.addEventListener("mousedown", onDown, true);
     return () => document.removeEventListener("mousedown", onDown, true);
-  }, [isOpen, value, state, isAnalyticsSurface]);
+  }, [isOpen, value, state, isAnalyticsSurface, isIntegrationsSurface]);
 
   const submit = async (q: string = value) => {
     const query = q.trim();
@@ -271,7 +282,19 @@ export function AskPiDock() {
         </div>
       )}
 
-      {isOpen && !isAnalyticsSurface && (
+      {isOpen && isIntegrationsSurface && (
+        // /integrations is a Q&A surface: mount the dedicated multi-turn chat
+        // shell so the user's question stays visible above Pi's answer, the
+        // composer never disappears, and follow-ups are one click away. The
+        // generic proposal-card flow below is wrong for this shape.
+        <div className="pointer-events-none" style={{ transform: `translateX(${dragX}px)` }}>
+          <PiPanel innerRef={panelRef} className="w-[680px] max-w-[94vw]">
+            <IntegrationsChat onClose={() => setState("collapsed")} />
+          </PiPanel>
+        </div>
+      )}
+
+      {isOpen && !isAnalyticsSurface && !isIntegrationsSurface && (
         <div className="pointer-events-none" style={{ transform: `translateX(${dragX}px)` }}>
           <PiPanel innerRef={panelRef} className="w-[680px] max-w-full">
             {expanded && (
@@ -282,10 +305,17 @@ export function AskPiDock() {
                   // Real LLM answer over D1 for this surface. Preserve the surface's
                   // canned CTA so the "next action" language stays on-brand. If Pi
                   // emitted P3 escape-hatch links this turn, they render above the CTA.
+                  //
+                  // /integrations is a docs-RAG surface: answers are markdown-heavy
+                  // (bold section names, code-fenced scopes, deep links) and there's
+                  // nothing to accept/reject — the payload IS the answer. Render
+                  // markdown + collapse the accept row to a single "Close".
                   <PiResultCard
                     result={{ text: liveAnswer, cta: ctx.result.cta, actionLinks: liveActionLinks ?? undefined }}
                     onAccept={reset}
                     onDismiss={reset}
+                    renderMarkdown={ctx.scopeMode === "integrations"}
+                    hideAccept={ctx.scopeMode === "integrations"}
                   />
                 ) : (
                   <PiResultCard result={ctx.result} onAccept={reset} onDismiss={reset} />
