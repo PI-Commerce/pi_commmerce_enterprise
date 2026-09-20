@@ -9,6 +9,10 @@ import * as agentsDb from "@/lib/db/agents";
 import type { AgentRecord } from "@/lib/agent-data";
 import { getEnv } from "@/lib/db/client";
 import type { SurfaceTool } from "@/lib/pi/kernel";
+import {
+  buildAgentSkeleton,
+  type PersonaGender,
+} from "../skeleton-template";
 
 /** Return every voice agent in the workspace (compact — no masterPrompt
  *  in a list call, that's what read_agent is for). */
@@ -108,6 +112,102 @@ export const listTools: SurfaceTool = {
 };
 
 /**
+ * FAST-PATH draft tool. Pi calls this on ANY new-agent request instead of
+ * authoring the full masterPrompt as text.
+ *
+ * Why: the four seeded agents each have ~8-10k characters of masterPrompt.
+ * Asking the model to regenerate that shape from scratch is 3000+ output
+ * tokens and 60-120s. But the STRUCTURE is invariant — only a handful of
+ * decisions actually need an LLM (which persona, which tools, what topic).
+ *
+ * This tool takes only those decisions as args. The server-side handler
+ * calls `buildAgentSkeleton` (a deterministic template renderer) to
+ * assemble the full 10-section masterPrompt + 4-section KB + 3 postCall
+ * vars, then upserts. Pi's tool call output is ~150 tokens instead of
+ * 3000+, so first draft returns in ~5s instead of 2 minutes.
+ *
+ * Iteration (Phase 2) still uses `save_agent` with a full merged record —
+ * that path is only slow when the whole prompt is regenerated at once,
+ * which iteration never needs to do.
+ */
+export const saveAgentFromTopic: SurfaceTool = {
+  name: "save_agent_from_topic",
+  description:
+    "Create a new voice agent from a topic + a few persona/tool picks. Server renders the full masterPrompt/KB/postCall skeleton from a template — you do NOT author them. Use for every fresh draft. For edits to an existing agent, use save_agent instead.",
+  parameters: {
+    type: "object",
+    properties: {
+      id: {
+        type: "string",
+        description:
+          "Agent id from context.draftHint.id. Do not invent — the client already reserved this id.",
+      },
+      name: {
+        type: "string",
+        description:
+          "Agent name from context.draftHint.name (snake_case, ends in _voice).",
+      },
+      topic: {
+        type: "string",
+        description:
+          "Human-readable subject the agent handles, from context.draftHint.topic. Examples: 'cart abandonment', 'loan against mutual funds', 'renewal reminders'. Used verbatim in the persona objective and call-flow scripts.",
+      },
+      personaName: {
+        type: "string",
+        enum: [
+          "Riya",
+          "Meera",
+          "Priya",
+          "Neha",
+          "Kavya",
+          "Kabir",
+          "Arjun",
+          "Rohan",
+          "Rahul",
+          "Vikram",
+        ],
+        description:
+          "Which persona to voice the agent. Pick one from the allowed list. Match tone to topic: empathetic for reactivation/collections, warm for winback, professional for insurance.",
+      },
+      personaGender: {
+        type: "string",
+        enum: ["female", "male"],
+        description:
+          "Must match the personaName choice (Riya/Meera/Priya/Neha/Kavya = female; Kabir/Arjun/Rohan/Rahul/Vikram = male). Drives Hindi verb agreement in the scripts.",
+      },
+      tools: {
+        type: "array",
+        items: { type: "string" },
+        description:
+          "1-3 tool handles the agent will use during calls. Pick from the known handles: crm_query (tier/LTV/churn), order_lookup (order/cart/eta), knowledge_lookup (FAQ backstop), policy_lookup (insurance), cart_status_check, loyalty_tier_fetch, loyalty_enrollment_check, loyalty_upgrade_status, log_collection_escalation, log_merchant_outreach. Empty array is fine if no tools apply.",
+      },
+    },
+    required: ["id", "name", "topic", "personaName", "personaGender", "tools"],
+  },
+  handler: async (args) => {
+    const id = args.id as string;
+    const name = args.name as string;
+    const topic = args.topic as string;
+    const personaName = args.personaName as string;
+    const personaGender = args.personaGender as PersonaGender;
+    const tools = Array.isArray(args.tools) ? (args.tools as string[]) : [];
+    if (!id || !name || !topic) {
+      return { error: "save_agent_from_topic: id, name, and topic are required" };
+    }
+    const record = buildAgentSkeleton({
+      id,
+      name,
+      topic,
+      personaName,
+      personaGender,
+      tools,
+    });
+    await agentsDb.upsertAgent(record);
+    return { ok: true, id: record.id };
+  },
+};
+
+/**
  * Screen-only tool. Signals the client to navigate to the builder page for
  * the given agent id. Server-side handler is a no-op that returns { ok }; the
  * real work happens in the AskPiDock dispatcher, which routes the tool call
@@ -131,4 +231,11 @@ export const openAgent: SurfaceTool = {
   handler: async (args) => ({ ok: true, id: args.id as string }),
 };
 
-export const agentCrudTools: SurfaceTool[] = [listAgents, readAgent, saveAgent, listTools, openAgent];
+export const agentCrudTools: SurfaceTool[] = [
+  listAgents,
+  readAgent,
+  saveAgent,
+  saveAgentFromTopic,
+  listTools,
+  openAgent,
+];

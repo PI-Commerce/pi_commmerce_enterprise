@@ -193,7 +193,9 @@ export function AskPiDock() {
     // the empty-draft state and shows a shimmer overlay while Pi generates.
     // We pass draftHint on the request context so Pi uses the SAME id + name
     // in its save_agent call (no collision, no dupe).
-    let draftHint: { id: string; name: string; label: string } | undefined;
+    let draftHint:
+      | { id: string; name: string; topic: string; label: string }
+      | undefined;
     if (ctx.scopeMode === "agents") {
       const intent = detectDraftAgentIntent(query);
       if (intent) {

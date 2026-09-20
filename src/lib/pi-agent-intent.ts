@@ -21,7 +21,11 @@
 export type DraftIntent = {
   id: string;
   name: string;
-  /** Human-readable subject for UI copy ("loan against mutual funds"). */
+  /** Human-readable subject for UI copy AND the server template
+   *  ("loan against mutual funds", "cart abandonment"). Passed through to
+   *  Pi as `draftHint.topic` so the server template can interpolate it. */
+  topic: string;
+  /** Alias for `topic`, kept for the drafting-pill label prop. */
   label: string;
 };
 
@@ -76,7 +80,8 @@ export function detectDraftAgentIntent(query: string): DraftIntent | null {
   const slugCore = tokens.length > 0 ? tokens.join("_") : "draft";
   const id = `a_${slugCore}_${stamp}`;
   const name = tokens.length > 0 ? `${slugCore}_voice` : `new_voice_agent`;
-  const label = rawSubject || "new voice agent";
+  const topic = rawSubject || "customer engagement";
+  const label = topic;
 
-  return { id, name, label };
+  return { id, name, topic, label };
 }
