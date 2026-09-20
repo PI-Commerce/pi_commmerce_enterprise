@@ -2701,13 +2701,22 @@ function ChannelDetail({
   );
 
   // Logs: pick the latest selected run, restrict to that run's selected nodes.
+  //
+  // Range reflow: scale the run through `scaleRunToRange` before handing it
+  // to LeadsTable, so `node.entered` on the scoped channel node matches the
+  // Sent/Delivered KPI cards above the table. Without scaling, the table
+  // reads the raw seeded 30-day volume (~1,500) while the KPIs show the
+  // 7-day slice (~163) — same mismatch the channel-view Logs fix
+  // (6832bbc) was meant to resolve but for date range instead of node id.
   const logsRun = useMemo<RunRow | undefined>(() => {
     if (refs.length === 0) return undefined;
     const lastRef = refs[0];
-    return CAMPAIGNS.find((c) => c.id === lastRef.campaignId)?.runs.find(
+    const rawRun = CAMPAIGNS.find((c) => c.id === lastRef.campaignId)?.runs.find(
       (r) => r.id === lastRef.runId,
     );
-  }, [refs]);
+    if (!rawRun) return undefined;
+    return scaleRunToRange(rawRun, dateRange, d1Ratio);
+  }, [refs, dateRange, d1Ratio]);
   const logsNodeIds = useMemo(
     () =>
       logsRun
