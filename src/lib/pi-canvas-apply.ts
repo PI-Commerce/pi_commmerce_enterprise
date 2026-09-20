@@ -236,6 +236,103 @@ export function applyPiToolCallsToGraph(
 }
 
 /**
+ * Expand `insert_skeleton` tool calls into synthetic `insert_node` +
+ * `connect_nodes` entries so applyPiToolCallsToGraph can consume them
+ * uniformly. Pi may batch a full skeleton install into ONE server-side
+ * insert_skeleton call (see pi-skills.ts); this expansion is how the
+ * client canvas learns about each individual node/edge.
+ *
+ * Non-insert_skeleton calls pass through untouched.
+ */
+export function expandSkeletonCalls(toolCalls: PiToolCallLog[]): PiToolCallLog[] {
+  const out: PiToolCallLog[] = [];
+  for (const tc of toolCalls) {
+    if (tc.name !== "insert_skeleton") {
+      out.push(tc);
+      continue;
+    }
+    let args: { campaignId?: string; skeleton?: { nodes?: Array<Record<string, unknown>>; edges?: Array<Record<string, unknown>> } } = {};
+    try {
+      args = JSON.parse(tc.args);
+    } catch {
+      out.push(tc);
+      continue;
+    }
+    const campaignId = args.campaignId;
+    const nodes = args.skeleton?.nodes ?? [];
+    const edges = args.skeleton?.edges ?? [];
+    for (const n of nodes) {
+      out.push({
+        name: "insert_node",
+        args: JSON.stringify({ campaignId, node: n }),
+        result: JSON.stringify({ ok: true, fromSkeleton: true }),
+      });
+    }
+    for (const e of edges) {
+      out.push({
+        name: "connect_nodes",
+        args: JSON.stringify({ campaignId, edge: e }),
+        result: JSON.stringify({ ok: true, fromSkeleton: true }),
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * Turn a Pi `emit_choice` or `suggest_next_step` tool call into a
+ * ChatChoice-shaped card the composer can render. Returns the first
+ * chip-emitting tool call; undefined if none. Tool-based chips are more
+ * reliable than prose fenced blocks and take precedence when both appear.
+ */
+export type ChipsFromTool = {
+  type: "single";
+  key?: string;
+  question?: string;
+  options: Array<{ id: string; label: string; hint?: string }>;
+};
+
+export function extractChipsFromToolCalls(toolCalls: PiToolCallLog[]): ChipsFromTool | undefined {
+  for (const tc of toolCalls) {
+    if (tc.name === "emit_choice") {
+      let args: { key?: string; prompt?: string; options?: Array<{ id?: string; label?: string; hint?: string }> } = {};
+      try {
+        args = JSON.parse(tc.args);
+      } catch {
+        continue;
+      }
+      const opts = (args.options ?? []).filter((o) => typeof o?.label === "string");
+      if (opts.length === 0) continue;
+      return {
+        type: "single",
+        key: args.key,
+        question: args.prompt,
+        options: opts.map((o) => ({ id: o.id ?? o.label!, label: o.label!, hint: o.hint })),
+      };
+    }
+    if (tc.name === "suggest_next_step") {
+      // suggest_next_step returns the chip list in `result`, not `args`.
+      let list: Array<{ id?: string; label?: string; hint?: string }> = [];
+      try {
+        list = JSON.parse(tc.result) as typeof list;
+      } catch {
+        continue;
+      }
+      if (!Array.isArray(list) || list.length === 0) continue;
+      return {
+        type: "single",
+        key: "next_step",
+        question: "What next?",
+        options: list
+          .filter((o) => typeof o?.label === "string")
+          .map((o) => ({ id: o.id ?? o.label!, label: o.label!, hint: o.hint })),
+      };
+    }
+  }
+  return undefined;
+}
+
+/**
  * Compact human-readable summary of what Pi did, shown in the composer's
  * result panel above the LLM's textual answer.
  *

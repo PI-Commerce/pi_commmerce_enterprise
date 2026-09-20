@@ -29,6 +29,10 @@ export type Env = {
   ANTHROPIC_API_KEY?: string;
   ANTHROPIC_MODEL?: string;
   ANTHROPIC_WORKSPACE_ID?: string;
+  /** Extended-thinking budget (tokens) for the Ask Pi loop. Overrides the
+   *  code default of 5000. Bump higher for harder builds; drop to 0 to
+   *  effectively disable thinking (Anthropic still needs the block > 0). */
+  ANTHROPIC_THINKING_BUDGET?: string;
   /** Legacy TrueFoundry paths (kept as fallback for local dev on Paytm net). */
   PI_AGENT_API_KEY?: string;
   PI_AGENT_BASE_URL?: string;
@@ -85,6 +89,7 @@ export function getEnv(): Env {
       ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
       ANTHROPIC_MODEL: process.env.ANTHROPIC_MODEL,
       ANTHROPIC_WORKSPACE_ID: process.env.ANTHROPIC_WORKSPACE_ID,
+      ANTHROPIC_THINKING_BUDGET: process.env.ANTHROPIC_THINKING_BUDGET,
       PI_AGENT_API_KEY: process.env.PI_AGENT_API_KEY,
       PI_AGENT_BASE_URL: process.env.PI_AGENT_BASE_URL,
       PI_AGENT_MODEL: process.env.PI_AGENT_MODEL,

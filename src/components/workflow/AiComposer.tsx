@@ -6,7 +6,7 @@ import { extractProposedDraft, type ProposedDraft } from "@/lib/pi-propose-draft
 import { ConfirmDraftCard } from "./ConfirmDraftCard";
 import { getSuggestion } from "@/lib/pi-node-suggestions";
 import { askPi } from "@/lib/server-fns/pi-llm";
-import { summarizePiEdits, type PiToolCallLog } from "@/lib/pi-canvas-apply";
+import { summarizePiEdits, expandSkeletonCalls, extractChipsFromToolCalls, type PiToolCallLog } from "@/lib/pi-canvas-apply";
 import { cn } from "@/lib/utils";
 import {
   PiPill,
@@ -272,7 +272,11 @@ export function AiComposer({
           // eslint-disable-next-line no-console
           console.log("[AskPi] builder context diag:", r.diag);
         }
-        const toolCalls = (r.toolCalls ?? []) as PiToolCallLog[];
+        const rawToolCalls = (r.toolCalls ?? []) as PiToolCallLog[];
+        // Expand `insert_skeleton` into synthetic insert_node/connect_nodes
+        // so the canvas apply flow sees each node/edge individually. Other
+        // tool calls pass through untouched.
+        const toolCalls = expandSkeletonCalls(rawToolCalls);
         // Split the batch into (a) the plan-announcement call
         // (`propose_draft` — the client renders the Confirm-Draft card
         // and does NOT touch the canvas yet), and (b) real mutation
@@ -282,13 +286,18 @@ export function AiComposer({
         const draft = extractProposedDraft(toolCalls);
         const mutationCalls = toolCalls.filter((t) => t.name !== "propose_draft");
         if (mutationCalls.length > 0) onPiToolCalls?.(mutationCalls);
-        const { text: bodyText, options, choice } = parsePiFencedBlocks(r.answer);
+        const { text: bodyText, options, choice: proseChoice } = parsePiFencedBlocks(r.answer);
+        // Tool-based chips (from `emit_choice` / `suggest_next_step`) beat
+        // any prose-fenced pi-choice block — the tool call is the reliable
+        // path and always wins when both appear in the same turn.
+        const toolChoice = extractChipsFromToolCalls(rawToolCalls);
+        const choice = toolChoice ?? proseChoice;
         const edits = summarizePiEdits(mutationCalls);
         setMessages((prev) => [
           ...prev,
           {
             role: "assistant",
-            content: bodyText || (edits.length > 0 ? "Done." : draft ? "Here's the plan." : "Not sure what to do with that — could you rephrase?"),
+            content: bodyText || (edits.length > 0 ? "Done." : draft ? "Here's the plan." : choice ? "" : "Not sure what to do with that — could you rephrase?"),
             options,
             choice,
             draft: draft ?? undefined,

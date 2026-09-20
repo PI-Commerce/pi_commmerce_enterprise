@@ -27,6 +27,7 @@ import * as freeformDb from "@/lib/db/freeform-workflows";
 import { CANONICAL_CONSTRUCT_RULES } from "@/lib/pi-construct-rules";
 import { BUILDER_ALLOWED_KINDS, summarizeRegistryForContext } from "@/lib/node-registry";
 import { computeAllValidity } from "@/lib/node-validity";
+import { summarizeCatalogForContext } from "@/lib/pi-skills-catalog";
 
 export type BuilderContext = {
   surface: "campaigns.builder";
@@ -41,6 +42,9 @@ export type BuilderContext = {
   validity: Array<{ nodeId: string; kind: string; valid: boolean; error?: string }>;
   rules: string;
   nodeKinds: ReturnType<typeof summarizeRegistryForContext>;
+  /** The catalog of canonical (industry × usecase) skeletons Pi can pull
+   *  via `suggest_skeleton`. Compact — no full skeleton bodies here. */
+  skillCatalog: ReturnType<typeof summarizeCatalogForContext>;
   assets: {
     voiceAgents: Array<{ id: string; name: string; status: string }>;
     waTemplates: Array<{ id: string; name: string; category: string }>;
@@ -201,6 +205,7 @@ export async function assembleBuilderContext(campaignId: string | undefined): Pr
     validity,
     rules: CANONICAL_CONSTRUCT_RULES,
     nodeKinds: summarizeRegistryForContext(BUILDER_ALLOWED_KINDS),
+    skillCatalog: summarizeCatalogForContext(),
     assets: { voiceAgents, waTemplates, freeformWorkflows, smsTemplates, rcsTemplates, tools },
     _diag: diag,
   };
