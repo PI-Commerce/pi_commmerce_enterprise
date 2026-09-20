@@ -212,16 +212,19 @@ const ROUTES: { match: (p: string) => boolean; ctx: PiContext }[] = [
   {
     match: (p) => p.startsWith("/inbox"),
     ctx: {
+      // Inbox is a Pi dead zone for the first demo. The one idea worth reviving
+      // later is inbox-pattern insights that hand off to a Broadcast draft on
+      // the Broadcasts surface, but it needs an Inbox schema first (see
+      // project_askpi_inbox.md in memory). Until then, pill stays visible for
+      // consistency, non-interactive.
       scope: "Inbox",
       scopeMode: "analytics",
-      systemHint: "The user is in the Inbox surface (customer conversations). Summarize conversation threads, route replies, or identify unresolved queries. Use read_campaign to link a conversation back to the campaign that opened it.",
-      placeholder: "Ask Pi to summarize, tag, or route conversations…",
-      chips: ["Show unresolved threads over 24h", "Summarize the top escalations today", "Which conversations came from Cart Abandonment?"],
-      thinking: ["Reading the inbox queue…", "Grouping by campaign of origin…", "Ranking by staleness…"],
-      result: {
-        text: "You have 12 unresolved threads over 24 hours old — 7 came from Cart Abandonment, 3 from Insurance Renewal, 2 from Loyalty Card. I can auto-tag them by campaign for triage.",
-        cta: "Auto-tag by campaign",
-      },
+      systemHint: "",
+      placeholder: "",
+      chips: [],
+      thinking: [],
+      result: { text: "", cta: "" },
+      deadZone: { nudge: "Pi's off duty here. Read your customers, reply the human way." },
     },
   },
   {
