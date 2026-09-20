@@ -338,7 +338,17 @@ export function AiComposer({
         // calls (`insert_node` / `connect_nodes` / `update_node` — those
         // go straight through to the canvas). Read-only tools (analytics
         // reads) are already ignored by applyPiToolCallsToGraph.
-        const draft = extractProposedDraft(toolCalls);
+        const rawDraft = extractProposedDraft(toolCalls);
+        // Suppress the plan card once the user has already accepted a
+        // draft in this conversation. Pi occasionally re-emits
+        // propose_draft in Phase 2 or Phase 3 (violates the "no draft
+        // after acceptance" rule); rendering the same card again looks
+        // like Pi is offering to redraft what's already on the canvas,
+        // which is confusing. The mutation calls in the same turn
+        // still flow through — only the plan-announcement UI is
+        // suppressed.
+        const alreadyAccepted = messages.some((m) => m.draftAccepted);
+        const draft = alreadyAccepted ? null : rawDraft;
         const mutationCalls = toolCalls.filter((t) => t.name !== "propose_draft");
         if (mutationCalls.length > 0) onPiToolCalls?.(mutationCalls);
         const { text: bodyText, options, choice: proseChoice } = parsePiFencedBlocks(r.answer);
