@@ -29,6 +29,14 @@ import {
   screenToolsForSurface,
 } from "@/lib/server-fns/pi-screen-tools";
 import { BUILDER_ALLOWED_KINDS } from "@/lib/node-registry";
+// Kernel — generic loop + transports + surface dispatcher.
+// Phase 2 in progress: surfaces are being migrated to
+// `@/lib/pi/surfaces/*` one at a time. Migrated scopes route through
+// `runSurface`; unmigrated scopes still use the local TOOL_DEFS /
+// runToolInner / SYSTEM_* below.
+import { runAnthropicLoop, runTfyLoop, runSurface, type NormalizedToolDef } from "@/lib/pi/kernel";
+// Side-effect imports — each surface self-registers on import.
+import "@/lib/pi/surfaces/agents";
 import {
   classifyBrief,
   findRelevantAssets,
@@ -1188,6 +1196,19 @@ export const askPi = createServerFn({ method: "POST" })
       return { ok: false, error: `runtime_env_missing: ${(e as Error).message}` };
     }
 
+    // Migrated surfaces route through the kernel dispatcher — the surface
+    // module owns its tools, prompt, and context assembler. Phase 2a
+    // migrated `agents`; builder + analytics still use the legacy path
+    // below and will migrate in 2b + 2c.
+    if (data.scope === "agents") {
+      const r = await runSurface("agents", {
+        question: data.question,
+        context: data.context,
+        history: data.history,
+      }, env);
+      return r as AskPiResponse;
+    }
+
     // Analytics-scope surfaces (`/campaigns`, `/broadcasts`, `/campaigns/$id`
     // list-context, etc.) can each expose a handful of UI-mutation tools that
     // manipulate the page the user is currently on (set a filter, open a
@@ -1203,14 +1224,16 @@ export const askPi = createServerFn({ method: "POST" })
     const screenTools = data.scope === "analytics" ? screenToolsForSurface(surfaceId) : [];
     const screenAddendum = screenTools.length ? buildScreenToolsSystemAddendum(surfaceId!) : "";
 
+    // NOTE: `scope === "agents"` is handled above by the migrated
+    // surface dispatcher. Only builder + analytics survive this branch.
     const systemContent =
-      data.scope === "builder" ? SYSTEM_BUILDER
-      : data.scope === "agents" ? SYSTEM_AGENTS
-      : SYSTEM_ANALYTICS + screenAddendum;
+      data.scope === "builder"
+        ? SYSTEM_BUILDER
+        : SYSTEM_ANALYTICS + screenAddendum;
     const scopeTools =
-      data.scope === "builder" ? [...TOOL_DEFS.analytics, ...TOOL_DEFS.builder, SHARED_ESCAPE_TOOL]
-      : data.scope === "agents"  ? [...TOOL_DEFS.analytics, ...TOOL_DEFS.agents, SHARED_ESCAPE_TOOL]
-      : [...TOOL_DEFS.analytics, ...screenTools, SHARED_ESCAPE_TOOL];
+      data.scope === "builder"
+        ? [...TOOL_DEFS.analytics, ...TOOL_DEFS.builder, SHARED_ESCAPE_TOOL]
+        : [...TOOL_DEFS.analytics, ...screenTools, SHARED_ESCAPE_TOOL];
 
     // Builder scope: enrich context with the current DSL, canonical construct
     // rules, node registry, and asset catalogs so Pi reads real state on EVERY
@@ -1259,6 +1282,21 @@ export const askPi = createServerFn({ method: "POST" })
       }
     }
 
+    // Flatten this file's OpenAI-shape tool defs to the kernel's
+    // normalized shape ({ name, description, parameters }). The kernel
+    // converts to each provider's exact wire shape internally.
+    const normalizedTools: NormalizedToolDef[] = scopeTools.map((t) => ({
+      name: t.function.name,
+      description: t.function.description,
+      parameters: t.function.parameters,
+    }));
+
+    // Executor closure — captures `surfaceId` so the kernel doesn't need
+    // to know anything about screen-tool routing. The kernel calls this
+    // once per tool_use block the model emits.
+    const executor = (name: string, args: Record<string, unknown>) =>
+      runTool(name, args, surfaceId);
+
     // Prefer Anthropic direct. If missing, fall back to the OpenAI-compat
     // TrueFoundry gateway. If neither, ok:false with a clear message.
     if (env.ANTHROPIC_API_KEY) {
@@ -1267,12 +1305,16 @@ export const askPi = createServerFn({ method: "POST" })
         model: env.ANTHROPIC_MODEL || "claude-sonnet-4-5",
         workspaceId: env.ANTHROPIC_WORKSPACE_ID,
         systemContent,
-        tools: scopeTools,
+        tools: normalizedTools,
         question: data.question,
         history: data.history,
         context: enrichedContext,
-        thinkingBudget: env.ANTHROPIC_THINKING_BUDGET ? Number(env.ANTHROPIC_THINKING_BUDGET) : undefined,
-        surfaceId,
+        executor,
+        config: {
+          thinkingBudget: env.ANTHROPIC_THINKING_BUDGET
+            ? Number(env.ANTHROPIC_THINKING_BUDGET)
+            : undefined,
+        },
       });
       // Attach the builder diagnostic to a successful response so the client
       // console can show which catalogs were empty and why. Non-invasive.
@@ -1290,225 +1332,13 @@ export const askPi = createServerFn({ method: "POST" })
       baseUrl: tfyBase,
       model: env.PI_AGENT_MODEL || env.TFY_MODEL || "pi-agentic/global.anthropic.claude-sonnet-4-6",
       systemContent,
-      tools: scopeTools,
+      tools: normalizedTools,
       question: data.question,
       history: data.history,
       context: enrichedContext,
-      surfaceId,
+      executor,
     });
     if (r.ok && builderDiag) return { ...r, diag: builderDiag };
     return r;
   });
 
-/* -------------------------------------------------------------------------- */
-/* Anthropic native tool loop                                                  */
-/* -------------------------------------------------------------------------- */
-
-type LoopInput = {
-  apiKey: string;
-  model: string;
-  systemContent: string;
-  tools: ReadonlyArray<{ type: "function"; function: { name: string; description: string; parameters: unknown } }>;
-  question: string;
-  history?: Array<{ role: "user" | "assistant"; content: string }>;
-  context?: Record<string, unknown>;
-  /** Extended thinking budget in tokens (Anthropic path only). */
-  thinkingBudget?: number;
-  /** Current UI surface (e.g. `campaigns.runs`) — routes screen-tool exec. */
-  surfaceId?: string;
-};
-
-/**
- * Anthropic /v1/messages tool loop. Their shape:
- *   - `system` is a top-level string (not a message role)
- *   - tools flatten to { name, description, input_schema }
- *   - response content is an array of blocks: { type:"text",text } and
- *     { type:"tool_use", id, name, input }
- *   - tool results go back as user-message content: { type:"tool_result",
- *     tool_use_id, content: string }
- */
-async function runAnthropicLoop(
-  input: LoopInput & { workspaceId?: string },
-): Promise<AskPiResponse> {
-  // Convert our OpenAI-shape tool defs to Anthropic's shape.
-  const anthropicTools = input.tools.map((t) => ({
-    name: t.function.name,
-    description: t.function.description,
-    input_schema: t.function.parameters,
-  }));
-
-  // Anthropic messages: user/assistant only. `system` moves out. We fold the
-  // context hint into the system string so it survives every turn.
-  const systemFull = input.context && Object.keys(input.context).length > 0
-    ? `${input.systemContent}\n\n## Current context\n${JSON.stringify(input.context, null, 2)}`
-    : input.systemContent;
-
-  type AnthropicBlock =
-    | { type: "text"; text: string }
-    | { type: "tool_use"; id: string; name: string; input: Record<string, unknown> }
-    | { type: "tool_result"; tool_use_id: string; content: string }
-    // Extended thinking blocks. The API returns them at the top of `content`
-    // when `thinking: { type: "enabled" }` is passed. We MUST echo them
-    // verbatim (including `signature`) back inside the assistant message on
-    // any follow-up tool round, or the API rejects the request. Redacted
-    // variants show up when the reasoning was filtered upstream.
-    | { type: "thinking"; thinking: string; signature: string }
-    | { type: "redacted_thinking"; data: string };
-
-  // Seed history from prior turns (all user/assistant text blocks).
-  const messages: Array<{ role: "user" | "assistant"; content: AnthropicBlock[] | string }> = [];
-  for (const m of input.history ?? []) {
-    messages.push({ role: m.role, content: m.content });
-  }
-  messages.push({ role: "user", content: input.question });
-
-  const headers: Record<string, string> = {
-    "content-type": "application/json",
-    "x-api-key": input.apiKey,
-    "anthropic-version": "2023-06-01",
-  };
-  // Workspace-scoped API keys require this header; unscoped keys reject it.
-  // Only send when the workspace id is configured.
-  if (input.workspaceId) {
-    headers["anthropic-workspace-id"] = input.workspaceId;
-  }
-
-  // Extended thinking config. Budget covers ONE turn's reasoning; the loop
-  // may run 8 rounds, so total tokens across a full build can be ~8x this.
-  // Overridable via env for tuning without a redeploy.
-  const thinkingBudget = Number(input.thinkingBudget ?? 5000);
-  const maxTokens = Math.max(thinkingBudget + 4096, 12000);
-
-  const toolCalls: ToolCallLog[] = [];
-  for (let round = 0; round < 8; round++) {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        model: input.model,
-        max_tokens: maxTokens,
-        // temperature MUST be 1 when extended thinking is enabled.
-        temperature: 1,
-        thinking: { type: "enabled", budget_tokens: thinkingBudget },
-        system: systemFull,
-        messages,
-        tools: anthropicTools,
-      }),
-    });
-    if (!res.ok) {
-      const body = await res.text();
-      return { ok: false, error: `anthropic_${res.status}: ${body.slice(0, 300)}` };
-    }
-    const json = await res.json() as {
-      content?: AnthropicBlock[];
-      stop_reason?: string;
-      role?: string;
-    };
-    const blocks = json.content ?? [];
-    // Record the assistant turn verbatim so tool results reference the
-    // matching tool_use ids on the next round.
-    messages.push({ role: "assistant", content: blocks });
-
-    const toolUses = blocks.filter((b): b is Extract<AnthropicBlock, { type: "tool_use" }> => b.type === "tool_use");
-    if (toolUses.length === 0) {
-      // Terminal turn — collect all text blocks as the answer.
-      const answer = blocks
-        .filter((b): b is Extract<AnthropicBlock, { type: "text" }> => b.type === "text")
-        .map((b) => b.text)
-        .join("");
-      return { ok: true, answer, toolCalls };
-    }
-
-    // Execute every tool call in this turn, then post the results back as a
-    // single user message with N tool_result blocks.
-    const resultBlocks: AnthropicBlock[] = [];
-    for (const tu of toolUses) {
-      const result = await runTool(tu.name, tu.input ?? {}, input.surfaceId);
-      const resultStr = JSON.stringify(result);
-      toolCalls.push({
-        name: tu.name,
-        args: JSON.stringify(tu.input ?? {}),
-        result: resultStr,
-      });
-      resultBlocks.push({ type: "tool_result", tool_use_id: tu.id, content: resultStr });
-    }
-    messages.push({ role: "user", content: resultBlocks });
-  }
-  return { ok: false, error: "exceeded_tool_rounds" };
-}
-
-/* -------------------------------------------------------------------------- */
-/* TFY OpenAI-compat fallback (kept for local dev on Paytm net)                */
-/* -------------------------------------------------------------------------- */
-
-async function runTfyLoop(
-  input: LoopInput & { baseUrl: string },
-): Promise<AskPiResponse> {
-  const messages: Array<Record<string, unknown>> = [
-    { role: "system", content: input.systemContent },
-    ...(input.history ?? []).map((m) => ({ role: m.role, content: m.content })),
-  ];
-  if (input.context && Object.keys(input.context).length > 0) {
-    messages.push({ role: "system", content: `Current context: ${JSON.stringify(input.context)}` });
-  }
-  messages.push({ role: "user", content: input.question });
-
-  const toolCalls: ToolCallLog[] = [];
-  for (let round = 0; round < 8; round++) {
-    const res = await fetch(`${input.baseUrl}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${input.apiKey}`,
-      },
-      body: JSON.stringify({ model: input.model, messages, tools: input.tools, tool_choice: "auto" }),
-    });
-    if (!res.ok) {
-      const body = await res.text();
-      return { ok: false, error: `tfy_${res.status}: ${body.slice(0, 200)}` };
-    }
-    const json = await res.json() as {
-      choices?: Array<{
-        message?: {
-          content?: string | null;
-          tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }>;
-        };
-      }>;
-    };
-    const msg = json.choices?.[0]?.message;
-    if (!msg) return { ok: false, error: "empty_response" };
-    // OpenAI convention: assistant messages MAY carry `content: null` when
-    // only tool_calls are present. Bedrock (routed via TFY) is strict — it
-    // rejects `content: ""` on the same turn as tool_calls with an
-    // "aws-bedrock error: The content field in the Message object ... is
-    // empty" 400. Prefer null over "" and omit tool_calls when absent.
-    const hasToolCalls = !!(msg.tool_calls && msg.tool_calls.length > 0);
-    const assistantMsg: Record<string, unknown> = {
-      role: "assistant",
-      content: msg.content && msg.content.trim().length > 0 ? msg.content : null,
-    };
-    if (hasToolCalls) assistantMsg.tool_calls = msg.tool_calls;
-    messages.push(assistantMsg);
-    if (!hasToolCalls) {
-      return { ok: true, answer: msg.content ?? "", toolCalls };
-    }
-    for (const tc of msg.tool_calls!) {
-      let args: Record<string, unknown> = {};
-      try { args = JSON.parse(tc.function.arguments) as Record<string, unknown>; }
-      catch { /* keep as {} */ }
-      const result = await runTool(tc.function.name, args, input.surfaceId);
-      toolCalls.push({
-        name: tc.function.name,
-        args: JSON.stringify(args),
-        result: JSON.stringify(result),
-      });
-      messages.push({
-        role: "tool",
-        tool_call_id: tc.id,
-        name: tc.function.name,
-        content: JSON.stringify(result),
-      });
-    }
-  }
-  return { ok: false, error: "exceeded_tool_rounds" };
-}
