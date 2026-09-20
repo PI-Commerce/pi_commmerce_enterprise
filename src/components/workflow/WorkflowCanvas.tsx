@@ -499,7 +499,27 @@ export function WorkflowCanvas({
       if (!next.changed) return;
       setNodes(next.nodes);
       setEdges(next.edges);
-      setSelected(null);
+      // Focus behaviour during Pi-driven edits:
+      //   - If Pi's batch was a single update_node (Phase 2 config assist),
+      //     auto-select that node so the config panel opens on it and the
+      //     canvas visually spotlights it via focusNodeId.
+      //   - Otherwise (batch inserts / connects / mixed), clear selection.
+      const updateOnly = toolCalls.filter((t) => t.name === "update_node");
+      const isSingleUpdate = updateOnly.length === 1 && toolCalls.every((t) => t.name === "update_node" || t.name === "propose_draft" || t.name === "emit_choice");
+      if (isSingleUpdate) {
+        try {
+          const args = JSON.parse(updateOnly[0].args) as { nodeId?: string };
+          const targetId = args.nodeId;
+          const target = next.nodes.find((n) => n.id === targetId);
+          if (target) {
+            setSelected({ id: target.id, data: target.data as WorkflowNodeData });
+          } else {
+            setSelected(null);
+          }
+        } catch { setSelected(null); }
+      } else {
+        setSelected(null);
+      }
       onDirty?.();
       // Fire ELK relayout so Pi's new nodes land cleanly aligned — same
       // path the manual Wand2 button uses. Two rAFs give ReactFlow time

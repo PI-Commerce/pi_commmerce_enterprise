@@ -1290,7 +1290,10 @@ function VoiceCallCore({ config, readOnly, mark, onChange }: { config?: PresetCo
                   {mappable.length > 0 ? mappable.map((inp) => {
                     const v = `${tool.handle}.${inp.key}`;
                     const saved = toolMap.find((m) => m.v === v);
-                    const fallback = inp.source === "campaign" ? `contact.${inp.value ?? inp.key}` : "__llm__";
+                    // Every tool input must be explicitly mapped to a variable or
+                    // constant — the "Let LLM decide" escape hatch was removed to
+                    // force the builder to be explicit about data flow.
+                    const fallback = inp.source === "campaign" ? `contact.${inp.value ?? inp.key}` : "";
                     const def = saved?.def ?? fallback;
                     return (
                       <div key={v} className="grid grid-cols-[130px_1fr] items-center gap-2">
@@ -1335,7 +1338,9 @@ function VoiceCallCore({ config, readOnly, mark, onChange }: { config?: PresetCo
   );
 }
 
-/** Maps a single tool input to "Let LLM decide", a CSV/upstream variable, or a constant. */
+/** Maps a single tool input to a CSV / upstream variable or a hardcoded
+ *  constant. The old "Let LLM decide" escape hatch was removed platform-wide
+ *  — every input must be explicitly mapped so the flow is deterministic. */
 function ToolInputMapPicker({
   defaultValue, disabled, mode = "variable", onChange,
 }: {
@@ -1343,20 +1348,19 @@ function ToolInputMapPicker({
   mode?: "variable" | "constant";
   onChange?: (v: string, mode?: "variable" | "constant") => void;
 }) {
-  const [v, setV] = useState(defaultValue ?? "__llm__");
+  const [v, setV] = useState(defaultValue ?? "");
   const [m, setM] = useState<"variable" | "constant">(mode);
   useEffect(() => { setM(mode); }, [mode]);
   const extraVariables = useContext(ExtraVariablesContext);
   const suppressSamples = useContext(SuppressSampleVariablesContext);
   const allVariables = mergeVariables(extraVariables, suppressSamples);
-  const isCustom = v !== "__llm__" && !!v && !allVariables.some((s) => s.key === v);
+  const isCustom = !!v && !allVariables.some((s) => s.key === v);
   const grouped = groupVariablesBySource(allVariables);
 
   const pickMode = (next: "variable" | "constant") => {
     setM(next);
-    const reset = next === "variable" ? "__llm__" : "";
-    setV(reset);
-    onChange?.(reset, next);
+    setV("");
+    onChange?.("", next);
   };
   const toggleBtn = (
     <VarValueToggle mode={m} disabled={disabled} onPick={pickMode} size="h-8" />
@@ -1381,12 +1385,9 @@ function ToolInputMapPicker({
   }
   return (
     <div className="flex min-w-0 items-center gap-1">
-      <Select value={v || "__llm__"} disabled={disabled} onValueChange={(val) => { setV(val); onChange?.(val, "variable"); }}>
-        <SelectTrigger className="h-8 min-w-0 font-mono text-[12px] [&>span]:truncate"><SelectValue /></SelectTrigger>
+      <Select value={v || undefined} disabled={disabled} onValueChange={(val) => { setV(val); onChange?.(val, "variable"); }}>
+        <SelectTrigger className="h-8 min-w-0 font-mono text-[12px] [&>span]:truncate"><SelectValue placeholder="Select variable…" /></SelectTrigger>
         <SelectContent>
-          <SelectItem value="__llm__" className="text-[12px]">
-            <span className="inline-flex items-center gap-1.5"><Sparkles className="h-3 w-3 text-ai" /> Let LLM decide</span>
-          </SelectItem>
           {isCustom && (
             <SelectItem value={v} className="font-mono text-[12px]">{v} <span className="text-muted-foreground">· upstream</span></SelectItem>
           )}

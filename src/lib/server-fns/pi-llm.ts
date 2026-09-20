@@ -24,6 +24,17 @@ import * as agentsDb from "@/lib/db/agents";
 import type { AgentRecord } from "@/lib/agent-data";
 import { assembleBuilderContext } from "@/lib/server-fns/builder-context";
 import { BUILDER_ALLOWED_KINDS } from "@/lib/node-registry";
+import {
+  classifyBrief,
+  findRelevantAssets,
+  readAsset,
+  suggestSkeleton,
+  insertSkeleton,
+  suggestNextStep,
+  emitChoice,
+  type AssetKind,
+} from "@/lib/pi-skills";
+import { INDUSTRIES, USECASES, type Industry, type Usecase } from "@/lib/pi-skills-catalog";
 
 export type AskPiScope = "analytics" | "builder" | "agents";
 
@@ -267,6 +278,171 @@ const TOOL_DEFS = {
         },
       },
     },
+    /* ------------------------------------------------------------------ */
+    /* Skills (Pi's higher-level reasoning tools)                           */
+    /* ------------------------------------------------------------------ */
+    {
+      type: "function",
+      function: {
+        name: "classify_brief",
+        description:
+          "Extract the structured shape of a user's natural-language marketing brief: industry (bfsi/retail/travel/edtech/healthtech/utilities/other), usecase (renewal/collection/cart_abandonment/order_confirmation/onboarding/cross_sell/broadcast_offer/feedback_nps/reactivation/activation/delivery_update/other), plus a `missing` array listing what the brief didn't say (audience, tone, timing). Call this on the FIRST turn of any new campaign brief. Deterministic keyword classifier — cheap, always call before proposing anything.",
+        parameters: {
+          type: "object",
+          properties: {
+            text: { type: "string", description: "The user's natural-language brief. Usually their first message." },
+          },
+          required: ["text"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "suggest_skeleton",
+        description:
+          "Return the canonical skeleton DAG (node kinds + wiring, NO asset ids) for a given industry+usecase. Draws from the curated catalog. Use this the moment you know the industry+usecase — don't hand-roll a shape when a canonical one exists. Returns { ok, entry: { skeleton: { nodes, edges }, followUps } } or { ok:false, alternates }.",
+        parameters: {
+          type: "object",
+          properties: {
+            industry: { type: "string", enum: INDUSTRIES as unknown as string[] },
+            usecase: { type: "string", enum: USECASES as unknown as string[] },
+          },
+          required: ["industry", "usecase"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "insert_skeleton",
+        description:
+          "Atomically install a skeleton onto the current campaign — batches all insert_node + connect_nodes calls into one server-side transaction and returns { nodeIds, edgeIds, openConfig }. Nodes are inserted WITHOUT asset config (skeleton-first). Use this AFTER the user has accepted the skeleton (`Draft this` on the plan card). Do NOT call insert_node individually when you're installing a full skeleton — this is the one-shot version. `openConfig` tells you which nodes still need a pick, feed that into your next chip question.",
+        parameters: {
+          type: "object",
+          properties: {
+            campaignId: { type: "string" },
+            skeleton: {
+              type: "object",
+              properties: {
+                title: { type: "string" },
+                summary: { type: "string" },
+                nodes: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      id: { type: "string" },
+                      kind: { type: "string", enum: BUILDER_ALLOWED_KINDS },
+                      title: { type: "string" },
+                      subtitle: { type: "string" },
+                      needs: { type: "array", items: { type: "string" } },
+                    },
+                    required: ["id", "kind", "title"],
+                  },
+                },
+                edges: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      id: { type: "string" },
+                      source: { type: "string" },
+                      target: { type: "string" },
+                      sourceHandle: { type: "string" },
+                    },
+                    required: ["id", "source", "target"],
+                  },
+                },
+              },
+              required: ["title", "summary", "nodes", "edges"],
+            },
+          },
+          required: ["campaignId", "skeleton"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "find_relevant_assets",
+        description:
+          "Rank the workspace's existing assets (voiceAgent / waTemplate / smsTemplate / rcsTemplate / freeformWorkflow / tool) against an industry+usecase (and optional free-text query). Returns top 5 with a `reasons` array explaining why each row scored. Use this BEFORE presenting asset chips — instead of dumping the whole catalog, cite only the relevant few. Cheap, deterministic — always call it before `emit_choice` for an asset pick.",
+        parameters: {
+          type: "object",
+          properties: {
+            kind: { type: "string", enum: ["voiceAgent", "waTemplate", "smsTemplate", "rcsTemplate", "freeformWorkflow", "tool"] },
+            industry: { type: "string", enum: INDUSTRIES as unknown as string[] },
+            usecase: { type: "string", enum: USECASES as unknown as string[] },
+            query: { type: "string", description: "Optional free-text hint from the user (e.g. 'renewal reminder for HNI segment')." },
+            limit: { type: "number", description: "Default 5." },
+          },
+          required: ["kind"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "read_asset",
+        description:
+          "Fetch the FULL internals of a single asset (voiceAgent → masterPrompt + KB + tools + postCall; waTemplate → body + buttons + variables; smsTemplate → body; rcsTemplate → cards; freeformWorkflow → steps; tool → spec). Use this when you need to compare candidate templates by content, not just by name — for example to explain to the user WHY one WA template fits the brief better than another. Do NOT dump the returned content back verbatim to the user; summarize.",
+        parameters: {
+          type: "object",
+          properties: {
+            kind: { type: "string", enum: ["voiceAgent", "waTemplate", "smsTemplate", "rcsTemplate", "freeformWorkflow", "tool"] },
+            id: { type: "string" },
+          },
+          required: ["kind", "id"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "suggest_next_step",
+        description:
+          "Return 2-4 next-best actions given the current DSL + classified brief. Prioritizes invalid nodes ('pick agent for voiceCall_1'), then skeleton follow-ups, then a review-and-save chip. Use this after `insert_skeleton` and after any batch of `update_node` calls — so the user always has clickable next actions instead of an open-ended 'what next?' prompt.",
+        parameters: {
+          type: "object",
+          properties: {
+            campaignId: { type: "string", description: "Campaign whose DSL + validity should drive the suggestions." },
+            classifiedIndustry: { type: "string", enum: INDUSTRIES as unknown as string[] },
+            classifiedUsecase: { type: "string", enum: USECASES as unknown as string[] },
+          },
+          required: ["campaignId"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "emit_choice",
+        description:
+          "Present a chips card to the user. USE THIS INSTEAD of writing a ```pi-choice fenced JSON block in prose — the tool call is more reliable and the client always renders it as clickable chips. Emit whenever you'd ask a narrow-answer question (2-6 options). The server returns `{ ok, awaiting_user: true }` — Pi MUST stop calling tools after emit_choice and wait for the user's next turn.",
+        parameters: {
+          type: "object",
+          properties: {
+            key: { type: "string", description: "Stable snake_case id for this decision (voice_agent / wa_5d / delay_window)." },
+            prompt: { type: "string", description: "One-sentence question that goes above the chips. Under 100 chars." },
+            options: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  id: { type: "string", description: "Real asset id when picking an asset; short slug otherwise." },
+                  label: { type: "string", description: "Human label under 60 chars." },
+                  hint: { type: "string", description: "Optional subtitle under 60 chars." },
+                },
+                required: ["id", "label"],
+              },
+              minItems: 1,
+            },
+          },
+          required: ["key", "prompt", "options"],
+        },
+      },
+    },
     {
       type: "function",
       function: {
@@ -374,11 +550,19 @@ async function runTool(name: string, args: Record<string, unknown>): Promise<unk
   if (!hasDb) {
     switch (name) {
       case "propose_draft":
-        // Client-only tool. Never needs D1.
+      case "emit_choice":
+        // Client-only tools. Never need D1.
         return { ok: true, awaiting_user: true };
+      case "classify_brief":
+      case "suggest_skeleton":
+      case "suggest_next_step":
+        // Pure fns — degrade gracefully without D1. Let them run in the
+        // regular path below (they don't touch D1).
+        break;
       case "insert_node":
       case "connect_nodes":
       case "update_node":
+      case "insert_skeleton":
       case "save_agent":
         // Mutation tools: return ok so Pi's textual confirmation still fires
         // and the client applies the change to the live canvas. Include a
@@ -386,6 +570,8 @@ async function runTool(name: string, args: Record<string, unknown>): Promise<unk
         return { ok: true, warning: "d1_unavailable — change applied to canvas but not persisted" };
       case "list_agents":
       case "read_agent":
+      case "read_asset":
+      case "find_relevant_assets":
       case "list_campaigns":
       case "read_campaign":
       case "list_tools":
@@ -466,6 +652,40 @@ async function runToolInner(name: string, args: Record<string, unknown>): Promis
         .all<{ handle: string; description: string }>();
       return rows.results ?? [];
     }
+    /* --- Skills ------------------------------------------------------- */
+    case "classify_brief":
+      return classifyBrief(String(args.text ?? ""));
+    case "suggest_skeleton":
+      return suggestSkeleton(
+        args.industry as Parameters<typeof suggestSkeleton>[0],
+        args.usecase as Parameters<typeof suggestSkeleton>[1],
+      );
+    case "insert_skeleton":
+      return await insertSkeleton(
+        args.campaignId as string,
+        args.skeleton as Parameters<typeof insertSkeleton>[1],
+      );
+    case "find_relevant_assets":
+      return await findRelevantAssets(
+        args.kind as AssetKind,
+        args.industry as Parameters<typeof findRelevantAssets>[1],
+        args.usecase as Parameters<typeof findRelevantAssets>[2],
+        args.query as string | undefined,
+        (args.limit as number) ?? 5,
+      );
+    case "read_asset":
+      return await readAsset(args.kind as AssetKind, args.id as string);
+    case "suggest_next_step": {
+      // Pull the freshest DSL + validity for the current campaign so the
+      // suggestions reflect the real state, not stale client context.
+      const ctx = await assembleBuilderContext(args.campaignId as string | undefined);
+      const classified = args.classifiedIndustry && args.classifiedUsecase
+        ? { industry: args.classifiedIndustry as Industry, usecase: args.classifiedUsecase as Usecase }
+        : undefined;
+      return suggestNextStep(ctx.dsl, ctx.validity, classified);
+    }
+    case "emit_choice":
+      return emitChoice(args as Parameters<typeof emitChoice>[0]);
     default:
       return { error: `unknown tool: ${name}` };
   }
@@ -481,13 +701,48 @@ const SYSTEM_BUILDER = `You are Pi (Paytm Intelligence), the campaign workflow b
 - Follow the canonical construct rules verbatim. They cover: blank-canvas invariants (Start, Audience, End pre-exist and are locked), single-End convergence, LEFT-to-RIGHT layout, bezier edges, allowed kinds, WhatsApp Freeform placement, real-asset wiring, and the confirm-before-build flow.
 - Before ANY \`insert_node\` call, call \`propose_draft\` first. The client renders that plan as a Confirm-Draft card; the user hits Draft this to accept. Skipping \`propose_draft\` is a violation.
 
-## Turn behavior
+## Three-phase flow (hard structure)
 
-Each turn Pi is in exactly one of three modes:
+Pi works in THREE clean phases. Do NOT mix phases. Do NOT jump ahead. Each user brief starts at Phase 1.
 
-1. **Clarify.** Emit ONE short question, no tool calls. Do this when Pi doesn't yet have enough to propose a draft. Cap: 2-3 total clarifiers before proposing. Bundle when possible.
-2. **Propose draft.** Emit a single \`propose_draft\` tool call summarizing the plan (title, one-line summary, branches with channel + asset picks). Do this once Pi has enough context. Do NOT also emit \`insert_node\` in the same turn.
-3. **Build.** After the user has confirmed the draft (their next user message will say "Draft this" or similar), emit the \`insert_node\` / \`connect_nodes\` / \`update_node\` calls that realize the plan, followed by a one-line textual confirmation of what changed.
+### Phase 1 — Skeleton (mandatory, always)
+
+Build the DAG shape only. Zero asset picks. Zero variable mappings. Zero conditions. Just: what nodes, in what order, wired how.
+
+Steps:
+0. \`classify_brief\` on the user's opening text → { industry, usecase, missing[] }.
+1. If \`missing\` includes industry or usecase, ask ONE clarifier via \`emit_choice\`. Cap: 2 clarifiers before proposing.
+2. \`suggest_skeleton(industry, usecase)\` — get the canonical DAG.
+3. \`propose_draft\` with EMPTY assetIds per channel (skeleton only). openQuestions empty.
+4. User hits Draft this → \`insert_skeleton(campaignId, skeleton)\` — one atomic call.
+5. Reply with a ONE-line confirmation ("Done. The 2-branch renewal skeleton is on the canvas.") and ask ONE thing: "Want me to help fill in the config, or take it from here?" via \`emit_choice\` with two chips: "Help me configure" / "I'll do it myself".
+
+Phase 1 ends here. If the user picks "I'll do it myself", stop. Do NOT auto-start Phase 2.
+
+### Phase 2 — Config assist (optional, only if user opts in)
+
+If the user picked "Help me configure" or explicitly asks for help with a specific node, Pi walks nodes ONE AT A TIME. The chat message that mentions a node id is what the client uses to focus the canvas on that node.
+
+For each config walk-through:
+1. \`suggest_next_step\` — get the ordered list of nodes needing config.
+2. Pick the first one. Announce which node ("Now configuring: **Voice Call** (voiceCall_1). It needs a voice agent.") — the node id MUST appear in the message so the canvas can focus.
+3. For asset picks: \`find_relevant_assets(kind, industry, usecase)\` first, then \`emit_choice\` with the 3-5 shortlisted options.
+4. User picks → \`update_node\` with the full valid config for THAT kind (see Config shape spec below).
+5. Ask "Continue to the next node?" via \`emit_choice\` (chips: "Yes, continue" / "I'll finish the rest myself"). Only advance if the user says yes.
+
+Phase 2 is opt-in per node. Never auto-run through all nodes.
+
+### Phase 3 — Ongoing edits
+
+After Phases 1+2, the user drives. They can ask to add a branch, delete a node, change an asset, re-wire an edge. Handle each request as it comes, one thing at a time. No auto-continuation.
+
+### Rules that override the above
+
+- Skeleton is NEVER a config gate. If the user says "just build the flow", install and stop.
+- Chips first, always. Any bounded-answer question goes through \`emit_choice\`. Never a fenced \`pi-choice\` block in prose when the tool is available.
+- Before ANY asset-pick chip, call \`find_relevant_assets\` — don't list the entire catalog, show the top 3-5.
+- \`read_asset\` when the user asks "what does this template say?" — summarize, don't dump.
+- \`suggest_next_step\` before every Phase 2 sub-turn.
 
 ## What Pi asks about
 
@@ -498,13 +753,17 @@ Pi asks minimum viable questions. Don't ask what the context already tells you. 
 - **Real asset ids** — which specific voice agent / WA template / SMS template to wire.
 - **Follow-up branches** — for each channel, does the user want a downstream action on its non-default output? (e.g. Voice Call after a WhatsApp Template's \`timeout\` branch.)
 
-## Node validity (proactive surfacing)
+## Node validity (READ this every turn before making claims)
 
-The injected \`validity\` array carries one entry per node in the current DSL. Any entry with \`valid: false\` has a concrete \`error\` string ("Missing a voice agent", "Missing a WhatsApp template", "Missing at least one branch", etc.). Use it:
+The injected \`validity\` array carries one entry per node in the current DSL. Any entry with \`valid: false\` has a concrete \`error\` string ("Missing a voice agent", "Missing a WhatsApp template", "Missing at least one branch", etc.).
 
-- When the user asks "is this ready?" / "can I save?" — cite the specific invalid nodes and their errors. Don't hedge.
-- When proposing a draft, if some just-inserted node is still invalid because it needs an asset pick, ask for it in the next turn (single question, \`pi-choice\` block with the actual catalog).
-- Never claim a flow is ready when \`validity\` has any \`valid: false\` entry.
+**Hard rule: never claim the flow is "ready", "configured", "complete", or "valid" unless EVERY entry in \`validity\` has \`valid: true\`.**
+
+When the user asks "is this ready?" / "can I save?" / "what's left?" / "what's the configuration left?":
+- Count the entries where \`valid: false\`. If 0 → say "All nodes are configured and valid."
+- If > 0 → list each one by nodeId + kind + error. Format: "\`voiceCall_1\` (Voice Call): Missing a voice agent." One per line. No hedging. No summary that contradicts the list.
+
+Never say "fully configured" while any entry in validity has valid:false. That is a lying-to-the-user violation. Read the array before you speak.
 
 ## Never invent platform state
 
@@ -523,16 +782,142 @@ Deep links to other surfaces (only when a catalog is empty): use inline Markdown
 
 ## What Pi CAN change on this surface (all via \`update_node\`)
 
-Everything that lives as **node config on the current campaign** is Pi's job here. That includes:
+Everything that lives as **node config on the current campaign** is Pi's job here. But the config must match the exact expected shape per kind — invalid shapes leave the node red on canvas even when Pi thinks it "picked something".
 
-- **Audience node config** — schema fields (add / remove / rename / retype), phone field selection, primary key, source mode (csv / api). If the user says "add a \`renewal_date\` field to the Audience schema", Pi does it: call \`update_node("audience", { patch: { config: { fields: [...] } } })\`.
-- **Conditional node config** — branches, conditions, default routing.
-- **Voice Call config** — pick an agent, call window, retry policy, variable mappings.
-- **WhatsApp Template config** — pick a template, timeout window, variable mappings.
-- **SMS / RCS config** — pick a template, DLR window.
-- **Delay config** — static / dynamic mode, value, unit, dynamic source variable.
-- **API Tool Call config** — pick a tool handle, map inputs.
-- **WhatsApp Freeform config** — pick a freeform workflow, timer mode.
+### Audience (\`audience\`)
+
+\`\`\`
+{
+  fields: [{ id: "f1", name: "phone", type: "String" }, { id: "f2", name: "renewal_date", type: "String" }, ...],
+  phoneField: "phone",     // must reference a field with type: "String"
+  primaryKey: "customer_id" // optional
+}
+\`\`\`
+
+**Field \`type\` is exactly one of: \`"String"\` | \`"Number"\` | \`"Boolean"\`. Nothing else.** Not "phone", not "date", not "email". Phones and dates are STORED as String. Booleans for yes/no flags. Numbers for cart value, tier score.
+
+The field marked as \`phoneField\` MUST have \`type: "String"\` or the node stays invalid.
+
+### Conditional (\`conditional\`)
+
+Every branch needs at least one CONDITION, not just a label.
+
+\`\`\`
+{
+  branches: [
+    {
+      id: "branch_5day",
+      label: "Renewal in 5 days",
+      logic: "AND",
+      conditions: [{ variable: "contact.renewal_date", op: "days_from_now_eq", value: "5" }]
+    },
+    {
+      id: "branch_30day",
+      label: "Renewal in 30 days",
+      logic: "AND",
+      conditions: [{ variable: "contact.renewal_date", op: "days_from_now_eq", value: "30" }]
+    }
+  ]
+}
+\`\`\`
+
+The \`variable\` MUST be a real key: an Audience field prefixed \`contact.<field>\` OR an upstream node's output variable (\`voiceCall_1.call_status\`, \`whatsapp_1.button\`, etc.). A default \`else\` branch is always present, you don't create it.
+
+Never leave \`conditions: []\`. If you don't have enough info to write a real condition, ASK the user which variable to route on before calling update_node.
+
+### A/B Split (\`abSplit\`)
+
+Every variant needs BOTH a label AND a numeric \`pct\`. Percentages MUST sum to 100.
+
+\`\`\`
+{
+  splitVariants: [
+    { id: "variant_a", label: "Renewal link v1", pct: 80 },
+    { id: "variant_b", label: "Renewal savings v1", pct: 20 }
+  ]
+}
+\`\`\`
+
+If the user says "80/20", set pct: 80 and pct: 20. Never leave pct empty. Never leave the sum at 0.
+
+### WhatsApp Template (\`whatsapp\`)
+
+Needs BOTH a template pick AND a connected WhatsApp number.
+
+\`\`\`
+{
+  waMode: "template",
+  waTemplate: "<template_id from assets.waTemplates>",
+  waNumber: "<connected wa number id — pick from what's configured on the workspace>",
+  waTimeoutHours: 24,
+  waVarMap: [{ v: "1", def: "contact.first_name" }, ...]  // one per {{n}} in the template body
+}
+\`\`\`
+
+If the workspace has no connected numbers, tell the user and deep-link to \`/channels/whatsapp\` (Numbers tab). Do NOT set waTemplate alone — the node stays invalid without waNumber.
+
+### WhatsApp Freeform (\`whatsappFreeform\`)
+
+\`\`\`
+{
+  ffWorkflowId: "<id from assets.freeformWorkflows>",
+  ffTimerMode: "absolute" | "inactivity",
+  ffTimerMinutes: 60  // capped at 1440 (Meta's 24h freeform window)
+}
+\`\`\`
+
+### Voice Call (\`voiceCall\`)
+
+\`\`\`
+{
+  agent: "<agent id from assets.voiceAgents>",
+  callStart: "09:00",
+  callEnd: "20:00",
+  timezone: "Asia/Kolkata",
+  maxAttempts: 3,
+  retryInterval: "2h",
+  voiceVarMap: [{ v: "name", def: "contact.first_name" }, ...]
+}
+\`\`\`
+
+### SMS (\`sms\`)
+
+\`\`\`
+{
+  smsTemplateId: "<id from assets.smsTemplates>",
+  smsDlrWindow: "24h",
+  smsVarMap: [{ v: "name", def: "contact.first_name" }, ...]
+}
+\`\`\`
+
+### RCS (\`rcs\`)
+
+\`\`\`
+{
+  rcsTemplateId: "<id from assets.rcsTemplates>",
+  rcsDlrWindow: "24h",
+  rcsVarMap: [{ v: "name", def: "contact.first_name" }, ...]
+}
+\`\`\`
+
+### Delay (\`delay\`)
+
+\`\`\`
+// Static delay:
+{ delayMode: "fixed", delayValue: 24, delayUnit: "Hours" }
+
+// Dynamic delay (waits until a datetime from an upstream var):
+{ delayMode: "variable", delayVariable: "voiceCall_1.callback_time", delayVariableFormat: "ISO 8601", delayFallbackValue: 2, delayFallbackUnit: "Hours" }
+\`\`\`
+
+### API Tool Call (\`apiToolCall\`)
+
+\`\`\`
+{
+  apiTool: "<handle from assets.tools>",
+  apiInputMap: [{ v: "customer_id", def: "contact.customer_id" }, ...]  // one per required tool input
+}
+\`\`\`
 
 Pi never says "that's on another surface" for any of the above. They are all node config on THIS canvas.
 
@@ -726,6 +1111,7 @@ export const askPi = createServerFn({ method: "POST" })
         question: data.question,
         history: data.history,
         context: enrichedContext,
+        thinkingBudget: env.ANTHROPIC_THINKING_BUDGET ? Number(env.ANTHROPIC_THINKING_BUDGET) : undefined,
       });
       // Attach the builder diagnostic to a successful response so the client
       // console can show which catalogs were empty and why. Non-invasive.
@@ -764,6 +1150,8 @@ type LoopInput = {
   question: string;
   history?: Array<{ role: "user" | "assistant"; content: string }>;
   context?: Record<string, unknown>;
+  /** Extended thinking budget in tokens (Anthropic path only). */
+  thinkingBudget?: number;
 };
 
 /**
@@ -794,7 +1182,14 @@ async function runAnthropicLoop(
   type AnthropicBlock =
     | { type: "text"; text: string }
     | { type: "tool_use"; id: string; name: string; input: Record<string, unknown> }
-    | { type: "tool_result"; tool_use_id: string; content: string };
+    | { type: "tool_result"; tool_use_id: string; content: string }
+    // Extended thinking blocks. The API returns them at the top of `content`
+    // when `thinking: { type: "enabled" }` is passed. We MUST echo them
+    // verbatim (including `signature`) back inside the assistant message on
+    // any follow-up tool round, or the API rejects the request. Redacted
+    // variants show up when the reasoning was filtered upstream.
+    | { type: "thinking"; thinking: string; signature: string }
+    | { type: "redacted_thinking"; data: string };
 
   // Seed history from prior turns (all user/assistant text blocks).
   const messages: Array<{ role: "user" | "assistant"; content: AnthropicBlock[] | string }> = [];
@@ -814,6 +1209,12 @@ async function runAnthropicLoop(
     headers["anthropic-workspace-id"] = input.workspaceId;
   }
 
+  // Extended thinking config. Budget covers ONE turn's reasoning; the loop
+  // may run 8 rounds, so total tokens across a full build can be ~8x this.
+  // Overridable via env for tuning without a redeploy.
+  const thinkingBudget = Number(input.thinkingBudget ?? 5000);
+  const maxTokens = Math.max(thinkingBudget + 4096, 12000);
+
   const toolCalls: ToolCallLog[] = [];
   for (let round = 0; round < 8; round++) {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -821,7 +1222,10 @@ async function runAnthropicLoop(
       headers,
       body: JSON.stringify({
         model: input.model,
-        max_tokens: 4096,
+        max_tokens: maxTokens,
+        // temperature MUST be 1 when extended thinking is enabled.
+        temperature: 1,
+        thinking: { type: "enabled", budget_tokens: thinkingBudget },
         system: systemFull,
         messages,
         tools: anthropicTools,
