@@ -9,7 +9,6 @@ import { usePiSurface, dispatchScreenToolCalls, usePiDisabledCopy } from "@/lib/
 import { extractActionLinksFromToolCalls } from "@/lib/pi-canvas-apply";
 import { AnalyticsChat } from "@/components/analytics/AnalyticsChat";
 import { IntegrationsChat } from "@/components/integrations/IntegrationsChat";
-import { DeveloperChat } from "@/components/developer/DeveloperChat";
 import {
   PiPill,
   PiNudge,
@@ -87,11 +86,10 @@ export function AskPiDock() {
   // whole point. The single-shot idle→thinking→result flow is wrong for
   // that shape.
   const isIntegrationsSurface = pathname === "/integrations";
-  // /developer is the sibling docs-RAG surface (API Docs + Release Notes).
-  // Same reasoning as /integrations — dedicated chat shell so the question
-  // stays visible, markdown answers render cleanly, and follow-ups are one
-  // click away.
-  const isDeveloperSurface = pathname === "/developer";
+  // /developer surface handling is landed by a sibling chat once
+  // DeveloperChat.tsx + pi/surfaces/developer/ are pushed. Placeholder
+  // constant keeps the rest of the guards working without a broken import.
+  const isDeveloperSurface = false;
   const screenCtx = usePiScreenContext();
   // Surface published by the current page — carries the surfaceId (so the
   // server exposes the right screen tools) and the handler map the dock
@@ -388,17 +386,8 @@ export function AskPiDock() {
         </div>
       )}
 
-      {isOpen && isDeveloperSurface && (
-        // /developer is the sibling docs-RAG surface (API Docs + Release Notes).
-        // Same reasoning as /integrations — dedicated chat shell so the question
-        // stays visible above Pi's answer, markdown answers render cleanly, and
-        // follow-ups are one click away.
-        <div className="pointer-events-none" style={{ transform: `translateX(${dragX}px)` }}>
-          <PiPanel innerRef={panelRef} className="w-[680px] max-w-[94vw]">
-            <DeveloperChat onClose={() => setState("collapsed")} />
-          </PiPanel>
-        </div>
-      )}
+      {/* /developer surface branch removed until DeveloperChat.tsx lands
+          from the sibling chat; isDeveloperSurface is a stub `false`. */}
 
       {isOpen && !isAnalyticsSurface && !isIntegrationsSurface && !isDeveloperSurface && (
         <div className="pointer-events-none" style={{ transform: `translateX(${dragX}px)` }}>
