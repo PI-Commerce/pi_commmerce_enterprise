@@ -24,7 +24,8 @@
 import type { NodeKind, PresetConfig, PresetTransform, PresetBranch } from "@/lib/campaign-types";
 import { branchConditions } from "@/lib/campaign-types";
 import type { FreeformWorkflowRow, FreeformNodeRecord } from "@/lib/freeform-types";
-import { resolveWaTemplate, isBranchableButton } from "@/lib/wa-outputs";
+import { resolveWaTemplate, isBranchableButton, actionNodeOutputs } from "@/lib/wa-outputs";
+import type { WorkflowNodeData } from "@/lib/campaign-types";
 import { resolveSmsTemplate } from "@/lib/sms-store";
 import { smsPlaceholders } from "@/lib/sms-templates";
 import { resolveRcsTemplate } from "@/lib/rcs-store";
@@ -61,6 +62,15 @@ export type ValidatorContext = {
 const EMPTY_CTX: ValidatorContext = { edges: [] };
 
 /**
+ * Does `nodeId` have at least one outgoing edge on the given handle id?
+ * Handle match is exact (null / undefined sourceHandle counts as no
+ * handle, not as a wildcard) so partial wiring is reliably caught.
+ */
+function isHandleWired(edges: ValidatorEdge[], nodeId: string, handleId: string): boolean {
+  return edges.some((e) => e.source === nodeId && (e.sourceHandle ?? null) === handleId);
+}
+
+/**
  * Validate one node against its kind-specific rules. Returns
  * `{ valid: true }` when the node is fully configured and correctly wired
  * (per its kind), or `{ valid: false, error }` with the first blocking
@@ -79,9 +89,9 @@ export function validateNode(
     case "audience":
       return validateAudience(config);
     case "conditional":
-      return validateConditional(config);
+      return validateConditional(nodeId, config, ctx);
     case "abSplit":
-      return validateAbSplit(config);
+      return validateAbSplit(nodeId, config, ctx);
     case "voiceCall":
       return validateVoiceCall(config);
     case "apiToolCall":
@@ -122,7 +132,8 @@ export function computeGraphValidity(
   for (const e of edges) hasOutgoing.add(e.source);
 
   return nodes.map((n) => {
-    // Layer 1 — kind-specific config validity.
+    // Layer 1 — kind-specific config validity (includes per-branch
+    // wiring for conditional + abSplit, per-button wiring for whatsapp).
     const v = validateNode(n.id, n.kind as NodeKind, n.config as PresetConfig | undefined, ctx);
     if (!v.valid) {
       return { nodeId: n.id, kind: n.kind, valid: false, error: v.error };
@@ -138,6 +149,34 @@ export function computeGraphValidity(
         valid: false,
         error: "Not wired forward — leads reach a dead-end here. Connect this node into the next step or into End.",
       };
+    }
+    // Layer 3 — outcome-handle wiring for action nodes (voice / sms /
+    // rcs / apiToolCall). Each `outcome`-kind handle is a real path a
+    // lead can take (Success vs Failure, Delivered vs Failed, buttons);
+    // leaving it unwired silently dead-ends leads on that handle.
+    // `default`-kind handles (Timeout / catch-all) are OK unwired —
+    // they're the fall-through by design.
+    // Conditional branches, abSplit variants, and whatsapp buttons are
+    // handled inside their per-kind validators above; this layer
+    // catches the remaining action-node outcomes uniformly.
+    const cfg = n.config as WorkflowNodeData["config"] | undefined;
+    const outputs = actionNodeOutputs(n.kind as NodeKind, cfg);
+    if (outputs && outputs.length > 0) {
+      const unwiredOutcome = outputs.find((o) => {
+        if (o.kind !== "outcome") return false;
+        // whatsapp buttons already flagged by validateWhatsapp — skip
+        // to avoid double-reporting the same error.
+        if (n.kind === "whatsapp" && o.id.startsWith("btn_")) return false;
+        return !isHandleWired(edges, n.id, o.id);
+      });
+      if (unwiredOutcome) {
+        return {
+          nodeId: n.id,
+          kind: n.kind,
+          valid: false,
+          error: `'${unwiredOutcome.label}' branch has no downstream connection — leads on this outcome dead-end.`,
+        };
+      }
     }
     return { nodeId: n.id, kind: n.kind, valid: true };
   });
@@ -179,7 +218,11 @@ function validateAudience(config?: PresetConfig): NodeValidity {
 const VALUELESS_OPS = new Set(["exists", "does not exist"]);
 const RANGE_OPS = new Set(["between", "not between"]);
 
-function validateConditional(config?: PresetConfig): NodeValidity {
+function validateConditional(
+  nodeId: string,
+  config: PresetConfig | undefined,
+  ctx: ValidatorContext,
+): NodeValidity {
   const branches = (config?.branches ?? []) as PresetBranch[];
   if (!Array.isArray(branches) || branches.length === 0) {
     return { valid: false, error: "Add at least one branch" };
@@ -201,16 +244,39 @@ function validateConditional(config?: PresetConfig): NodeValidity {
         return { valid: false, error: `Branch '${label}': set the upper bound for condition #${ci + 1}` };
       }
     }
+    // Per-branch wiring: each configured branch is a separate handle on
+    // the node — leads matching it follow that handle's outgoing edge.
+    // Unwired branch = silent lead dead-end. The always-present `default`
+    // catch-all handle handles leads matching NO branch, so it's OK
+    // unwired here (reachability elsewhere covers "node has zero
+    // outgoing edges at all").
+    if (!isHandleWired(ctx.edges, nodeId, b.id)) {
+      return { valid: false, error: `Branch '${label}' has no downstream connection — leads matching it dead-end.` };
+    }
   }
   return { valid: true };
 }
 
-/** A/B Split: variants must total 100%. Matches `AbSplitFields` line 883. */
-function validateAbSplit(config?: PresetConfig): NodeValidity {
+/** A/B Split: variants must total 100% AND each variant must be wired
+ *  forward. Every variant is a real traffic path — unwired = leads on
+ *  that variant dead-end silently. Matches `AbSplitFields` line 883
+ *  for the totals check; wiring is an additional layer. */
+function validateAbSplit(
+  nodeId: string,
+  config: PresetConfig | undefined,
+  ctx: ValidatorContext,
+): NodeValidity {
   const variants = config?.splitVariants ?? [];
   if (variants.length === 0) return { valid: false, error: "Add at least one A/B variant" };
   const total = variants.reduce((s, v) => s + (Number(v.pct) || 0), 0);
   if (total !== 100) return { valid: false, error: `Traffic must total 100% (currently ${total}%)` };
+  for (let i = 0; i < variants.length; i++) {
+    const v = variants[i];
+    const label = v.label?.trim() || `Variant ${String.fromCharCode(65 + i)}`;
+    if (!isHandleWired(ctx.edges, nodeId, v.id)) {
+      return { valid: false, error: `Variant '${label}' (${v.pct}%) has no downstream connection — leads on this arm dead-end.` };
+    }
+  }
   return { valid: true };
 }
 

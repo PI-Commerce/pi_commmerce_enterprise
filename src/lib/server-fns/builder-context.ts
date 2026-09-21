@@ -40,6 +40,18 @@ export type BuilderContext = {
    *  when asking about missing config ("your Voice node is missing an
    *  agent — pick one?") or when confirming a save is safe. */
   validity: Array<{ nodeId: string; kind: string; valid: boolean; error?: string }>;
+  /** Graph-level rollup — the same numbers the top bar displays
+   *  ("6/7 nodes configured"). Pi should cite these verbatim when the
+   *  user asks "what's left" / "is this ready" instead of recounting
+   *  the array itself, so the phrasing matches the canvas UI. */
+  validitySummary: {
+    total: number;
+    valid: number;
+    invalid: number;
+    /** All invalid entries in one place, ready to enumerate as a
+     *  bulleted list in Pi's reply. */
+    missing: Array<{ nodeId: string; kind: string; error: string }>;
+  };
   rules: string;
   nodeKinds: ReturnType<typeof summarizeRegistryForContext>;
   /** The catalog of canonical (industry × usecase) skeletons Pi can pull
@@ -201,11 +213,23 @@ export async function assembleBuilderContext(campaignId: string | undefined): Pr
     ? computeGraphValidity(dsl.nodes, dsl.edges, freeformWorkflows)
     : [];
 
+  // Graph rollup — matches the top-bar "N/M nodes configured" count so
+  // Pi's phrasing agrees with what the user sees on the canvas.
+  const validitySummary = {
+    total: validity.length,
+    valid: validity.filter((v) => v.valid).length,
+    invalid: validity.filter((v) => !v.valid).length,
+    missing: validity
+      .filter((v) => !v.valid)
+      .map((v) => ({ nodeId: v.nodeId, kind: v.kind, error: v.error ?? "invalid" })),
+  };
+
   return {
     surface: "campaigns.builder",
     campaign,
     dsl,
     validity,
+    validitySummary,
     rules: CANONICAL_CONSTRUCT_RULES,
     nodeKinds: summarizeRegistryForContext(BUILDER_ALLOWED_KINDS),
     skillCatalog: summarizeCatalogForContext(),
