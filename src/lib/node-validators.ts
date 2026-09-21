@@ -164,18 +164,24 @@ export function computeGraphValidity(
     const cfg = n.config as WorkflowNodeData["config"] | undefined;
     const outputs = actionNodeOutputs(n.kind as NodeKind, cfg);
     if (outputs && outputs.length > 0) {
-      const unwired = outputs.find((o) => {
+      const unwired = outputs.filter((o) => {
         // whatsapp buttons already flagged by validateWhatsapp — skip
         // to avoid double-reporting the same error.
         if (n.kind === "whatsapp" && o.id.startsWith("btn_")) return false;
         return !isHandleWired(edges, n.id, o.id);
       });
-      if (unwired) {
+      if (unwired.length > 0) {
+        // Enumerate EVERY unwired handle in one error, not just the
+        // first. Pi wires each named handle in one pass; without this
+        // Pi fixes the first, re-reads validity, sees the "next" one,
+        // and either loops or gives up thinking one edit was enough.
+        const list = unwired.map((o) => `'${o.label}'`).join(", ");
+        const plural = unwired.length === 1 ? "branch has" : "branches have";
         return {
           nodeId: n.id,
           kind: n.kind,
           valid: false,
-          error: `'${unwired.label}' branch has no downstream connection — wire it into End or the next step.`,
+          error: `${list} ${plural} no downstream connection — wire each into End or the next step.`,
         };
       }
     }

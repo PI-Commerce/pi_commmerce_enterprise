@@ -408,12 +408,17 @@ export function WorkflowCanvas({
         // pass: skip WRITE, allow CLEAR (same rule as reachability).
         const declared = (n.data.outputs ?? []) as Array<{ id: string; label: string }>;
         if (declared.length > 0) {
-          const unwired = declared.find(
+          const unwired = declared.filter(
             (o) => !edges.some((e) => e.source === n.id && (e.sourceHandle ?? null) === o.id),
           );
-          if (unwired) {
+          if (unwired.length > 0) {
             if (hasSkeletons) return n;
-            const newErr = `'${unwired.label}' branch has no downstream connection — wire it into End or the next step.`;
+            // Enumerate every unwired handle so the user sees the full
+            // gap on the node card (and Pi, reading validity, wires
+            // every named handle in one pass instead of iterating).
+            const list = unwired.map((o) => `'${o.label}'`).join(", ");
+            const plural = unwired.length === 1 ? "branch has" : "branches have";
+            const newErr = `${list} ${plural} no downstream connection — wire each into End or the next step.`;
             if (n.data.valid === false && !hadWiringError) return n;
             if (n.data.error === newErr) return n;
             changed = true;

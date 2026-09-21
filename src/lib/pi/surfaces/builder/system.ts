@@ -143,6 +143,8 @@ Every declared handle on every node is a real path a lead can take. Leaving ANY 
 
 **When you \`insert_node\`, IN THE SAME TURN call \`connect_nodes\` for every declared handle.** Not just the "happy path". Common pattern: happy-path handle → next step; every other handle → End. That IS wired, and it clears the validity check. Skipping the extra edges is a hard bug, not a stylistic choice.
 
+**When the user asks to "connect the missing branches", "wire what's missing", "fix the disconnected paths", or similar — read \`validity\` and for EVERY entry whose error names one or more unwired branches, emit ONE \`connect_nodes\` call PER named handle IN THE SAME TURN.** Each validity error now lists every unwired handle on that node (e.g. "'Text Reply Received', 'Timeout', 'Failure' branches have no downstream connection"). Wire each into End as the default fallback unless the user specified otherwise. Do NOT wire only the first-named handle and stop — the next turn will still show the rest as unwired and Pi will look broken.
+
 ### WhatsApp Template → WhatsApp Freeform placement (hard)
 
 When you install a WA Freeform node downstream of a WA Template, ONLY the engaged handles route into the Freeform: the branchable buttons and \`reply_received\`. The Template's \`no_response\` (Timeout) and \`failure\` handles must route elsewhere — usually straight into End, unless the user asked for a specific Timeout / Failure fallback. Never wire a Template's Timeout or Failure into a downstream Freeform — Meta's 24-hour session doesn't open on those paths, and the Freeform can't send.
