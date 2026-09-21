@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { EChartsOption } from "echarts";
 import { EChart } from "@/components/analytics/EChart";
 import { Input } from "@/components/ui/input";
@@ -722,6 +722,8 @@ function CallsTable({ refs }: { refs: VoiceRef[] }) {
   const [q, setQ] = useState("");
   const [durF, setDurF] = useState("any");
   const [open, setOpen] = useState<Call | null>(null);
+  const [pageSize, setPageSize] = useState<number>(50);
+  const [page, setPage] = useState<number>(1);
 
   // Calls table aggregates every (run, node) pair the KPIs above aggregate,
   // so the row count matches the "Sent" card exactly. Pre-fix the table only
@@ -746,11 +748,29 @@ function CallsTable({ refs }: { refs: VoiceRef[] }) {
     [calls, q, durF],
   );
 
+  // Reset to page 1 whenever the filter set changes (matches LeadsTable UX
+  // — otherwise a narrow filter could leave the user stranded on page 7).
+  useEffect(() => {
+    setPage(1);
+  }, [q, durF, pageSize, refs]);
+
+  // Client-side pagination. Mirrors LeadsTable's shape (25/50/100/250/500)
+  // so switching between channel sub-tabs feels consistent.
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const pageStart = (currentPage - 1) * pageSize;
+  const pageEnd = Math.min(pageStart + pageSize, filtered.length);
+  const paged = filtered.slice(pageStart, pageEnd);
+
+  // Export CSV honors the user's search / duration filters. The "Completed
+  // only" / "Failed only" scopes narrow further from the filtered set — so
+  // the user always exports what they can see, no fewer, no more. Pre-fix
+  // the "all" scope silently ignored the search box.
   const exportCsv = (scope: "all" | "completed" | "failed") => {
     const rows =
       scope === "all"
-        ? calls
-        : calls.filter((c) => c.status.toLowerCase() === scope);
+        ? filtered
+        : filtered.filter((c) => c.status.toLowerCase() === scope);
     downloadCsv(`voice-calls-${scope}.csv`, callsToCsv(rows));
   };
 
@@ -807,8 +827,9 @@ function CallsTable({ refs }: { refs: VoiceRef[] }) {
           </DropdownMenu>
         </div>
         <div className="border-b border-border px-4 py-2 text-[11px] text-muted-foreground">
-          Showing 1–{Math.min(filtered.length, 50)} of{" "}
-          {calls.length.toLocaleString()} calls
+          {filtered.length > 0
+            ? `Showing ${(pageStart + 1).toLocaleString()}–${pageEnd.toLocaleString()} of ${filtered.length.toLocaleString()} calls`
+            : `No calls match the current filters (of ${calls.length.toLocaleString()} in scope)`}
         </div>
         <div className="max-h-[560px] overflow-auto">
           <table className="w-full text-sm">
@@ -825,7 +846,7 @@ function CallsTable({ refs }: { refs: VoiceRef[] }) {
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {filtered.slice(0, 50).map((c) => {
+              {paged.map((c) => {
                 const clickable = c.status === "Completed";
                 return (
                   <tr
@@ -868,6 +889,53 @@ function CallsTable({ refs }: { refs: VoiceRef[] }) {
             </tbody>
           </table>
         </div>
+        {filtered.length > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-2 text-[11px] text-muted-foreground">
+            <div>
+              Showing {(pageStart + 1).toLocaleString()}–{pageEnd.toLocaleString()} of{" "}
+              {filtered.length.toLocaleString()}
+            </div>
+            <div className="flex items-center gap-2">
+              <span>Rows per page</span>
+              <Select
+                value={String(pageSize)}
+                onValueChange={(v) => setPageSize(Number(v))}
+              >
+                <SelectTrigger className="h-7 w-[72px] text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {[25, 50, 100, 250, 500].map((n) => (
+                    <SelectItem key={n} value={String(n)}>
+                      {n}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                disabled={currentPage <= 1}
+                onClick={() => setPage(currentPage - 1)}
+              >
+                Prev
+              </Button>
+              <span>
+                Page {currentPage} / {totalPages}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                disabled={currentPage >= totalPages}
+                onClick={() => setPage(currentPage + 1)}
+              >
+                Next
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
 
       <CallDrawer call={open} onClose={() => setOpen(null)} />
