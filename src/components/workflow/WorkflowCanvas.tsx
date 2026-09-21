@@ -351,11 +351,22 @@ export function WorkflowCanvas({
     // ALWAYS compute the real signature — even during skeleton passes —
     // so the effect fires and clears stale errors the moment wiring is
     // good. The write-path suppression happens inside the effect body.
-    const outgoing = new Set<string>();
-    for (const e of edges) outgoing.add(e.source);
+    //
+    // Sig includes each node's declared handles + which are wired, so
+    // a per-handle edge add/remove re-fires the check. Without this,
+    // adding an edge on a specific handle wouldn't invalidate the sig
+    // if the node already had any outgoing edge.
+    const wired = new Set<string>();
+    for (const e of edges) wired.add(`${e.source}#${e.sourceHandle ?? ""}`);
     return nodes
-      .map((n) => `${n.id}:${outgoing.has(n.id) ? 1 : 0}`)
-      .join("|");
+      .map((n) => {
+        const handles = (n.data.outputs ?? []).map((o) => o.id);
+        const key = handles.length > 0
+          ? handles.map((h) => `${h}:${wired.has(`${n.id}#${h}`) ? 1 : 0}`).join(",")
+          : `_:${edges.some((e) => e.source === n.id) ? 1 : 0}`;
+        return `${n.id}|${key}`;
+      })
+      .join("¦");
   }, [nodes, edges]);
 
   useEffect(() => {
@@ -364,31 +375,56 @@ export function WorkflowCanvas({
       const outgoing = new Set<string>();
       for (const e of edges) outgoing.add(e.source);
       const REACH_ERROR = "Not wired forward — connect this into the next step or into End.";
+      // Prefix that identifies wiring errors written by this useEffect.
+      // Includes both the reachability error above and any per-handle
+      // "'X' branch has no downstream connection" written below. Clean-
+      // up on this render must clear ALL of them when wiring is good.
+      const isWiringError = (err: string | undefined) =>
+        err === REACH_ERROR
+        || (typeof err === "string" && err.includes(" branch has no downstream connection"));
       let changed = false;
       const next = nds.map((n) => {
         if (n.id.startsWith("_skel_")) return n;
         if (n.data.kind === "end") return n;
-        const missingWire = !outgoing.has(n.id);
-        const hadReachError = n.data.error === REACH_ERROR;
-        if (missingWire) {
-          // Skeleton-in-progress: DO NOT write new errors. The Draft-this
-          // reset briefly leaves Audience without an outgoing edge one
-          // render before skeleton edges land, and we don't want that
-          // frame's flash to become a persistent red mark. Cleanup still
-          // fires below when wiring is fine — that path is safe.
+        const hadWiringError = isWiringError(n.data.error);
+
+        // Reachability first — node has zero outgoing edges of any handle.
+        if (!outgoing.has(n.id)) {
+          // Skeleton-in-progress: DO NOT write new errors (avoid the
+          // single-frame flash while the Draft-this reset settles).
           if (hasSkeletons) return n;
-          // Config-level errors take precedence — if a per-kind check
-          // already marked this node invalid, don't clobber that message.
-          if (n.data.valid === false && !hadReachError) return n;
-          if (hadReachError) return n;
+          // Config-level errors from ConfigPanel take precedence.
+          if (n.data.valid === false && !hadWiringError) return n;
+          if (n.data.error === REACH_ERROR) return n;
           changed = true;
           return { ...n, data: { ...n.data, valid: false, error: REACH_ERROR } };
         }
-        // Wiring IS good now — always clear a stale reach-error, even
-        // during a skeleton pass. Without this, an error written before
-        // the skeleton showed up sticks forever because the write-path
-        // guard above suppresses re-checks. (Regression from 55f6512.)
-        if (hadReachError) {
+
+        // Per-handle wiring — EVERY declared handle on this node must
+        // have an outgoing edge. Applies to conditional branches +
+        // default, abSplit variants, whatsapp buttons + reply_received
+        // + timeout + failure, sms/rcs delivery outcomes, voiceCall
+        // dispositions, apiToolCall success/timeout/failure. Skeleton
+        // pass: skip WRITE, allow CLEAR (same rule as reachability).
+        const declared = (n.data.outputs ?? []) as Array<{ id: string; label: string }>;
+        if (declared.length > 0) {
+          const unwired = declared.find(
+            (o) => !edges.some((e) => e.source === n.id && (e.sourceHandle ?? null) === o.id),
+          );
+          if (unwired) {
+            if (hasSkeletons) return n;
+            const newErr = `'${unwired.label}' branch has no downstream connection — wire it into End or the next step.`;
+            if (n.data.valid === false && !hadWiringError) return n;
+            if (n.data.error === newErr) return n;
+            changed = true;
+            return { ...n, data: { ...n.data, valid: false, error: newErr } };
+          }
+        }
+
+        // All handles wired — clear any stale wiring error we wrote
+        // earlier. Runs even during skeleton passes so an error from
+        // before doesn't stick.
+        if (hadWiringError) {
           changed = true;
           return { ...n, data: { ...n.data, valid: true, error: undefined } };
         }

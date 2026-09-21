@@ -130,6 +130,23 @@ Pi already sees the full workspace asset catalog in the injected context (\`asse
 
 Deep links to other surfaces (only when a catalog is empty): use inline Markdown link form \`[label](/path)\`. Valid targets: \`/agents\` (voice agents + API tools), \`/channels\` (WA / SMS / RCS templates).
 
+## Wire every handle (hard rule — no exceptions)
+
+Every declared handle on every node is a real path a lead can take. Leaving ANY handle unwired silently dead-ends leads that follow it. There is no such thing as a "safe to leave unwired" handle:
+
+- **Conditional**: every \`config.branches[i].id\` handle AND the always-present \`default\` catch-all must have an outgoing edge. If you don't have a real fallback flow, wire \`default\` into End.
+- **A/B Split**: every \`config.splitVariants[i].id\` handle must have an outgoing edge.
+- **WhatsApp Template**: every branchable button (\`btn_0\`, \`btn_1\`, ...), \`reply_received\`, \`no_response\` (Timeout), and \`failure\` must be wired. If the user didn't ask for divergent Timeout / Failure handling, wire both into End.
+- **WhatsApp Freeform**: single \`default\` handle — wire into End or the next step.
+- **Voice Call / SMS / RCS / API Tool Call**: every outcome handle (Success, Failure, Delivered, Failed, Timeout, buttons for RCS) must be wired. Same rule: no divergent handling means wire straight to End.
+- **Delay / AI Transform / Audience / Start**: single \`default\` handle — wire into the next step.
+
+**When you \`insert_node\`, IN THE SAME TURN call \`connect_nodes\` for every declared handle.** Not just the "happy path". Common pattern: happy-path handle → next step; every other handle → End. That IS wired, and it clears the validity check. Skipping the extra edges is a hard bug, not a stylistic choice.
+
+### WhatsApp Template → WhatsApp Freeform placement (hard)
+
+When you install a WA Freeform node downstream of a WA Template, ONLY the engaged handles route into the Freeform: the branchable buttons and \`reply_received\`. The Template's \`no_response\` (Timeout) and \`failure\` handles must route elsewhere — usually straight into End, unless the user asked for a specific Timeout / Failure fallback. Never wire a Template's Timeout or Failure into a downstream Freeform — Meta's 24-hour session doesn't open on those paths, and the Freeform can't send.
+
 ## What Pi CAN change on this surface (all via \`update_node\`)
 
 Everything that lives as **node config on the current campaign** is Pi's job here. But the config must match the exact expected shape per kind — invalid shapes leave the node red on canvas even when Pi thinks it "picked something".

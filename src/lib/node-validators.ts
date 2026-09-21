@@ -150,31 +150,32 @@ export function computeGraphValidity(
         error: "Not wired forward — leads reach a dead-end here. Connect this node into the next step or into End.",
       };
     }
-    // Layer 3 — outcome-handle wiring for action nodes (voice / sms /
-    // rcs / apiToolCall). Each `outcome`-kind handle is a real path a
-    // lead can take (Success vs Failure, Delivered vs Failed, buttons);
-    // leaving it unwired silently dead-ends leads on that handle.
-    // `default`-kind handles (Timeout / catch-all) are OK unwired —
-    // they're the fall-through by design.
-    // Conditional branches, abSplit variants, and whatsapp buttons are
-    // handled inside their per-kind validators above; this layer
-    // catches the remaining action-node outcomes uniformly.
+    // Layer 3 — per-handle wiring for action nodes (voice / sms / rcs /
+    // whatsapp / apiToolCall). EVERY declared handle is a real path a
+    // lead can take. Whether it's Success, Failure, Delivered, Failed,
+    // Timeout, or a template button — leaving any of them unwired
+    // silently dead-ends leads that take that path. "Default" handles
+    // are the FALL-THROUGH, not an escape hatch; they must still be
+    // wired to End or a downstream node so the lead exits cleanly.
+    //
+    // Conditional branches + abSplit variants + whatsapp buttons are
+    // already flagged inside their per-kind validators above; this
+    // layer catches the remaining outcome + default handles uniformly.
     const cfg = n.config as WorkflowNodeData["config"] | undefined;
     const outputs = actionNodeOutputs(n.kind as NodeKind, cfg);
     if (outputs && outputs.length > 0) {
-      const unwiredOutcome = outputs.find((o) => {
-        if (o.kind !== "outcome") return false;
+      const unwired = outputs.find((o) => {
         // whatsapp buttons already flagged by validateWhatsapp — skip
         // to avoid double-reporting the same error.
         if (n.kind === "whatsapp" && o.id.startsWith("btn_")) return false;
         return !isHandleWired(edges, n.id, o.id);
       });
-      if (unwiredOutcome) {
+      if (unwired) {
         return {
           nodeId: n.id,
           kind: n.kind,
           valid: false,
-          error: `'${unwiredOutcome.label}' branch has no downstream connection — leads on this outcome dead-end.`,
+          error: `'${unwired.label}' branch has no downstream connection — wire it into End or the next step.`,
         };
       }
     }
@@ -244,15 +245,18 @@ function validateConditional(
         return { valid: false, error: `Branch '${label}': set the upper bound for condition #${ci + 1}` };
       }
     }
-    // Per-branch wiring: each configured branch is a separate handle on
-    // the node — leads matching it follow that handle's outgoing edge.
-    // Unwired branch = silent lead dead-end. The always-present `default`
-    // catch-all handle handles leads matching NO branch, so it's OK
-    // unwired here (reachability elsewhere covers "node has zero
-    // outgoing edges at all").
+    // Per-branch wiring: each configured branch is a separate handle
+    // on the node — leads matching it follow that handle's outgoing
+    // edge. Unwired branch = silent lead dead-end.
     if (!isHandleWired(ctx.edges, nodeId, b.id)) {
       return { valid: false, error: `Branch '${label}' has no downstream connection — leads matching it dead-end.` };
     }
+  }
+  // The always-present `default` catch-all handle catches leads that
+  // matched no configured branch. If it's not wired, those leads also
+  // dead-end. Must be routed somewhere (End is fine).
+  if (!isHandleWired(ctx.edges, nodeId, "default")) {
+    return { valid: false, error: "'Default / else' branch has no downstream connection — wire it into End or a fallback step." };
   }
   return { valid: true };
 }
