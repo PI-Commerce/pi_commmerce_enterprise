@@ -102,6 +102,30 @@ function pickRuns(f: F) {
   return runs;
 }
 
+/** Screen context can inject a list of resolved (campaign, run, node) refs.
+ *  When present the fx functions sum over exactly those refs (matching the
+ *  KPI cards' per-ref math); when absent they fall back to their filter-
+ *  driven pickRuns / pickCampaigns behavior. */
+export type ResolvedRefLite = { campaignId: string; runId: string; nodeId: string };
+
+/** Group resolved refs by run so we can iterate {campaignId, campaignName,
+ *  run, nodeIds} for asset-mode fixture math. Runs that don't resolve in
+ *  CAMPAIGNS are silently dropped. */
+function groupResolvedRefs(refs: ResolvedRefLite[]) {
+  const runMap = new Map<string, { campaignId: string; campaignName: string; run: RunRow; nodeIds: Set<string> }>();
+  for (const r of refs) {
+    const c = CAMPAIGNS.find((x) => x.id === r.campaignId);
+    if (!c) continue;
+    const run = c.runs.find((x) => x.id === r.runId);
+    if (!run) continue;
+    const key = `${r.campaignId}|${r.runId}`;
+    const existing = runMap.get(key);
+    if (existing) existing.nodeIds.add(r.nodeId);
+    else runMap.set(key, { campaignId: c.id, campaignName: c.name, run, nodeIds: new Set([r.nodeId]) });
+  }
+  return [...runMap.values()];
+}
+
 /** Days in an ISO range (inclusive). Mirrors DateRangePicker.rangeDays —
  *  BOTH bounds at midnight, then round + 1. Using T23:59:59Z on `to` inflates
  *  the delta by ~1 day and breaks parity with the on-screen KPIs. */
@@ -203,33 +227,74 @@ function scaledRun(r: RunRow, ratio: number): RunRow {
 /* Tool implementations (fixture)                                              */
 /* -------------------------------------------------------------------------- */
 
-export async function fxSummary(f: F) {
+export async function fxSummary(f: F, opts?: { resolvedRefs?: ResolvedRefLite[] }) {
   const ratio = await resolveRatio(f);
-  const scaled = pickRuns(f).map(({ campaignId, campaignName, run }) => ({
-    campaignId, campaignName, run: scaledRun(run, ratio),
-  }));
+  const refs = opts?.resolvedRefs;
 
-  // Top-line lead KPIs: sum across the picked runs, using the SAME fields the
-  // UI displays. NEVER sum channel-node entered here — that double-counts.
-  const totalLeads     = scaled.reduce((s, x) => s + x.run.kpi.totalLeads, 0);
-  const eligibleLeads  = scaled.reduce((s, x) => s + x.run.kpi.validLeads, 0);
-  const completedLeads = scaled.reduce((s, x) => s + x.run.kpi.leadsProcessed, 0);
-  const failedLeads    = Math.max(0, eligibleLeads - completedLeads);
-
-  // Per-channel touchpoint counts (sends), aggregated from sankey channel nodes.
-  // Labelled `sent` so Pi doesn't confuse them with unique leads.
+  // Two math paths. Both apply the same range ratio (D1 first, days/30
+  // fallback) so the scaling matches the UI's `scaleRunToRange`.
+  //   A. resolvedRefs present (asset / broadcast / channel-tab view) —
+  //      iterate ONLY those (run, node) triples. The "sent" KPI card sums
+  //      node.entered over exactly this list; Pi mirrors that.
+  //   B. resolvedRefs absent (Campaign-tab, or Pi calling without context) —
+  //      fall back to pickRuns(f), summing at the run.kpi level.
+  let totalLeads = 0;
+  let eligibleLeads = 0;
+  let completedLeads = 0;
   const perChannel = new Map<string, { sent: number; delivered: number; converted: number }>();
-  for (const { run } of scaled) {
-    for (const n of run.sankey.nodes) {
-      if (!CHANNEL_KINDS.includes(n.kind)) continue;
-      if (f.channel && n.kind !== f.channel) continue;
-      const cur = perChannel.get(n.kind) ?? { sent: 0, delivered: 0, converted: 0 };
-      cur.sent += n.entered;
-      cur.delivered += Math.round(n.entered * 0.94);
-      cur.converted += n.exited;
-      perChannel.set(n.kind, cur);
+
+  if (refs && refs.length > 0) {
+    // Asset / channel view: KPIs come from summing node.entered over the
+    // exact resolved refs. `sent` is the channel-touchpoint total (matches
+    // the UI's "Sent" card exactly). Total/eligible/completed leads are
+    // derived from the same node.entered pool with the same 98% / 91%
+    // ratios the fixture uses elsewhere, so all three KPIs stay coherent.
+    let sentSum = 0;
+    let convertedSum = 0;
+    for (const g of groupResolvedRefs(refs)) {
+      const scaled = scaledRun(g.run, ratio);
+      for (const n of scaled.sankey.nodes) {
+        if (!g.nodeIds.has(n.id)) continue;
+        sentSum += n.entered;
+        convertedSum += n.exited;
+        if (CHANNEL_KINDS.includes(n.kind) && (!f.channel || n.kind === f.channel)) {
+          const cur = perChannel.get(n.kind) ?? { sent: 0, delivered: 0, converted: 0 };
+          cur.sent += n.entered;
+          cur.delivered += Math.round(n.entered * 0.94);
+          cur.converted += n.exited;
+          perChannel.set(n.kind, cur);
+        }
+      }
+    }
+    // The UI shows Sent/Delivered/Failed/Timeout on channel views — same
+    // node.entered pool, ratioed. Total leads for the SCREEN's aggregate
+    // block is `sent` when we're in asset-mode (the user is looking at a
+    // template's send volume, not a per-lead audience).
+    totalLeads = sentSum;
+    eligibleLeads = sentSum; // asset-mode: eligible == sent (all in-scope)
+    completedLeads = convertedSum;
+  } else {
+    // Full-run / Campaign-tab math — sum kpi fields per selected run.
+    const scaled = pickRuns(f).map(({ campaignId, campaignName, run }) => ({
+      campaignId, campaignName, run: scaledRun(run, ratio),
+    }));
+    totalLeads     = scaled.reduce((s, x) => s + x.run.kpi.totalLeads, 0);
+    eligibleLeads  = scaled.reduce((s, x) => s + x.run.kpi.validLeads, 0);
+    completedLeads = scaled.reduce((s, x) => s + x.run.kpi.leadsProcessed, 0);
+    for (const { run } of scaled) {
+      for (const n of run.sankey.nodes) {
+        if (!CHANNEL_KINDS.includes(n.kind)) continue;
+        if (f.channel && n.kind !== f.channel) continue;
+        const cur = perChannel.get(n.kind) ?? { sent: 0, delivered: 0, converted: 0 };
+        cur.sent += n.entered;
+        cur.delivered += Math.round(n.entered * 0.94);
+        cur.converted += n.exited;
+        perChannel.set(n.kind, cur);
+      }
     }
   }
+  const failedLeads = Math.max(0, eligibleLeads - completedLeads);
+
   const byChannel = Array.from(perChannel, ([channel, v]) => ({
     channel, sent: v.sent, delivered: v.delivered, converted: v.converted,
   })).sort((a, b) => b.sent - a.sent);
@@ -261,6 +326,8 @@ export async function fxSummary(f: F) {
       from: f.from,
       to: f.to,
       scaledBy: ratio < 1 ? Number(ratio.toFixed(3)) : 1,
+      refCount: refs?.length ?? 0,
+      resolvedRefs: refs && refs.length ? refs : undefined,
     },
     // The three KPIs shown on the /analytics screen — cite these when the
     // user asks about "leads eligible", "total leads", "completed".
@@ -274,12 +341,26 @@ export async function fxSummary(f: F) {
   };
 }
 
-export async function fxCountLeads(f: F): Promise<number> {
-  // "leads" = unique audience under the filter. Use kpi.totalLeads sum.
+export async function fxCountLeads(f: F, opts?: { resolvedRefs?: ResolvedRefLite[] }): Promise<number> {
   const ratio = await resolveRatio(f);
+  const refs = opts?.resolvedRefs;
+
+  // resolvedRefs path — sum node.entered over the exact triples in scope.
+  if (refs && refs.length > 0) {
+    let total = 0;
+    for (const g of groupResolvedRefs(refs)) {
+      const scaled = scaledRun(g.run, ratio);
+      for (const n of scaled.sankey.nodes) {
+        if (!g.nodeIds.has(n.id)) continue;
+        total += n.entered;
+      }
+    }
+    return total;
+  }
+
+  // Filter-driven path.
   const runs = pickRuns(f);
   if (f.channel || f.stageNodeId) {
-    // Narrowing by channel/node — return the channel node's scaled entered.
     let total = 0;
     for (const { run } of runs) {
       for (const n of run.sankey.nodes) {
@@ -294,8 +375,8 @@ export async function fxCountLeads(f: F): Promise<number> {
   return runs.reduce((s, { run }) => s + scale(run.kpi.totalLeads, ratio), 0);
 }
 
-export async function fxStatusBreakdown(f: F) {
-  return (await fxSummary(f)).byStatus;
+export async function fxStatusBreakdown(f: F, opts?: { resolvedRefs?: ResolvedRefLite[] }) {
+  return (await fxSummary(f, opts)).byStatus;
 }
 
 export function fxWorstDropoffs(runId: string, limit = 5) {
@@ -314,8 +395,8 @@ export function fxWorstDropoffs(runId: string, limit = 5) {
   return rows.sort((a, b) => b.dropPct - a.dropPct).slice(0, limit);
 }
 
-export async function fxCompareChannels(f: F) {
-  const s = await fxSummary({ ...f, channel: undefined });
+export async function fxCompareChannels(f: F, opts?: { resolvedRefs?: ResolvedRefLite[] }) {
+  const s = await fxSummary({ ...f, channel: undefined }, opts);
   return s.byChannel.map((c) => ({
     channel: c.channel,
     sent: c.sent,
@@ -412,15 +493,26 @@ function hashStr(s: string): number {
   return Math.abs(h);
 }
 
-export async function fxVoiceIntentDistribution(f: F) {
+export async function fxVoiceIntentDistribution(f: F, opts?: { resolvedRefs?: ResolvedRefLite[] }) {
   const ratio = await resolveRatio(f);
-  const runs = pickRuns(f);
+  const refs = opts?.resolvedRefs;
   // Total completed voice calls under scope = sum of voice-node exited (scaled).
   let completed = 0;
-  for (const { run } of runs) {
-    for (const n of run.sankey.nodes) {
-      if (n.kind !== "voice") continue;
-      completed += scale(n.exited, ratio);
+  if (refs && refs.length > 0) {
+    for (const g of groupResolvedRefs(refs)) {
+      const scaled = scaledRun(g.run, ratio);
+      for (const n of scaled.sankey.nodes) {
+        if (n.kind !== "voice") continue;
+        if (!g.nodeIds.has(n.id)) continue;
+        completed += n.exited;
+      }
+    }
+  } else {
+    for (const { run } of pickRuns(f)) {
+      for (const n of run.sankey.nodes) {
+        if (n.kind !== "voice") continue;
+        completed += scale(n.exited, ratio);
+      }
     }
   }
   if (completed === 0) return { intents: [], totalCompleted: 0 };
@@ -459,8 +551,14 @@ export async function fxVoiceIntentDistribution(f: F) {
  * counts, so we spread the metric total across the range with a weekday
  * weight. Approximation — shape-realistic, adequate for trend visualization.
  */
-export async function fxTimeSeries(args: { metric: string; from: string; to: string; campaignId?: string; channel?: string }) {
-  const summary = await fxSummary({ campaignId: args.campaignId, channel: args.channel, from: args.from, to: args.to });
+export async function fxTimeSeries(
+  args: { metric: string; from: string; to: string; campaignId?: string; channel?: string },
+  opts?: { resolvedRefs?: ResolvedRefLite[] },
+) {
+  const summary = await fxSummary(
+    { campaignId: args.campaignId, channel: args.channel, from: args.from, to: args.to },
+    opts,
+  );
   const total = (() => {
     switch (args.metric) {
       case "leads":     return summary.totalLeads;

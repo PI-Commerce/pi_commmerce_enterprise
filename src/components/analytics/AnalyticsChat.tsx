@@ -445,9 +445,16 @@ function friendlyContextLine(c: AnalyticsScreenContext): { compact: string; full
   const L = c.labels ?? {};
   const parts: string[] = [];
   if (L.channelLabel) parts.push(L.channelLabel);
-  if (L.campaignName) parts.push(L.campaignName);
-  else if (c.filter?.campaignId) parts.push("this campaign");
-  if (L.runLabel) parts.push(L.runLabel);
+  // Asset-mode (View by Template / Agent) and Broadcast-mode span multiple
+  // runs — surface the asset/broadcast name instead of a campaign/run pair
+  // so the user sees exactly what scope Pi is answering against.
+  if (L.modeLabel && L.assetLabel) {
+    parts.push(`${L.modeLabel} ${L.assetLabel}`);
+  } else {
+    if (L.campaignName) parts.push(L.campaignName);
+    else if (c.filter?.campaignId) parts.push("this campaign");
+    if (L.runLabel) parts.push(L.runLabel);
+  }
   const head = parts.join(" · ");
   const range = L.rangeLabel ? ` — ${L.rangeLabel}` : "";
   const line = head ? `${head}${range}` : "your whole workspace";

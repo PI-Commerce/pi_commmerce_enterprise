@@ -16,9 +16,17 @@ import { runAnalyticsTool } from "../runtool";
 const CHANNELS = ["whatsapp", "voice", "sms", "rcs"] as const;
 const METRICS = ["leads", "delivered", "read", "clicked", "replied", "converted", "failed"] as const;
 
-/** Sugar — every tool below has the same handler signature. */
+/** Sugar — every tool below has the same handler signature. Passes the
+ *  screen context through so the runtool can honor `resolvedRefs` (the
+ *  pre-resolved (campaign, run, node) triples the channel views publish).
+ *  Without ctx, asset-mode / broadcast-mode views would return workspace-
+ *  wide aggregates that disagree with the KPI cards by 10-50x. */
 const dispatch = (name: string): SurfaceTool["handler"] =>
-  async (args) => await runAnalyticsTool(name, args);
+  async (args, ctx) => await runAnalyticsTool(
+    name,
+    args,
+    ctx?.request?.context as Record<string, unknown> | undefined,
+  );
 
 export const summary: SurfaceTool = {
   name: "summary",

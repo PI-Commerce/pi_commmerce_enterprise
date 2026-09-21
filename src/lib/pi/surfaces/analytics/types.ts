@@ -6,6 +6,13 @@
  * because they describe the SHAPE of what this surface produces + consumes.
  */
 
+/** A concrete (campaign, run, node) triple in scope on the current screen.
+ *  The Channel tab's asset/broadcast modes span multiple runs across multiple
+ *  campaigns, so a single `campaignId`+`runId` pair can't describe the scope.
+ *  The client resolves the selection into this list and Pi's tools honor it
+ *  verbatim, so the numbers Pi cites match the on-screen KPI cards. */
+export type ResolvedRef = { campaignId: string; runId: string; nodeId: string };
+
 /** Everything the /analytics page is currently showing. Fed to Pi verbatim
  *  as the injected `Screen context` block on every turn so Pi grounds
  *  answers in what the user is actually looking at. */
@@ -19,6 +26,19 @@ export type AnalyticsScreenContext = {
     from?: string;   // ISO yyyy-mm-dd
     to?: string;     // ISO yyyy-mm-dd
     status?: string;
+    /** Channel-tab View-by mode. Undefined on the Campaign tab. */
+    mode?: "campaign" | "asset" | "broadcast";
+    /** The template / agent / broadcast the user picked in asset/broadcast
+     *  mode. Ids from the workspace registry. */
+    assetKind?: "template" | "agent";
+    assetId?: string;
+    broadcastId?: string;
+    /** Pre-resolved (campaign, run, node) triples in scope. Populated by the
+     *  client when the selection spans more than one (run, node) — asset and
+     *  broadcast modes especially. Pi's tools sum over exactly these refs so
+     *  they match the KPI cards; when empty/absent the tools fall back to
+     *  their filter-driven behavior. */
+    resolvedRefs?: ResolvedRef[];
   };
   tab?: string;                // "campaign" | "channel"
   selectedNodeId?: string;     // if a node drawer is open
@@ -29,6 +49,11 @@ export type AnalyticsScreenContext = {
     runLabel?: string;
     channelLabel?: string;
     rangeLabel?: string;
+    /** Asset picker label (template name / agent name / broadcast name). */
+    assetLabel?: string;
+    /** "Workflow run" / "Template" / "Agent" / "Broadcast" — the mode label
+     *  the user sees in the View by dropdown. */
+    modeLabel?: string;
   };
 };
 

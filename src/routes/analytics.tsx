@@ -1926,31 +1926,10 @@ function ChannelAnalytics({
   const { kind, mode } = selection;
   const tabMeta = CHANNEL_TABS.find((c) => c.kind === kind)!;
 
-  // Publish live screen context for Ask Pi.
-  const _channelCampaign = selection.campaignId
-    ? CAMPAIGNS.find((c) => c.id === selection.campaignId)
-    : undefined;
-  const _channelRun = _channelCampaign?.runs.find((r) => r.id === selection.runId);
-  const _channelLabel = tabMeta.label;
-  usePublishScreenContext({
-    pathname: "/analytics",
-    tab: "channel",
-    filter: {
-      channel: kind,
-      campaignId: selection.campaignId,
-      runId: selection.runId,
-      from: dateRangeToIsoFrom(dateRange),
-      to: dateRangeToIsoTo(dateRange),
-    },
-    labels: {
-      channelLabel: _channelLabel,
-      campaignName: _channelCampaign?.name,
-      runLabel: _channelRun ? `${_channelRun.name} · ${_channelRun.code}` : undefined,
-      rangeLabel: dateRange?.from && dateRange?.to
-        ? `${fmtDate(dateRange.from, "MMM d")} – ${fmtDate(dateRange.to, "MMM d, yyyy")}`
-        : undefined,
-    },
-  });
+  // Screen context is published FURTHER DOWN, after `selectedRefs` is computed
+  // — Pi needs the resolved (campaign, run, node) triples in scope to match
+  // the KPI cards' math bit-for-bit. Keep this comment as a signpost so
+  // nobody re-adds a shallow publish here.
 
   // ── Static indexes ─────────────────────────────────────────────────────────
   // Every (campaign, run, node) triple belonging to this channel kind.
@@ -2124,6 +2103,62 @@ function ChannelAnalytics({
     if (effectiveModeIsAsset && !dateRange) onDateRangeChange(defaultDateRange(7));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode]);
+
+  // Publish live screen context for Ask Pi. Carries the FULL scope: mode,
+  // asset id/label, and the resolved (campaign, run, node) triples. The
+  // analytics runtool sums over exactly this ref list, so Pi's numbers
+  // match the KPI cards regardless of the View-by mode.
+  const _publishAssetLabel = (() => {
+    if (mode === "broadcast" && selection.broadcastId) {
+      return SEED_BROADCASTS.find((b) => b.id === selection.broadcastId)?.name;
+    }
+    if (effectiveAssetId) {
+      return assetOptions.find((a) => a.id === effectiveAssetId)?.label;
+    }
+    return undefined;
+  })();
+  const _publishModeLabel =
+    mode === "campaign" ? "Workflow run" :
+    mode === "broadcast" ? "Broadcast" :
+    tabMeta.assetLabel;
+  const _publishCampaign = selection.campaignId
+    ? CAMPAIGNS.find((c) => c.id === selection.campaignId)
+    : undefined;
+  const _publishRun = _publishCampaign?.runs.find((r) => r.id === selection.runId);
+  usePublishScreenContext({
+    pathname: "/analytics",
+    tab: "channel",
+    filter: {
+      channel: kind,
+      // In asset/broadcast mode the selection spans many (campaign, run)
+      // pairs; leave the singleton ids undefined and rely on resolvedRefs.
+      campaignId: mode === "campaign" ? selection.campaignId : undefined,
+      runId: mode === "campaign" ? selection.runId : undefined,
+      from: dateRangeToIsoFrom(dateRange),
+      to: dateRangeToIsoTo(dateRange),
+      mode,
+      assetKind: effectiveModeIsAsset
+        ? (kind === "voice" ? "agent" : "template")
+        : undefined,
+      assetId: effectiveAssetId,
+      broadcastId: mode === "broadcast" ? selection.broadcastId : undefined,
+      resolvedRefs: selectedRefs.map((r) => ({
+        campaignId: r.campaignId,
+        runId: r.runId,
+        nodeId: r.nodeId,
+      })),
+    },
+    labels: {
+      channelLabel: tabMeta.label,
+      campaignName: _publishCampaign?.name,
+      runLabel: _publishRun ? `${_publishRun.name} · ${_publishRun.code}` : undefined,
+      rangeLabel: dateRange?.from && dateRange?.to
+        ? `${fmtDate(dateRange.from, "MMM d")} – ${fmtDate(dateRange.to, "MMM d, yyyy")}`
+        : undefined,
+      assetLabel: _publishAssetLabel,
+      modeLabel: _publishModeLabel,
+    },
+  });
 
   return (
     <>

@@ -160,20 +160,49 @@ async function toolCompareRuns(a: string, b: string) {
  *  KPI cards, flip this back to the `if (!hasDb) { fixture } else { d1 }`
  *  fork — the D1 tool bodies below are kept live for that day.
  */
-export async function runAnalyticsTool(name: string, args: Record<string, unknown>): Promise<unknown> {
+/** Pull the pre-resolved (campaign, run, node) triples out of the screen
+ *  context. The Channel tab publishes them for asset/broadcast/campaign
+ *  views; when present, fx tools sum over exactly this list so Pi's numbers
+ *  match the KPI cards. Returns undefined when the context doesn't carry
+ *  refs (Campaign tab, or the client is on an older publish schema). */
+function extractResolvedRefs(ctx?: Record<string, unknown>): fx.ResolvedRefLite[] | undefined {
+  const filter = (ctx?.filter ?? undefined) as Record<string, unknown> | undefined;
+  const refs = filter?.resolvedRefs;
+  if (!Array.isArray(refs) || refs.length === 0) return undefined;
+  const out: fx.ResolvedRefLite[] = [];
+  for (const r of refs) {
+    if (!r || typeof r !== "object") continue;
+    const rec = r as Record<string, unknown>;
+    if (
+      typeof rec.campaignId === "string" &&
+      typeof rec.runId === "string" &&
+      typeof rec.nodeId === "string"
+    ) {
+      out.push({ campaignId: rec.campaignId, runId: rec.runId, nodeId: rec.nodeId });
+    }
+  }
+  return out.length > 0 ? out : undefined;
+}
+
+export async function runAnalyticsTool(
+  name: string,
+  args: Record<string, unknown>,
+  ctx?: Record<string, unknown>,
+): Promise<unknown> {
   try {
+    const opts = { resolvedRefs: extractResolvedRefs(ctx) };
     switch (name) {
-      case "summary":         return await fx.fxSummary(args as F);
-      case "time_series":     return await fx.fxTimeSeries(args as Parameters<typeof fx.fxTimeSeries>[0]);
-      case "count_leads":     return { count: await fx.fxCountLeads(args as F) };
-      case "status_breakdown":return await fx.fxStatusBreakdown(args as F);
+      case "summary":         return await fx.fxSummary(args as F, opts);
+      case "time_series":     return await fx.fxTimeSeries(args as Parameters<typeof fx.fxTimeSeries>[0], opts);
+      case "count_leads":     return { count: await fx.fxCountLeads(args as F, opts) };
+      case "status_breakdown":return await fx.fxStatusBreakdown(args as F, opts);
       case "worst_dropoffs":  return fx.fxWorstDropoffs(args.runId as string, (args.limit as number) ?? 5);
-      case "compare_channels":return await fx.fxCompareChannels(args as F);
+      case "compare_channels":return await fx.fxCompareChannels(args as F, opts);
       case "compare_runs":    return await fx.fxCompareRuns(args.runIdA as string, args.runIdB as string);
       case "latest_runs":     return fx.fxLatestRuns((args.limit as number) ?? 10);
       case "list_campaigns":  return fx.fxListCampaigns();
       case "read_campaign":   return fx.fxReadCampaign(args.id as string);
-      case "voice_intent_distribution": return await fx.fxVoiceIntentDistribution(args as F);
+      case "voice_intent_distribution": return await fx.fxVoiceIntentDistribution(args as F, opts);
       default:                return { error: `unknown_tool: ${name}` };
     }
   } catch (e) {
