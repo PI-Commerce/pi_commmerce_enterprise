@@ -14,7 +14,14 @@
  *   2. Date-range scaling: when the range is <30 days, every count is scaled
  *      by `days/30`. Matches `scaleRunToRange`'s synthetic-ratio fallback.
  */
-import { CAMPAIGNS, type RunRow, type SankeyNode, type SankeyNodeKind } from "@/lib/analytics-data";
+import {
+  CAMPAIGNS,
+  RCS_DELIVERY_RATES,
+  SMS_DELIVERY_RATES,
+  type RunRow,
+  type SankeyNode,
+  type SankeyNodeKind,
+} from "@/lib/analytics-data";
 import type { PresetConfig } from "@/lib/campaign-types";
 import { getDb } from "@/lib/db/client";
 
@@ -202,6 +209,77 @@ function buildLeadsWhere(f: F): { where: string; binds: unknown[] } {
 
 const scale = (n: number, ratio: number) => Math.max(0, Math.round(n * ratio));
 
+/**
+ * Channel-specific funnel derivation. Mirrors the UI's `deriveChannelValues`
+ * (analytics.tsx) + `smsOutcomeTotals` / `rcsOutcomeTotals` bit-for-bit so
+ * Pi's numbers match the KPI cards on every channel view. The generic
+ * fallback (0.94 / 0.68 / …) that used to sit in fxSummary was fine for the
+ * Campaign tab but drifted 7-10% on channel views. When we know the scope
+ * is one channel, use its real rates.
+ *
+ *   whatsapp — 0.94 / 0.55 / 0.32 / 0.16 (delivered/read/clicked/replied)
+ *   sms      — SMS_DELIVERY_RATES (delivered 0.94, failed 0.04)
+ *   rcs      — RCS_DELIVERY_RATES (delivered 0.88, read 0.62, clicked 0.11, failed 0.10)
+ *   voice    — completed 0.72, failed 0.14 (matches deriveChannelValues)
+ */
+function channelFunnel(sent: number, kind: SankeyNodeKind | undefined) {
+  switch (kind) {
+    case "whatsapp":
+    case "whatsappFreeform": {
+      const delivered = Math.round(sent * 0.94);
+      const read = Math.round(sent * 0.55);
+      const clicked = Math.round(sent * 0.32);
+      const replied = Math.round(sent * 0.16);
+      const failed = Math.round(sent * 0.06);
+      return { sent, delivered, read, clicked, replied, converted: replied, failed };
+    }
+    case "sms": {
+      const delivered = Math.round(sent * SMS_DELIVERY_RATES.delivered);
+      const failed = Math.round(sent * SMS_DELIVERY_RATES.failed);
+      return { sent, delivered, read: 0, clicked: 0, replied: 0, converted: delivered, failed };
+    }
+    case "rcs": {
+      const delivered = Math.round(sent * RCS_DELIVERY_RATES.delivered);
+      const read = Math.round(sent * RCS_DELIVERY_RATES.read);
+      const clicked = Math.round(sent * RCS_DELIVERY_RATES.clicked);
+      const failed = Math.round(sent * RCS_DELIVERY_RATES.failed);
+      return { sent, delivered, read, clicked, replied: 0, converted: clicked, failed };
+    }
+    case "voice": {
+      // Voice matches `deriveChannelValues("voice", ...)` above: 8% running,
+      // 14% failed, 6% pending, 72% completed.
+      const failed = Math.round(sent * 0.14);
+      const completed = Math.max(0, sent - Math.round(sent * 0.06) - Math.round(sent * 0.08) - failed);
+      return { sent, delivered: completed, read: 0, clicked: 0, replied: 0, converted: completed, failed };
+    }
+    default: {
+      // Campaign-tab / mixed-channel scope — generic funnel over eligible
+      // leads. Matches the pre-channel-specific behavior for back-compat.
+      const delivered = Math.round(sent * 0.94);
+      const read = Math.round(sent * 0.68);
+      const clicked = Math.round(sent * 0.22);
+      const replied = Math.round(sent * 0.15);
+      return { sent, delivered, read, clicked, replied, converted: 0, failed: 0 };
+    }
+  }
+}
+
+/** Peek at the resolved refs and return a single channel kind if every ref
+ *  points to a node of the same kind, else undefined (Campaign tab or mixed).
+ *  Used to pick channel-specific delivery rates in fxSummary. */
+function inferChannelKind(refs?: ResolvedRefLite[]): SankeyNodeKind | undefined {
+  if (!refs || refs.length === 0) return undefined;
+  const kinds = new Set<SankeyNodeKind>();
+  for (const r of refs) {
+    const c = CAMPAIGNS.find((x) => x.id === r.campaignId);
+    const run = c?.runs.find((x) => x.id === r.runId);
+    const node = run?.sankey.nodes.find((x) => x.id === r.nodeId);
+    if (node) kinds.add(node.kind);
+    if (kinds.size > 1) return undefined;
+  }
+  return kinds.size === 1 ? [...kinds][0] : undefined;
+}
+
 /** Scale a run's KPIs + sankey by the same rule scaleRunToRange uses. */
 function scaledRun(r: RunRow, ratio: number): RunRow {
   if (ratio >= 1) return r;
@@ -259,9 +337,10 @@ export async function fxSummary(f: F, opts?: { resolvedRefs?: ResolvedRefLite[] 
         convertedSum += n.exited;
         if (CHANNEL_KINDS.includes(n.kind) && (!f.channel || n.kind === f.channel)) {
           const cur = perChannel.get(n.kind) ?? { sent: 0, delivered: 0, converted: 0 };
-          cur.sent += n.entered;
-          cur.delivered += Math.round(n.entered * 0.94);
-          cur.converted += n.exited;
+          const cf = channelFunnel(n.entered, n.kind);
+          cur.sent += cf.sent;
+          cur.delivered += cf.delivered;
+          cur.converted += cf.converted;
           perChannel.set(n.kind, cur);
         }
       }
@@ -293,7 +372,32 @@ export async function fxSummary(f: F, opts?: { resolvedRefs?: ResolvedRefLite[] 
       }
     }
   }
-  const failedLeads = Math.max(0, eligibleLeads - completedLeads);
+  // Channel-scoped views (asset/broadcast/channel tab) use channel-specific
+  // funnel rates from the same source of truth the KPI cards use — mirroring
+  // deriveChannelValues + smsOutcomeTotals / rcsOutcomeTotals. When we're on
+  // the Campaign tab or a mixed-channel scope, fall through to the generic
+  // funnel where completed drives the "converted" number.
+  const scopedKind: SankeyNodeKind | undefined = refs
+    ? inferChannelKind(refs)
+    : (f.channel as SankeyNodeKind | undefined);
+  const isChannelScope = scopedKind !== undefined;
+  const funnel = isChannelScope
+    ? channelFunnel(eligibleLeads, scopedKind)
+    : {
+        sent:      eligibleLeads,
+        delivered: Math.round(eligibleLeads * 0.94),
+        read:      Math.round(eligibleLeads * 0.68),
+        clicked:   Math.round(eligibleLeads * 0.22),
+        replied:   Math.round(eligibleLeads * 0.15),
+        converted: completedLeads,
+        failed:    Math.max(0, eligibleLeads - completedLeads),
+      };
+  // Channel scope: failed comes from the channel-specific rate, not
+  // eligible-completed. Otherwise it's the residual.
+  const failedLeads = isChannelScope
+    ? funnel.failed
+    : Math.max(0, eligibleLeads - completedLeads);
+  if (isChannelScope) completedLeads = funnel.converted;
 
   const byChannel = Array.from(perChannel, ([channel, v]) => ({
     channel, sent: v.sent, delivered: v.delivered, converted: v.converted,
@@ -306,17 +410,6 @@ export async function fxSummary(f: F, opts?: { resolvedRefs?: ResolvedRefLite[] 
     { status: "failed", count: failedLeads },
     { status: "ineligible", count: Math.max(0, totalLeads - eligibleLeads) },
   ].filter((r) => r.count > 0);
-
-  // Funnel over eligible leads (approximate). NOT channel-touchpoint sums.
-  const funnel = {
-    sent:      eligibleLeads,
-    delivered: Math.round(eligibleLeads * 0.94),
-    read:      Math.round(eligibleLeads * 0.68),
-    clicked:   Math.round(eligibleLeads * 0.22),
-    replied:   Math.round(eligibleLeads * 0.15),
-    converted: completedLeads,
-    failed:    failedLeads,
-  };
 
   return {
     scope: {
