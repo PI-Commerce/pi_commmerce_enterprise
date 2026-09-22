@@ -5,11 +5,15 @@
  * Kept brief on purpose. Each entry documents one shipped capability and
  * mirrors what went out in the corresponding release notes PDF.
  *
- * Two release bundles ship under v2 so far:
+ * Releases under v2 so far:
  *   - 20 August 2026: SMS, Delay v2, API Tool Node, WhatsApp Template
  *     Timeout, API Keys.
  *   - 25 August 2026: RCS, Direct Channel APIs, Batch API for Campaigns,
  *     CLM Connectors, CSV upload limits.
+ *   - 3 September 2026: API Docs.
+ *   - 9 September 2026: WhatsApp Freeform Workflows.
+ *   - 10 September 2026: Broadcast Campaigns.
+ *   - 15 September 2026: Channel Webhooks.
  */
 
 export type ReleaseCategory =
@@ -39,6 +43,86 @@ export type ReleaseEntry = {
 };
 
 export const RELEASE_ENTRIES: ReleaseEntry[] = [
+  /* ---------------- 15 September 2026 ---------------- */
+  {
+    id: "channel-webhooks",
+    version: "v2",
+    date: "2026-09-15",
+    category: "Developer",
+    title: "Channel Webhooks",
+    summary:
+      "Register an HTTPS endpoint and receive Delivery Status and Incoming Messages events in real time, scoped to one channel and one sender.",
+    highlights: [
+      "Delivery Status on WhatsApp, SMS and RCS; Incoming Messages on WhatsApp",
+      "Scope a webhook to a WABA and phone number, a DLT sender ID, or an RCS agent",
+      "Bearer token generated at creation and shown once; Pi metadata rides in headers, never in the body",
+      "Your endpoint has 10 seconds to return 2xx; five retries across roughly 13 hours, then auto-pause",
+      "Send a test event from the row menu or the create dialog to verify your receiver before going live",
+    ],
+    linkTo: "/developer",
+    linkLabel: "Open Webhooks",
+  },
+
+  /* ---------------- 10 September 2026 ---------------- */
+  {
+    id: "broadcast-campaigns",
+    version: "v2",
+    date: "2026-09-10",
+    category: "Campaigns",
+    title: "Broadcast Campaigns",
+    summary:
+      "A one-shot send that sits alongside Workflows. Pick a channel, pick an approved template, upload a CSV audience, and go.",
+    highlights: [
+      "Campaigns is now a group with Workflows and Broadcasts as separate surfaces",
+      "WhatsApp, SMS and RCS supported; template variables fill from CSV columns of the same name",
+      "Sender identity derives from the template: WABA phone, DLT sender ID with PE, or RCS agent",
+      "Pause, resume and terminate a running broadcast from the Broadcasts table",
+      "Channel Analytics gains View by Broadcast with the same KPI cards, chart, funnel and logs as View by Template",
+    ],
+    linkTo: "/broadcasts",
+    linkLabel: "Open Broadcasts",
+  },
+
+  /* ---------------- 9 September 2026 ---------------- */
+  {
+    id: "freeform-workflows",
+    version: "v2",
+    date: "2026-09-09",
+    category: "Channels",
+    title: "WhatsApp Freeform Workflows",
+    summary:
+      "Build a reusable freeform conversation on its own canvas, then attach it to any campaign so a lead can be taken through a guided WhatsApp session.",
+    highlights: [
+      "New Freeform Workflows tab under Channels > WhatsApp, with a canvas builder carrying Text, Image, Video, Document and List nodes plus API Call and Conditional",
+      "Meta limits enforced as you build: up to 3 quick reply buttons or 1 CTA URL, 10 list rows, and per-field character caps",
+      "Attach a workflow to a campaign off a WhatsApp Template's Reply Received or button output, with variable mapping across the whole graph",
+      "Session closure timer runs on Total Session Time or User Inactivity Time up to 24 hours, with Success, Timeout and Failed outputs",
+      "A workflow locks once a campaign run uses it; Duplicate to edit clones it into a fresh draft",
+      "Campaign analytics reports In, Out and Drop-off per workflow, and Inbox conversations carry entry and exit trace pills",
+    ],
+    linkTo: "/channels/whatsapp",
+    linkLabel: "Open WhatsApp",
+  },
+  /* ---------------- 3 September 2026 ---------------- */
+  {
+    id: "api-docs",
+    version: "v2",
+    date: "2026-09-03",
+    category: "Developer",
+    title: "API Docs",
+    summary:
+      "Developer is now a top-level section with a full API reference: every endpoint, request shape, error code and rate limit in one place.",
+    highlights: [
+      "Get started pages cover Overview, Authentication, Rate limits, Idempotency, Response shape and Error codes",
+      "Endpoints grouped by Campaign Trigger, WhatsApp, SMS and RCS, so each channel has its own home",
+      "Every endpoint page carries a sample request, a success response, an error response and its own limits",
+      "New SMS template registry endpoint: register 1 to 500 DLT templates in one call, with per-row results",
+      "API Keys, Logs and Release Notes now sit alongside API Docs on the same surface",
+    ],
+    linkTo: "/developer",
+    linkLabel: "Open API Docs",
+  },
+
   /* ---------------- 25 August 2026 bundle ---------------- */
   {
     id: "rcs-channel",
