@@ -58,6 +58,10 @@ export type Endpoint = {
   bodyParams: Param[];
   requestExample: string;
   responseOkExample: string;
+  /** Rate limits prose (verbatim from prod). Rendered below the sample response. */
+  rateLimits?: string;
+  /** Notes prose (verbatim from prod). Rendered below Rate limits. */
+  notes?: string;
   /** When true, this endpoint is a stub — no verbatim prod screenshot to draw from. */
   stub?: boolean;
 };
@@ -183,7 +187,8 @@ const TRIGGER_CAMPAIGN_RESPONSE = `{
     "rejected": 1,
     "records": [
       { "index": 0, "status": "queued", "record_id": "run_abc123_01HZY..." },
-      { "index": 1, "status": "queued", "record_id": "run_abc123_01HZZ..." }
+      { "index": 1, "status": "queued", "record_id": "run_abc123_01HZZ..." },
+      { "index": 2, "status": "rejected", "code": "INVALID_PAYLOAD" }
     ]
   }
 }`;
@@ -203,6 +208,10 @@ export const ENDPOINTS: Endpoint[] = [
     bodyParams: TRIGGER_CAMPAIGN_BODY_PARAMS,
     requestExample: TRIGGER_CAMPAIGN_REQUEST,
     responseOkExample: TRIGGER_CAMPAIGN_RESPONSE,
+    rateLimits:
+      "Minimum 1 record per request; maximum 1,000. Request body maximum 4 MB. An empty array [] is HTTP 400 EMPTY_LIST. More than 1,000 is HTTP 413 records_over_limit. A body larger than 4 MB is HTTP 413 payload_over_limit.",
+    notes:
+      "An empty array [] is rejected with HTTP 400 EMPTY_LIST. A non-object array element is rejected as an INVALID_PAYLOAD row at its index while the rest of the batch still returns 202.",
   },
 
   /* --- Channel APIs: nav entries only. Prod screenshots do not show the

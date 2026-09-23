@@ -644,6 +644,20 @@ function EndpointView({ endpoint }: { endpoint: Endpoint }) {
           <CodeBlock language="json" code={endpoint.responseOkExample} />
         </>
       )}
+
+      {endpoint.rateLimits && (
+        <>
+          <H2>Rate limits</H2>
+          <P>{endpoint.rateLimits}</P>
+        </>
+      )}
+
+      {endpoint.notes && (
+        <>
+          <H2>Notes</H2>
+          <P>{endpoint.notes}</P>
+        </>
+      )}
     </div>
   );
 }
