@@ -1,7 +1,7 @@
 import { useState } from "react";
 import {
   Users, GitBranch, Split, Phone, MessageCircle,
-  MessageSquare, Clock, Megaphone, Plus, X, Webhook,
+  MessageSquare, Clock, Megaphone, Plus, X, Webhook, Headset, Wand2, Square,
   type LucideIcon,
 } from "lucide-react";
 import type { NodeKind } from "@/lib/campaign-types";
@@ -17,16 +17,33 @@ const ICONS: Partial<Record<NodeKind, LucideIcon>> = {
   voiceCall: Phone,
   whatsapp: MessageCircle,
   sms: MessageSquare,
+  agentSession: Headset,
+  aiTransform: Wand2,
   adsCampaign: Megaphone,
+  end: Square,
 };
+
+export type PaletteSection = { label: string; nodes: NodeKind[] };
 
 // Audience is omitted: every canvas already ships with exactly one (non-deletable)
 // Audience node as the single contact entry point, so it's never addable here.
-const SECTIONS: Array<{ label: string; nodes: NodeKind[] }> = [
+export const CAMPAIGN_SECTIONS: PaletteSection[] = [
   { label: "Data Nodes", nodes: ["apiToolCall"] },
   { label: "Logic Nodes", nodes: ["conditional", "abSplit", "delay"] },
   { label: "Action Nodes", nodes: ["voiceCall", "whatsapp", "sms"] },
   { label: "Ads Nodes", nodes: ["adsCampaign"] },
+];
+
+/**
+ * Inbound entry-point graphs route ONE arrival, so the outbound-only primitives
+ * are absent: there is no Audience to fan out over, hence no A/B split, and the
+ * channel is already fixed by the number the contact dialled or messaged.
+ */
+export const INBOUND_SECTIONS: PaletteSection[] = [
+  { label: "Data Nodes", nodes: ["apiToolCall"] },
+  { label: "AI Nodes", nodes: ["aiTransform"] },
+  { label: "Logic Nodes", nodes: ["conditional", "delay"] },
+  { label: "Routing", nodes: ["agentSession", "end"] },
 ];
 
 // Out of scope for v1: cannot be added to new campaigns (disabled in palette),
@@ -34,8 +51,8 @@ const SECTIONS: Array<{ label: string; nodes: NodeKind[] }> = [
 const DISABLED_KINDS = new Set<NodeKind>(["sms", "adsCampaign"]);
 
 export function NodePalette({
-  onAdd, disabled,
-}: { onAdd: (kind: NodeKind) => void; disabled?: boolean }) {
+  onAdd, disabled, sections = CAMPAIGN_SECTIONS,
+}: { onAdd: (kind: NodeKind) => void; disabled?: boolean; sections?: PaletteSection[] }) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -60,7 +77,7 @@ export function NodePalette({
             </button>
           </div>
           <div className="scrollbar-thin max-h-[420px] overflow-y-auto py-1">
-            {SECTIONS.map((s) => {
+            {sections.map((s) => {
               return (
                 <div key={s.label} className="px-1 py-1">
                   <p className="px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/80">{s.label}</p>

@@ -1,7 +1,7 @@
 import { Handle, Position, type NodeProps } from "reactflow";
 import {
   Play, Square, Users, GitBranch, Split,
-  Phone, MessageCircle, MessageSquare,
+  Phone, MessageCircle, MessageSquare, Inbox, Headset, Wand2,
   Clock, Megaphone, AlertCircle, CheckCircle2, Loader2, Sparkles, FlaskConical, Webhook,
   type LucideIcon,
 } from "lucide-react";
@@ -14,6 +14,7 @@ export type { WorkflowNodeData } from "@/lib/campaign-types";
 const ICONS: Record<NodeKind, LucideIcon> = {
   start: Play,
   end: Square,
+  inboundTrigger: Inbox,
   audience: Users,
   apiToolCall: Webhook,
   conditional: GitBranch,
@@ -22,6 +23,8 @@ const ICONS: Record<NodeKind, LucideIcon> = {
   voiceCall: Phone,
   whatsapp: MessageCircle,
   sms: MessageSquare,
+  agentSession: Headset,
+  aiTransform: Wand2,
   adsCampaign: Megaphone,
 };
 
@@ -43,6 +46,12 @@ export function WorkflowNode({ data, selected }: NodeProps<WorkflowNodeData>) {
   const success = data.runState === "success";
   const failed = data.runState === "failed";
   const isTerminal = data.kind === "start" || data.kind === "end";
+  // An inbound graph's ends. `inboundTrigger` is where every arrival begins, so
+  // nothing can precede it; `agentSession` is where routing stops, because a
+  // Session is a leaf — one agent, one stage, one transcript — and a second
+  // handoff on the same path would have nowhere to live.
+  const noTarget = data.kind === "inboundTrigger";
+  const noSource = data.kind === "agentSession";
   const outputs = data.outputs ?? [];
   const multiOut = outputs.length > 0;
   const abTest = data.abTest;
@@ -106,7 +115,9 @@ export function WorkflowNode({ data, selected }: NodeProps<WorkflowNodeData>) {
         </div>
       )}
 
-      <Handle type="target" position={Position.Left} className="!h-2 !w-2 !border-2 !border-background !bg-muted-foreground/50" />
+      {!noTarget && (
+        <Handle type="target" position={Position.Left} className="!h-2 !w-2 !border-2 !border-background !bg-muted-foreground/50" />
+      )}
 
       <div className="flex items-start gap-2.5 p-3">
         <div className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-lg", tone)}>
@@ -182,7 +193,7 @@ export function WorkflowNode({ data, selected }: NodeProps<WorkflowNodeData>) {
             </div>
           ))}
         </div>
-      ) : (
+      ) : noSource ? null : (
         <Handle type="source" position={Position.Right} className="!h-2 !w-2 !border-2 !border-background !bg-muted-foreground/50" />
       )}
     </div>

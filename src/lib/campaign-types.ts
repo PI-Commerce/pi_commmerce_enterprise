@@ -5,10 +5,18 @@
 
 export type NodeGroup = "system" | "data" | "logic" | "action" | "ai" | "ads";
 
+/**
+ * Every primitive either surface can place. Campaigns and inbound entry points
+ * share one union rather than two, so `ConditionalFields`, the node renderer and
+ * the variable plumbing work unchanged on both. Which kinds a given canvas
+ * *offers* is a palette concern — see `NodePalette`'s `sections` prop.
+ */
 export type NodeKind =
   // system
   | "start"
   | "end"
+  /** Inbound only: the arrival. Exactly one per entry-point graph, non-deletable. */
+  | "inboundTrigger"
   // data
   | "audience"
   | "apiToolCall"
@@ -20,6 +28,10 @@ export type NodeKind =
   | "voiceCall"
   | "whatsapp"
   | "sms"
+  /** Inbound only: hands the arrival to an agent. Terminal — see `inbound-graph.ts`. */
+  | "agentSession"
+  // ai
+  | "aiTransform"
   // ads
   | "adsCampaign";
 
@@ -145,6 +157,23 @@ export type PresetConfig = {
   apiTool?: string;
   /** Maps each non-constant tool input (`v` = input key) to an upstream variable (`def`). */
   apiInputMap?: PresetVarMap[];
+  // ---- Agent Session (inbound) ----
+  /**
+   * Id of the agent that handles the session. Distinct from {@link agent}, which
+   * holds a display name on campaign Voice nodes. Must be channel-compatible with
+   * the entry point (AC-E4) — the picker enforces it via `agentsForChannel`.
+   */
+  agentId?: string;
+  /**
+   * Channel of the entry point this node belongs to, stamped on at add time.
+   * The node carries the constraint it has to honour so the agent picker can gate
+   * itself without the config panel knowing which entry point it is editing.
+   */
+  channel?: "voice" | "whatsapp";
+  // ---- AI Transform ----
+  aiPrompt?: string;
+  /** Variables the model emits, exposed downstream as `<serial>.<name>`. */
+  aiOutputs?: PresetSchemaField[];
 };
 
 export type WorkflowNodeData = {
@@ -185,6 +214,7 @@ export type WorkflowNodeData = {
 export const NODE_GROUPS: Record<NodeKind, NodeGroup> = {
   start: "system",
   end: "system",
+  inboundTrigger: "system",
   audience: "data",
   apiToolCall: "data",
   conditional: "logic",
@@ -193,12 +223,15 @@ export const NODE_GROUPS: Record<NodeKind, NodeGroup> = {
   voiceCall: "action",
   whatsapp: "action",
   sms: "action",
+  agentSession: "action",
+  aiTransform: "ai",
   adsCampaign: "ads",
 };
 
 export const NODE_LABELS: Record<NodeKind, string> = {
   start: "Start",
   end: "End",
+  inboundTrigger: "Inbound Trigger",
   audience: "Audience",
   apiToolCall: "API Tool Call",
   conditional: "Conditional Branch",
@@ -207,6 +240,8 @@ export const NODE_LABELS: Record<NodeKind, string> = {
   voiceCall: "Voice Call",
   whatsapp: "WhatsApp",
   sms: "SMS",
+  agentSession: "Agent Session",
+  aiTransform: "AI Transform",
   adsCampaign: "Ads Campaign Setup",
 };
 
@@ -219,6 +254,7 @@ export const STATUS_TONE: Record<CampaignStatus, string> = {
 export const SERIAL_PREFIX: Record<NodeKind, string> = {
   start: "start",
   end: "end",
+  inboundTrigger: "trigger",
   audience: "audience",
   apiToolCall: "api",
   conditional: "cond",
@@ -227,6 +263,8 @@ export const SERIAL_PREFIX: Record<NodeKind, string> = {
   voiceCall: "voice",
   whatsapp: "whatsapp",
   sms: "sms",
+  agentSession: "agent",
+  aiTransform: "ai",
   adsCampaign: "ads",
 };
 

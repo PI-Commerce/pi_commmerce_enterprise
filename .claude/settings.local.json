@@ -20,7 +20,26 @@
       "Bash(echo \"NONE: $\\(command -v pdftotext || echo no-pdftotext\\)\")",
       "Bash(python3 -c ' *)",
       "Bash(grep -rnoE \"onDismiss[^;]{0,60}|onAutoClose[^;]{0,40}|closeButton[^;]{0,30}|deleteToast[^;]{0,40}\" node_modules/sonner/dist/index.mjs)",
-      "Bash(grep -nE \"</aside>|</div>\\\\s*$|^\\\\s*\\\\\\);\\\\s*$|^}\" src/components/workflow/ConfigPanel.tsx)"
+      "Bash(grep -nE \"</aside>|</div>\\\\s*$|^\\\\s*\\\\\\);\\\\s*$|^}\" src/components/workflow/ConfigPanel.tsx)",
+      "Bash(npm install:*)",
+      "Bash(source:*)",
+      "Bash(nvm ls:*)",
+      "mcp__6f616b42-0ed8-571e-823f-ee4aca6b7ce9__read_me",
+      "Bash(/Users/saurabhsingh/.nvm/versions/node/v22.23.1/bin/node:*)",
+      "Bash(wc:*)",
+      "Bash(grep:*)",
+      "Bash(./node_modules/.bin/tsc:*)",
+      "Bash(python3:*)",
+      "Bash(node -e:*)",
+      "Bash(tee:*)",
+      "Bash(cut:*)",
+      "Bash(pip3 install:*)",
+      "Bash(export PATH:*)",
+      "Bash(export PATH=\"$PATH:$HOME/.nvm/versions/node/v22.23.1/bin\")",
+      "Bash(for p in paytm PICOTP PIOFFR \"mirrored\" \"Get cURL\" \"sender_id\" \"recipients\" \"1107\")",
+      "Bash(do printf '%-14s ' \"$p\")",
+      "Bash(done)",
+      "Bash(/usr/bin/python3:*)"
     ]
   }
 }

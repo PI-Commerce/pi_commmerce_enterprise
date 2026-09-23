@@ -3,6 +3,8 @@ import { createFileRoute } from "@tanstack/react-router";
 import type { EChartsOption } from "echarts";
 import { AppShell, PageHeader } from "@/components/app/AppShell";
 import { PageTabs } from "@/components/app/Tabs";
+import { InboundAnalytics } from "@/components/analytics/InboundAnalytics";
+import { AgentAnalytics } from "@/components/analytics/AgentAnalytics";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -31,7 +33,6 @@ import {
   Download,
   Search,
   MessageCircle,
-  Phone,
   ExternalLink,
 } from "lucide-react";
 import { EChart } from "@/components/analytics/EChart";
@@ -43,7 +44,6 @@ import {
 } from "@/components/analytics/DateRangePicker";
 import type { DateRange } from "react-day-picker";
 import { CampaignFlowView } from "@/components/analytics/CampaignFlowView";
-import { VoiceChannelView } from "@/components/analytics/VoiceChannelView";
 import {
   CAMPAIGNS,
   NODE_METRICS,
@@ -73,11 +73,12 @@ export const Route = createFileRoute("/analytics")({
   head: () => ({ meta: [{ title: "Analytics · Pi Commerce Enterprise" }] }),
 });
 
-type Tab = "campaign" | "channel";
+type Tab = "campaign" | "inbound" | "agent" | "channel";
 
 const CHANNEL_CTA_LABEL: Record<ChannelKind, string> = {
   whatsapp: "View Detailed WhatsApp Analytics",
-  voice: "View Detailed Voice Analytics",
+  // Voice lands on the Agent tab, not Channel — hence the different noun.
+  voice: "View Agent Analytics",
   sms: "View Detailed SMS Analytics",
   ads: "View Detailed Ads Analytics",
 };
@@ -155,6 +156,11 @@ const STATUS_TONE: Record<string, string> = {
 
 // SMS and Ads channels are out of scope for v1 — only the live channels
 // (WhatsApp / Voice) are exposed in Channel analytics.
+/* Voice is deliberately absent. A "voice channel asset" was only ever an agent —
+ * `buildChannelAssets("voice")` keys it by `agent.id` — so this tab was showing
+ * agent behaviour under a transport label. That view now lives on the Agent tab,
+ * where it can sit next to the same agent's inbound half. Channel is transport
+ * health only: what was sent and whether it arrived. */
 const CHANNEL_TABS: {
   kind: ChannelKind;
   label: string;
@@ -167,7 +173,6 @@ const CHANNEL_TABS: {
     icon: MessageCircle,
     assetLabel: "Template",
   },
-  { kind: "voice", label: "Voice", icon: Phone, assetLabel: "Voice Agent" },
 ];
 
 /* ───────────── Channel selection state (lifted, supports deep-link) ─────────────
@@ -197,26 +202,11 @@ type ChannelSelection = {
   runId?: string;
 };
 
-/** Pre-select the "most recent" asset for asset-mode landing:
- *   • Voice  → the voice agent used by the latest run that contains a voice node.
- *   • WhatsApp → the template with the highest Sent (= node entered) volume in
- *                the latest run that contains a whatsapp node.
- *  Both resolve deterministically from the dev fixtures.
+/** Pre-select the "most recent" asset for asset-mode landing: the template with
+ *  the highest Sent (= node entered) volume in the latest run that contains a
+ *  whatsapp node. Resolves deterministically from the dev fixtures.
  */
 function pickDefaultAsset(kind: ChannelKind): string | undefined {
-  if (kind === "voice") {
-    for (const c of CAMPAIGNS) {
-      for (const r of c.runs) {
-        for (const n of r.sankey.nodes) {
-          if (n.kind === "voice") {
-            const a = resolveAgent(n.config?.agent);
-            if (a) return a.id;
-          }
-        }
-      }
-    }
-    return undefined;
-  }
   if (kind === "whatsapp") {
     for (const c of CAMPAIGNS) {
       for (const r of c.runs) {
@@ -278,6 +268,7 @@ function Analytics() {
   const [channelSel, setChannelSel] = useState<ChannelSelection>(() =>
     defaultChannelSelection("whatsapp"),
   );
+  const [agentId, setAgentId] = useState<string>();
   const [dateRange, setDateRange] = useState<DateRange | undefined>(() =>
     defaultDateRange(7),
   );
@@ -285,13 +276,25 @@ function Analytics() {
   /** Drawer CTA → Channel tab. Deep-links into Campaign-mode pinned to the same
    *  C/V/R the user just inspected, so the channel view aggregates ALL nodes of
    *  that kind inside that one run (the natural "what is the channel doing in
-   *  this run" question). */
+   *  this run" question).
+   *
+   *  A voice node is the exception: what it does is agent behaviour, not
+   *  transport, so it lands on the Agent tab scoped to the node's agent. That
+   *  drops the run pin — the Agent tab rolls up every node the agent touches —
+   *  which is the correct trade, since the question a voice node raises ("is
+   *  this agent any good?") is not answerable inside one run. */
   function goToChannel(opts: {
     kind: ChannelKind;
     campaignId: string;
     runId: string;
-    nodeId: string;
+    node: SankeyNode;
   }) {
+    if (opts.kind === "voice") {
+      const agent = resolveAgent(opts.node.config?.agent);
+      if (agent) setAgentId(agent.id);
+      setTab("agent");
+      return;
+    }
     const campaign = CAMPAIGNS.find((c) => c.id === opts.campaignId);
     const runIdx = campaign?.runs.findIndex((r) => r.id === opts.runId) ?? -1;
     setChannelSel({
@@ -309,23 +312,33 @@ function Analytics() {
     <AppShell>
       <PageHeader
         title="Analytics"
-        description="Campaign, and node-level performance across your workspace."
+        description="Outbound campaigns, inbound sessions, and node-level performance across your workspace."
       />
+      {/* Campaign and Inbound are the two directions of work. Agent cuts across
+          both by the thing doing the work. Channel is delivery health — the
+          transport, not the behaviour. */}
       <PageTabs<Tab>
         value={tab}
         onChange={setTab}
         tabs={[
           { id: "campaign", label: "Campaign" },
+          { id: "inbound", label: "Inbound" },
+          { id: "agent", label: "Agent" },
           { id: "channel", label: "Channel" },
         ]}
       />
-      {tab === "campaign" ? (
+      {tab === "campaign" && (
         <CampaignAnalytics
           goToChannel={goToChannel}
           dateRange={dateRange}
           onDateRangeChange={setDateRange}
         />
-      ) : (
+      )}
+      {tab === "inbound" && <InboundAnalytics />}
+      {tab === "agent" && (
+        <AgentAnalytics agentId={agentId} onAgentChange={setAgentId} />
+      )}
+      {tab === "channel" && (
         <ChannelAnalytics
           selection={channelSel}
           onSelectionChange={setChannelSel}
@@ -357,7 +370,7 @@ function CampaignAnalytics({
     kind: ChannelKind;
     campaignId: string;
     runId: string;
-    nodeId: string;
+    node: SankeyNode;
   }) => void;
   dateRange: DateRange | undefined;
   onDateRangeChange: (r: DateRange | undefined) => void;
@@ -522,7 +535,7 @@ function CampaignAnalytics({
             kind: n.kind as ChannelKind,
             campaignId,
             runId: run.id,
-            nodeId: n.id,
+            node: n,
           });
           setOpenNode(null);
         }}
@@ -1331,7 +1344,8 @@ type Ref = { campaignId: string; runId: string; nodeId: string };
 
 const CHANNEL_KPI_LABELS: Record<ChannelKind, string[]> = {
   whatsapp: ["Sent", "Delivered", "Read", "Clicked", "Replied"],
-  // Voice renders via VoiceChannelView, not ChannelDetail; kept only for completeness.
+  // voice/sms/ads are not selectable channel tabs; the keys exist because
+  // ChannelKind demands them.
   voice: ["Total Base", "Running", "Completed", "Failed"],
   sms: ["Sent", "Delivered", "Failed"],
   ads: ["Impressions", "Clicks", "Total Leads"],
@@ -1440,51 +1454,20 @@ function ChannelAnalytics({
     return map;
   }, [kind]);
 
-  // refKey → the resolved Voice Agent on the node.
-  const agentByRefKey = useMemo(() => {
-    const map = new Map<string, ReturnType<typeof resolveAgent>>();
-    if (kind !== "voice") return map;
-    for (const c of CAMPAIGNS) {
-      for (const r of c.runs) {
-        for (const n of r.sankey.nodes) {
-          if (n.kind !== "voice") continue;
-          const a = resolveAgent(n.config?.agent);
-          if (a) map.set(`${c.id}|${r.id}|${n.id}`, a);
-        }
-      }
-    }
-    return map;
-  }, [kind]);
-
-  // Asset picker options (Asset-mode): voice = unique resolved agents touching
-  // any ref; whatsapp = unique templates touching any ref. Sorted by latest-use.
+  // Asset picker options (Asset-mode): unique templates touching any ref.
   const assetOptions = useMemo(() => {
-    if (kind === "voice") {
-      const m = new Map<string, { id: string; label: string }>();
-      for (const r of allRefs) {
-        const a = agentByRefKey.get(`${r.campaignId}|${r.runId}|${r.nodeId}`);
-        if (a) m.set(a.id, { id: a.id, label: a.name });
-      }
-      return [...m.values()];
+    if (kind !== "whatsapp") return [] as { id: string; label: string }[];
+    const m = new Map<string, { id: string; label: string }>();
+    for (const r of allRefs) {
+      const t = templateByRefKey.get(`${r.campaignId}|${r.runId}|${r.nodeId}`);
+      if (t) m.set(t.id, { id: t.id, label: t.name });
     }
-    if (kind === "whatsapp") {
-      const m = new Map<string, { id: string; label: string }>();
-      for (const r of allRefs) {
-        const t = templateByRefKey.get(`${r.campaignId}|${r.runId}|${r.nodeId}`);
-        if (t) m.set(t.id, { id: t.id, label: t.name });
-      }
-      return [...m.values()];
-    }
-    return [] as { id: string; label: string }[];
-  }, [kind, allRefs, agentByRefKey, templateByRefKey]);
+    return [...m.values()];
+  }, [kind, allRefs, templateByRefKey]);
 
-  // refKey → asset id (voice agent id OR template id) — for Asset-mode scope.
-  const refAssetId = (r: Ref): string | undefined => {
-    const k = `${r.campaignId}|${r.runId}|${r.nodeId}`;
-    if (kind === "voice") return agentByRefKey.get(k)?.id;
-    if (kind === "whatsapp") return templateByRefKey.get(k)?.id;
-    return undefined;
-  };
+  // refKey → asset id (template id) — for Asset-mode scope.
+  const refAssetId = (r: Ref): string | undefined =>
+    templateByRefKey.get(`${r.campaignId}|${r.runId}|${r.nodeId}`)?.id;
 
   // ── Mode-driven resolved refs ──────────────────────────────────────────────
   const selectedRefs = useMemo(() => {
@@ -1590,31 +1573,36 @@ function ChannelAnalytics({
 
   return (
     <>
-      {/* Channel sub-tabs */}
-      <div className="mb-4 flex items-center gap-1 rounded-lg border border-border bg-card p-1">
-        {CHANNEL_TABS.map((c) => {
-          const Icon = c.icon;
-          const active = c.kind === kind;
-          return (
-            <button
-              key={c.kind}
-              onClick={() => onSelectionChange(defaultChannelSelection(c.kind))}
-              className={cn(
-                "flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
-                active
-                  ? "bg-secondary text-foreground"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              <Icon
-                className="h-3.5 w-3.5"
-                style={{ color: active ? CHANNEL_COLORS[c.kind] : undefined }}
-              />
-              {c.label}
-            </button>
-          );
-        })}
-      </div>
+      {/* Channel sub-tabs. A one-item picker is just a label, so it only renders
+          once there is a second channel to switch to. */}
+      {CHANNEL_TABS.length > 1 && (
+        <div className="mb-4 flex items-center gap-1 rounded-lg border border-border bg-card p-1">
+          {CHANNEL_TABS.map((c) => {
+            const Icon = c.icon;
+            const active = c.kind === kind;
+            return (
+              <button
+                key={c.kind}
+                onClick={() =>
+                  onSelectionChange(defaultChannelSelection(c.kind))
+                }
+                className={cn(
+                  "flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
+                  active
+                    ? "bg-secondary text-foreground"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <Icon
+                  className="h-3.5 w-3.5"
+                  style={{ color: active ? CHANNEL_COLORS[c.kind] : undefined }}
+                />
+                {c.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Mode dropdown sits inline left of the filters — reading flows
           left-to-right: pick mode → narrow within mode. Dropdown (not pill)
@@ -1798,22 +1786,6 @@ function ChannelAnalytics({
         <div className="rounded-xl border border-border bg-card px-6 py-12 text-center text-sm text-muted-foreground">
           No {tabMeta.label} nodes found in scope.
         </div>
-      ) : kind === "voice" ? (
-        (() => {
-          const vrefs = selectedRefs.map((ref) => {
-            const run = CAMPAIGNS.find(
-              (c) => c.id === ref.campaignId,
-            )!.runs.find((r) => r.id === ref.runId)!;
-            const node = run.sankey.nodes.find((n) => n.id === ref.nodeId)!;
-            return { run, node };
-          });
-          return (
-            <VoiceChannelView
-              refs={vrefs}
-              agentExplicitlyOne={mode === "asset" && !!selection.assetId}
-            />
-          );
-        })()
       ) : (
         <ChannelDetail kind={kind} refs={selectedRefs} dateRange={dateRange} />
       )}

@@ -4,7 +4,9 @@ import {
   Smile, X, Trash2, Pencil, UploadCloud, Phone, Reply, Workflow, ExternalLink, Check,
   Signal, Wifi, BatteryFull, ChevronLeft, ChevronRight, AlertCircle,
   Bold, Italic, Strikethrough, Code, Info, List, ArrowUp, ArrowDown, ChevronDown, Copy,
+  ClipboardList,
 } from "lucide-react";
+import { CtTemplateSetupDialog } from "@/components/clevertap/CtTemplateSetupDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -22,8 +24,9 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import type { ConnectedWaba } from "@/lib/waba-onboarding";
 import { useRegion } from "@/lib/region";
+import { useTemplates, saveTemplate, removeTemplate } from "@/lib/template-store";
 import {
-  SEED_TEMPLATES, TEMPLATE_CATEGORIES, TEMPLATE_BUTTON_TYPES, BUTTON_TYPE_LABELS,
+  TEMPLATE_CATEGORIES, TEMPLATE_BUTTON_TYPES, BUTTON_TYPE_LABELS,
   MEDIA_HINTS, languageLabel, fillVariables, variableCount,
   MAX_TEMPLATE_BUTTONS, cappedButtonTypes, buttonRuleErrors, buttonFieldErrors, duplicateButtonIndexes,
   bodyEdgeVariable, bodyTooManyVariables,
@@ -75,7 +78,9 @@ const EMOJIS = [
  * primitives) rather than Paytm's blue UI. Mock only — nothing is sent to Meta.
  */
 export function WhatsAppTemplates({ waba }: { waba: ConnectedWaba }) {
-  const [templates, setTemplates] = useState<WaTemplate[]>(SEED_TEMPLATES);
+  // Templates live in a shared store, not here: the campaign builder picks from the
+  // same list and can author into it. See `@/lib/template-store`.
+  const templates = useTemplates();
   const [editing, setEditing] = useState<WaTemplate | null>(null);
   const [creating, setCreating] = useState(false);
 
@@ -83,24 +88,22 @@ export function WhatsAppTemplates({ waba }: { waba: ConnectedWaba }) {
   const openEdit = (t: WaTemplate) => { setEditing(t); setCreating(true); };
   const close = () => { setCreating(false); setEditing(null); };
 
-  const save = (t: WaTemplate) => {
-    setTemplates((prev) => {
-      const i = prev.findIndex((x) => x.id === t.id);
-      if (i === -1) return [t, ...prev];
-      const next = [...prev]; next[i] = t; return next;
-    });
-    close();
-  };
-
   if (creating) {
-    return <TemplateForm waba={waba} initial={editing} onCancel={close} onSave={save} />;
+    return (
+      <TemplateForm
+        waba={waba}
+        initial={editing}
+        onCancel={close}
+        onSave={(t) => { saveTemplate(t); close(); }}
+      />
+    );
   }
   return (
     <TemplateList
       templates={templates}
       onCreate={openCreate}
       onEdit={openEdit}
-      onDelete={(id) => setTemplates((prev) => prev.filter((t) => t.id !== id))}
+      onDelete={removeTemplate}
     />
   );
 }
@@ -125,6 +128,9 @@ function TemplateList({ templates, onCreate, onEdit, onDelete }: {
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
   const [page, setPage] = useState(1);
+  // FR-5. Offered per row rather than as a page-level action because the values a
+  // client has to retype into CleverTap are all specific to one template.
+  const [ctSetup, setCtSetup] = useState<WaTemplate | null>(null);
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -180,7 +186,7 @@ function TemplateList({ templates, onCreate, onEdit, onDelete }: {
       <div className="mt-4 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border">
         <div className="grid shrink-0 grid-cols-[1.4fr_1.6fr_1fr_1fr_0.9fr_auto] items-center gap-3 border-b border-border bg-secondary/40 px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
           <span>ID</span><span>Name</span><span>Create date</span><span>Category</span><span>Status</span>
-          <span className="w-16 text-right">Action</span>
+          <span className="w-24 text-right">Action</span>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto">
         {filtered.length === 0 ? (
@@ -205,7 +211,22 @@ function TemplateList({ templates, onCreate, onEdit, onDelete }: {
               <span className="text-muted-foreground">{t.createdAt}</span>
               <span><CategoryTag category={t.category} /></span>
               <span><StatusTag status={t.status} /></span>
-              <span className="flex w-16 items-center justify-end gap-1">
+              <span className="flex w-24 items-center justify-end gap-1">
+                {/* Only approved templates can be resolved by CleverTap, so offering
+                    setup instructions for a pending one would document a send that
+                    is guaranteed to fail. */}
+                {t.status === "Approved" && (
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    onClick={(e) => { e.stopPropagation(); setCtSetup(t); }}
+                    className="grid h-7 w-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                    aria-label="CleverTap setup"
+                    title="CleverTap setup"
+                  >
+                    <ClipboardList className="h-3.5 w-3.5" />
+                  </span>
+                )}
                 <span
                   role="button"
                   tabIndex={0}
@@ -260,6 +281,11 @@ function TemplateList({ templates, onCreate, onEdit, onDelete }: {
         )}
       </div>
       </div>
+
+      <CtTemplateSetupDialog
+        template={ctSetup}
+        onOpenChange={(v) => { if (!v) setCtSetup(null); }}
+      />
     </div>
   );
 }
@@ -319,7 +345,13 @@ function todayLabel(): string {
   return `${String(d.getDate()).padStart(2, "0")} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
 }
 
-function TemplateForm({ waba, initial, onCancel, onSave }: {
+/**
+ * The full-page create/edit surface. Exported because the campaign builder opens the
+ * very same form over the canvas — a template authored mid-flow should be authored
+ * against the same rules and the same preview as one authored from the manager, not
+ * a reduced copy that quietly permits something Meta will reject.
+ */
+export function TemplateForm({ waba, initial, onCancel, onSave }: {
   waba: ConnectedWaba;
   initial: WaTemplate | null;
   onCancel: () => void;

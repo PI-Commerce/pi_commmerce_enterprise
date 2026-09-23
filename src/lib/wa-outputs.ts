@@ -8,7 +8,8 @@
  * a single `completed` output. Downstream branching is done with a Conditional node.
  */
 import type { NodeKind, NodeOutput, WorkflowNodeData } from "./campaign-types";
-import { SEED_TEMPLATES, type TemplateButton, type WaTemplate } from "./waba-templates";
+import type { TemplateButton, WaTemplate } from "./waba-templates";
+import { getTemplates } from "./template-store";
 import { resolveAgent } from "./agent-data";
 import { getTool } from "./tool-registry";
 
@@ -27,11 +28,12 @@ export function isBranchableButton(b: TemplateButton): boolean {
 }
 
 /** Resolve by template id (showcase campaigns store ids) or by name (the journey
- *  library stores readable names like "renewal_link_v1"). */
+ *  library stores readable names like "renewal_link_v1"). Reads the live store, so
+ *  a template authored from inside a flow resolves the same as a seeded one. */
 export function resolveWaTemplate(idOrName?: string): WaTemplate | undefined {
   if (!idOrName) return undefined;
-  return SEED_TEMPLATES.find((t) => t.id === idOrName)
-    ?? SEED_TEMPLATES.find((t) => t.name === idOrName);
+  const all = getTemplates();
+  return all.find((t) => t.id === idOrName) ?? all.find((t) => t.name === idOrName);
 }
 
 /** Trackable freeform reply — the lead replied without tapping a button. */
@@ -139,6 +141,10 @@ export function deriveNodeOutcomeVariables(
       // downstream, namespaced by the node serial (e.g. `api_1.college_name`).
       const tool = config?.apiTool ? getTool(config.apiTool) : undefined;
       if (tool) for (const o of tool.outputs) vars.push({ key: `${ns}.${o.varName}`, source });
+    } else if (kind === "aiTransform") {
+      // The model's declared outputs, namespaced the same way — so two transforms
+      // can both emit `intent` without colliding.
+      for (const o of config?.aiOutputs ?? []) if (o.name?.trim()) vars.push({ key: `${ns}.${o.name.trim()}`, source });
     }
   }
   // Dedupe by key (defensive — duplicates only if two nodes share a serial).

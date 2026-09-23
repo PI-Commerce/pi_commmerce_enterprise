@@ -12,6 +12,7 @@ import type { WorkflowNodeData, NodeKind, CampaignStatus } from "@/lib/campaign-
 import { NODE_LABELS, SERIAL_PREFIX } from "@/lib/campaign-types";
 import { whatsappOutputs, completedOutput, apiOutcomeOutputs, deriveNodeOutcomeVariables } from "@/lib/wa-outputs";
 import { EXAMPLE_CAMPAIGNS } from "@/lib/campaign-examples";
+import { getCampaignCopy } from "@/lib/campaign-templates";
 import { elkLayout, type Point } from "@/lib/flow-layout";
 import { useRegion, localizeTzAbbrev, localizeCurrency } from "@/lib/region";
 import { ConfigPanel } from "./ConfigPanel";
@@ -60,8 +61,12 @@ const DEFAULT_NODE_DATA: Record<NodeKind, Partial<WorkflowNodeData>> = {
   voiceCall: { subtitle: "AI voice outreach", valid: false, error: "Select agent", outputs: completedOutput() },
   whatsapp: { subtitle: "Send WhatsApp message", valid: false, error: "Pick template", outputs: whatsappOutputs(undefined) },
   sms: { subtitle: "Send SMS", valid: false, error: "Add message body", outputs: completedOutput() },
-  
   adsCampaign: { subtitle: "WhatsApp CTWA ad", valid: false, error: "Complete setup" },
+  // Inbound-only kinds. Present because campaigns and entry points share one
+  // `NodeKind` union; the campaign palette never offers them (see NodePalette).
+  inboundTrigger: { valid: true, locked: true },
+  agentSession: { subtitle: "Hand to an agent", valid: false, error: "Select agent" },
+  aiTransform: { subtitle: "Extract with a model", valid: false, error: "Add a prompt" },
 };
 
 let nodeCounter = 100;
@@ -102,15 +107,21 @@ export function WorkflowCanvas({
    *  pulse — but nodes are still clickable and show their config read-only. */
   previewOnly?: boolean;
 }) {
-  // Pre-built example campaigns ship their own authored graph; everything else
-  // (the existing demo campaigns) falls back to the shared seed graph.
+  // Graph resolution, in priority order:
+  //   1. A tenant copy forked from a template — its scrubbed graph (unbound nodes
+  //      already marked invalid so the builder opens in an Incomplete state).
+  //   2. A pre-built example campaign's authored graph.
+  //   3. The shared seed graph (existing demo campaigns).
+  // Read once at mount — a copy's live edits then live in ReactFlow state.
+  const copy = campaignId ? getCampaignCopy(campaignId) : undefined;
   const example = campaignId ? EXAMPLE_CAMPAIGNS[campaignId] : undefined;
+  const source = copy ?? example;
   const { tzAbbrev, symbol } = useRegion();
   const [nodes, setNodes, onNodesChange] = useNodesState(
-    isNew ? BLANK_NODES : example?.nodes ?? SEED_NODES,
+    isNew ? BLANK_NODES : source?.nodes ?? SEED_NODES,
   );
   const [edges, setEdges, onEdgesChange] = useEdgesState(
-    isNew ? BLANK_EDGES : example?.edges ?? SEED_EDGES,
+    isNew ? BLANK_EDGES : source?.edges ?? SEED_EDGES,
   );
   const [selected, setSelected] = useState<{ id: string; data: WorkflowNodeData } | null>(null);
   // ELK runs async at render-time for example/seed graphs; hide the graph until the
@@ -122,7 +133,6 @@ export function WorkflowCanvas({
   // state without re-triggering on every change.
   const nodesRef = useRef(nodes); nodesRef.current = nodes;
   const edgesRef = useRef(edges); edgesRef.current = edges;
-  const didLayoutRef = useRef(false);
 
   // Localize region-sensitive node text — timezone abbreviations (e.g. the Voice
   // "Call window … IST" subtitle) and currency symbols in conditional labels
@@ -143,11 +153,16 @@ export function WorkflowCanvas({
     );
   }, [tzAbbrev, symbol, setNodes]);
 
-  // Initial ELK layout for the example/seed graph (runs once on mount). Blank new
-  // campaigns ship pre-laid-out (see BLANK_NODES) so skip them here.
+  // Initial ELK layout for the example/seed graph. Blank new campaigns ship
+  // pre-laid-out (see BLANK_NODES) so skip them here. The effect's deps are
+  // stable, so this runs once per mount — but we deliberately DON'T guard it
+  // with a persistent ref: under a mount→unmount→remount (StrictMode in dev, or
+  // a router transition on SPA navigation) the first run is cancelled by its
+  // cleanup, and a ref guard would make the re-run early-return, leaving
+  // `layingOut` stuck true → a blank canvas. Letting each mount re-run the
+  // (idempotent) layout guarantees the surviving invocation reveals ReactFlow.
   useEffect(() => {
-    if (didLayoutRef.current || isNew) return;
-    didLayoutRef.current = true;
+    if (isNew) return;
     let cancelled = false;
     (async () => {
       const laid = await elkLayout(nodesRef.current, edgesRef.current);

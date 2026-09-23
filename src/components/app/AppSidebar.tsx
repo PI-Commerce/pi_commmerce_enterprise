@@ -3,6 +3,7 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import {
   LayoutDashboard, Megaphone, Bot, BarChart3, Plug, Settings, Command,
   PanelLeftClose, PanelLeftOpen, Radio, ChevronRight, MessageCircle, MessageSquare, MessageSquareText,
+  LayoutTemplate, Store, Inbox,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useRegion } from "@/lib/region";
@@ -10,6 +11,13 @@ import { useRegion } from "@/lib/region";
 const primary = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, exact: true },
   { to: "/campaigns", label: "Campaigns", icon: Megaphone },
+  // Templates is a subpath of /campaigns; the exclusive isActive below keeps
+  // Campaigns from also lighting up when a template route is open.
+  { to: "/campaigns/templates", label: "Templates", icon: LayoutTemplate },
+  // Inbound sits beside Campaigns, not inside it. A campaign is a project you
+  // launch over a known audience; an entry point is always-on infrastructure
+  // whose unit of work is one person's session. Different lifecycle, different object.
+  { to: "/inbound", label: "Inbound", icon: Inbox },
   { to: "/agents", label: "Agents", icon: Bot },
   { to: "/analytics", label: "Analytics", icon: BarChart3 },
 ] as const;
@@ -22,8 +30,13 @@ const channelChildren: ChannelChild[] = [
   { label: "RCS", icon: MessageSquareText },
 ];
 
+// "Connections", not "Integrations". The route now holds the systems a client's
+// audience arrives from — a thing they set up and check on. API keys and webhooks
+// were the other half of the old Integrations page and remain out of the first cut.
 const secondary = [
-  { to: "/integrations", label: "Integrations", icon: Plug, disabled: true },
+  { to: "/integrations", label: "Connections", icon: Plug },
+  // Admin panel — client (merchant) caps, enforcement, and campaign stop/resume.
+  { to: "/merchants", label: "Merchants", icon: Store },
   { to: "/settings", label: "Settings", icon: Settings, disabled: true },
 ] as const;
 
@@ -41,8 +54,16 @@ export function AppSidebar() {
     window.localStorage.setItem(STORAGE_KEY, collapsed ? "1" : "0");
   }, [collapsed]);
 
-  const isActive = (to: string, exact?: boolean) =>
-    exact ? path === to : path === to || path.startsWith(to + "/") || path === to;
+  // Exclusive prefix match: an item is active when its `to` is the *longest* nav
+  // path that prefixes the current path. This lets Templates (/campaigns/templates)
+  // and Campaigns (/campaigns) coexist without both lighting up on a template route.
+  const navTos = [...primary, ...secondary].map((i) => i.to);
+  const isActive = (to: string, exact?: boolean) => {
+    if (exact) return path === to;
+    const matches = path === to || path.startsWith(to + "/");
+    if (!matches) return false;
+    return !navTos.some((o) => o.length > to.length && (path === o || path.startsWith(o + "/")));
+  };
 
   return (
     <aside

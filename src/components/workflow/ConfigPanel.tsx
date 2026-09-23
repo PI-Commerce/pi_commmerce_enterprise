@@ -23,22 +23,30 @@ import {
 import { toast } from "sonner";
 import type { WorkflowNodeData, NodeKind, PresetConfig, PresetBranch, PresetCondition, PresetVarMap, PresetValueRemap, NodeOutput } from "@/lib/campaign-types";
 import { NODE_LABELS, SAMPLE_WORKFLOW_VARIABLES, branchConditions } from "@/lib/campaign-types";
-import { SEED_TEMPLATES } from "@/lib/waba-templates";
+import { useTemplates, saveTemplate } from "@/lib/template-store";
+import { TemplateForm } from "@/components/integrations/WhatsAppTemplates";
+import { useWabaConnection } from "@/lib/waba-store";
+import { DEMO_RESULT } from "@/lib/waba-onboarding";
 import { whatsappOutputs, resolveWaTemplate, completedOutput, isBranchableButton } from "@/lib/wa-outputs";
 import { getTool, TOOLS } from "@/lib/tool-registry";
-import { resolveAgent, voiceAgents } from "@/lib/agent-data";
-
-const VOICE_AGENTS = voiceAgents();
+import { resolveAgent, useAgents } from "@/lib/agent-data";
+import { Section, Field, SelectLike } from "./config-primitives";
 
 /** Per-node outcome variables (e.g. `whatsapp_1.session_expired`) contributed by the
  *  action nodes present in the flow — merged into the Conditional variable picker. */
 const ExtraVariablesContext = createContext<{ key: string; source: string }[]>([]);
 
+/** When true, `extraVariables` is the entire variable universe. Inbound entry-point
+ *  graphs have no Audience, so the `contact.*` samples could never resolve there and
+ *  offering them would let an author write a branch that can never be taken. */
+const OnlyExtraVariablesContext = createContext(false);
+
 /** Merge flow-derived variables (from the live nodes) with the static sample set.
  *  Dedupes by key (derived wins). When the Audience node has contributed real
  *  `contact.*` fields from its edited schema, the static `contact.*` samples are
  *  dropped so the picker reflects the actual schema, not the demo defaults. */
-function mergeVariables(extra: { key: string; source: string }[]) {
+function mergeVariables(extra: { key: string; source: string }[], onlyExtra = false) {
+  if (onlyExtra) return extra;
   const hasDerivedContact = extra.some((v) => v.key.startsWith("contact."));
   const sample = hasDerivedContact
     ? SAMPLE_WORKFLOW_VARIABLES.filter((v) => !v.key.startsWith("contact."))
@@ -105,6 +113,8 @@ type Props = {
   onDuplicate: () => void;
   /** Outcome variables exposed by other action nodes in the flow (for the Conditional picker). */
   extraVariables?: { key: string; source: string }[];
+  /** Treat {@link extraVariables} as the complete universe — see {@link OnlyExtraVariablesContext}. */
+  onlyExtraVariables?: boolean;
 };
 
 const MIN_PANEL_W = 360;
@@ -173,11 +183,14 @@ function ResizablePanel({ children }: { children: React.ReactNode }) {
 // silently disconnect the example graph's edges mid-demo).
 const NOOP_CHANGE = (_patch: Partial<WorkflowNodeData>) => undefined;
 
-export function ConfigPanel({ node, readOnly, onClose, onChange, onDelete, onDuplicate, extraVariables }: Props) {
+export function ConfigPanel({ node, readOnly, onClose, onChange, onDelete, onDuplicate, extraVariables, onlyExtraVariables }: Props) {
   if (!node) return null;
   const { data } = node;
   const valid = data.valid !== false;
-  const isSystem = data.kind === "start" || data.kind === "end";
+  // Structural nodes: no description, no delete/duplicate footer — just a blurb
+  // explaining the role they play. `inboundTrigger` joins Start/End because every
+  // arrival begins there; there is exactly one and it cannot be removed.
+  const isSystem = data.kind === "start" || data.kind === "end" || data.kind === "inboundTrigger";
   // Preset/example nodes render the *real* editor for this kind, hydrated from
   // data.config — so it looks fully configured AND its dropdowns/inputs are live
   // (the user can open and explore them). We only neuter onChange so the stateful
@@ -190,6 +203,7 @@ export function ConfigPanel({ node, readOnly, onClose, onChange, onDelete, onDup
 
   return (
     <ExtraVariablesContext.Provider value={extraVariables ?? []}>
+    <OnlyExtraVariablesContext.Provider value={!!onlyExtraVariables}>
     <ResizablePanel>
         <div className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
           <div className="min-w-0">
@@ -218,7 +232,9 @@ export function ConfigPanel({ node, readOnly, onClose, onChange, onDelete, onDup
         <div className="scrollbar-thin flex-1 overflow-y-auto px-5 py-5 space-y-5">
           <NameField data={data} readOnly={ro} onChange={safeChange} />
           {!isSystem && <DescriptionField data={data} readOnly={ro} onChange={safeChange} />}
-          {isSystem ? (
+          {data.kind === "inboundTrigger" ? (
+            <InboundTriggerFields />
+          ) : isSystem ? (
             <div className="flex items-start gap-2.5 rounded-lg bg-muted px-3.5 py-3 text-[13px] text-muted-foreground">
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
               <p>
@@ -271,6 +287,7 @@ export function ConfigPanel({ node, readOnly, onClose, onChange, onDelete, onDup
           </div>
         )}
     </ResizablePanel>
+    </OnlyExtraVariablesContext.Provider>
     </ExtraVariablesContext.Provider>
   );
 }
@@ -351,7 +368,16 @@ function KindFields({
   switch (kind) {
     case "start":
     case "end":
+    // Rendered by the panel shell itself — it has no per-kind config, only a
+    // read-only list of the variables it publishes.
+    case "inboundTrigger":
       return null;
+
+    case "agentSession":
+      return <AgentSessionFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
+
+    case "aiTransform":
+      return <AiTransformFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
 
     case "audience":
       return <AudienceFields config={config} readOnly={readOnly} mark={mark} />;
@@ -549,6 +575,128 @@ function SchemaFieldsEditor({
         <Plus className="mr-1 h-3 w-3" /> Add field
       </Button>
     </div>
+  );
+}
+
+/* --------------------------- Inbound: Trigger / Agent Session / AI Transform --------------------------- */
+
+/** The arrival. It has nothing to configure — its only job is to publish what the
+ *  channel actually carries, so the branches downstream can predicate on it. The
+ *  list is channel-scoped by the canvas (a phone call has no ad referral or message
+ *  text), which is what stops an author writing a branch that can never be taken. */
+function InboundTriggerFields() {
+  const vars = useContext(ExtraVariablesContext).filter((v) => v.source === "Inbound Trigger");
+  return (
+    <Section title="Published variables">
+      <div className="space-y-1.5">
+        {vars.map((v) => (
+          <div key={v.key} className="flex items-center gap-2 rounded-md border border-border bg-card px-2.5 py-1.5">
+            <Variable className="h-3 w-3 shrink-0 text-muted-foreground" />
+            <span className="font-mono text-[11.5px]">{v.key}</span>
+          </div>
+        ))}
+        <p className="pt-1 text-[11px] leading-snug text-muted-foreground">
+          Every arrival starts here. These are the only signals this channel carries —
+          conditionals downstream can branch on them.
+        </p>
+      </div>
+    </Section>
+  );
+}
+
+/**
+ * Hands the arrival to an agent, ending routing. The picker is gated to agents of
+ * the entry point's channel (AC-E4) — a voice DID cannot be answered by a chat
+ * agent. Non-live agents are listed but flagged rather than hidden, so a broken
+ * assignment is diagnosable instead of just missing.
+ */
+function AgentSessionFields({ config, readOnly, mark, onChange }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
+  const agents = useAgents();
+  const channel = config?.channel ?? "whatsapp";
+  const eligible = agents.filter((a) => a.type === (channel === "voice" ? "voice" : "chat"));
+  const [agentId, setAgentId] = useState(config?.agentId ?? "");
+  const picked = eligible.find((a) => a.id === agentId);
+
+  useEffect(() => {
+    mark(!!picked, picked ? undefined : "Select agent");
+    onChange({ config: { ...config, agentId: agentId || undefined }, subtitle: picked?.name ?? "Select an agent" });
+  }, [agentId, picked?.name]);
+
+  return (
+    <Section title="Handled by">
+      <Field label={`${channel === "voice" ? "Voice" : "Chat"} agent`} required>
+        <Select value={agentId} disabled={readOnly} onValueChange={setAgentId}>
+          <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select an agent" /></SelectTrigger>
+          <SelectContent>
+            {eligible.map((a) => (
+              <SelectItem key={a.id} value={a.id}>
+                <span className="flex items-center gap-2">
+                  <span>{a.name}</span>
+                  <span className="text-[10.5px] text-muted-foreground">{a.status}</span>
+                </span>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </Field>
+      {picked && picked.status !== "live" && (
+        <StatusBanner
+          ok={false}
+          title={`${picked.name} is ${picked.status}`}
+          detail="A live entry point needs a live agent, or these arrivals go unanswered."
+        />
+      )}
+      <div className="flex items-start gap-2 rounded-md border border-dashed border-border bg-muted/30 px-2.5 py-2 text-[11px] text-muted-foreground">
+        <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        <span>
+          Routing ends here — the agent owns the conversation from this point, so this
+          node has no output. Only agents of this entry point&rsquo;s channel are offered.
+        </span>
+      </div>
+    </Section>
+  );
+}
+
+/** Prompt in, named variables out. The outputs are namespaced by the node's serial
+ *  (e.g. `ai_1.intent`) so two transforms can emit the same field name. */
+function AiTransformFields({ config, readOnly, mark, onChange }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
+  const [prompt, setPrompt] = useState(config?.aiPrompt ?? "");
+  const [fields, setFields] = useState<SchemaField[]>(
+    config?.aiOutputs?.length ? config.aiOutputs : [{ id: "o1", name: "intent", type: "String" }],
+  );
+  const named = fields.filter((f) => f.name.trim());
+  const ok = !!prompt.trim() && named.length > 0;
+
+  useEffect(() => {
+    mark(ok, !prompt.trim() ? "Add a prompt" : "Name at least one output");
+    onChange({
+      config: { ...config, aiPrompt: prompt, aiOutputs: named },
+      subtitle: named.length ? named.map((f) => f.name).join(", ") : "Extract with a model",
+    });
+  }, [prompt, JSON.stringify(named)]);
+
+  return (
+    <>
+      <Section title="Prompt">
+        <Textarea
+          value={prompt}
+          disabled={readOnly}
+          rows={5}
+          placeholder="Classify the customer's opening message into one of: order_status, refund, other."
+          onChange={(e) => setPrompt(e.target.value)}
+          className="text-[13px]"
+        />
+        <p className="text-[11px] text-muted-foreground">
+          Runs on the arrival before routing continues. Reference published variables inline as <span className="font-mono">{"{{trigger.message_text}}"}</span>.
+        </p>
+      </Section>
+      <Section title="Outputs">
+        <SchemaFieldsEditor fields={fields} setFields={setFields} readOnly={readOnly} />
+        <p className="text-[11px] text-muted-foreground">
+          Available downstream as <span className="font-mono">serial.field_name</span>.
+        </p>
+      </Section>
+    </>
   );
 }
 
@@ -964,6 +1112,7 @@ function VoiceCallFields({ config, readOnly, mark, onChange }: { config?: Preset
 
 function VoiceCallCore({ config, readOnly, mark, onChange }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
   const { tzLabel } = useRegion();
+  const voiceAgentList = useAgents().filter((a) => a.type === "voice");
   const [agent, setAgent] = useState<string>(config?.agent ?? "");
   const agentSelected = !!agent;
   const varMap = config?.voiceVarMap ?? [
@@ -1003,7 +1152,7 @@ function VoiceCallCore({ config, readOnly, mark, onChange }: { config?: PresetCo
             </div>
             <SelectLike
               disabled={readOnly}
-              options={VOICE_AGENTS.map((a) => a.name)}
+              options={voiceAgentList.map((a) => a.name)}
               defaultValue={config?.agent}
               onPick={(v) => { setAgent(v); mark(true); }}
               placeholder="Select agent…"
@@ -1121,7 +1270,7 @@ function ToolInputMapPicker({
   const [m, setM] = useState<"variable" | "constant">(mode);
   useEffect(() => { setM(mode); }, [mode]);
   const extraVariables = useContext(ExtraVariablesContext);
-  const allVariables = mergeVariables(extraVariables);
+  const allVariables = mergeVariables(extraVariables, useContext(OnlyExtraVariablesContext));
   const isCustom = v !== "__llm__" && !!v && !allVariables.some((s) => s.key === v);
   const grouped = groupVariablesBySource(allVariables);
 
@@ -1204,8 +1353,6 @@ function WhatsAppFields({ config, readOnly, mark, onChange }: { config?: PresetC
   );
 }
 
-const APPROVED_TEMPLATES = SEED_TEMPLATES.filter((t) => t.status === "Approved");
-
 function WhatsAppCore({
   config, readOnly, mark, onChange,
 }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
@@ -1213,6 +1360,18 @@ function WhatsAppCore({
   const [templateId, setTemplateId] = useState(config?.waTemplate ?? "");
   const [numberSelected, setNumberSelected] = useState(!!config?.waNumber);
   const [contentReady, setContentReady] = useState(!!config?.waTemplate || !!config?.waBody);
+  const [authoring, setAuthoring] = useState(false);
+
+  // Live list, so a template authored from this panel is in the picker the moment
+  // it is saved. Approved can go out today; Pending is offered because you are
+  // authoring a flow that runs later, not sending now — the node is configurable
+  // against it, it just can't go live until Meta says yes. Drafts stay out: a draft
+  // was never submitted, so it has no path to approval at all.
+  const templates = useTemplates();
+  const approved = templates.filter((t) => t.status === "Approved");
+  const pending = templates.filter((t) => t.status === "Pending");
+  const waba = useWabaConnection() ?? DEMO_RESULT;
+
   const template = resolveWaTemplate(templateId);
   const templateSelected = !!template;
   // "Branchable" buttons produce a trackable handle (Quick Reply / tracked URL).
@@ -1250,17 +1409,53 @@ function WhatsAppCore({
 
   // Publish the canvas handles (derived from template buttons + the Type-1 split
   // toggle) AND persist the config so the node restores correctly when reopened.
+  //
+  // Keyed on the derived handles, not just the template id: templates are editable
+  // now and edits keep their id, so adding or renaming a button on a template this
+  // node already points at has to move the node's ports with it.
+  const outs = mode === "freeform" ? whatsappOutputs(undefined) : whatsappOutputs(template);
+  const outsKey = outs.map((o) => `${o.id}:${o.label}`).join("|");
   useEffect(() => {
-    const outs = mode === "freeform" ? whatsappOutputs(undefined) : whatsappOutputs(template);
     onChange({
       outputs: outs,
       config: { ...config, waMode: mode, waTemplate: templateId },
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, templateId]);
+  }, [mode, templateId, outsKey]);
 
   return (
     <>
+      {/* The manager's own create surface, opened over the builder. It is already a
+          full-page overlay, so it needs no dialog wrapper — and reusing it means a
+          template made here is subject to every Meta rule the manager enforces. On
+          save it lands in the shared store and is selected straight away, because
+          the only reason you opened it was to use it. */}
+      {authoring && (
+        <TemplateForm
+          waba={waba}
+          initial={null}
+          onCancel={() => setAuthoring(false)}
+          onSave={(t) => {
+            saveTemplate(t);
+            setAuthoring(false);
+            // Only a submitted template gets selected. A draft was never sent to
+            // Meta, so it has no route to approval and nothing to wire a flow to —
+            // it is kept, and it is waiting in the manager, and that is all.
+            if (t.status === "Pending") {
+              setTemplateId(t.id);
+              setContentReady(true);
+              toast.success(`Template "${t.name}" submitted`, {
+                description: "Sent to Meta for review, and selected on this node.",
+              });
+            } else {
+              toast.success(`Template "${t.name}" saved as a draft`, {
+                description: "Submit it for review to use it on a node.",
+              });
+            }
+          }}
+        />
+      )}
+
       <Section title="WhatsApp number">
         <Field label="Connected number" required>
           <SelectLike
@@ -1288,8 +1483,21 @@ function WhatsAppCore({
               <div className="flex items-center gap-2">
                 <StepChip n={1} done={templateSelected} />
                 <Label className="flex items-center gap-1 text-[12px] font-medium text-foreground">
-                  Approved template <span className="text-destructive">*</span>
+                  Template <span className="text-destructive">*</span>
                 </Label>
+                {/* The point at which you discover you need a template is this one,
+                    with the picker open. Sending someone to Channels to get it —
+                    and back again to find it — is the flow abandoning them at the
+                    exact moment it could help. Same form, same rules, over the canvas. */}
+                {!readOnly && (
+                  <button
+                    type="button"
+                    onClick={() => setAuthoring(true)}
+                    className="ml-auto flex h-6 items-center gap-1 rounded-md border border-border px-2 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  >
+                    <Plus className="h-3 w-3" /> New template
+                  </button>
+                )}
               </div>
               <Select
                 value={templateId || undefined}
@@ -1300,16 +1508,39 @@ function WhatsAppCore({
                   <SelectValue placeholder="Choose template…" />
                 </SelectTrigger>
                 <SelectContent>
-                  {/* Preset/legacy configs may reference a template name not in the
-                      registry — surface it so the node still reads as configured. */}
-                  {templateId && !template && (
-                    <SelectItem value={templateId}>{templateId} · legacy</SelectItem>
+                  {/* The library stores readable names (`renewal_link_v1`) while items
+                      are keyed by id, so a preset's value can resolve to a real template
+                      and still match no item — leaving a required field looking empty on
+                      a node that reports itself valid. Carry the stored value as its own
+                      item: named if we can resolve it, marked legacy if we can't. */}
+                  {templateId && !templates.some((t) => t.id === templateId) && (
+                    <SelectItem value={templateId}>
+                      {template ? `${template.name} · ${template.category}` : `${templateId} · legacy`}
+                    </SelectItem>
                   )}
-                  {APPROVED_TEMPLATES.map((t) => (
-                    <SelectItem key={t.id} value={t.id}>{t.name} · {t.category}</SelectItem>
-                  ))}
+                  <SelectGroup>
+                    <SelectLabel>Approved</SelectLabel>
+                    {approved.map((t) => (
+                      <SelectItem key={t.id} value={t.id}>{t.name} · {t.category}</SelectItem>
+                    ))}
+                  </SelectGroup>
+                  {pending.length > 0 && (
+                    <SelectGroup>
+                      <SelectLabel>Awaiting Meta review</SelectLabel>
+                      {pending.map((t) => (
+                        <SelectItem key={t.id} value={t.id}>{t.name} · {t.category}</SelectItem>
+                      ))}
+                    </SelectGroup>
+                  )}
                 </SelectContent>
               </Select>
+              {template?.status === "Pending" && (
+                <p className="flex items-start gap-1.5 text-[11px] leading-relaxed text-warning">
+                  <Clock className="mt-0.5 h-3 w-3 shrink-0" />
+                  Meta hasn't reviewed this template yet. You can finish wiring the flow
+                  against it — the run can't go live until it's approved.
+                </p>
+              )}
               {template && (
                 <div className="rounded-lg border border-border bg-muted/30 p-3 text-[12px]">
                   <p className="mb-1 text-[10.5px] uppercase tracking-wider text-muted-foreground">Preview</p>
@@ -1543,45 +1774,6 @@ function AdsCampaignFields({ readOnly, mark }: { readOnly?: boolean; mark: (v: b
 
 /* --------------------------- Primitives --------------------------- */
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="mb-6 space-y-3 last:mb-0">
-      <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{title}</h3>
-      {children}
-    </div>
-  );
-}
-
-function Field({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
-  return (
-    <div className="space-y-1.5">
-      <Label className="flex items-center gap-1 text-[11.5px] font-medium text-foreground">
-        {label}
-        {required && <span className="text-destructive">*</span>}
-      </Label>
-      {children}
-    </div>
-  );
-}
-
-function SelectLike({
-  options, placeholder, defaultValue, disabled, onPick,
-}: { options: string[]; placeholder?: string; defaultValue?: string; disabled?: boolean; onPick: (v: string) => void }) {
-  const [value, setValue] = useState(defaultValue ?? "");
-  return (
-    <Select value={value || undefined} disabled={disabled} onValueChange={(v) => { setValue(v); onPick(v); }}>
-      <SelectTrigger className="h-9 text-sm">
-        <SelectValue placeholder={placeholder ?? "Select…"} />
-      </SelectTrigger>
-      <SelectContent>
-        {options.map((o) => (
-          <SelectItem key={o} value={o}>{o}</SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  );
-}
-
 function VariablePicker({
   value, defaultValue, disabled, onChange, allowConstant, mode = "variable",
 }: {
@@ -1598,7 +1790,7 @@ function VariablePicker({
   useEffect(() => { setM(mode); }, [mode]);
   // Outcome variables from other action nodes in the flow (e.g. `whatsapp_1.button`).
   const extraVariables = useContext(ExtraVariablesContext);
-  const allVariables = mergeVariables(extraVariables);
+  const allVariables = mergeVariables(extraVariables, useContext(OnlyExtraVariablesContext));
   // Preset/upstream variables (e.g. lifetime_order_value, call_disposition) aren't in
   // the sample list — surface the current value as its own option so it still renders.
   const isCustom = !!v && !allVariables.some((s) => s.key === v);

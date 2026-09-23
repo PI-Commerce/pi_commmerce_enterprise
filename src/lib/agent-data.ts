@@ -1,7 +1,19 @@
 /**
- * Agent records — seed data for the agent builder (create starts blank, edit
- * hydrates from here). Tools are referenced by handle from the tool registry.
+ * Agent records — the source of truth for the agent builder AND every surface
+ * that names an agent (the campaign Voice Call node, analytics, wa-outputs).
+ *
+ * `AGENT_RECORDS` is the seed; the live list is a module-level `current` array so
+ * an agent authored in the builder is immediately visible everywhere that reads
+ * agents — the same reactive-store pattern as `template-store`/`connections`.
+ * Resolvers (`resolveAgent`, `voiceAgents`, …) read `current`, not the frozen
+ * seed map, so newly saved agents resolve. In-memory only: a hard refresh
+ * replays the demo from seed.
+ *
+ * The store lives here (rather than a separate `agent-store`) so the many
+ * existing `@/lib/agent-data` importers keep working and there's no import cycle
+ * between the seed and the resolvers.
  */
+import { useSyncExternalStore } from "react";
 import { getTool } from "./tool-registry";
 
 export type AgentType = "voice" | "chat";
@@ -18,6 +30,8 @@ export type AgentRecord = {
   postCall: PostCallVar[];
   /** Optional eval instruction; when omitted the builder shows a boilerplate default. */
   evalPrompt?: string;
+  /** Shared model config this agent runs on (see `model-config`). */
+  modelConfigId?: string;
 };
 
 export const AGENT_RECORDS: Record<string, AgentRecord> = {
@@ -26,6 +40,7 @@ export const AGENT_RECORDS: Record<string, AgentRecord> = {
     name: "pi_concierge",
     type: "chat",
     status: "live",
+    modelConfigId: "mc_default",
     tools: ["send_whatsapp", "order_lookup", "knowledge_lookup"],
     masterPrompt:
       "# Role\nYou are **Pi Concierge**, the first line of help for Paytm customers on WhatsApp.\n\n## Goals\n- Understand why the customer reached out and resolve it on first contact.\n- Be warm, concise, and never over-promise.\n\n## Tools\nUse {{order_lookup}} to check delivery status before answering order questions, and {{knowledge_lookup}} for policy or how-to questions. Send confirmations with {{send_whatsapp}}.\n\n## Guardrails\n- Never give investment advice.\n- Escalate anything involving a failed payment over ₹10,000 to a human.",
@@ -51,6 +66,7 @@ export const AGENT_RECORDS: Record<string, AgentRecord> = {
     name: "reactivation_voice",
     type: "voice",
     status: "live",
+    modelConfigId: "mc_default",
     tools: ["place_call", "crm_query", "order_lookup"],
     masterPrompt:
       "# Role\nYou are **Reactivation Voice**, calling dormant Paytm traders to bring them back.\n\n## Opening\nGreet the customer by first name and reference how long they've been away.\n\n## Tools\nPull context with {{crm_query}} at the start of the call so you can personalize the pitch.\n\n## Guardrails\n- Keep the call under 3 minutes.\n- If the customer asks to stop, apologize and end the call immediately.",
@@ -163,6 +179,51 @@ export const AGENT_RECORDS: Record<string, AgentRecord> = {
       },
     ],
   },
+  // The only voice agent built to *receive* a call rather than place one. Inbound
+  // entry points need this: the other voice agents open by pitching, which is wrong
+  // when the customer is the one who dialled and already has a reason for calling.
+  a_voice_support: {
+    id: "a_voice_support",
+    name: "support_voice",
+    type: "voice",
+    status: "live",
+    modelConfigId: "mc_default",
+    tools: ["order_lookup", "crm_query", "knowledge_lookup", "refund_initiate"],
+    masterPrompt:
+      "# Role\nYou are **Support Voice**, answering inbound calls to the Paytm support line.\n\n## Opening\nThe customer called you — do not pitch. Greet them, then ask what you can help with.\n\n## Tools\nIdentify the caller with {{crm_query}}, pull order state with {{order_lookup}}, and answer policy questions with {{knowledge_lookup}}.\n\n## Guardrails\n- Verify the order belongs to the caller before discussing or refunding it.\n- If the caller asks for a human, hand off immediately rather than retrying.",
+    knowledgeBase:
+      "## Refund eligibility\nOnly orders marked `returned` or `failed` are refundable.\n\n## Escalation\nHand off to a human for disputes above ₹10,000, suspected fraud, or any second call about the same unresolved issue.",
+    postCall: [
+      {
+        id: "p1",
+        name: "issue_category",
+        prompt: "Categorize the caller's issue: delivery, payment, refund, account, or other.",
+      },
+      {
+        id: "p2",
+        name: "resolved_on_call",
+        prompt:
+          "Was the caller's issue fully resolved on this call without a human? yes or no.",
+      },
+      {
+        id: "p3",
+        name: "escalation_reason",
+        prompt:
+          "If the call was handed to a human, the reason: caller requested, policy limit, agent could not resolve, or none.",
+      },
+      {
+        id: "p4",
+        name: "repeat_contact",
+        prompt:
+          "Did the caller say they had contacted support about this before? yes or no.",
+      },
+      {
+        id: "p5",
+        name: "csat",
+        prompt: "Estimate caller satisfaction from 1-5 based on their tone at the end of the call.",
+      },
+    ],
+  },
   a_support: {
     id: "a_support",
     name: "l1_support",
@@ -193,21 +254,70 @@ export const AGENT_RECORDS: Record<string, AgentRecord> = {
   },
 };
 
+// ── Reactive store ─────────────────────────────────────────────────────────
+
+let current: AgentRecord[] = Object.values(AGENT_RECORDS);
+const listeners = new Set<() => void>();
+
+function emit() {
+  for (const l of listeners) l();
+}
+
+function subscribe(cb: () => void) {
+  listeners.add(cb);
+  return () => listeners.delete(cb);
+}
+
+/** Reactive read of every agent. */
+export function useAgents(): AgentRecord[] {
+  return useSyncExternalStore(subscribe, () => current, () => current);
+}
+
+/** Reactive read of one agent by id. */
+export function useAgent(id?: string): AgentRecord | undefined {
+  const all = useAgents();
+  return id ? all.find((a) => a.id === id) : undefined;
+}
+
+/** Imperative read — for non-React callers (resolvers, analytics). */
+export function getAgents(): AgentRecord[] {
+  return current;
+}
+
+/** Upsert by id. New agents go to the front so a just-saved one leads the list. */
+export function saveAgent(a: AgentRecord) {
+  const i = current.findIndex((x) => x.id === a.id);
+  current = i === -1 ? [a, ...current] : current.map((x) => (x.id === a.id ? a : x));
+  emit();
+}
+
+export function removeAgent(id: string) {
+  current = current.filter((a) => a.id !== id);
+  emit();
+}
+
+/** Mint a fresh agent id, matching the store/template id style. */
+export function newAgentId(): string {
+  return `a_${Date.now().toString(36)}`;
+}
+
+// ── Resolvers (read the live `current` list, not the frozen seed) ────────────
+
 export function getAgentRecord(id: string): AgentRecord | undefined {
-  return AGENT_RECORDS[id];
+  return current.find((a) => a.id === id);
 }
 
 /** Resolve an agent by its id OR its name (the voice node stores the name). */
 export function resolveAgent(nameOrId?: string): AgentRecord | undefined {
   if (!nameOrId) return undefined;
   return (
-    AGENT_RECORDS[nameOrId] ??
-    Object.values(AGENT_RECORDS).find((a) => a.name === nameOrId)
+    current.find((a) => a.id === nameOrId) ??
+    current.find((a) => a.name === nameOrId)
   );
 }
 
 export function voiceAgents(): AgentRecord[] {
-  return Object.values(AGENT_RECORDS).filter((a) => a.type === "voice");
+  return current.filter((a) => a.type === "voice");
 }
 
 /** Output variables an agent's tools expose downstream (e.g. `order_lookup.delivered_status`). */
