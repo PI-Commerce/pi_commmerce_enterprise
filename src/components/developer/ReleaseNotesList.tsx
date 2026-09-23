@@ -28,15 +28,21 @@ const CATEGORY_TINT: Record<ReleaseCategory, string> = {
   Campaigns:   "border-primary/30 bg-primary/10 text-primary",
 };
 
-export function ReleaseNotesList() {
+/**
+ * Props:
+ *   - hideAppLinks: when true, entries do NOT render their in-app "Open" link.
+ *     Used by the public-docs deployment, where the internal app routes are
+ *     not part of the shell.
+ */
+export function ReleaseNotesList({ hideAppLinks = false }: { hideAppLinks?: boolean } = {}) {
   const v2 = getEntriesByVersion("v2");
   const v1 = getEntriesByVersion("v1");
 
   return (
     <div className="max-w-4xl">
-      <VersionBlock label="v2" entries={v2} />
+      <VersionBlock label="v2" entries={v2} hideAppLinks={hideAppLinks} />
       {v1.length > 0 ? (
-        <VersionBlock label="v1" entries={v1} className="mt-14" />
+        <VersionBlock label="v1" entries={v1} className="mt-14" hideAppLinks={hideAppLinks} />
       ) : (
         <div className="mt-14">
           <VersionHeader label="v1" count={0} />
@@ -60,10 +66,12 @@ function VersionBlock({
   label,
   entries,
   className,
+  hideAppLinks,
 }: {
   label: string;
   entries: ReleaseEntry[];
   className?: string;
+  hideAppLinks?: boolean;
 }) {
   return (
     <section className={cn(className)}>
@@ -71,7 +79,7 @@ function VersionBlock({
       <ol className="mt-6 divide-y divide-border">
         {entries.map((e) => (
           <li key={e.id}>
-            <EntryRow entry={e} />
+            <EntryRow entry={e} hideAppLinks={hideAppLinks} />
           </li>
         ))}
       </ol>
@@ -99,7 +107,7 @@ function VersionHeader({ label, count }: { label: string; count: number }) {
  * vertical rule, and the description on the right. On narrow screens the
  * columns stack.
  */
-function EntryRow({ entry }: { entry: ReleaseEntry }) {
+function EntryRow({ entry, hideAppLinks }: { entry: ReleaseEntry; hideAppLinks?: boolean }) {
   return (
     <div className="grid grid-cols-1 gap-4 py-8 md:grid-cols-[180px_1fr] md:gap-10">
       <div className="flex flex-col gap-2 md:border-r md:border-border md:pr-6">
@@ -136,7 +144,7 @@ function EntryRow({ entry }: { entry: ReleaseEntry }) {
             </li>
           ))}
         </ul>
-        {entry.linkTo && (
+        {entry.linkTo && !hideAppLinks && (
           <div className="mt-4">
             <Link
               to={entry.linkTo}
