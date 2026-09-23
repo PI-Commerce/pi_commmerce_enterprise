@@ -549,7 +549,7 @@ function CreateBroadcastDialog({
             type="button"
             onClick={() => setMode("now")}
             className={cn(
-              "flex items-center justify-center gap-1.5 rounded px-2 py-1.5 text-[12px] font-medium transition-colors",
+              "flex items-center justify-center gap-1.5 rounded px-2 py-1.5 text-[12px] font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
               mode === "now"
                 ? "bg-background text-foreground shadow-sm"
                 : "text-muted-foreground hover:text-foreground",
@@ -561,7 +561,7 @@ function CreateBroadcastDialog({
             type="button"
             onClick={() => setMode("schedule")}
             className={cn(
-              "flex items-center justify-center gap-1.5 rounded px-2 py-1.5 text-[12px] font-medium transition-colors",
+              "flex items-center justify-center gap-1.5 rounded px-2 py-1.5 text-[12px] font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
               mode === "schedule"
                 ? "bg-background text-foreground shadow-sm"
                 : "text-muted-foreground hover:text-foreground",
