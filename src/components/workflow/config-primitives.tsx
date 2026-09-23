@@ -36,17 +36,30 @@ export function Field({ label, required, children }: { label: string; required?:
 
 /** Uncontrolled-ish single select over a list of string options. */
 export function SelectLike({
-  options, placeholder, defaultValue, disabled, onPick,
-}: { options: string[]; placeholder?: string; defaultValue?: string; disabled?: boolean; onPick: (v: string) => void }) {
+  options, placeholder, defaultValue, disabled, onPick, optionLabel,
+}: {
+  options: string[];
+  placeholder?: string;
+  defaultValue?: string;
+  disabled?: boolean;
+  onPick: (v: string) => void;
+  /** When the option `value` and display label differ (e.g. option is an id but
+   *  the user reads a human name), return the display label here. */
+  optionLabel?: (v: string) => string;
+}) {
   const [value, setValue] = useState(defaultValue ?? "");
   return (
     <Select value={value || undefined} disabled={disabled} onValueChange={(v) => { setValue(v); onPick(v); }}>
       <SelectTrigger className="h-9 text-sm">
-        <SelectValue placeholder={placeholder ?? "Select…"} />
+        {value ? (
+          <span className="truncate">{optionLabel ? optionLabel(value) : value}</span>
+        ) : (
+          <SelectValue placeholder={placeholder ?? "Select…"} />
+        )}
       </SelectTrigger>
       <SelectContent>
         {options.map((o) => (
-          <SelectItem key={o} value={o}>{o}</SelectItem>
+          <SelectItem key={o} value={o}>{optionLabel ? optionLabel(o) : o}</SelectItem>
         ))}
       </SelectContent>
     </Select>

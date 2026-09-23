@@ -3,41 +3,52 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import {
   LayoutDashboard, Megaphone, Bot, BarChart3, Plug, Settings, Command,
   PanelLeftClose, PanelLeftOpen, Radio, ChevronRight, MessageCircle, MessageSquare, MessageSquareText,
-  LayoutTemplate, Store, Inbox,
+  Inbox, Code2, Workflow, Send, FileText, LayoutTemplate, Store,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useRegion } from "@/lib/region";
 
-const primary = [
+const primaryTop = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, exact: true },
-  { to: "/campaigns", label: "Campaigns", icon: Megaphone },
+] as const;
+
+type CampaignChild = { to: string; label: string; icon: React.ComponentType<{ className?: string }> };
+const campaignChildren: CampaignChild[] = [
+  { to: "/campaigns", label: "Workflows", icon: Workflow },
+  { to: "/broadcasts", label: "Broadcasts", icon: Send },
   // Templates is a subpath of /campaigns; the exclusive isActive below keeps
-  // Campaigns from also lighting up when a template route is open.
+  // Workflows from also lighting up when a template route is open.
   { to: "/campaigns/templates", label: "Templates", icon: LayoutTemplate },
+];
+
+const primaryBottom = [
   // Inbound sits beside Campaigns, not inside it. A campaign is a project you
   // launch over a known audience; an entry point is always-on infrastructure
   // whose unit of work is one person's session. Different lifecycle, different object.
   { to: "/inbound", label: "Inbound", icon: Inbox },
   { to: "/agents", label: "Agents", icon: Bot },
+  { to: "/inbox", label: "Inbox", icon: Inbox },
   { to: "/analytics", label: "Analytics", icon: BarChart3 },
+  { to: "/reports", label: "Reports", icon: FileText },
 ] as const;
 
 type ChannelChild = { label: string; icon: React.ComponentType<{ className?: string }>; to?: string };
 const channelChildren: ChannelChild[] = [
   { to: "/channels/whatsapp", label: "WhatsApp", icon: MessageCircle },
   { label: "Meta Ads", icon: Megaphone },
-  { label: "SMS", icon: MessageSquare },
-  { label: "RCS", icon: MessageSquareText },
+  { to: "/channels/sms", label: "SMS", icon: MessageSquare },
+  { to: "/channels/rcs", label: "RCS", icon: MessageSquareText },
 ];
 
 // "Connections", not "Integrations". The route now holds the systems a client's
 // audience arrives from — a thing they set up and check on. API keys and webhooks
 // were the other half of the old Integrations page and remain out of the first cut.
 const secondary = [
-  { to: "/integrations", label: "Connections", icon: Plug },
+  { to: "/developer", label: "Developer", icon: Code2 },
+  { to: "/integrations", label: "Integrations", icon: Plug },
   // Admin panel — client (merchant) caps, enforcement, and campaign stop/resume.
   { to: "/merchants", label: "Merchants", icon: Store },
-  { to: "/settings", label: "Settings", icon: Settings, disabled: true },
+  { to: "/settings", label: "Settings", icon: Settings },
 ] as const;
 
 const STORAGE_KEY = "pc_sidebar_collapsed";
@@ -57,7 +68,7 @@ export function AppSidebar() {
   // Exclusive prefix match: an item is active when its `to` is the *longest* nav
   // path that prefixes the current path. This lets Templates (/campaigns/templates)
   // and Campaigns (/campaigns) coexist without both lighting up on a template route.
-  const navTos = [...primary, ...secondary].map((i) => i.to);
+  const navTos = [...primaryTop, ...campaignChildren, ...primaryBottom, ...secondary].map((i) => i.to);
   const isActive = (to: string, exact?: boolean) => {
     if (exact) return path === to;
     const matches = path === to || path.startsWith(to + "/");
@@ -84,11 +95,15 @@ export function AppSidebar() {
         )}
       </div>
 
-      <nav className="flex-1 px-2 py-2">
-        <NavSection items={primary} isActive={isActive} collapsed={collapsed} />
+      <nav className="flex flex-1 flex-col px-2 py-2">
+        <NavSection items={primaryTop} isActive={isActive} collapsed={collapsed} />
+        <CampaignsNav path={path} isActive={isActive} collapsed={collapsed} />
+        <NavSection items={primaryBottom} isActive={isActive} collapsed={collapsed} />
         <ChannelsNav path={path} isActive={isActive} collapsed={collapsed} />
-        <div className="my-3 h-px bg-border" />
-        <NavSection items={secondary} isActive={isActive} collapsed={collapsed} />
+        <div className="mt-auto">
+          <div className="my-3 h-px bg-border" />
+          <NavSection items={secondary} isActive={isActive} collapsed={collapsed} />
+        </div>
       </nav>
 
       <div className={cn("border-t border-border p-2", collapsed && "flex justify-center")}>
@@ -107,6 +122,75 @@ export function AppSidebar() {
         </button>
       </div>
     </aside>
+  );
+}
+
+/** Campaigns: expandable group housing Orchestrated (canvas builder) and
+ *  Broadcasts (direct-channel one-shot sends). */
+function CampaignsNav({
+  path, isActive, collapsed,
+}: {
+  path: string;
+  isActive: (to: string, exact?: boolean) => boolean;
+  collapsed: boolean;
+}) {
+  const onCampaigns = path.startsWith("/campaigns") || path.startsWith("/broadcasts");
+  const [open, setOpen] = useState(onCampaigns);
+
+  if (collapsed) {
+    return (
+      <ul className="mt-0.5 space-y-0.5">
+        <li>
+          <Link
+            to="/campaigns"
+            title="Campaigns"
+            className={cn(
+              "group flex h-9 w-9 items-center justify-center rounded-md",
+              onCampaigns ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+            )}
+          >
+            <Megaphone className="h-4 w-4" />
+          </Link>
+        </li>
+      </ul>
+    );
+  }
+
+  return (
+    <ul className="mt-0.5 space-y-0.5">
+      <li>
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          className={cn(
+            "group flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] transition-colors",
+            onCampaigns ? "font-medium text-foreground" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+          )}
+        >
+          <Megaphone className={cn("h-4 w-4 shrink-0", onCampaigns ? "text-foreground" : "text-muted-foreground")} />
+          <span>Campaigns</span>
+          <ChevronRight className={cn("ml-auto h-3.5 w-3.5 transition-transform", open && "rotate-90")} />
+        </button>
+        {open && (
+          <ul className="mt-0.5 space-y-0.5 border-l border-border pl-3 ml-[18px]">
+            {campaignChildren.map((child) => (
+              <li key={child.to}>
+                <Link
+                  to={child.to}
+                  className={cn(
+                    "flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[12.5px] transition-colors",
+                    isActive(child.to) ? "bg-accent font-medium text-foreground" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+                  )}
+                >
+                  <child.icon className={cn("h-3.5 w-3.5 shrink-0", isActive(child.to) ? "text-foreground" : "text-muted-foreground")} />
+                  {child.label}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+      </li>
+    </ul>
   );
 }
 

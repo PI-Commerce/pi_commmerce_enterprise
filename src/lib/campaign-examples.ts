@@ -18,7 +18,10 @@ import type {
   PresetConfig, PresetVarMap,
 } from "./campaign-types";
 import { SERIAL_PREFIX } from "./campaign-types";
-import { whatsappOutputs, resolveWaTemplate } from "./wa-outputs";
+import { whatsappOutputs, resolveWaTemplate, smsOutputs, completedOutput, DEFAULT_SMS_DLR_WINDOW, rcsOutputs, DEFAULT_RCS_DLR_WINDOW } from "./wa-outputs";
+import { SEED_SMS_TEMPLATES } from "./sms-templates";
+import { SEED_RCS_TEMPLATES } from "./rcs-templates";
+import { SEED_RCS_CONFIG, agentById } from "./rcs-config";
 
 export type ExampleCampaign = {
   name: string;
@@ -90,8 +93,8 @@ const EX1_NODES: Node<WorkflowNodeData>[] = [
       outputs: [
         { id: "btn_0", label: "Complete purchase", kind: "outcome" },
         { id: "btn_1", label: "Not interested", kind: "outcome" },
-        { id: "reply_received", label: "Replied (no button)", kind: "outcome" },
-        { id: "no_response", label: "No response / continue", kind: "default" },
+        { id: "reply_received", label: "Text Reply Received", kind: "outcome" },
+        { id: "no_response", label: "Timeout", kind: "default" },
       ],
       config: {
         waNumber: "+91 98100 12345 · PiCommerce",
@@ -100,6 +103,28 @@ const EX1_NODES: Node<WorkflowNodeData>[] = [
         waVarMap: [
           { v: "{{1}}", def: "contact.first_name" },
           { v: "{{2}}", def: "favorite_category" },
+        ],
+      },
+    },
+  },
+  {
+    id: "chatFreeform", type: "workflow", position: { x: 720, y: 440 },
+    data: {
+      kind: "whatsappFreeform", title: "Freeform · Test-drive slot", subtitle: "Freeform workflow · slot picker", valid: true, preset: true,
+      outputs: [
+        { id: "completed", label: "Success", kind: "outcome" },
+        { id: "timed_out", label: "Timeout", kind: "outcome" },
+        { id: "failed", label: "Failed", kind: "outcome" },
+      ],
+      config: {
+        ffWorkflowId: "ff_pre_book_test_drive",
+        ffTimerMode: "absolute",
+        ffTimerMinutes: 60,
+        ffVarMap: [
+          { v: "{{name}}", def: "contact.first_name" },
+          { v: "{{model}}", def: "favorite_category" },
+          { v: "{{dealership}}", def: "contact.city" },
+          { v: "{{preferred_date}}", def: "tomorrow" },
         ],
       },
     },
@@ -159,7 +184,12 @@ const EX1_EDGES: Edge[] = [
   { id: "ex1-e4", source: "tier", sourceHandle: "mid_ltv", target: "chatMid", type: EDGE },
   { id: "ex1-e5", source: "chat", sourceHandle: "btn_0", target: "end", type: EDGE },
   { id: "ex1-e6", source: "chat", sourceHandle: "no_response", target: "voice", type: EDGE },
-  { id: "ex1-e7", source: "chat", sourceHandle: "reply_received", target: "delay5", type: EDGE },
+  // Reply-received traffic feeds a freeform workflow (test-drive slot picker),
+  // whose completion / timeout paths converge on the same 5-day delay downstream.
+  { id: "ex1-e7", source: "chat", sourceHandle: "reply_received", target: "chatFreeform", type: EDGE },
+  { id: "ex1-ff1", source: "chatFreeform", sourceHandle: "completed", target: "delay5", type: EDGE },
+  { id: "ex1-ff2", source: "chatFreeform", sourceHandle: "timed_out", target: "delay5", type: EDGE },
+  { id: "ex1-ff3", source: "chatFreeform", sourceHandle: "failed", target: "end", type: EDGE },
   { id: "ex1-e5b", source: "chat", sourceHandle: "btn_1", target: "delay5", type: EDGE },
   { id: "ex1-e8", source: "delay5", target: "voice", type: EDGE },
   { id: "ex1-e9", source: "voice", target: "end", type: EDGE },
@@ -247,8 +277,8 @@ const EX2_NODES: Node<WorkflowNodeData>[] = [
       outputs: [
         { id: "btn_0", label: "Pay now", kind: "outcome" },
         { id: "btn_1", label: "Remind me later", kind: "outcome" },
-        { id: "reply_received", label: "Replied (no button)", kind: "outcome" },
-        { id: "no_response", label: "No response / continue", kind: "default" },
+        { id: "reply_received", label: "Text Reply Received", kind: "outcome" },
+        { id: "no_response", label: "Timeout", kind: "default" },
       ],
       config: {
         waNumber: "+91 98100 12345 · PiCommerce",
@@ -289,7 +319,13 @@ const EX2_NODES: Node<WorkflowNodeData>[] = [
     id: "callbackDelay", type: "workflow", position: { x: 420, y: 760 },
     data: {
       kind: "delay", title: "Delay · to callback", subtitle: "Wait until callback_at", valid: true, preset: true,
-      config: { delayValue: 1, delayUnit: "Hours" },
+      config: {
+        delayMode: "variable",
+        delayVariable: "voice_1.callback_time",
+        delayVariableFormat: "ISO 8601",
+        delayFallbackValue: 24,
+        delayFallbackUnit: "Hours",
+      },
     },
   },
   {
@@ -459,9 +495,108 @@ const sWa = (
   },
 });
 
+/**
+ * A DLT-template SMS send. Unlike WhatsApp, an SMS node always exposes the same
+ * three delivery outcomes (Delivered / Failed / Timeout) regardless of
+ * template — `buildCampaign` fans a port-less onward edge to all three, so a
+ * "linear" library send still wires every handle. Campaigns that want to react
+ * differently to a failure wire the ports explicitly.
+ *
+ * Sender / campaign type / PE are denormalised off the registry template so the
+ * canvas and analytics can label the node without re-resolving it. Reads from
+ * SEED_SMS_TEMPLATES rather than the live store — this is build-time seed data
+ * and must not depend on module init order.
+ */
+const sSms = (
+  id: string, title: string, subtitle: string, templateId: string,
+  opts?: { vars?: PresetVarMap[]; dlrWindow?: string },
+): Spec => {
+  const t = SEED_SMS_TEMPLATES.find((x) => x.id === templateId);
+  return {
+    id, kind: "sms", title, subtitle,
+    outputs: smsOutputs(),
+    config: {
+      smsTemplateId: templateId,
+      smsVarMap: opts?.vars ?? [],
+      smsDlrWindow: opts?.dlrWindow ?? DEFAULT_SMS_DLR_WINDOW,
+      smsCategory: t?.category,
+      senderId: t?.senderId,
+      peId: t?.peId,
+    },
+  };
+};
+
+/** Registry template ids used by the library journeys. */
+const SMS_ORDER_CONFIRM = "1107168420993847112";
+const SMS_DELIVERY_OTP = "1107168421004829376";
+const SMS_RENEWAL_PROMO = "1107168421118290043";
+const SMS_PAYMENT_FAILED = "1107168421220847665";
+const SMS_CART_RECOVERY = "1107168421339104782";
+const SMS_FESTIVE_HINDI = "1107168421447290318";
+const SMS_KYC_PENDING = "1107168421556731209";
+
+/**
+ * An RCS send. Its outputs are dynamic: one branch per button on the template
+ * (RCS reports a click for reply, URL and dialer buttons alike) PLUS the fixed
+ * Delivered / Failed / Timeout outcomes. `buildCampaign` fans a
+ * port-less onward edge to every handle, so a "linear" RCS send wires them all;
+ * a journey that reacts to a specific click (or wires an SMS fallback off Not
+ * Reachable) ports the edges explicitly. Agent + type are denormalised off the
+ * seed template/config so the canvas and analytics can label the node without
+ * re-resolving it. Reads from SEED_RCS_TEMPLATES (build-time seed).
+ */
+const sRcs = (
+  id: string, title: string, subtitle: string, templateId: string,
+  opts?: { vars?: PresetVarMap[]; dlrWindow?: string },
+): Spec => {
+  const t = SEED_RCS_TEMPLATES.find((x) => x.id === templateId);
+  return {
+    id, kind: "rcs", title, subtitle,
+    outputs: rcsOutputs(t),
+    config: {
+      rcsTemplateId: templateId,
+      rcsVarMap: opts?.vars ?? [],
+      rcsDlrWindow: opts?.dlrWindow ?? DEFAULT_RCS_DLR_WINDOW,
+      rcsAgentId: t?.agentId,
+      rcsAgentType: agentById(SEED_RCS_CONFIG, t?.agentId)?.type,
+    },
+  };
+};
+
+/** Registry template ids used by the RCS journey. */
+const RCS_WELCOME_OFFER = "rcs_tpl_welcome_offer";
+const RCS_PAYMENT_REMINDER = "rcs_tpl_payment_reminder";
+
 const sDelay = (id: string, value: number, unit: "Minutes" | "Hours" | "Days"): Spec => ({
   id, kind: "delay", title: `Delay · ${value} ${unit.toLowerCase()}`, subtitle: `Wait ${value} ${unit.toLowerCase()}`,
   config: { delayValue: value, delayUnit: unit },
+});
+
+// AI Transformation node — chains 1+ transforms; each writes a downstream var.
+// Kept minimal so it composes into existing campaigns like every other action node.
+const sAiTransform = (
+  id: string,
+  title: string,
+  subtitle: string,
+  transforms: Array<import("./campaign-types").PresetTransform>,
+): Spec => ({
+  id, kind: "aiTransform", title, subtitle,
+  config: { transforms },
+});
+
+/** Human Escalation (needsReview) node — TERMINAL. Flags the lead as
+ *  Human Escalation and (in the runtime) exits to End. Optional client-notify
+ *  webhook is picked up via `notifyEnabled` / `notifyEndpointUrl` /
+ *  `customPayloadFields` on `config`. Every graph that includes this node
+ *  must also carry the `<review>_end` edge in its edge list. */
+const sReview = (
+  id: string,
+  title: string,
+  subtitle: string,
+  cfg?: Partial<PresetConfig>,
+): Spec => ({
+  id, kind: "needsReview", title, subtitle,
+  config: cfg,
 });
 
 const ed = (from: string, to: string, port?: string): SpecEdge => ({ from, to, port });
@@ -584,6 +719,15 @@ const C_RENEWAL = buildCampaign("BFSI · Insurance Renewal", [
   sWa("waSavings", "WhatsApp renewal reminder · Savings", "Variant · Savings angle", "renewal_savings_v1"),
   sDelay("d1", 23, "Hours"),
   sWa("wfu", "WhatsApp follow-up", "WhatsApp · nudge", "renewal_followup_v1"),
+  sSms("smsRen", "SMS renewal reminder", "SMS · renew now", SMS_RENEWAL_PROMO, {
+    vars: [
+      { v: "name", def: "contact.first_name" },
+      { v: "plan", def: "contact.policy_no" },
+      { v: "expiry_date", def: "contact.expiry_date" },
+      { v: "discount", def: "10", mode: "constant" },
+      { v: "link", def: "picomm.in/renew", mode: "constant" },
+    ],
+  }),
   sCond("rcLow", "Renewed?", "renewal_status", [
     { id: "yes", label: "Yes", value: "renewed" },
     { id: "no", label: "No", value: "pending" },
@@ -600,7 +744,7 @@ const C_RENEWAL = buildCampaign("BFSI · Insurance Renewal", [
   ed("prem", "abLow", "low"),
   ed("abLow", "waBenefits", "vA"), ed("abLow", "waSavings", "vB"),
   ed("waBenefits", "d1"), ed("waSavings", "d1"),
-  ed("d1", "wfu"), ed("wfu", "rcLow"),
+  ed("d1", "wfu"), ed("wfu", "smsRen"), ed("smsRen", "rcLow"),
   ed("rcLow", "end", "yes"),
   ed("rcLow", "vFinal", "no"), ed("vFinal", "rlFinal"), ed("rlFinal", "end"),
 ]);
@@ -659,6 +803,14 @@ const C_COLLECT = buildCampaign("BFSI · Collections", [
     { id: "mid",   label: "31–90 DPD", op: "between", value: "31", value2: "90" },
     { id: "late",  label: "90+ DPD",  op: "greater than", value: "90" },
   ]),
+  sSms("smsDue", "SMS payment reminder", "SMS · amount due", SMS_PAYMENT_FAILED, {
+    vars: [
+      { v: "amount", def: "contact.amount_due" },
+      { v: "order_id", def: "contact.loan_id" },
+      { v: "link", def: "picomm.in/pay", mode: "constant" },
+      { v: "hours", def: "24", mode: "constant" },
+    ],
+  }),
   sWa("waRem", "WhatsApp reminder", "WhatsApp · payment reminder", "collections_reminder_v1"),
   sWa("plEarly", "Payment link", "WhatsApp · pay now", "payment_link_v1"),
   sVoice("vColl", "Voice AI collections call", "Collections call"),
@@ -675,7 +827,7 @@ const C_COLLECT = buildCampaign("BFSI · Collections", [
   sEnd(),
 ], [
   ed("start", "aud"), ed("aud", "dpd"),
-  ed("dpd", "waRem", "early"), ed("waRem", "plEarly"), ed("plEarly", "d1"),
+  ed("dpd", "smsDue", "early"), ed("smsDue", "waRem"), ed("waRem", "plEarly"), ed("plEarly", "d1"),
   ed("dpd", "vColl", "mid"), ed("vColl", "plMid"), ed("plMid", "d1"),
   ed("dpd", "vEsc", "late"), ed("vEsc", "plLate"), ed("plLate", "d1"),
   ed("d1", "paid"), ed("paid", "end", "yes"),
@@ -706,6 +858,15 @@ const C_ACTIVATION = buildCampaign("Retail · Activation", [
   sWa("cartLow", "Cart link", "WhatsApp · complete order", "cart_link_v1"),
   sDelay("d1", 23, "Hours"),
   sWa("waRem", "WhatsApp reminder + cart link", "WhatsApp · complete order", "cart_link_v1"),
+  sSms("smsCart", "SMS order confirmation", "SMS · order confirmed", SMS_ORDER_CONFIRM, {
+    vars: [
+      { v: "name", def: "contact.first_name" },
+      { v: "order_id", def: "contact.customer_id" },
+      { v: "amount", def: "contact.order_value" },
+      { v: "eta", def: "contact.delivery_eta" },
+      { v: "link", def: "picomm.in/track", mode: "constant" },
+    ],
+  }),
   sCond("orderLow", "Conversion check", "order_status", [
     { id: "conv", label: "Converted", value: "placed" },
     { id: "no", label: "Not converted", value: "pending" },
@@ -720,7 +881,7 @@ const C_ACTIVATION = buildCampaign("Retail · Activation", [
   ed("intent", "ab", "low"),
   ed("ab", "abA", "vA"), ed("ab", "abB", "vB"),
   ed("abA", "cartLow"), ed("abB", "cartLow"),
-  ed("cartLow", "d1"), ed("d1", "waRem"), ed("waRem", "orderLow"),
+  ed("cartLow", "d1"), ed("d1", "waRem"), ed("waRem", "smsCart"), ed("smsCart", "orderLow"),
   ed("orderLow", "end", "conv"), ed("orderLow", "vfuLow", "no"), ed("vfuLow", "appLow"), ed("appLow", "end"),
 ]);
 
@@ -748,6 +909,17 @@ const C_REWARD = buildCampaign("Retail · Reward Expiry", [
   sWa("redLow", "Redemption link", "WhatsApp · redeem now", "redemption_link_v1"),
   sDelay("d1", 23, "Hours"),
   sWa("waRem2", "WhatsApp reminder", "WhatsApp · redeem now", "redemption_link_v1"),
+  // Unicode template — bills at 2 segments per recipient, so the SMS channel's
+  // "Segments consumed" tile diverges from its "Sent" count in this journey.
+  sSms("smsFest", "SMS festive offer", "SMS · festive reminder (Hindi)", SMS_FESTIVE_HINDI, {
+    vars: [
+      { v: "name", def: "contact.first_name" },
+      { v: "festival", def: "Diwali", mode: "constant" },
+      { v: "discount", def: "20", mode: "constant" },
+      { v: "expiry_date", def: "contact.expiry_date" },
+      { v: "link", def: "picomm.in/offer", mode: "constant" },
+    ],
+  }),
   sCond("redCheck2", "Redemption check", "redemption_status", [
     { id: "yes", label: "Redeemed", value: "redeemed" },
     { id: "no", label: "Not redeemed", value: "pending" },
@@ -761,7 +933,7 @@ const C_REWARD = buildCampaign("Retail · Reward Expiry", [
   ed("points", "ab", "low"),
   ed("ab", "abA", "vA"), ed("ab", "abB", "vB"),
   ed("abA", "redLow"), ed("abB", "redLow"),
-  ed("redLow", "d1"), ed("d1", "waRem2"), ed("waRem2", "redCheck2"),
+  ed("redLow", "d1"), ed("d1", "waRem2"), ed("waRem2", "smsFest"), ed("smsFest", "redCheck2"),
   ed("redCheck2", "end", "yes"), ed("redCheck2", "finalLow", "no"), ed("finalLow", "end"),
 ]);
 
@@ -792,6 +964,14 @@ const C_WINBACK = buildCampaign("Retail · Winback", [
     { id: "yes", label: "Yes", value: "placed" },
     { id: "no", label: "No", value: "pending" },
   ]),
+  sSms("smsWin", "SMS winback offer", "SMS · cart recovery", SMS_CART_RECOVERY, {
+    vars: [
+      { v: "name", def: "contact.first_name" },
+      { v: "item", def: "contact.last_item" },
+      { v: "discount", def: "15", mode: "constant" },
+      { v: "link", def: "picomm.in/shop", mode: "constant" },
+    ],
+  }),
   sVoice("vfuLow", "Voice AI follow-up", "Reattempt · 1 retry", { maxAttempts: 1 }),
   sEnd(),
 ], [
@@ -802,7 +982,13 @@ const C_WINBACK = buildCampaign("Retail · Winback", [
   ed("ab", "abA", "vA"), ed("ab", "abB", "vB"),
   ed("abA", "purLow"), ed("abB", "purLow"),
   ed("purLow", "d1"), ed("d1", "purchased"),
-  ed("purchased", "end", "yes"), ed("purchased", "vfuLow", "no"), ed("vfuLow", "end"),
+  ed("purchased", "end", "yes"), ed("purchased", "smsWin", "no"),
+  // The one journey that reacts to delivery: a delivered offer is left to land,
+  // while a hard failure or a silent DLR window escalates to a voice follow-up.
+  ed("smsWin", "end", "delivered"),
+  ed("smsWin", "vfuLow", "failed"),
+  ed("smsWin", "vfuLow", "no_dlr"),
+  ed("vfuLow", "end"),
 ]);
 
 /* ---- 8. Retail · Subscription Conversion ------------------------------- */
@@ -892,6 +1078,48 @@ const C_SEASONAL = buildCampaign("Retail · Seasonal Sale", [
   ed("clicked", "waRem", "no"), ed("waRem", "end"),
 ]);
 
+/* ---- RCS · Festive Engagement ------------------------------------------
+ * An RCS-led journey (PICOM-4728) that shows every branch kind an RCS node
+ * exposes: one path per button (Shop now / See offers / Visit store), the fixed
+ * delivery outcomes, and — the headline pattern — an SMS fallback wired off the
+ * "Failed" branch so recipients on non-RCS handsets still get reached. */
+const C_RCS = buildCampaign("Retail · RCS Festive Engagement", [
+  sStart(),
+  sAud("CSV · festive shoppers", ["fav_category", "rcs_capable"]),
+  sRcs("rcsWelcome", "RCS festive offer", "RCS · welcome offer", RCS_WELCOME_OFFER, {
+    vars: [
+      { v: "{{name}}", def: "contact.first_name" },
+      { v: "{{discount}}", def: "promo.discount_pct" },
+    ],
+  }),
+  sDelay("dShop", 1, "Days"),
+  sWa("waCart", "WhatsApp cart nudge", "WhatsApp · complete purchase", "cart_link_v1"),
+  sWa("waCatalog", "WhatsApp catalog", "WhatsApp · browse offers", "sale_link_v1"),
+  sSms("smsFallback", "SMS festive offer", "SMS · festive reminder (Hindi)", SMS_FESTIVE_HINDI),
+  sRcs("rcsPay", "RCS payment reminder", "RCS · complete payment", RCS_PAYMENT_REMINDER, {
+    vars: [
+      { v: "{{name}}", def: "contact.first_name" },
+      { v: "{{amount}}", def: "order.amount_due" },
+      { v: "{{order_id}}", def: "order.id" },
+    ],
+  }),
+  sEnd(),
+], [
+  ed("start", "aud"), ed("aud", "rcsWelcome"),
+  // Click branches — one per button on the template (welcome_offer_card has
+  // "Shop now" = btn_0, "See offers" = btn_1, "Visit store" = btn_2).
+  ed("rcsWelcome", "dShop", "btn_0"), ed("dShop", "waCart"), ed("waCart", "end"),
+  ed("rcsWelcome", "waCatalog", "btn_1"),
+  ed("rcsWelcome", "waCatalog", "btn_2"), ed("waCatalog", "end"),
+  // Failed → SMS fallback: a hard failure or a handset that isn't RCS-capable,
+  // so reach them over SMS instead. This is the RCS→SMS fallback, configured
+  // downstream rather than inside the node.
+  ed("rcsWelcome", "smsFallback", "failed"), ed("smsFallback", "end"),
+  // Delivered but no click → a gentle payment nudge over RCS; timeout ends.
+  ed("rcsWelcome", "rcsPay", "delivered"), ed("rcsPay", "end"),
+  ed("rcsWelcome", "end", "timeout"),
+]);
+
 /* ---- 10. D2C · Order Confirmation -------------------------------------- */
 const C_ORDERCONF = buildCampaign("D2C · Order Confirmation", [
   sStart(),
@@ -979,6 +1207,23 @@ const C_OUTBOUND = buildCampaign("D2C · Outbound Sales", [
 const C_CART = buildCampaign("D2C · Cart Abandonment", [
   sStart(),
   sAud("CSV · cart abandoners", ["cart_value", "cart_items"]),
+  sAiTransform("aitEnrich", "Enrich cart context", "3 AI-derived variables", [
+    {
+      id: "t1", type: "Custom AI Action",
+      label: "Normalize phone", input: "", output: "phone_e164",
+      prompt: "Normalize contact.phone to E.164 international format (e.g. +91XXXXXXXXXX).",
+    },
+    {
+      id: "t2", type: "Custom AI Action",
+      label: "Format cart value", input: "", output: "cart_value_fmt",
+      prompt: "Format contact.cart_value as an INR currency string with correct separators (e.g. ₹5,499).",
+    },
+    {
+      id: "t3", type: "Custom AI Action",
+      label: "Greeting", input: "", output: "first_name_hi",
+      prompt: "Transliterate contact.first_name into the Devanagari script for use in a Hindi WhatsApp greeting.",
+    },
+  ]),
   sCond("cart", "Cart value branch", "cart_value", [
     { id: "high", label: "> ₹5,000", op: "greater than", value: "5000" },
     { id: "low", label: "≤ ₹5,000", op: "less than or equal to", value: "5000" },
@@ -1005,7 +1250,7 @@ const C_CART = buildCampaign("D2C · Cart Abandonment", [
   sVoice("vRemLow", "Voice AI reminder", "Reattempt · 1 retry", { maxAttempts: 1 }),
   sEnd(),
 ], [
-  ed("start", "aud"), ed("aud", "cart"),
+  ed("start", "aud"), ed("aud", "aitEnrich"), ed("aitEnrich", "cart"),
   ed("cart", "vRec", "high"), ed("vRec", "cartHigh"), ed("cartHigh", "purHigh"),
   ed("purHigh", "end", "yes"), ed("purHigh", "vRemHigh", "no"), ed("vRemHigh", "end"),
   ed("cart", "ab", "low"),
@@ -1190,8 +1435,121 @@ const C_ALTAYER = buildCampaign("Retail · ACME Corp FCC Loyalty", [
   ...FCC_GOLD.edges, ...FCC_PLATINUM.edges, ...FCC_BLACK.edges,
 ]);
 
+/* ---- 18. D2C · Order Lifecycle (SMS-led) -------------------------------
+ * The one SMS-first journey in the library. Every other campaign uses SMS as a
+ * single supporting step, which makes the channel's template comparison a
+ * one-bar chart in Campaign-run mode. This one runs FIVE different DLT
+ * templates across both categories (Transactional / Promotional), three sender
+ * IDs and both encodings — so the SMS analytics have something real to compare,
+ * and the segment divergence shows up inside a single run rather than only when
+ * switching templates in Asset-mode.
+ */
+const C_SMS_LIFECYCLE = buildCampaign("D2C · Order Lifecycle (SMS-led)", [
+  sStart(),
+  sAud("CSV · new orders", ["order_value", "order_id", "delivery_eta", "due_date"]),
+  sSms("smsConfirm", "SMS order confirmation", "SMS · order confirmed", SMS_ORDER_CONFIRM, {
+    vars: [
+      { v: "name", def: "contact.first_name" },
+      { v: "order_id", def: "contact.order_id" },
+      { v: "amount", def: "contact.order_value" },
+      { v: "eta", def: "contact.delivery_eta" },
+      { v: "link", def: "picomm.in/track", mode: "constant" },
+    ],
+  }),
+  sDelay("d1", 1, "Days"),
+  sCond("state", "Order state branch", "order_state", [
+    { id: "dispatched", label: "Dispatched", value: "dispatched" },
+    { id: "payment_due", label: "Payment pending", value: "payment_due" },
+    { id: "kyc", label: "KYC pending", value: "kyc_pending" },
+  ]),
+  // Dispatched → verification code at handover, then a promotional cross-sell a couple of days later.
+  sSms("smsOtp", "SMS delivery code", "SMS · handover code", SMS_DELIVERY_OTP, {
+    vars: [{ v: "otp", def: "delivery.otp" }],
+    dlrWindow: "5 minutes",
+  }),
+  sDelay("d2", 2, "Days"),
+  sSms("smsPromo", "SMS festive cross-sell", "SMS · festive offer (Hindi)", SMS_FESTIVE_HINDI, {
+    vars: [
+      { v: "name", def: "contact.first_name" },
+      { v: "festival", def: "Diwali", mode: "constant" },
+      { v: "discount", def: "20", mode: "constant" },
+      { v: "expiry_date", def: "contact.due_date" },
+      { v: "link", def: "picomm.in/offer", mode: "constant" },
+    ],
+  }),
+  // Payment pending → reminder; a non-delivered reminder escalates to WhatsApp.
+  sSms("smsPay", "SMS payment reminder", "SMS · amount due", SMS_PAYMENT_FAILED, {
+    vars: [
+      { v: "amount", def: "contact.order_value" },
+      { v: "order_id", def: "contact.order_id" },
+      { v: "link", def: "picomm.in/pay", mode: "constant" },
+      { v: "hours", def: "24", mode: "constant" },
+    ],
+  }),
+  sWa("waPay", "WhatsApp payment link", "WhatsApp · pay now", "payment_link_v1"),
+  // KYC pending → transactional nudge.
+  sSms("smsKyc", "SMS KYC reminder", "SMS · complete KYC", SMS_KYC_PENDING, {
+    vars: [
+      { v: "name", def: "contact.first_name" },
+      { v: "due_date", def: "contact.due_date" },
+      { v: "link", def: "picomm.in/kyc", mode: "constant" },
+    ],
+  }),
+  sEnd(),
+], [
+  ed("start", "aud"), ed("aud", "smsConfirm"),
+  ed("smsConfirm", "d1"), ed("d1", "state"),
+  ed("state", "smsOtp", "dispatched"), ed("smsOtp", "d2"), ed("d2", "smsPromo"), ed("smsPromo", "end"),
+  ed("state", "smsPay", "payment_due"),
+  // Delivery-aware escalation: a delivered reminder is left to work, while a
+  // failure or a silent DLR window falls back to WhatsApp.
+  ed("smsPay", "end", "delivered"),
+  ed("smsPay", "waPay", "failed"),
+  ed("smsPay", "waPay", "no_dlr"),
+  ed("waPay", "end"),
+  ed("state", "smsKyc", "kyc"), ed("smsKyc", "end"),
+]);
+
 const EX1_LAID = assemble(EX1_NODES, EX1_EDGES);
 const EX2_LAID = assemble(EX2_NODES, EX2_EDGES);
+
+/* ---- Support · WhatsApp with human handoff ----------------------------- */
+/**
+ * Minimal demo that wires the *Human Escalation* (needsReview) node.
+ *
+ * Flow: WhatsApp support prompt → conditional on the user's reply
+ *   - resolved  → End (agent handled it)
+ *   - escalate  → Human Escalation (flags the lead + optional webhook) → End
+ *
+ * `handoff` node's config enables the webhook to demo the "notify client
+ * system" surface end-to-end. The Leads list uses the `humanEscalated` flag
+ * this node emits (rolled up on `LeadRecord.humanEscalated`) to show the
+ * conditional Human Escalation column.
+ */
+const C_HANDOFF = buildCampaign("Support · WhatsApp with human handoff", [
+  sStart(),
+  sAud("CSV · support inbound", ["intent", "issue_summary"]),
+  sWa("waSupport", "WhatsApp support triage", "WhatsApp · greet + ask", "support_triage_v1"),
+  sCond("resolveOrEscalate", "Resolvable?", "waSupport.reply", [
+    { id: "resolved", label: "Resolved by bot", value: "resolved" },
+    { id: "escalate", label: "Needs a human",   value: "escalate" },
+  ]),
+  sReview("handoff", "Human Escalation", "Support L2 queue", {
+    // Fire the two registered Human Escalation webhooks (see webhooks-data seed).
+    notifyWebhookIds: ["wh_crm_esc", "wh_ops_slack_esc"],
+    // Per-node payload extras — added on top of the auto-included fields.
+    notifyPayloadExtras: ["contact.customer_id", "waSupport.reply"],
+  }),
+  sEnd(),
+], [
+  ed("start", "aud"), ed("aud", "waSupport"),
+  ed("waSupport", "resolveOrEscalate"),
+  ed("resolveOrEscalate", "end", "resolved"),
+  ed("resolveOrEscalate", "handoff", "escalate"),
+  // Human Escalation is terminal — auto-wired to End at add-time in the
+  // builder; we pre-wire it here so the example graph is consistent.
+  ed("handoff", "end"),
+]);
 
 const RAW_EXAMPLE_CAMPAIGNS: Record<string, ExampleCampaign> = {
   // Order here drives the Campaigns-list order (the list staggers `lastEdited` by
@@ -1210,11 +1568,14 @@ const RAW_EXAMPLE_CAMPAIGNS: Record<string, ExampleCampaign> = {
   c_ex4: C_RENEWAL,
   c_ex5: C_UPSELL,
   c_ex6: C_COLLECT,
+  c_ex18: C_SMS_LIFECYCLE,
+  c_ex19: C_RCS,
   c_ex12: C_ORDERCONF,
   c_ex13: C_OUTBOUND,
   c_ex14: C_CART,
   c_ex15: C_PRICEDROP,
   c_ex16: C_BACKINSTOCK,
+  c_ex20: C_HANDOFF,
 };
 
 /* ---- normalization ------------------------------------------------------
@@ -1239,9 +1600,15 @@ function shortDesc(title: string): string {
 function normalizeCampaign(c: ExampleCampaign): ExampleCampaign {
   const counters: Partial<Record<NodeKind, number>> = {};
   // WhatsApp nodes authored without explicit outputs get the standard handle set
-  // here (reply_received + no_response + any trackable button); their port-less
-  // onward edge must then fan to every handle so each one is wired.
+  // here (reply_received + no_response + any trackable button + failure); their
+  // port-less onward edge fans to every non-failure handle so each engagement
+  // path is wired. Failure stays a dangling handle by default — authors opt
+  // into wiring it (fallback SMS, escalate, etc.).
   const waFanned = new Map<string, NodeOutput[]>();
+  // Voice nodes carry two fixed handles (Success, Failure). Unhandled
+  // port-less onward edges are rewritten to `success` so existing single-edge
+  // Voice → next flows continue to work; Failure stays dangling by default.
+  const voiceIds = new Set<string>();
   // Conditional nodes that have an always-on `default` handle — used below to
   // guarantee that handle is wired (no lead ever stuck on a dangling default).
   const conditionalIds = new Set<string>();
@@ -1262,6 +1629,9 @@ function normalizeCampaign(c: ExampleCampaign): ExampleCampaign {
       const tmpl = n.data.config?.waMode === "freeform" ? undefined : resolveWaTemplate(n.data.config?.waTemplate);
       outputs = whatsappOutputs(tmpl);
       waFanned.set(n.id, outputs);
+    } else if (kind === "voiceCall" && (!outputs || outputs.length === 0)) {
+      outputs = completedOutput();
+      voiceIds.add(n.id);
     }
     return { ...n, data: { ...n.data, serial, description, outputs } };
   });
@@ -1272,12 +1642,27 @@ function normalizeCampaign(c: ExampleCampaign): ExampleCampaign {
     c.edges.forEach((e) => {
       const handles = waFanned.get(e.source);
       if (handles && !e.sourceHandle) {
-        handles.forEach((h) => fanned.push({ ...e, id: `${e.id}_${h.id}_${fi++}`, sourceHandle: h.id }));
+        // Fan onto every handle EXCEPT `failure` — failure paths need an
+        // explicit target so we don't silently wire the success flow into a
+        // fallback branch.
+        handles.filter((h) => h.id !== "failure").forEach((h) =>
+          fanned.push({ ...e, id: `${e.id}_${h.id}_${fi++}`, sourceHandle: h.id }),
+        );
       } else {
         fanned.push(e);
       }
     });
     edges = fanned;
+  }
+  if (voiceIds.size) {
+    // Rewrite unhandled port-less edges from Voice nodes to `success`. This
+    // preserves the historical semantics (Voice → next means "on completion")
+    // while the Failure handle stays dangling for authors to wire.
+    edges = edges.map((e) =>
+      voiceIds.has(e.source) && !e.sourceHandle
+        ? { ...e, sourceHandle: "success" }
+        : e,
+    );
   }
   // Wire every conditional's always-on `default` handle to the End node when no
   // edge already sources from it — otherwise the default branch dangles.

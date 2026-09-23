@@ -9,7 +9,7 @@ import {
 } from "@/components/ui/select";
 import { Wrench, Search, Plus, MessageCircle, Phone } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { TOOLS, TYPE_LABEL, STATUS_LABEL, type ToolType } from "@/lib/tool-registry";
+import { TOOLS, STATUS_LABEL } from "@/lib/tool-registry";
 import { useAgents } from "@/lib/agent-data";
 
 export const Route = createFileRoute("/agents/")({
@@ -156,10 +156,8 @@ function StatusTag({ status }: { status: AgentStatus }) {
 function Tools() {
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
-  const [fType, setFType] = useState<"all" | ToolType>("all");
 
   const filtered = TOOLS.filter((t) => {
-    if (fType !== "all" && t.type !== fType) return false;
     if (query && !t.handle.toLowerCase().includes(query.toLowerCase())) return false;
     return true;
   });
@@ -176,16 +174,15 @@ function Tools() {
             className="h-8 pl-8 text-xs"
           />
         </div>
-        <FilterSelect
-          label="Type"
-          value={fType}
-          onChange={(v) => setFType(v as typeof fType)}
-          options={[
-            { value: "all", label: "All" },
-            { value: "http", label: "HTTP API" },
-            { value: "mcp", label: "MCP" },
-          ]}
-        />
+        <div className="ml-auto">
+          <Button
+            size="sm"
+            className="h-8 gap-1.5 text-xs"
+            onClick={() => navigate({ to: "/agents/tools/new", search: {} })}
+          >
+            <Plus className="h-3.5 w-3.5" /> New tool
+          </Button>
+        </div>
       </div>
 
       {filtered.length === 0 ? (
@@ -198,7 +195,7 @@ function Tools() {
             <thead>
               <tr className="border-b border-border bg-secondary/30 text-[11px] uppercase tracking-wider text-muted-foreground">
                 <th className="px-4 py-2.5 text-left font-medium">Tool</th>
-                <th className="px-4 py-2.5 text-left font-medium">Type</th>
+                <th className="px-4 py-2.5 text-left font-medium">Method</th>
                 <th className="px-4 py-2.5 text-left font-medium">Status</th>
                 <th className="px-4 py-2.5 text-left font-medium">Created</th>
                 <th className="px-4 py-2.5 text-left font-medium">Updated</th>
@@ -220,11 +217,8 @@ function Tools() {
                     </div>
                   </td>
                   <td className="px-4 py-3">
-                    <span className={cn(
-                      "inline-flex items-center rounded-md border px-1.5 py-0.5 text-[11px] font-medium",
-                      t.type === "mcp" ? "border-ai/30 bg-ai/10 text-ai" : "border-border bg-secondary/40 text-muted-foreground",
-                    )}>
-                      {TYPE_LABEL[t.type]}
+                    <span className="inline-flex items-center rounded-md border border-border bg-secondary/40 px-1.5 py-0.5 font-mono text-[11px] font-medium text-muted-foreground">
+                      {t.method ?? "—"}
                     </span>
                   </td>
                   <td className="px-4 py-3">

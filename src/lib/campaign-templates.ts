@@ -126,7 +126,7 @@ export type CampaignCopy = {
  * The map is centralized here so a new node kind is covered by declaring its
  * tenant-bound fields once, rather than in every surface that renders a node.
  */
-type ScrubRule = { fields: { key: keyof WorkflowNodeData["config"] & string; label: string }[]; error: string };
+type ScrubRule = { fields: { key: keyof NonNullable<WorkflowNodeData["config"]> & string; label: string }[]; error: string };
 
 const SCRUB_RULES: Partial<Record<NodeKind, ScrubRule>> = {
   whatsapp: {

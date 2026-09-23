@@ -39,7 +39,12 @@
       "Bash(for p in paytm PICOTP PIOFFR \"mirrored\" \"Get cURL\" \"sender_id\" \"recipients\" \"1107\")",
       "Bash(do printf '%-14s ' \"$p\")",
       "Bash(done)",
-      "Bash(/usr/bin/python3:*)"
+      "Bash(/usr/bin/python3:*)",
+      "Bash(lsof -ti:5173 -sTCP:LISTEN)",
+      "Bash(lsof -ti:3000 -sTCP:LISTEN)",
+      "Bash(node -e \"const p=require\\('./package.json'\\);console.log\\(JSON.stringify\\(p.scripts,null,2\\)\\)\")",
+      "Bash(npm run *)",
+      "Bash(curl -s -o /dev/null http://localhost:5173)"
     ]
   }
 }

@@ -1,8 +1,11 @@
-import { useState, useEffect, useRef, createContext, useContext } from "react";
+import { useState, useEffect, useRef, useMemo, useSyncExternalStore, createContext, useContext } from "react";
+import { Link } from "@tanstack/react-router";
+import { webhooksOfType, activeCountForType } from "@/lib/webhooks-store";
+import { AUTO_INCLUDED_FIELDS } from "@/lib/webhooks-data";
 import {
-  X, Copy, Trash2, AlertCircle, CheckCircle2, Plus, GripVertical, ChevronDown, Variable,
+  X, Copy, Trash2, AlertCircle, CheckCircle2, Plus, GripVertical, ChevronDown, ChevronRight, Variable,
   Sparkles, GitBranch, FlaskConical, ArrowUp, ArrowDown, ArrowRight, ArrowLeftRight,
-  FileSpreadsheet, Loader2, Clock, Hash,
+  FileSpreadsheet, Loader2, Clock, Hash, Info, Pencil, Eye, Workflow,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useRegion, localizeCurrency } from "@/lib/region";
@@ -27,26 +30,66 @@ import { useTemplates, saveTemplate } from "@/lib/template-store";
 import { TemplateForm } from "@/components/integrations/WhatsAppTemplates";
 import { useWabaConnection } from "@/lib/waba-store";
 import { DEMO_RESULT } from "@/lib/waba-onboarding";
-import { whatsappOutputs, resolveWaTemplate, completedOutput, isBranchableButton } from "@/lib/wa-outputs";
-import { getTool, TOOLS } from "@/lib/tool-registry";
-import { resolveAgent, useAgents } from "@/lib/agent-data";
 import { Section, Field, SelectLike } from "./config-primitives";
+import { SEED_TEMPLATES, MEDIA_HINTS, validateMediaUrl, type TemplateFormat } from "@/lib/waba-templates";
+import {
+  whatsappOutputs, resolveWaTemplate, completedOutput, isBranchableButton,
+  WA_TIMEOUT_HOURS, DEFAULT_WA_TIMEOUT_HOURS, waTimeoutLabel,
+  smsOutputs, SMS_DLR_WINDOWS, DEFAULT_SMS_DLR_WINDOW,
+  rcsOutputs, RCS_DLR_WINDOWS, DEFAULT_RCS_DLR_WINDOW,
+} from "@/lib/wa-outputs";
+import {
+  getFreeformWorkflows, getFreeformPlaceholders, getFreeformCampaignOutputs,
+  subscribeFreeformWorkflows,
+  type FreeformPlaceholder, type FreeformNodeRecord,
+} from "@/lib/freeform-types";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+} from "@/components/ui/dialog";
+import { FreeformCanvas } from "@/components/workflow/FreeformCanvas";
+import { useSmsConfig, useSmsTemplates, resolveSmsTemplate } from "@/lib/sms-store";
+import { sendersForCategory } from "@/lib/sms-config";
+import {
+  SMS_CATEGORIES, smsPlaceholders, templateSegments, type SmsCategory,
+} from "@/lib/sms-templates";
+import { useRcsConfig, useRcsTemplates, resolveRcsTemplate } from "@/lib/rcs-store";
+import { agentsForBrand, agentById, brandForAgent } from "@/lib/rcs-config";
+import {
+  templatePlaceholders, templateButtons,
+} from "@/lib/rcs-templates";
+import { getTool, TOOLS, type ToolInput } from "@/lib/tool-registry";
+import { flattenBody } from "@/lib/tool-body";
+import { resolveAgent, voiceAgents, useAgents } from "@/lib/agent-data";
+import {
+  CUSTOM_AI_ACTION,
+  transformError, transformsError,
+  sanitizeOutputName, conversationContextVariables,
+} from "@/lib/ai-transformations";
+import { PromptEditor } from "@/components/workflow/PromptEditor";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+
+const VOICE_AGENTS = voiceAgents();
 
 /** Per-node outcome variables (e.g. `whatsapp_1.session_expired`) contributed by the
  *  action nodes present in the flow — merged into the Conditional variable picker. */
 const ExtraVariablesContext = createContext<{ key: string; source: string }[]>([]);
 
-/** When true, `extraVariables` is the entire variable universe. Inbound entry-point
- *  graphs have no Audience, so the `contact.*` samples could never resolve there and
- *  offering them would let an author write a branch that can never be taken. */
-const OnlyExtraVariablesContext = createContext(false);
+/** Suppresses the static `contact.*` sample fallback when true, making
+ *  `extraVariables` the entire variable universe. Freeform workflows and inbound
+ *  entry-point graphs have no Audience node, so exposing "sample" audience
+ *  variables there would let authors branch on data that never exists at runtime. */
+const SuppressSampleVariablesContext = createContext(false);
 
 /** Merge flow-derived variables (from the live nodes) with the static sample set.
  *  Dedupes by key (derived wins). When the Audience node has contributed real
  *  `contact.*` fields from its edited schema, the static `contact.*` samples are
  *  dropped so the picker reflects the actual schema, not the demo defaults. */
-function mergeVariables(extra: { key: string; source: string }[], onlyExtra = false) {
-  if (onlyExtra) return extra;
+function mergeVariables(extra: { key: string; source: string }[], suppressSamples = false) {
+  if (suppressSamples) {
+    // Still dedupe by key so callers that pass their own duplicates are safe.
+    const seen = new Set<string>();
+    return extra.filter((v) => (seen.has(v.key) ? false : (seen.add(v.key), true)));
+  }
   const hasDerivedContact = extra.some((v) => v.key.startsWith("contact."));
   const sample = hasDerivedContact
     ? SAMPLE_WORKFLOW_VARIABLES.filter((v) => !v.key.startsWith("contact."))
@@ -113,8 +156,11 @@ type Props = {
   onDuplicate: () => void;
   /** Outcome variables exposed by other action nodes in the flow (for the Conditional picker). */
   extraVariables?: { key: string; source: string }[];
-  /** Treat {@link extraVariables} as the complete universe — see {@link OnlyExtraVariablesContext}. */
-  onlyExtraVariables?: boolean;
+  /** When true, do NOT merge the demo `contact.*` fallback samples into the
+   *  variable picker. Used by surfaces (like Freeform Workflows) that have no
+   *  Audience node, so those variables never exist at runtime and would be a
+   *  footgun for authors to branch on. Also used by inbound entry-point graphs. */
+  suppressSampleVariables?: boolean;
 };
 
 const MIN_PANEL_W = 360;
@@ -183,7 +229,7 @@ function ResizablePanel({ children }: { children: React.ReactNode }) {
 // silently disconnect the example graph's edges mid-demo).
 const NOOP_CHANGE = (_patch: Partial<WorkflowNodeData>) => undefined;
 
-export function ConfigPanel({ node, readOnly, onClose, onChange, onDelete, onDuplicate, extraVariables, onlyExtraVariables }: Props) {
+export function ConfigPanel({ node, readOnly, onClose, onChange, onDelete, onDuplicate, extraVariables, suppressSampleVariables }: Props) {
   if (!node) return null;
   const { data } = node;
   const valid = data.valid !== false;
@@ -203,7 +249,7 @@ export function ConfigPanel({ node, readOnly, onClose, onChange, onDelete, onDup
 
   return (
     <ExtraVariablesContext.Provider value={extraVariables ?? []}>
-    <OnlyExtraVariablesContext.Provider value={!!onlyExtraVariables}>
+    <SuppressSampleVariablesContext.Provider value={!!suppressSampleVariables}>
     <ResizablePanel>
         <div className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
           <div className="min-w-0">
@@ -287,7 +333,7 @@ export function ConfigPanel({ node, readOnly, onClose, onChange, onDelete, onDup
           </div>
         )}
     </ResizablePanel>
-    </OnlyExtraVariablesContext.Provider>
+    </SuppressSampleVariablesContext.Provider>
     </ExtraVariablesContext.Provider>
   );
 }
@@ -357,12 +403,12 @@ function DescriptionField({
 function NodeFields({
   data, readOnly, onChange,
 }: { data: WorkflowNodeData; readOnly?: boolean; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
-  return <KindFields kind={data.kind} config={data.config} readOnly={readOnly} onChange={onChange} />;
+  return <KindFields kind={data.kind} config={data.config} serial={data.serial} readOnly={readOnly} onChange={onChange} />;
 }
 
 function KindFields({
-  kind, config, readOnly, onChange,
-}: { kind: NodeKind; config?: PresetConfig; readOnly?: boolean; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
+  kind, config, serial, readOnly, onChange,
+}: { kind: NodeKind; config?: PresetConfig; serial?: string; readOnly?: boolean; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
   const mark = (valid: boolean, error?: string) => onChange({ valid, error });
 
   switch (kind) {
@@ -392,16 +438,10 @@ function KindFields({
       return <AbSplitFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
 
     case "delay":
-      return (
-        <Section title="Delay">
-          <Field label="Duration" required>
-            <div className="grid grid-cols-2 gap-2">
-              <Input disabled={readOnly} type="number" defaultValue={config?.delayValue ?? 24} className="h-9" onChange={() => mark(true)} />
-              <SelectLike disabled={readOnly} options={["Minutes", "Hours", "Days"]} onPick={() => mark(true)} defaultValue={config?.delayUnit ?? "Hours"} />
-            </div>
-          </Field>
-        </Section>
-      );
+      return <DelayFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
+
+    case "aiTransform":
+      return <AiTransformFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
 
     case "voiceCall":
       return <VoiceCallFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
@@ -409,11 +449,20 @@ function KindFields({
     case "whatsapp":
       return <WhatsAppFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
 
+    case "whatsappFreeform":
+      return <WhatsAppFreeformFields config={config} serial={serial} readOnly={readOnly} mark={mark} onChange={onChange} />;
+
     case "sms":
       return <SmsFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
 
+    case "rcs":
+      return <RcsFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
+
     case "adsCampaign":
       return <AdsCampaignFields readOnly={readOnly} mark={mark} />;
+
+    case "needsReview":
+      return <NeedsReviewFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
   }
 }
 
@@ -657,48 +706,6 @@ function AgentSessionFields({ config, readOnly, mark, onChange }: { config?: Pre
   );
 }
 
-/** Prompt in, named variables out. The outputs are namespaced by the node's serial
- *  (e.g. `ai_1.intent`) so two transforms can emit the same field name. */
-function AiTransformFields({ config, readOnly, mark, onChange }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
-  const [prompt, setPrompt] = useState(config?.aiPrompt ?? "");
-  const [fields, setFields] = useState<SchemaField[]>(
-    config?.aiOutputs?.length ? config.aiOutputs : [{ id: "o1", name: "intent", type: "String" }],
-  );
-  const named = fields.filter((f) => f.name.trim());
-  const ok = !!prompt.trim() && named.length > 0;
-
-  useEffect(() => {
-    mark(ok, !prompt.trim() ? "Add a prompt" : "Name at least one output");
-    onChange({
-      config: { ...config, aiPrompt: prompt, aiOutputs: named },
-      subtitle: named.length ? named.map((f) => f.name).join(", ") : "Extract with a model",
-    });
-  }, [prompt, JSON.stringify(named)]);
-
-  return (
-    <>
-      <Section title="Prompt">
-        <Textarea
-          value={prompt}
-          disabled={readOnly}
-          rows={5}
-          placeholder="Classify the customer's opening message into one of: order_status, refund, other."
-          onChange={(e) => setPrompt(e.target.value)}
-          className="text-[13px]"
-        />
-        <p className="text-[11px] text-muted-foreground">
-          Runs on the arrival before routing continues. Reference published variables inline as <span className="font-mono">{"{{trigger.message_text}}"}</span>.
-        </p>
-      </Section>
-      <Section title="Outputs">
-        <SchemaFieldsEditor fields={fields} setFields={setFields} readOnly={readOnly} />
-        <p className="text-[11px] text-muted-foreground">
-          Available downstream as <span className="font-mono">serial.field_name</span>.
-        </p>
-      </Section>
-    </>
-  );
-}
 
 /* --------------------------- Conditional --------------------------- */
 
@@ -898,8 +905,27 @@ function ApiToolCallFields({
   const tool = getTool(handle);
   const selected = !!tool;
   const inputMap = config?.apiInputMap ?? [];
-  const mappable = (tool?.inputs ?? []).filter((i) => i.source !== "constant");
-  const constants = (tool?.inputs ?? []).filter((i) => i.source === "constant");
+  // Merge flat inputs + body-tree leaves into a single flat list so the mapper
+  // shows one row per campaign-bound field, regardless of whether the tool was
+  // authored with the legacy `inputs[]` shape or the new nested body tree.
+  const allInputs: ToolInput[] = useMemo(() => {
+    if (!tool) return [];
+    const nonBody = tool.inputs.filter((i) => i.in !== "body");
+    const legacyBody = tool.body ? [] : tool.inputs.filter((i) => i.in === "body");
+    const bodyLeaves: ToolInput[] = tool.body
+      ? flattenBody(tool.body).map(({ path, node }) => ({
+          key: path || node.key || "field",
+          dataType: node.dataType,
+          in: "body" as const,
+          source: node.source ?? "constant",
+          value: node.value ?? "",
+          description: node.description ?? "",
+        }))
+      : [];
+    return [...nonBody, ...legacyBody, ...bodyLeaves];
+  }, [tool]);
+  const mappable = allInputs.filter((i) => i.source !== "constant");
+  const constants = allInputs.filter((i) => i.source === "constant");
 
   // Persist the chosen tool + input map to node config so the node restores on
   // reopen AND downstream nodes can resolve its outputs (see deriveNodeOutcomeVariables).
@@ -924,32 +950,36 @@ function ApiToolCallFields({
     next.push({ v: key, def: existing?.def ?? "", mode: existing?.mode, remap: remap.length ? remap : undefined });
     onChange({ config: { ...config, apiTool: handle, apiInputMap: next } });
   };
+  const outputsVisible = selected && !!tool && tool.outputs.length > 0;
   return (
-    <>
-      <Section title="API tool">
-        <div className="rounded-xl border border-border bg-card/50 p-4 space-y-4">
-          {/* Step 1: pick the API tool */}
-          <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <StepChip n={1} done={selected} />
-              <Label className="flex items-center gap-1 text-[12px] font-medium text-foreground">
-                API tool <span className="text-destructive">*</span>
-              </Label>
-            </div>
-            <SelectLike
-              disabled={readOnly}
-              options={TOOLS.map((t) => t.handle)}
-              defaultValue={config?.apiTool}
-              onPick={pickTool}
-              placeholder="Select an API tool…"
-            />
-            {tool && (
-              <p className="text-[11px] text-muted-foreground">
-                <span className="font-mono text-foreground">{tool.method ?? tool.type.toUpperCase()}</span>{" "}
-                <span className="font-mono">{tool.url}</span> — {tool.description}
-              </p>
-            )}
+    <Section title="Tool">
+      <div className="rounded-xl border border-border bg-card/50 p-4 space-y-4">
+        {/* Step 1: pick the tool. Endpoint + description live inside the same
+            numbered block so the layout stays compact. */}
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <StepChip n={1} done={selected} />
+            <Label className="flex items-center gap-1 text-[12px] font-medium text-foreground">
+              Tool <span className="text-destructive">*</span>
+            </Label>
           </div>
+          <SelectLike
+            disabled={readOnly}
+            options={TOOLS.map((t) => t.handle)}
+            defaultValue={config?.apiTool}
+            onPick={pickTool}
+            placeholder="Select a tool…"
+          />
+          {tool && (
+            <div className="space-y-1">
+              <p className="font-mono text-[11.5px] text-foreground">
+                <span className="text-muted-foreground">{tool.method ?? tool.type.toUpperCase()}</span>{" "}
+                {tool.url}
+              </p>
+              <p className="text-[11.5px] text-muted-foreground leading-snug">{tool.description}</p>
+            </div>
+          )}
+        </div>
 
           <div className="border-t border-border/60" />
 
@@ -963,86 +993,105 @@ function ApiToolCallFields({
               Map each request parameter to an upstream workflow variable (e.g. a CSV column).
             </p>
             {selected ? (
-              mappable.length > 0 ? (
-                <div className="space-y-2 pt-1">
-                  {mappable.map((inp) => {
-                    const row = inputMap.find((m) => m.v === inp.key);
-                    const def = row?.def
-                      ?? (inp.source === "campaign" ? `contact.${inp.value ?? inp.key}` : "");
-                    // A value-remap only makes sense for a variable source (you remap the
-                    // resolved value); a hardcoded constant is already the final value.
-                    const isVarMapped = (row?.mode ?? "variable") === "variable" && !!def;
-                    return (
-                      <div key={inp.key} className="space-y-1.5">
-                        <div className="grid grid-cols-[130px_1fr] items-center gap-2">
-                          <span className="truncate font-mono text-[11.5px] text-muted-foreground" title={inp.description}>
-                            {inp.key}
-                          </span>
-                          <VariablePicker
-                            defaultValue={def}
+            mappable.length > 0 ? (
+              <div className="space-y-2 pt-1">
+                {mappable.map((inp) => {
+                  const row = inputMap.find((m) => m.v === inp.key);
+                  const def = row?.def
+                    ?? (inp.source === "campaign" ? `contact.${inp.value ?? inp.key}` : "");
+                  // A value-remap only makes sense for a variable source (you remap the
+                  // resolved value); a hardcoded constant is already the final value.
+                  const isVarMapped = (row?.mode ?? "variable") === "variable" && !!def;
+                  return (
+                    <div key={inp.key} className="space-y-1.5">
+                      <div className="grid grid-cols-[130px_1fr] items-center gap-2">
+                        <span className="truncate font-mono text-[11.5px] text-muted-foreground" title={inp.description}>
+                          {inp.key}
+                        </span>
+                        <VariablePicker
+                          defaultValue={def}
+                          disabled={readOnly}
+                          allowConstant
+                          mode={row?.mode}
+                          onChange={(v, mode) => setMapping(inp.key, v, mode)}
+                        />
+                      </div>
+                      {isVarMapped && (
+                        <div className="pl-[138px]">
+                          <ValueRemapEditor
+                            value={row?.remap ?? []}
                             disabled={readOnly}
-                            allowConstant
-                            mode={row?.mode}
-                            onChange={(v, mode) => setMapping(inp.key, v, mode)}
+                            onChange={(rm) => setRemap(inp.key, rm)}
                           />
                         </div>
-                        {isVarMapped && (
-                          <div className="pl-[138px]">
-                            <ValueRemapEditor
-                              value={row?.remap ?? []}
-                              disabled={readOnly}
-                              onChange={(rm) => setRemap(inp.key, rm)}
-                            />
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="rounded-md border border-dashed border-border bg-muted/30 px-3 py-3 text-[11.5px] text-muted-foreground">
-                  All parameters are fixed at the tool — no mapping needed.
-                </div>
-              )
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             ) : (
               <div className="rounded-md border border-dashed border-border bg-muted/30 px-3 py-3 text-[11.5px] text-muted-foreground">
-                Select an API tool above to map its inputs.
+                All parameters are fixed at the tool — no mapping needed.
               </div>
-            )}
-          </div>
+            )
+          ) : (
+            <div className="rounded-md border border-dashed border-border bg-muted/30 px-3 py-3 text-[11.5px] text-muted-foreground">
+              Select a tool above to map its inputs.
+            </div>
+          )}
         </div>
-      </Section>
 
-      {selected && constants.length > 0 && (
-        <Section title="Fixed parameters">
-          <div className="rounded-xl border border-border bg-card/50 p-3 space-y-1.5">
-            {constants.map((c) => (
-              <div key={c.key} className="flex items-center justify-between gap-3 text-[11.5px]">
-                <span className="font-mono text-muted-foreground">{c.key}</span>
-                <span className="truncate font-mono text-foreground" title={c.value}>{c.value}</span>
-              </div>
-            ))}
-          </div>
-        </Section>
-      )}
+        {selected && constants.length > 0 && (
+          <>
+            <div className="border-t border-border/60" />
+            <div className="space-y-1.5">
+              <Label className="text-[12px] font-medium text-foreground">Fixed parameters</Label>
+              {constants.map((c) => (
+                <div key={c.key} className="flex items-center justify-between gap-3 text-[11.5px]">
+                  <span className="font-mono text-muted-foreground">{c.key}</span>
+                  <span className="truncate font-mono text-foreground" title={c.value}>{c.value}</span>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
 
-      {selected && tool.outputs.length > 0 && (
-        <Section title="Outputs → downstream variables">
-          <div className="rounded-xl border border-border bg-card/50 p-3 space-y-1.5">
-            <p className="text-[11px] text-muted-foreground">
-              These response fields are available to later nodes as{" "}
-              <span className="font-mono text-foreground">{"{node}.{field}"}</span>.
-            </p>
-            {tool.outputs.map((o) => (
-              <div key={o.varName} className="flex items-center justify-between gap-3 text-[11.5px]">
-                <span className="font-mono text-ai">{o.varName}</span>
-                <span className="truncate text-muted-foreground" title={o.description}>{o.description}</span>
+        {/* Step 3 — outputs (read-only, informational only) */}
+        {outputsVisible && (
+          <>
+            <div className="border-t border-border/60" />
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <StepChip n={3} muted={!selected} />
+                <Label className="text-[12px] font-medium text-foreground">Outputs</Label>
               </div>
-            ))}
-          </div>
-        </Section>
-      )}
-    </>
+              <div className="overflow-hidden rounded-md border border-border">
+                <table className="w-full text-[11.5px]">
+                  <thead>
+                    <tr className="border-b border-border bg-secondary/40 text-[10px] uppercase tracking-wider text-muted-foreground">
+                      <th className="px-3 py-1.5 text-left font-medium">Name</th>
+                      <th className="px-3 py-1.5 text-left font-medium">Type</th>
+                      <th className="px-3 py-1.5 text-left font-medium">Description</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {tool.outputs.map((o) => (
+                      <tr key={o.varName}>
+                        <td className="px-3 py-1.5 font-mono text-ai">{o.varName}</td>
+                        <td className="px-3 py-1.5">
+                          <span className="rounded-sm border border-border bg-secondary/40 px-1 py-0.5 text-[10px]">{o.dataType ?? "String"}</span>
+                        </td>
+                        <td className="px-3 py-1.5 text-muted-foreground">{o.description}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    </Section>
   );
 }
 
@@ -1270,7 +1319,8 @@ function ToolInputMapPicker({
   const [m, setM] = useState<"variable" | "constant">(mode);
   useEffect(() => { setM(mode); }, [mode]);
   const extraVariables = useContext(ExtraVariablesContext);
-  const allVariables = mergeVariables(extraVariables, useContext(OnlyExtraVariablesContext));
+  const suppressSamples = useContext(SuppressSampleVariablesContext);
+  const allVariables = mergeVariables(extraVariables, suppressSamples);
   const isCustom = v !== "__llm__" && !!v && !allVariables.some((s) => s.key === v);
   const grouped = groupVariablesBySource(allVariables);
 
@@ -1371,12 +1421,26 @@ function WhatsAppCore({
   const approved = templates.filter((t) => t.status === "Approved");
   const pending = templates.filter((t) => t.status === "Pending");
   const waba = useWabaConnection() ?? DEMO_RESULT;
-
+  const [timeoutHours, setTimeoutHours] = useState(config?.waTimeoutHours ?? DEFAULT_WA_TIMEOUT_HOURS);
   const template = resolveWaTemplate(templateId);
   const templateSelected = !!template;
+  // Media-header templates (IMAGE / VIDEO / DOCUMENT) need one URL per lead, on top
+  // of the usual text-variable mapping. Meta accepts either a public URL or an
+  // uploaded media ID — we support the URL path only for now.
+  const mediaFormat: Exclude<TemplateFormat, "TEXT"> | null =
+    template && template.format !== "TEXT" ? template.format : null;
+  const waMediaUrl: PresetVarMap = config?.waMediaUrl ?? { v: "media_url", def: "", mode: "variable" };
+  const mediaConstantError =
+    mediaFormat && waMediaUrl.mode === "constant" && waMediaUrl.def.trim()
+      ? validateMediaUrl(waMediaUrl.def, mediaFormat)
+      : null;
+  const mediaMapped = !!waMediaUrl.def.trim() && !mediaConstantError;
+  const setWaMediaUrl = (def: string, m?: "variable" | "constant") => {
+    onChange({ config: { ...config, waMediaUrl: { v: "media_url", def, mode: m ?? waMediaUrl.mode ?? "variable" } } });
+  };
   // "Branchable" buttons produce a trackable handle (Quick Reply / tracked URL).
   // Phone numbers and untracked URLs are NOT branchable — those taps route through
-  // the always-on "No response / continue" path.
+  // the always-on "Timeout" path.
   const hasButtons = mode !== "freeform" && !!template
     && (template.buttons ?? []).some(isBranchableButton);
   const isType1 = !hasButtons;
@@ -1404,8 +1468,14 @@ function WhatsAppCore({
   };
 
   useEffect(() => {
-    mark(numberSelected && contentReady, numberSelected ? undefined : "Select a connected WhatsApp number");
-  }, [numberSelected, contentReady]);
+    const mediaOk = !mediaFormat || mediaMapped;
+    const err = !numberSelected
+      ? "Select a connected WhatsApp number"
+      : mediaFormat && !mediaMapped
+        ? `Map the ${mediaFormat.toLowerCase()} URL for this template's header`
+        : undefined;
+    mark(numberSelected && contentReady && mediaOk, err);
+  }, [numberSelected, contentReady, mediaFormat, mediaMapped]);
 
   // Publish the canvas handles (derived from template buttons + the Type-1 split
   // toggle) AND persist the config so the node restores correctly when reopened.
@@ -1418,10 +1488,10 @@ function WhatsAppCore({
   useEffect(() => {
     onChange({
       outputs: outs,
-      config: { ...config, waMode: mode, waTemplate: templateId },
+      config: { ...config, waMode: mode, waTemplate: templateId, waTimeoutHours: timeoutHours },
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, templateId, outsKey]);
+  }, [mode, templateId, outsKey, timeoutHours]);
 
   return (
     <>
@@ -1557,12 +1627,48 @@ function WhatsAppCore({
               )}
             </div>
 
+            {/* Step 2: media URL — only for templates whose header is a media file.
+                Meta accepts either a public URL or an uploaded media ID; we support
+                the URL path for now. Runtime asks Meta to fetch the URL, so file-
+                level checks (size, dimensions, MIME) surface at send time. */}
+            {mediaFormat && (
+              <>
+                <div className="border-t border-border/60" />
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <StepChip n={2} done={mediaMapped} muted={!templateSelected} />
+                    <Label className="flex items-center gap-1 text-[12px] font-medium text-foreground">
+                      {mediaFormat === "IMAGE" ? "Image URL" : mediaFormat === "VIDEO" ? "Video URL" : "Document URL"}
+                      <span className="text-destructive">*</span>
+                    </Label>
+                  </div>
+                  <div className="space-y-1">
+                    <VariablePicker
+                      value={waMediaUrl.def}
+                      disabled={readOnly}
+                      allowConstant
+                      mode={waMediaUrl.mode}
+                      onChange={(v, m) => setWaMediaUrl(v, m)}
+                    />
+                    {mediaConstantError ? (
+                      <p className="text-[11px] text-destructive">{mediaConstantError}</p>
+                    ) : (
+                      <p className="text-[10.5px] text-muted-foreground">
+                        Meta accepts: {MEDIA_HINTS[mediaFormat].accept}. Must be a public HTTPS URL.
+                        Files that exceed the size or format limit are rejected by Meta at send time.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </>
+            )}
+
             <div className="border-t border-border/60" />
 
-            {/* Step 2: variable mapping */}
+            {/* Variable mapping — step 3 when a media step precedes it, otherwise 2. */}
             <div className="space-y-2">
               <div className="flex items-center gap-2">
-                <StepChip n={2} muted={!templateSelected} />
+                <StepChip n={mediaFormat ? 3 : 2} muted={!templateSelected} />
                 <Label className="text-[12px] font-medium text-foreground">Variable mapping</Label>
               </div>
               {templateSelected ? (
@@ -1633,12 +1739,426 @@ function WhatsAppCore({
         </Section>
       )}
 
-      {/* A WhatsApp node always exposes "Replied (no button)" + "No response /
-          continue" (and one handle per trackable button). Untrackable taps —
-          phone numbers, untracked URLs — route through "No response / continue",
-          so call it out when the template carries any. */}
-      <ActionAdvanceBanner kind="whatsapp" type1={isType1} />
+      <Section title="Response window">
+        <Field label="Wait for a response" required>
+          <Select value={String(timeoutHours)} disabled={readOnly} onValueChange={(v) => setTimeoutHours(Number(v))}>
+            <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {WA_TIMEOUT_HOURS.map((h) => (
+                <SelectItem key={h} value={String(h)}>
+                  {waTimeoutLabel(h)}{h === DEFAULT_WA_TIMEOUT_HOURS ? " · WhatsApp session limit" : ""}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="mt-1 text-[10.5px] text-muted-foreground">
+            How long a lead waits here with no reply before taking the “Timeout” path. WhatsApp closes the
+            session at 24 hours, so that is the maximum.
+          </p>
+        </Field>
+      </Section>
+
+      {/* A WhatsApp node always exposes "Text Reply Received" + "Timeout" (and one
+          handle per trackable button). Untrackable taps — phone numbers,
+          untracked URLs — route through "Timeout", so call it out when the
+          template carries any. */}
+      <ActionAdvanceBanner kind="whatsapp" type1={isType1} timeoutHours={timeoutHours} />
     </>
+  );
+}
+
+/* --------------------------- WhatsApp Freeform Workflow --------------------------- */
+
+/**
+ * WhatsApp Freeform Workflow. The campaign-side node that embeds a reusable
+ * freeform flow inside the 24-hour service window. Config is small and opinionated:
+ *
+ *   1) Pick a workflow (Ready-state only, from Channels → WhatsApp → Freeform
+ *      Workflows). Eye button opens a static preview modal (pan + zoom only).
+ *   2) Map each `{{var}}` the workflow references — grouped by variable name,
+ *      with all locations (which node / which part of that node) listed under
+ *      the picker so the author knows exactly where each mapping lands.
+ *   3) Session-close: `absolute` (from freeform-entry) OR `inactivity` (from
+ *      last lead interaction), whichever fires (or the lead reaching End)
+ *      first. Duration capped at 1440 min (Meta's 24-hour window).
+ *
+ * Outputs — Completed / Timed out / Failed — are seeded once at add time and
+ * never change based on config, so authors can pre-wire them.
+ */
+const FF_TIMER_MIN = 1;
+const FF_TIMER_MAX = 1440; // 24 hours
+
+function WhatsAppFreeformFields({
+  config, serial, readOnly, mark, onChange,
+}: {
+  config?: PresetConfig;
+  /** This node's per-kind serial (e.g. `ffw_1`). Used to render the output
+   *  variables list with the real namespace, not a `<this-node>` placeholder. */
+  serial?: string;
+  readOnly?: boolean;
+  mark: (v: boolean, e?: string) => void;
+  onChange: (patch: Partial<WorkflowNodeData>) => void;
+}) {
+  // Subscribe to the freeform store so a Ready state flipping (e.g. author fixes
+  // an invalid workflow in the builder) live-updates the dropdown here.
+  const workflows = useSyncExternalStore(subscribeFreeformWorkflows, getFreeformWorkflows, getFreeformWorkflows);
+  const readyWorkflows = useMemo(() => workflows.filter((w) => w.status === "ready"), [workflows]);
+
+  const selectedId = config?.ffWorkflowId ?? "";
+  const selected = useMemo(() => workflows.find((w) => w.id === selectedId), [workflows, selectedId]);
+
+  const placeholders = useMemo<FreeformPlaceholder[]>(
+    () => (selected ? getFreeformPlaceholders(selected.nodes) : []),
+    [selected],
+  );
+
+  const timerMode = config?.ffTimerMode ?? "absolute";
+  const timerMinutes = config?.ffTimerMinutes ?? 60;
+  // Stable references so the validity useEffect below doesn't loop — a fresh
+  // `[]` fallback would re-trigger the effect (which calls `mark`, which
+  // updates the node, which re-renders us) every tick.
+  const varMap = useMemo(() => config?.ffVarMap ?? [], [config?.ffVarMap]);
+
+  const [previewOpen, setPreviewOpen] = useState(false);
+
+  // Publish current validity + persist a completed varMap shape as the user
+  // fills the fields. `mark` is unstable (recreated each render by KindFields)
+  // so we store it in a ref and gate the actual call on real result changes —
+  // otherwise the effect loops indefinitely.
+  const markRef = useRef(mark);
+  markRef.current = mark;
+  const prevResultRef = useRef<{ valid: boolean; error?: string }>({ valid: false, error: "Pick a workflow" });
+  useEffect(() => {
+    let result: { valid: boolean; error?: string };
+    if (!selected) result = { valid: false, error: "Pick a workflow" };
+    else if (selected.status !== "ready") result = { valid: false, error: "Selected workflow is not Ready" };
+    else if (timerMinutes < FF_TIMER_MIN || timerMinutes > FF_TIMER_MAX) result = { valid: false, error: `Session timer must be between ${FF_TIMER_MIN} and ${FF_TIMER_MAX} minutes` };
+    else {
+      const missing = placeholders.find((p) => !varMap.find((m) => m.v === `{{${p.key}}}` && m.def?.trim()));
+      if (missing) result = { valid: false, error: `Map variable {{${missing.key}}}` };
+      else result = { valid: true };
+    }
+    const prev = prevResultRef.current;
+    if (prev.valid === result.valid && prev.error === result.error) return;
+    prevResultRef.current = result;
+    markRef.current(result.valid, result.error);
+  }, [selected, placeholders, timerMinutes, varMap]);
+
+  const patchConfig = (p: Partial<PresetConfig>) => onChange({ config: { ...config, ...p } });
+
+  const setMapping = (key: string, def: string, mode?: "variable" | "constant") => {
+    const v = `{{${key}}}`;
+    const next = (config?.ffVarMap ?? []).filter((m) => m.v !== v);
+    next.push({ v, def, mode });
+    patchConfig({ ffVarMap: next });
+  };
+
+  return (
+    <>
+      <Section title="Workflow">
+        <div className="rounded-xl border border-border bg-card/50 p-4 space-y-4">
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <StepChip n={1} done={!!selected} />
+              <Label className="flex items-center gap-1 text-[12px] font-medium text-foreground">
+                Freeform workflow <span className="text-destructive">*</span>
+              </Label>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <div className="min-w-0 flex-1">
+                <SelectLike
+                  disabled={readOnly}
+                  options={readyWorkflows.map((w) => w.id)}
+                  optionLabel={(id) => readyWorkflows.find((w) => w.id === id)?.name ?? id}
+                  defaultValue={selectedId || undefined}
+                  onPick={(v) => patchConfig({ ffWorkflowId: v, ffVarMap: [] })}
+                  placeholder={readyWorkflows.length ? "Select a workflow…" : "No Ready workflows yet"}
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => selected && setPreviewOpen(true)}
+                disabled={!selected}
+                className={cn(
+                  "grid h-9 w-9 shrink-0 place-items-center rounded-md border border-border text-muted-foreground transition-colors",
+                  selected ? "hover:bg-accent hover:text-foreground" : "cursor-not-allowed opacity-40",
+                )}
+                title={selected ? "Preview workflow" : "Pick a workflow to preview"}
+              >
+                <Eye className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            {readyWorkflows.length === 0 && (
+              <p className="text-[11px] text-muted-foreground">
+                Author + set to Ready first from{" "}
+                <Link to="/channels/whatsapp" className="underline hover:text-foreground">
+                  Channels → WhatsApp → Freeform Workflows
+                </Link>
+                .
+              </p>
+            )}
+          </div>
+
+          <div className="border-t border-border/60" />
+
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <StepChip n={2} muted={!selected} done={selected && placeholders.every((p) => varMap.find((m) => m.v === `{{${p.key}}}` && m.def?.trim())) ? true : undefined} />
+              <Label className="text-[12px] font-medium text-foreground">Variable mapping</Label>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Map each <span className="font-mono">{"{{var}}"}</span> placeholder found in the workflow to an upstream variable or literal.
+            </p>
+            {!selected ? (
+              <div className="rounded-md border border-dashed border-border bg-muted/30 px-3 py-3 text-[11.5px] text-muted-foreground">
+                Pick a workflow above to see its variables.
+              </div>
+            ) : placeholders.length === 0 ? (
+              <div className="rounded-md border border-dashed border-border bg-muted/30 px-3 py-3 text-[11.5px] text-muted-foreground">
+                This workflow has no <span className="font-mono">{"{{var}}"}</span> placeholders.
+              </div>
+            ) : (
+              <div className="space-y-3 pt-1">
+                {placeholders.map((p) => {
+                  const v = `{{${p.key}}}`;
+                  const saved = varMap.find((m) => m.v === v);
+                  return (
+                    <div key={p.key} className="space-y-1.5">
+                      <div className="flex items-baseline justify-between gap-2">
+                        <span className="font-mono text-[12px] text-foreground">{v}</span>
+                        <span className="text-[10.5px] text-muted-foreground">{p.locations.length} location{p.locations.length === 1 ? "" : "s"}</span>
+                      </div>
+                      <VariablePicker
+                        defaultValue={saved?.def}
+                        disabled={readOnly}
+                        allowConstant
+                        mode={saved?.mode}
+                        onChange={(val, mode) => setMapping(p.key, val, mode)}
+                      />
+                      <ul className="space-y-0.5 pl-1">
+                        {p.locations.map((loc, i) => (
+                          <li key={i} className="text-[10.5px] leading-tight text-muted-foreground">
+                            <span className="font-mono text-foreground/70">{loc.nodeSerial}</span>
+                            <span className="text-muted-foreground/70"> · {loc.part}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      </Section>
+
+      <Section title="Session closure">
+        <div className="rounded-xl border border-border bg-card/50 p-4 space-y-4">
+          <p className="text-[11px] text-muted-foreground">
+            The lead exits the WhatsApp Freeform workflow when they reach its End node <span className="italic">or</span> when the timer below fires, whichever comes first.
+          </p>
+          <div className="space-y-2">
+            <Label className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+              Timer <span className="text-destructive">*</span>
+            </Label>
+            <div className="grid grid-cols-2 gap-1.5">
+              <TimerTile
+                active={timerMode === "absolute"}
+                onClick={() => patchConfig({ ffTimerMode: "absolute" })}
+                label="Total Session Time"
+                hint="From workflow entry"
+                disabled={readOnly}
+              />
+              <TimerTile
+                active={timerMode === "inactivity"}
+                onClick={() => patchConfig({ ffTimerMode: "inactivity" })}
+                label="User Inactivity Time"
+                hint="From last lead action"
+                disabled={readOnly}
+              />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+              Duration <span className="text-destructive">*</span>
+            </Label>
+            <TimerDurationPicker
+              minutes={timerMinutes}
+              disabled={readOnly}
+              onChange={(m) => patchConfig({ ffTimerMinutes: m })}
+            />
+            <p className="text-[11px] text-muted-foreground">
+              Max 24 hours. Meta closes the customer-service window automatically after that.
+            </p>
+          </div>
+        </div>
+      </Section>
+
+      {selected && (
+        <FreeformOutputVarsSection
+          serial={serial ?? "ffw"}
+          selectedNodes={selected.nodes}
+        />
+      )}
+
+      {/* Preview modal. Read-only FreeformCanvas (pan + zoom only). */}
+      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+        <DialogContent className="max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>{selected?.name ?? "Workflow preview"}</DialogTitle>
+            <DialogDescription>
+              Read-only view. Pan and zoom to inspect; nothing here is editable.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="h-[70vh] overflow-hidden rounded-lg border border-border bg-background">
+            {selected && (
+              <FreeformCanvas
+                initialNodes={selected.nodes}
+                initialEdges={selected.edges}
+                previewOnly
+              />
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+function TimerTile({
+  active, onClick, label, hint, disabled,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+  hint: string;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={cn(
+        "flex flex-col items-start gap-0.5 rounded-md border px-2.5 py-2 text-left transition-colors",
+        active ? "border-foreground bg-accent/40" : "border-border hover:bg-accent/30",
+        disabled && "cursor-not-allowed opacity-50",
+      )}
+    >
+      <span className="text-[12px] font-medium">{label}</span>
+      <span className="text-[10.5px] text-muted-foreground">{hint}</span>
+    </button>
+  );
+}
+
+function fmtMinutes(m: number): string {
+  if (m < 60) return `${m} min`;
+  const h = Math.floor(m / 60);
+  const r = m - h * 60;
+  if (r === 0) return `${h}h`;
+  return `${h}h ${r}m`;
+}
+
+/**
+ * Value + unit picker for the freeform session timer. Value is a number input,
+ * unit is a dropdown (Minutes / Hours). Value is stored on the config as
+ * minutes; the picker converts on read + write. Clamp lives at the number-input
+ * level so the underlying `ffTimerMinutes` never exceeds Meta's 24-hour window.
+ */
+function TimerDurationPicker({
+  minutes, disabled, onChange,
+}: {
+  minutes: number;
+  disabled?: boolean;
+  onChange: (m: number) => void;
+}) {
+  // Prefer Hours when the current value is a whole-hour multiple; otherwise
+  // fall back to Minutes so the author isn't tricked by rounding.
+  const [unit, setUnit] = useState<"m" | "h">(
+    minutes % 60 === 0 && minutes >= 60 ? "h" : "m",
+  );
+  const displayValue = unit === "h" ? Math.round(minutes / 60) : minutes;
+  const stepMax = unit === "h" ? Math.floor(FF_TIMER_MAX / 60) : FF_TIMER_MAX;
+  return (
+    <div className="flex items-center gap-2">
+      <Input
+        type="number"
+        min={1}
+        max={stepMax}
+        value={displayValue}
+        disabled={disabled}
+        onChange={(e) => {
+          const raw = Number(e.target.value);
+          if (Number.isNaN(raw)) return;
+          const asMinutes = unit === "h" ? raw * 60 : raw;
+          const clamped = Math.max(FF_TIMER_MIN, Math.min(FF_TIMER_MAX, Math.round(asMinutes)));
+          onChange(clamped);
+        }}
+        className="h-9 w-24 text-sm"
+      />
+      <Select
+        value={unit}
+        disabled={disabled}
+        onValueChange={(next) => {
+          const u = next as "m" | "h";
+          setUnit(u);
+          // Re-clamp when switching units so we never exceed the window.
+          if (u === "h" && minutes > 24 * 60) onChange(24 * 60);
+        }}
+      >
+        <SelectTrigger className="h-9 w-[110px] text-sm">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="m">Minutes</SelectItem>
+          <SelectItem value="h">Hours</SelectItem>
+        </SelectContent>
+      </Select>
+      <span className="text-[12px] text-muted-foreground">({fmtMinutes(minutes)})</span>
+    </div>
+  );
+}
+
+/**
+ * Collapsible "Available output variables" section for the freeform campaign
+ * node. Hidden by default per v1 spec (uncommon field, adds noise). Each var
+ * key is namespaced by the node's real serial (e.g. `ffw_1.status`,
+ * `ffw_1.list_1.selected`) so downstream authors know the exact key to copy.
+ */
+function FreeformOutputVarsSection({
+  serial,
+  selectedNodes,
+}: {
+  serial: string;
+  selectedNodes: FreeformNodeRecord[];
+}) {
+  const [open, setOpen] = useState(false);
+  const outputs = useMemo(
+    () => getFreeformCampaignOutputs(serial, selectedNodes),
+    [serial, selectedNodes],
+  );
+  return (
+    <Section title="Available output variables">
+      <div className="rounded-xl border border-border bg-card/50">
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          className="flex w-full items-center justify-between px-4 py-3 text-left text-[11.5px] text-muted-foreground hover:bg-accent/30"
+        >
+          <span>{outputs.length} variable{outputs.length === 1 ? "" : "s"} downstream nodes can branch on</span>
+          {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+        </button>
+        {open && (
+          <div className="border-t border-border px-4 py-3">
+            <ul className="space-y-1">
+              {outputs.map((v) => (
+                <li key={v.key} className="font-mono text-[11.5px] text-foreground/80">{v.key}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    </Section>
   );
 }
 
@@ -1647,34 +2167,415 @@ function WhatsAppCore({
 function SmsFields({ config, readOnly, mark, onChange }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
   return (
     <ActionNodeShell kind="sms" config={config} readOnly={readOnly} mark={mark} onChange={onChange}
-      renderCore={(coreMark) => <SmsCore config={config} readOnly={readOnly} mark={coreMark} />} />
+      renderCore={(coreMark) => <SmsCore config={config} readOnly={readOnly} mark={coreMark} onChange={onChange} />} />
   );
 }
 
-function SmsCore({ config, readOnly, mark }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void }) {
+/**
+ * SMS node core — template-driven, mirroring the WhatsApp cascade.
+ *
+ * Under DLT the message body is fixed by the approved template, so nothing here
+ * edits copy: the client picks Campaign type → Sender ID → Template from the
+ * registry (Channels → SMS), and the only editable part is what gets substituted
+ * into each `{{var}}` and how long to wait for a DLR. Body text is shown
+ * read-only — a single altered character makes the operator reject the message.
+ */
+function SmsCore({ config, readOnly, mark, onChange }: {
+  config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void;
+  onChange: (patch: Partial<WorkflowNodeData>) => void;
+}) {
+  const smsConfig = useSmsConfig();
+  const templates = useSmsTemplates();
+  const [category, setCategory] = useState<SmsCategory | "">(
+    (config?.smsCategory as SmsCategory) ?? "",
+  );
+  const [senderId, setSenderId] = useState(config?.senderId ?? "");
+  const [templateId, setTemplateId] = useState(config?.smsTemplateId ?? "");
+  const [dlrWindow, setDlrWindow] = useState(config?.smsDlrWindow ?? DEFAULT_SMS_DLR_WINDOW);
+
+  const template = resolveSmsTemplate(templateId);
+
+  // Cascade: category narrows senders (a header is approved per category), and
+  // the two together narrow the templates. A selection that falls outside the
+  // narrowed set is cleared rather than left dangling.
+  const senders = category ? sendersForCategory(smsConfig, category) : [];
+  const matching = templates.filter(
+    (t) => (!category || t.category === category) && (!senderId || t.senderId === senderId),
+  );
+  useEffect(() => {
+    if (senderId && !senders.some((s) => s.id === senderId)) setSenderId("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [category]);
+  useEffect(() => {
+    if (templateId && !matching.some((t) => t.id === templateId)) setTemplateId("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [category, senderId]);
+
+  // Mapping rows are derived from the template's own placeholders, hydrated from
+  // any saved mapping so edits survive reopening the node.
+  const placeholders = smsPlaceholders(template?.content);
+  const varMap: PresetVarMap[] = placeholders.map(
+    (v) => config?.smsVarMap?.find((m) => m.v === v) ?? { v, def: "" },
+  );
+  const unmapped = varMap.filter((m) => !m.def?.trim()).length;
+
+  const setMapping = (key: string, def: string, mode?: "variable" | "constant") => {
+    const next = varMap.filter((m) => m.v !== key);
+    next.push({ v: key, def, mode });
+    onChange({ config: { ...config, smsVarMap: next } });
+  };
+
+  // Publish handles + persist the selection so the node restores when reopened.
+  // SMS always exposes the same three delivery outcomes (Delivered / Failed /
+  // Timeout), so the handles are fixed; they still need publishing on first config.
+  useEffect(() => {
+    onChange({
+      outputs: smsOutputs(),
+      config: {
+        ...config,
+        smsTemplateId: templateId,
+        smsDlrWindow: dlrWindow,
+        smsCategory: category || undefined,
+        senderId: senderId || undefined,
+        peId: template?.peId ?? smsConfig.principalEntities[0]?.id,
+      },
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [templateId, dlrWindow, category, senderId]);
+
+  useEffect(() => {
+    if (!template) mark(false, "Select a DLT template");
+    else if (unmapped > 0) mark(false, `Map ${unmapped} template variable${unmapped === 1 ? "" : "s"}`);
+    else mark(true);
+  }, [templateId, unmapped]);
+
   return (
     <>
-      <Section title="SMS Configuration">
-        <div className="grid grid-cols-2 gap-2">
-          <Field label="Message type" required>
-            <SelectLike disabled={readOnly} options={["Promotional", "Transactional", "OTP"]} defaultValue={config?.smsType} onPick={() => mark(true)} />
-          </Field>
-          <Field label="Format">
-            <SelectLike disabled={readOnly} options={["Text", "Unicode", "Flash SMS"]} onPick={() => undefined} defaultValue={config?.smsFormat ?? "Text"} />
-          </Field>
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <Field label="PE ID" required><Input disabled={readOnly} defaultValue={config?.peId} placeholder="1101xxxxxxxxxxxxxx" className="h-9 font-mono text-[12px]" onChange={(e) => mark(!!e.target.value)} /></Field>
-          <Field label="Sender ID" required><Input disabled={readOnly} defaultValue={config?.senderId} placeholder="PICOMM" maxLength={6} className="h-9 font-mono text-[12px]" onChange={(e) => mark(!!e.target.value)} /></Field>
+      <Section title="DLT template">
+        <div className="rounded-xl border border-border bg-card/50 p-4 space-y-4">
+          {/* Step 1: narrow by category + sender, then pick the template */}
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <StepChip n={1} done={!!template} />
+              <Label className="flex items-center gap-1 text-[12px] font-medium text-foreground">
+                Approved template <span className="text-destructive">*</span>
+              </Label>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="Category" required>
+                <Select value={category || undefined} disabled={readOnly} onValueChange={(v) => setCategory(v as SmsCategory)}>
+                  <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select…" /></SelectTrigger>
+                  <SelectContent>
+                    {SMS_CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field label="Sender ID" required>
+                <Select value={senderId || undefined} disabled={readOnly || !category} onValueChange={setSenderId}>
+                  <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select…" /></SelectTrigger>
+                  <SelectContent>
+                    {senders.map((s) => <SelectItem key={s.id} value={s.id}>{s.id}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </Field>
+            </div>
+            <Select value={templateId || undefined} disabled={readOnly || !senderId} onValueChange={setTemplateId}>
+              <SelectTrigger className="h-9 text-sm">
+                <SelectValue placeholder={senderId ? "Choose template…" : "Pick a category and sender first"} />
+              </SelectTrigger>
+              <SelectContent>
+                {/* Legacy preset configs may name a template that predates the
+                    registry — surface it so the node still reads as configured. */}
+                {templateId && !template && (
+                  <SelectItem value={templateId}>{templateId} · legacy</SelectItem>
+                )}
+                {matching.map((t) => (
+                  <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {senderId && matching.length === 0 && (
+              <p className="text-[11px] text-muted-foreground">
+                No templates registered for {category} · {senderId}. Add one under Channels → SMS → Templates.
+              </p>
+            )}
+            {template && (
+              <div className="rounded-lg border border-border bg-muted/30 p-3 text-[12px]">
+                <div className="mb-1.5 flex items-center justify-between gap-2">
+                  <p className="text-[10.5px] uppercase tracking-wider text-muted-foreground">Registered content</p>
+                  <span className="font-mono text-[10.5px] text-muted-foreground">{templateSegments(template).segments} SMS</span>
+                </div>
+                <p className="whitespace-pre-wrap text-foreground">{template.content}</p>
+                <p className="mt-2 font-mono text-[10.5px] text-muted-foreground">
+                  ID {template.id} · PE {template.peId}
+                </p>
+              </div>
+            )}
+          </div>
+
+          <div className="border-t border-border/60" />
+
+          {/* Step 2: variable mapping */}
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <StepChip n={2} muted={!template} done={!!template && unmapped === 0} />
+              <Label className="text-[12px] font-medium text-foreground">Variable mapping</Label>
+            </div>
+            {!template ? (
+              <p className="text-[11px] text-muted-foreground">Select a template to map its variables.</p>
+            ) : varMap.length === 0 ? (
+              <p className="text-[11px] text-muted-foreground">This template has no variables — nothing to map.</p>
+            ) : (
+              <div className="space-y-2 pt-1">
+                <p className="text-[11px] text-muted-foreground">
+                  Fill each placeholder with an upstream variable, or switch to a constant for a fixed value.
+                </p>
+                {varMap.map((row) => (
+                  <div key={row.v} className="space-y-1">
+                    <span className="font-mono text-[11px] text-muted-foreground">{`{{${row.v}}}`}</span>
+                    <VariablePicker
+                      defaultValue={row.def}
+                      disabled={readOnly}
+                      allowConstant
+                      mode={row.mode}
+                      onChange={(v, mode) => setMapping(row.v, v, mode)}
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </Section>
-      <Section title="Message">
-        <Field label="Body" required>
-          <Textarea disabled={readOnly} defaultValue={config?.smsBody} placeholder="Hi {{user.name}}, your OTP is {{otp}}. Valid for 5 minutes. — PICOMM" maxLength={320} className="min-h-24 resize-none text-sm" onChange={(e) => mark(!!e.target.value.trim())} />
-          <p className="mt-1 text-[10.5px] text-muted-foreground">Use @ to insert a variable. Media not supported.</p>
+
+      <Section title="Delivery">
+        <Field label="Wait for DLR" required>
+          <Select value={dlrWindow} disabled={readOnly} onValueChange={setDlrWindow}>
+            <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {SMS_DLR_WINDOWS.map((w) => <SelectItem key={w} value={w}>{w}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <p className="mt-1 text-[10.5px] text-muted-foreground">
+            How long the lead waits here for a delivery receipt before taking the “Timeout” path.
+          </p>
         </Field>
       </Section>
+
       <ActionAdvanceBanner kind="sms" />
+    </>
+  );
+}
+
+/* --------------------------- RCS --------------------------- */
+
+function RcsFields({ config, readOnly, mark, onChange }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
+  return (
+    <ActionNodeShell kind="rcs" config={config} readOnly={readOnly} mark={mark} onChange={onChange}
+      renderCore={(coreMark) => <RcsCore config={config} readOnly={readOnly} mark={coreMark} onChange={onChange} />} />
+  );
+}
+
+/**
+ * RCS node core — template-driven like SMS/WhatsApp, but its outputs are a hybrid:
+ * the client picks Brand → Agent → an **Approved** template from the registry
+ * (Channels → RCS), maps its `{{var}}`s, and sets a DLR wait window. The node then
+ * exposes one branch per button in the template PLUS the fixed delivery outcomes
+ * (Delivered / Failed / Timeout) — published here since the button handles vary
+ * with the chosen template.
+ */
+function RcsCore({ config, readOnly, mark, onChange }: {
+  config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void;
+  onChange: (patch: Partial<WorkflowNodeData>) => void;
+}) {
+  const rcsConfig = useRcsConfig();
+  const templates = useRcsTemplates();
+  // Prefill the brand when the workspace has only one; otherwise derive it from
+  // a persisted agent, else leave the user to pick.
+  const soleBrandId = rcsConfig.brands.length === 1 ? rcsConfig.brands[0].id : "";
+  const [brandId, setBrandId] = useState(
+    () => config?.rcsAgentId ? brandForAgent(rcsConfig, config.rcsAgentId)?.id ?? soleBrandId : soleBrandId,
+  );
+  const [agentId, setAgentId] = useState(config?.rcsAgentId ?? "");
+  const [templateId, setTemplateId] = useState(config?.rcsTemplateId ?? "");
+  const [dlrWindow, setDlrWindow] = useState(config?.rcsDlrWindow ?? DEFAULT_RCS_DLR_WINDOW);
+
+  const template = resolveRcsTemplate(templateId);
+
+  // Cascade: brand narrows agents, and brand+agent narrow templates. Only
+  // Approved templates can be sent, so the picker hides Pending/Rejected ones.
+  const agents = brandId ? agentsForBrand(rcsConfig, brandId) : [];
+  const agentIdsInBrand = new Set(agents.map((a) => a.id));
+  const matching = templates.filter(
+    (t) => t.approvalStatus === "Approved"
+      && (!brandId || agentIdsInBrand.has(t.agentId))
+      && (!agentId || t.agentId === agentId),
+  );
+  useEffect(() => {
+    if (agentId && !agentIdsInBrand.has(agentId)) setAgentId("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [brandId]);
+  useEffect(() => {
+    if (templateId && !matching.some((t) => t.id === templateId)) setTemplateId("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [brandId, agentId]);
+
+  const placeholders = template ? templatePlaceholders(template) : [];
+  const varMap: PresetVarMap[] = placeholders.map(
+    (v) => config?.rcsVarMap?.find((m) => m.v === v) ?? { v, def: "" },
+  );
+  const unmapped = varMap.filter((m) => !m.def?.trim()).length;
+  const buttons = template ? templateButtons(template) : [];
+  const agent = agentById(rcsConfig, template?.agentId ?? agentId);
+
+  const setMapping = (key: string, def: string, mode?: "variable" | "constant") => {
+    const next = varMap.filter((m) => m.v !== key);
+    next.push({ v: key, def, mode });
+    onChange({ config: { ...config, rcsVarMap: next } });
+  };
+
+  // Publish handles (one per button + delivery defaults) + persist selection.
+  useEffect(() => {
+    onChange({
+      outputs: rcsOutputs(template),
+      config: {
+        ...config,
+        rcsTemplateId: templateId,
+        rcsDlrWindow: dlrWindow,
+        rcsAgentId: template?.agentId ?? agentId ?? undefined,
+        rcsAgentType: agentById(rcsConfig, template?.agentId ?? agentId)?.type,
+      },
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [templateId, dlrWindow, brandId, agentId]);
+
+  useEffect(() => {
+    if (!template) mark(false, "Select a template");
+    else if (unmapped > 0) mark(false, `Map ${unmapped} template variable${unmapped === 1 ? "" : "s"}`);
+    else mark(true);
+  }, [templateId, unmapped]);
+
+  return (
+    <>
+      <Section title="RCS template">
+        <div className="rounded-xl border border-border bg-card/50 p-4 space-y-4">
+          {/* Step 1: narrow by category + bot, then pick the template */}
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <StepChip n={1} done={!!template} />
+              <Label className="flex items-center gap-1 text-[12px] font-medium text-foreground">
+                Approved template <span className="text-destructive">*</span>
+              </Label>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="Brand" required>
+                <Select value={brandId || undefined} disabled={readOnly} onValueChange={setBrandId}>
+                  <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select…" /></SelectTrigger>
+                  <SelectContent>
+                    {rcsConfig.brands.map((b) => (
+                      <SelectItem key={b.id} value={b.id}>{b.name} · {b.provider}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field label="Agent" required>
+                <Select value={agentId || undefined} disabled={readOnly || !brandId} onValueChange={setAgentId}>
+                  <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select…" /></SelectTrigger>
+                  <SelectContent>
+                    {agents.map((a) => (
+                      <SelectItem key={a.id} value={a.id}>{a.name} · {a.type}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+            </div>
+            <Select value={templateId || undefined} disabled={readOnly || !agentId} onValueChange={setTemplateId}>
+              <SelectTrigger className="h-9 text-sm">
+                <SelectValue placeholder={agentId ? "Choose template…" : "Pick a brand and agent first"} />
+              </SelectTrigger>
+              <SelectContent>
+                {templateId && !template && (
+                  <SelectItem value={templateId}>{templateId} · legacy</SelectItem>
+                )}
+                {matching.map((t) => (
+                  <SelectItem key={t.id} value={t.id}>{t.name} · {t.type === "TEXT" ? "Text" : "Rich card"}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {agentId && matching.length === 0 && (
+              <p className="text-[11px] text-muted-foreground">
+                No approved templates for {agent?.name ?? agentId}. Add one under Channels → RCS → Templates.
+              </p>
+            )}
+            {template && (
+              <div className="rounded-lg border border-border bg-muted/30 p-3 text-[12px]">
+                <div className="mb-1.5 flex items-center justify-between gap-2">
+                  <p className="text-[10.5px] uppercase tracking-wider text-muted-foreground">Template content</p>
+                  <span className="font-mono text-[10.5px] text-muted-foreground">{template.type === "TEXT" ? "Text" : "Rich card"}</span>
+                </div>
+                {template.title && <p className="mb-1 font-semibold text-foreground">{template.title}</p>}
+                <p className="whitespace-pre-wrap text-foreground">{template.body}</p>
+                {buttons.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {buttons.map((b, i) => (
+                      <span key={i} className="rounded-full border border-border bg-background px-2 py-0.5 text-[11px]">{b.text}</span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="border-t border-border/60" />
+
+          {/* Step 2: variable mapping */}
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <StepChip n={2} muted={!template} done={!!template && unmapped === 0} />
+              <Label className="text-[12px] font-medium text-foreground">Variable mapping</Label>
+            </div>
+            {!template ? (
+              <p className="text-[11px] text-muted-foreground">Select a template to map its variables.</p>
+            ) : varMap.length === 0 ? (
+              <p className="text-[11px] text-muted-foreground">This template has no variables — nothing to map.</p>
+            ) : (
+              <div className="space-y-2 pt-1">
+                <p className="text-[11px] text-muted-foreground">
+                  Fill each placeholder with an upstream variable, or switch to a constant for a fixed value.
+                </p>
+                {varMap.map((row) => (
+                  <div key={row.v} className="space-y-1">
+                    <span className="font-mono text-[11px] text-muted-foreground">{`{{${row.v}}}`}</span>
+                    <VariablePicker
+                      defaultValue={row.def}
+                      disabled={readOnly}
+                      allowConstant
+                      mode={row.mode}
+                      onChange={(v, mode) => setMapping(row.v, v, mode)}
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </Section>
+
+      <Section title="Delivery">
+        <Field label="Wait for DLR" required>
+          <Select value={dlrWindow} disabled={readOnly} onValueChange={setDlrWindow}>
+            <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {RCS_DLR_WINDOWS.map((w) => <SelectItem key={w} value={w}>{w}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <p className="mt-1 text-[10.5px] text-muted-foreground">
+            How long the lead waits here for a delivery receipt before taking the “Timeout” path.
+          </p>
+        </Field>
+      </Section>
+
+      <ActionAdvanceBanner kind="rcs" />
     </>
   );
 }
@@ -1772,6 +2673,286 @@ function AdsCampaignFields({ readOnly, mark }: { readOnly?: boolean; mark: (v: b
   );
 }
 
+/* --------------------------- Human Escalation --------------------------- */
+
+/**
+ * Human Escalation (needsReview) node config.
+ *
+ * Terminal node. Auto-wires an edge to End on drop. Reaching this node
+ * flags the lead as Human Escalation (shown in Leads + Analytics).
+ *
+ * The "Notify Client System" section attaches zero or more Human Escalation
+ * webhooks (registered under Settings → Developer). Each selected
+ * webhook receives the same JSON body: the platform's base fields plus any
+ * upstream workflow variables the author adds under "Payload extras".
+ */
+function NeedsReviewFields({
+  config, readOnly, mark, onChange,
+}: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
+  useEffect(() => { mark(true); }, []);
+  const selectedIds = config?.notifyWebhookIds ?? [];
+  const payloadExtras = config?.notifyPayloadExtras ?? [];
+  const availableHooks = webhooksOfType("human_escalation");
+  const registeredCount = activeCountForType("human_escalation");
+  const patch = (next: Partial<PresetConfig>) => {
+    if (readOnly) return;
+    onChange({ config: { ...(config ?? {}), ...next } });
+  };
+  const setSelectedIds = (next: string[]) => patch({ notifyWebhookIds: next });
+  const setExtras = (next: string[]) => patch({ notifyPayloadExtras: next });
+
+  return (
+    <>
+      <Section title="Flag Lead">
+        <div className="rounded-xl border border-border bg-card/50 p-4">
+          <div className="flex items-start gap-2 text-[12px]">
+            <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-success" />
+            <p className="leading-snug text-foreground">
+              This node flags the lead as <span className="font-medium">Human Escalation</span> in Leads and Analytics, then exits to End.
+            </p>
+          </div>
+        </div>
+      </Section>
+
+      <Section title="Notify Client System">
+        <div className="space-y-3 rounded-xl border border-border bg-card/50 p-4">
+          <div className="space-y-1.5">
+            <p className="text-[11.5px] font-medium">Webhooks</p>
+            <WebhookMultiSelect
+              options={availableHooks}
+              selectedIds={selectedIds}
+              onChange={setSelectedIds}
+              readOnly={readOnly}
+            />
+            <p className="text-[10.5px] text-muted-foreground">
+              Registered under <Link to="/settings" className="text-foreground underline underline-offset-2 hover:text-ai">Settings → Developer</Link>.
+            </p>
+          </div>
+
+          <div className="space-y-1.5">
+            <p className="text-[11.5px] font-medium">Payload</p>
+            <div className="rounded-md border border-border bg-background/40 p-2">
+              <p className="text-[10.5px] uppercase tracking-wider text-muted-foreground">Base fields</p>
+              <div className="mt-1 flex flex-wrap gap-1">
+                {AUTO_INCLUDED_FIELDS.human_escalation.map((f) => (
+                  <span key={f} className="rounded-md border border-border bg-secondary px-1.5 py-0.5 font-mono text-[10.5px] text-muted-foreground">{f}</span>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <div className="flex items-baseline justify-between gap-2">
+              <p className="text-[11px] font-medium">Payload extras</p>
+              <p className="text-[10.5px] text-muted-foreground">Optional upstream variables to add to the body.</p>
+            </div>
+            <PayloadExtrasPicker
+              fields={payloadExtras}
+              readOnly={readOnly}
+              onChange={setExtras}
+            />
+          </div>
+
+          {registeredCount === 0 && availableHooks.length === 0 && (
+            <p className="text-[11px] text-warning">
+              No Human Escalation webhooks registered. Add one under <Link to="/settings" className="text-warning underline underline-offset-2">Settings → Developer</Link>.
+            </p>
+          )}
+        </div>
+      </Section>
+    </>
+  );
+}
+
+/**
+ * Multi-select "dropdown" of webhooks. Popover trigger shows current
+ * selection ("2 webhooks" / "Select webhooks…") with a chevron. Inside is a
+ * checkbox list. Selected items also render as removable chips above the
+ * trigger, so the value is visible without opening the popover.
+ */
+function WebhookMultiSelect({
+  options, selectedIds, onChange, readOnly,
+}: {
+  options: { id: string; name: string; endpointUrl: string; status: "active" | "paused" }[];
+  selectedIds: string[];
+  onChange: (next: string[]) => void;
+  readOnly?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const toggle = (id: string) => {
+    if (readOnly) return;
+    const next = selectedIds.includes(id) ? selectedIds.filter((x) => x !== id) : [...selectedIds, id];
+    onChange(next);
+  };
+  const selected = options.filter((o) => selectedIds.includes(o.id));
+  const label = selected.length === 0
+    ? "Select webhooks…"
+    : `${selected.length} webhook${selected.length === 1 ? "" : "s"} selected`;
+
+  return (
+    <div className="space-y-1.5">
+      {selected.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {selected.map((s) => (
+            <span key={s.id} className="inline-flex items-center gap-1 rounded-md border border-ai/25 bg-ai/10 px-1.5 py-0.5 text-[10.5px] text-ai">
+              {s.name}
+              {!readOnly && (
+                <button type="button" onClick={() => toggle(s.id)} className="text-ai/70 hover:text-destructive" title="Remove">
+                  <X className="h-2.5 w-2.5" />
+                </button>
+              )}
+            </span>
+          ))}
+        </div>
+      )}
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            disabled={readOnly || options.length === 0}
+            className={cn(
+              "flex w-full items-center justify-between rounded-md border border-border bg-background px-2 py-1.5 text-left text-[12px]",
+              options.length === 0 ? "cursor-not-allowed text-muted-foreground" : "hover:bg-accent/40",
+            )}
+          >
+            <span className={selected.length === 0 ? "text-muted-foreground" : ""}>{label}</span>
+            <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+          </button>
+        </PopoverTrigger>
+        <PopoverContent align="start" className="w-[--radix-popover-trigger-width] p-1">
+          {options.length === 0 ? (
+            <p className="px-2 py-3 text-center text-[11.5px] text-muted-foreground">
+              No Human Escalation webhooks registered.
+            </p>
+          ) : (
+            <div className="max-h-60 overflow-y-auto">
+              {options.map((wh) => {
+                const checked = selectedIds.includes(wh.id);
+                return (
+                  <label
+                    key={wh.id}
+                    className={cn(
+                      "flex cursor-pointer items-start gap-2 rounded-md px-2 py-1.5 hover:bg-accent",
+                      checked && "bg-accent/60",
+                    )}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggle(wh.id)}
+                      className="mt-0.5 h-3.5 w-3.5 cursor-pointer accent-foreground"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <p className="truncate text-[12px] font-medium">{wh.name}</p>
+                        {wh.status === "paused" && (
+                          <span className="rounded-full border border-border bg-secondary px-1.5 py-0.5 text-[9.5px] uppercase tracking-wide text-muted-foreground">Paused</span>
+                        )}
+                      </div>
+                      <p className="mt-0.5 truncate font-mono text-[10.5px] text-muted-foreground" title={wh.endpointUrl}>{wh.endpointUrl}</p>
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+          )}
+        </PopoverContent>
+      </Popover>
+    </div>
+  );
+}
+
+/**
+ * Payload extras picker. Multi-select of upstream workflow variables shown
+ * grouped by their producing node — same variable pool consumed by
+ * {@link VariablePicker} elsewhere in the config panel.
+ */
+function PayloadExtrasPicker({
+  fields, readOnly, onChange,
+}: { fields: string[]; readOnly?: boolean; onChange: (f: string[]) => void }) {
+  const [open, setOpen] = useState(false);
+  const extraVariables = useContext(ExtraVariablesContext);
+  const suppressSamples = useContext(SuppressSampleVariablesContext);
+  const allVariables = useMemo(() => mergeVariables(extraVariables, suppressSamples), [extraVariables, suppressSamples]);
+  const grouped = useMemo(() => groupVariablesBySource(allVariables), [allVariables]);
+
+  const toggle = (key: string) => {
+    if (readOnly) return;
+    const next = fields.includes(key) ? fields.filter((f) => f !== key) : [...fields, key];
+    onChange(next);
+  };
+  const remove = (key: string) => {
+    if (readOnly) return;
+    onChange(fields.filter((f) => f !== key));
+  };
+
+  const label = fields.length === 0 ? "Add fields…" : `${fields.length} field${fields.length === 1 ? "" : "s"} added`;
+
+  return (
+    <div className="space-y-1.5">
+      {fields.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {fields.map((f) => (
+            <span key={f} className="inline-flex items-center gap-1 rounded-md border border-ai/25 bg-ai/10 px-1.5 py-0.5 font-mono text-[10.5px] text-ai">
+              {f}
+              {!readOnly && (
+                <button type="button" onClick={() => remove(f)} className="text-ai/70 hover:text-destructive">
+                  <X className="h-2.5 w-2.5" />
+                </button>
+              )}
+            </span>
+          ))}
+        </div>
+      )}
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            disabled={readOnly}
+            className="flex w-full items-center justify-between rounded-md border border-border bg-background px-2 py-1.5 text-left text-[12px] hover:bg-accent/40"
+          >
+            <span className={fields.length === 0 ? "text-muted-foreground" : ""}>{label}</span>
+            <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+          </button>
+        </PopoverTrigger>
+        <PopoverContent align="start" className="w-[--radix-popover-trigger-width] max-h-72 overflow-y-auto p-1">
+          {grouped.length === 0 ? (
+            <p className="px-2 py-3 text-center text-[11.5px] text-muted-foreground">
+              No upstream variables available.
+            </p>
+          ) : (
+            grouped.map((g) => (
+              <div key={g.source} className="mb-1 last:mb-0">
+                <p className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/80">{g.source}</p>
+                {g.items.map((v) => {
+                  const checked = fields.includes(v.key);
+                  return (
+                    <label
+                      key={v.key}
+                      className={cn(
+                        "flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-[11.5px] hover:bg-accent",
+                        checked && "bg-accent/60",
+                      )}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggle(v.key)}
+                        className="h-3.5 w-3.5 cursor-pointer accent-foreground"
+                      />
+                      <span className="font-mono">{v.key}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            ))
+          )}
+        </PopoverContent>
+      </Popover>
+    </div>
+  );
+}
+
 /* --------------------------- Primitives --------------------------- */
 
 function VariablePicker({
@@ -1790,7 +2971,8 @@ function VariablePicker({
   useEffect(() => { setM(mode); }, [mode]);
   // Outcome variables from other action nodes in the flow (e.g. `whatsapp_1.button`).
   const extraVariables = useContext(ExtraVariablesContext);
-  const allVariables = mergeVariables(extraVariables, useContext(OnlyExtraVariablesContext));
+  const suppressSamples = useContext(SuppressSampleVariablesContext);
+  const allVariables = mergeVariables(extraVariables, suppressSamples);
   // Preset/upstream variables (e.g. lifetime_order_value, call_disposition) aren't in
   // the sample list — surface the current value as its own option so it still renders.
   const isCustom = !!v && !allVariables.some((s) => s.key === v);
@@ -1896,15 +3078,29 @@ function PlatformChip({ active, disabled, children }: { active?: boolean; disabl
 /* Action-node shell: Core + A/B Experiments + AI Transformations + Exits */
 /* ====================================================================== */
 
-type ActionKind = "voiceCall" | "whatsapp" | "sms";
+type ActionKind = "voiceCall" | "whatsapp" | "sms" | "rcs";
 
-const AI_TRANSFORMATION_TYPES = [
-  "Custom AI Action", "Translate", "Transliterate", "Numerical Parsing",
-  "Numerical Transcription", "Currency Formatting", "Currency Transcription",
-  "Phone Number Normalization", "Date Formatting",
-];
-
-type AiTransform = { id: string; type: string; input: string; output: string; open: boolean };
+/**
+ * In-memory shape used by the config panel. Superset of {@link PresetTransform}
+ * — adds `open` for collapsible UI state. Persisted subset (strip `open`) is
+ * written back to node config as {@link PresetTransform}.
+ */
+type AiTransform = {
+  id: string;
+  type: string;
+  input: string;
+  output: string;
+  open: boolean;
+  label?: string;
+  inputLang?: string;
+  outputLang?: string;
+  outputCurrency?: string;
+  phoneFormat?: "E164" | "domestic";
+  dateFormat?: string;
+  prompt?: string;
+  outputType?: "Boolean" | "String" | "Multi-select" | "Date & Time";
+  multiSelectOptions?: string;
+};
 type Variant = { id: string; label: string; pct: number; open: boolean };
 
 function ActionNodeShell({
@@ -1937,10 +3133,11 @@ function ActionNodeShell({
     if (abEnabled) mark(abOk, abOk ? undefined : `Variant traffic must total 100% (currently ${total}%)`);
   }, [abEnabled, abOk, total]);
 
-  // Voice / SMS advance through a single "Completed" output; WhatsApp outputs are
-  // derived from the selected template's buttons (published by WhatsAppCore).
+  // Voice advances through a single "Completed" output. WhatsApp outputs derive
+  // from the selected template's buttons (published by WhatsAppCore) and SMS
+  // publishes its three delivery outcomes from SmsCore, so neither is set here.
   useEffect(() => {
-    if (kind === "voiceCall" || kind === "sms") onChange({ outputs: completedOutput() });
+    if (kind === "voiceCall") onChange({ outputs: completedOutput() });
   }, [kind]);
 
   // Surface the A/B experiment on the canvas node as a badge.
@@ -2065,15 +3262,18 @@ function ActionNodeShell({
 /** Static, non-editable explainer of when a lead advances off an action node.
  *  Replaces the old (editable) Exit Conditions section — branching is now done
  *  with a downstream Conditional node. */
-function ActionAdvanceBanner({ kind, type1 }: { kind: ActionKind; type1?: boolean }) {
+function ActionAdvanceBanner({ kind, type1, timeoutHours }: { kind: ActionKind; type1?: boolean; timeoutHours?: number }) {
+  const window = waTimeoutLabel(timeoutHours ?? DEFAULT_WA_TIMEOUT_HOURS);
   const text =
     kind === "voiceCall"
       ? "Leads advance when the call concludes or retries are exhausted. Branch on the outcome with a Conditional node downstream."
       : kind === "sms"
-        ? "Leads advance once the message is sent. Branch on the outcome with a Conditional node downstream."
+        ? "Always three outputs: “Delivered”, “Failed” and “Timeout” (no receipt within the wait window). Wire all three."
+        : kind === "rcs"
+          ? "One output per button (RCS reports clicks for reply, URL and dialer buttons alike), plus fixed “Delivered”, “Failed” and “Timeout”. “Failed” includes handsets that aren't RCS-capable — wire an SMS fallback off it."
         : type1
-          ? "Always two outputs: “Replied (no button)” and “No response / continue” (24h session expiry + any untrackable tap). Wire both."
-          : "Each trackable button is its own output, plus “Replied (no button)” and “No response / continue”. Phone numbers and untracked URLs aren’t trackable — those taps route through “No response / continue”. Wire every output.";
+          ? `Always two outputs: “Text Reply Received” and “Timeout” (no reply within ${window} + any untrackable tap). Wire both.`
+          : `Each trackable button is its own output, plus “Text Reply Received” and “Timeout” (no reply within ${window}). Phone numbers and untracked URLs aren’t trackable — those taps route through “Timeout”. Wire every output.`;
   return (
     <div className="mt-4 flex items-start gap-2 rounded-md border border-dashed border-border bg-muted/30 px-2.5 py-2 text-[11px] text-muted-foreground">
       <GitBranch className="mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -2121,11 +3321,15 @@ function CollapsibleSection({
 /* --------------------------- AI Transformations --------------------------- */
 
 function AiTransformationsSection({
-  readOnly, transforms, setTransforms,
+  readOnly, transforms, setTransforms, standalone,
 }: {
   readOnly?: boolean;
   transforms: AiTransform[];
   setTransforms: React.Dispatch<React.SetStateAction<AiTransform[]>>;
+  /** When true, renders the list directly (no outer collapsible, no title bar).
+   *  Used by the standalone AI Transformation node — the config panel already
+   *  labels the node, so a nested collapse is redundant. */
+  standalone?: boolean;
 }) {
   const move = (id: string, dir: -1 | 1) => {
     setTransforms((xs) => {
@@ -2138,8 +3342,61 @@ function AiTransformationsSection({
     });
   };
   const add = () => setTransforms((xs) => [...xs, {
-    id: uid("t"), type: "Translate", input: "", output: "", open: true,
+    // v1 has one transformation type — Custom AI Action. `input` is unused but
+    // kept for shape-compat with PresetTransform / legacy preset data.
+    id: uid("t"), type: CUSTOM_AI_ACTION, input: "", output: "", prompt: "", open: true,
   }]);
+  const patch = (id: string, p: Partial<AiTransform>) =>
+    setTransforms((xs) => xs.map((x) => x.id === id ? { ...x, ...p } : x));
+
+  const body = (
+    <>
+      {transforms.length === 0 ? (
+        <div className="rounded-md border border-dashed border-border bg-muted/30 px-3 py-4 text-center text-[11.5px] text-muted-foreground">
+          No transformations yet. Add one to define an AI-generated variable that downstream nodes can use.
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {transforms.map((a, i) => (
+            <TransformRow
+              key={a.id}
+              transform={a}
+              index={i}
+              total={transforms.length}
+              readOnly={readOnly}
+              onOpenChange={(o) => patch(a.id, { open: o })}
+              onPatch={(p) => patch(a.id, p)}
+              onMoveUp={() => move(a.id, -1)}
+              onMoveDown={() => move(a.id, 1)}
+              onRemove={() => setTransforms((xs) => xs.filter((x) => x.id !== a.id))}
+            />
+          ))}
+        </div>
+      )}
+    </>
+  );
+
+  if (standalone) {
+    return (
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Sparkles className="h-3.5 w-3.5 text-ai" />
+            <span className="text-[12px] font-medium">Transformations</span>
+            {transforms.length > 0 && (
+              <span className="rounded-full border border-ai/25 bg-ai/10 px-1.5 py-0.5 text-[10.5px] font-semibold text-ai">
+                {transforms.length}
+              </span>
+            )}
+          </div>
+          <Button size="sm" variant="ghost" disabled={readOnly} onClick={add} className="h-7 gap-1 px-2 text-[11px]">
+            <Plus className="h-3 w-3" /> Add
+          </Button>
+        </div>
+        {body}
+      </div>
+    );
+  }
 
   return (
     <CollapsibleSection
@@ -2153,58 +3410,347 @@ function AiTransformationsSection({
         </Button>
       }
     >
-      {transforms.length === 0 ? (
-        <div className="rounded-md border border-dashed border-border bg-muted/30 px-3 py-4 text-center text-[11.5px] text-muted-foreground">
-          No transformations. Outputs you define here become variables on downstream nodes.
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {transforms.map((a, i) => (
-            <Collapsible key={a.id} open={a.open} onOpenChange={(o) => setTransforms((xs) => xs.map((x) => x.id === a.id ? { ...x, open: o } : x))}>
-              <div className="rounded-lg border border-border bg-background">
-                <div className="flex items-center gap-1.5 px-2.5 py-2">
-                  <div className="flex flex-col">
-                    <button disabled={readOnly || i === 0} onClick={() => move(a.id, -1)} className="text-muted-foreground hover:text-foreground disabled:opacity-30"><ArrowUp className="h-3 w-3" /></button>
-                    <button disabled={readOnly || i === transforms.length - 1} onClick={() => move(a.id, 1)} className="text-muted-foreground hover:text-foreground disabled:opacity-30"><ArrowDown className="h-3 w-3" /></button>
-                  </div>
-                  <CollapsibleTrigger asChild>
-                    <button disabled={readOnly} className="flex flex-1 items-center gap-2 text-left">
-                      <GripVertical className="h-3.5 w-3.5 text-muted-foreground" />
-                      <span className="text-[11px] font-medium text-muted-foreground">#{i + 1}</span>
-                      <span className="text-[12.5px] font-medium">{a.type}</span>
-                      <span className="ml-auto flex items-center gap-1 font-mono text-[11px] text-ai">
-                        <Variable className="h-3 w-3" />{a.output || "output"}
-                      </span>
-                      <ChevronDown className={cn("h-3.5 w-3.5 text-muted-foreground transition-transform", a.open && "rotate-180")} />
-                    </button>
-                  </CollapsibleTrigger>
-                </div>
-                <CollapsibleContent className="space-y-2 border-t border-border p-2.5">
-                  <Field label="Transformation type">
-                    <SelectLike disabled={readOnly} options={AI_TRANSFORMATION_TYPES} defaultValue={a.type} onPick={(v) => setTransforms((xs) => xs.map((x) => x.id === a.id ? { ...x, type: v } : x))} />
-                  </Field>
-                  <Field label="Input variable">
-                    <VariablePicker defaultValue={a.input} disabled={readOnly} onChange={(v) => setTransforms((xs) => xs.map((x) => x.id === a.id ? { ...x, input: v } : x))} />
-                  </Field>
-                  {a.type === "Custom AI Action" && (
-                    <Field label="Prompt">
-                      <Textarea disabled={readOnly} placeholder="Describe what this AI step should do…" className="min-h-20 resize-none text-sm" />
-                    </Field>
-                  )}
-                  <Field label="Output variable name" required>
-                    <Input disabled={readOnly} value={a.output} onChange={(e) => setTransforms((xs) => xs.map((x) => x.id === a.id ? { ...x, output: e.target.value } : x))} placeholder="e.g. intent_hi" className="h-9 font-mono text-[12px]" />
-                  </Field>
-                  <div className="flex justify-end">
-                    <Button size="sm" variant="ghost" disabled={readOnly} onClick={() => setTransforms((xs) => xs.filter((x) => x.id !== a.id))} className="h-7 gap-1 text-[11px] text-destructive hover:text-destructive">
-                      <Trash2 className="h-3 w-3" /> Remove
-                    </Button>
-                  </div>
-                </CollapsibleContent>
-              </div>
-            </Collapsible>
-          ))}
-        </div>
-      )}
+      {body}
     </CollapsibleSection>
+  );
+}
+
+/** Standalone AI Transformation node config — the previously-inline
+ *  AiTransformationsSection lifted out of Action nodes into its own node kind.
+ *  Manages the transform list locally, persists on every change, and revalidates
+ *  the node on every mutation (Custom AI Action needs input + prompt; every
+ *  other transform needs at least an input + output name). */
+function AiTransformFields({
+  config, readOnly, mark, onChange,
+}: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
+  const [transforms, setTransforms] = useState<AiTransform[]>(
+    () => (config?.transforms ?? []).map((t) => ({ ...t, open: false })),
+  );
+  // Ref so the effect below can read the latest config/onChange without
+  // re-firing every time the parent re-renders and hands us new closures.
+  const parentRef = useRef({ config, onChange, mark });
+  parentRef.current = { config, onChange, mark };
+  const first = useRef(true);
+  useEffect(() => {
+    const persisted = transforms.map(({ open: _o, ...rest }) => rest);
+    const err = transformsError(persisted);
+    parentRef.current.mark(!err, err);
+    // Skip the initial run — nothing has changed vs what's already on config.
+    if (first.current) { first.current = false; return; }
+    parentRef.current.onChange({
+      config: { ...(parentRef.current.config ?? {}), transforms: persisted },
+    });
+  }, [transforms]);
+  return <AiTransformationsSection readOnly={readOnly} transforms={transforms} setTransforms={setTransforms} standalone />;
+}
+
+/* ------------------------------------------------------------------------ *
+ *  TransformRow — one row inside AiTransformationsSection.
+ *
+ *  v1 shape: no type picker (Custom AI Action is the only type), no input
+ *  variable field (the prompt's `{{voice_N}}` / `{{whatsapp_N}}` chips imply
+ *  which upstream node's conversation context to feed in), no output-type
+ *  dropdown. Just prompt + output name.
+ * ------------------------------------------------------------------------ */
+
+function TransformRow({
+  transform: a, index: i, total, readOnly, onOpenChange, onPatch, onMoveUp, onMoveDown, onRemove,
+}: {
+  transform: AiTransform;
+  index: number;
+  total: number;
+  readOnly?: boolean;
+  onOpenChange: (o: boolean) => void;
+  onPatch: (p: Partial<AiTransform>) => void;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+  onRemove: () => void;
+}) {
+  const err = transformError({ ...a });
+  const rename = a.label?.trim() || "AI Action";
+  const [editingName, setEditingName] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => { if (editingName) inputRef.current?.focus(); }, [editingName]);
+
+  // Prompt picker only surfaces upstream Voice / WhatsApp node handles — no
+  // contact fields, no per-field variables. Chip inserts as `{{voice_1}}`
+  // meaning "this node's full conversation context + eval outputs."
+  const allVars = useContext(ExtraVariablesContext);
+  const promptVars = useMemo(() => conversationContextVariables(allVars), [allVars]);
+
+  return (
+    <Collapsible open={a.open} onOpenChange={onOpenChange}>
+      <div className={cn(
+        "rounded-lg border bg-background",
+        err ? "border-destructive/40" : "border-border",
+      )}>
+        <div className="flex items-center gap-1.5 px-2.5 py-2">
+          <div className="flex flex-col">
+            <button disabled={readOnly || i === 0} onClick={onMoveUp} className="text-muted-foreground hover:text-foreground disabled:opacity-30"><ArrowUp className="h-3 w-3" /></button>
+            <button disabled={readOnly || i === total - 1} onClick={onMoveDown} className="text-muted-foreground hover:text-foreground disabled:opacity-30"><ArrowDown className="h-3 w-3" /></button>
+          </div>
+          <GripVertical className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="text-[11px] font-medium text-muted-foreground">#{i + 1}</span>
+          {editingName ? (
+            <Input
+              ref={inputRef}
+              defaultValue={a.label ?? ""}
+              placeholder="AI Action"
+              onBlur={(e) => { onPatch({ label: e.target.value.trim() || undefined }); setEditingName(false); }}
+              onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); if (e.key === "Escape") setEditingName(false); }}
+              className="h-6 flex-1 text-[12.5px]"
+              disabled={readOnly}
+            />
+          ) : (
+            <button
+              type="button"
+              disabled={readOnly}
+              onClick={(e) => { e.stopPropagation(); setEditingName(true); }}
+              className="group flex items-center gap-1 text-left text-[12.5px] font-medium hover:text-foreground"
+              title="Click to rename"
+            >
+              <span>{rename}</span>
+              <Pencil className="h-3 w-3 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+            </button>
+          )}
+          <CollapsibleTrigger asChild>
+            <button disabled={readOnly} className="ml-auto flex items-center gap-2 text-left">
+              <span className="flex items-center gap-1 font-mono text-[11px] text-ai">
+                <Variable className="h-3 w-3" />{a.output || "output"}
+              </span>
+              {err && !a.open && (
+                <span title={err} className="rounded-full border border-destructive/40 bg-destructive/10 px-1.5 py-0.5 text-[10px] text-destructive">Incomplete</span>
+              )}
+              <ChevronDown className={cn("h-3.5 w-3.5 text-muted-foreground transition-transform", a.open && "rotate-180")} />
+            </button>
+          </CollapsibleTrigger>
+        </div>
+        <CollapsibleContent className="space-y-2.5 border-t border-border p-2.5">
+          {/* Prompt */}
+          <div className="space-y-1.5">
+            <Label className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+              Prompt <span className="text-destructive">*</span>
+            </Label>
+            <PromptEditor
+              value={a.prompt ?? ""}
+              disabled={readOnly}
+              placeholder="e.g. Summarize the customer's stated interest in savings products based on {{voice_1}} and {{whatsapp_2}}."
+              variables={promptVars}
+              onChange={(next) => onPatch({ prompt: next })}
+            />
+            <p className="text-[10.5px] text-muted-foreground">
+              Type <span className="font-mono">{"{{"}</span> to reference an upstream Voice or WhatsApp node — its transcript / chat history + eval outputs will be sent as context.
+            </p>
+          </div>
+
+          {/* Output variable name — sanitized to [a-z0-9_] on every keystroke */}
+          <Field label="Output variable name" required>
+            <Input
+              disabled={readOnly}
+              value={a.output}
+              onChange={(e) => onPatch({ output: sanitizeOutputName(e.target.value) })}
+              placeholder="e.g. product_interest"
+              className="h-9 font-mono text-[12px]"
+            />
+            <p className="mt-1 text-[10.5px] text-muted-foreground">Lowercase letters, digits, underscores only. No spaces.</p>
+          </Field>
+
+          {err && (
+            <div className="flex items-start gap-1.5 rounded-md border border-destructive/30 bg-destructive/5 px-2 py-1.5 text-[11px] text-destructive">
+              <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />
+              <span>{err}</span>
+            </div>
+          )}
+
+          <div className="flex justify-end">
+            <Button size="sm" variant="ghost" disabled={readOnly} onClick={onRemove} className="h-7 gap-1 text-[11px] text-destructive hover:text-destructive">
+              <Trash2 className="h-3 w-3" /> Remove
+            </Button>
+          </div>
+        </CollapsibleContent>
+      </div>
+    </Collapsible>
+  );
+}
+
+/* --------------------------- Delay (v2) --------------------------- *
+ *  Two modes, surfaced in the UI as "Static delay" (fixed value + unit) and
+ *  "Dynamic delay" (wait UNTIL a datetime carried in an upstream variable).
+ *  Node advances when the current time reaches the resolved value.
+ */
+
+/** Preset datetime formats for a Dynamic delay's incoming variable. `value`
+ *  is the parseable format token persisted on the node; `label` is the shape
+ *  shown to the user (token + concrete example in brackets). Fixed list —
+ *  the engine only parses these five shapes, so exposing a free-form pattern
+ *  would be misleading. */
+const DELAY_VAR_FORMATS: Array<{ value: string; label: string }> = [
+  { value: "ISO 8601",           label: "ISO 8601 (2026-07-24T10:30:00Z)" },
+  { value: "YYYY-MM-DD HH:mm",   label: "YYYY-MM-DD HH:mm (2026-07-24 10:30)" },
+  { value: "DD/MM/YYYY HH:mm",   label: "DD/MM/YYYY HH:mm (24/07/2026 10:30)" },
+  { value: "MM/DD/YYYY HH:mm",   label: "MM/DD/YYYY HH:mm (07/24/2026 10:30)" },
+  { value: "DD MMM YYYY, HH:mm", label: "DD MMM YYYY, HH:mm (24 Jul 2026, 10:30)" },
+];
+
+function DelayFields({
+  config, readOnly, mark, onChange,
+}: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
+  const [mode, setMode] = useState<"fixed" | "variable">(config?.delayMode ?? "fixed");
+  // Consolidated validation — required fields depend on the current mode.
+  // Dynamic mode also requires a fallback duration so the node still advances
+  // when the picked variable is missing/unparseable at runtime.
+  const validate = (c: PresetConfig) => {
+    if (c.delayMode !== "variable") return mark(true);
+    if (!c.delayVariable) return mark(false, "Pick a datetime variable");
+    if (!c.delayVariableFormat?.trim()) return mark(false, "Pick a datetime format");
+    if (c.delayFallbackValue == null || c.delayFallbackValue <= 0) return mark(false, "Set a fallback duration");
+    if (!c.delayFallbackUnit) return mark(false, "Set a fallback unit");
+    return mark(true);
+  };
+  const patch = (p: Partial<PresetConfig>) => {
+    const next = { ...(config ?? {}), ...p };
+    onChange({ config: next });
+    validate(next);
+  };
+  const setDelayMode = (m: "fixed" | "variable") => {
+    setMode(m);
+    // When switching INTO Dynamic mode, seed a sensible fallback default so
+    // the node isn't immediately invalid — the tech-team spec ships a
+    // 24-hour default so an unparseable datetime never blocks the run.
+    if (m === "variable") {
+      patch({
+        delayMode: m,
+        delayFallbackValue: config?.delayFallbackValue ?? 24,
+        delayFallbackUnit: config?.delayFallbackUnit ?? "Hours",
+      });
+    } else {
+      patch({ delayMode: m });
+    }
+  };
+  // Empty → placeholder shown; matched preset → its label. No custom pattern
+  // support — the engine only parses the fixed preset list.
+  const currentFormat = config?.delayVariableFormat ?? "";
+  const pickerLabel = DELAY_VAR_FORMATS.find((f) => f.value === currentFormat)?.label ?? "";
+  return (
+    <Section title="Wait mode">
+      {/* Mode picker — two radio-style tiles so both options are equally discoverable */}
+      <div className="mb-3 grid grid-cols-2 gap-2">
+        <ModeTile
+          selected={mode === "fixed"}
+          onClick={() => !readOnly && setDelayMode("fixed")}
+          icon={<Clock className="h-3.5 w-3.5" />}
+          title="Static delay"
+          subtitle="Wait a fixed duration"
+          disabled={readOnly}
+        />
+        <ModeTile
+          selected={mode === "variable"}
+          onClick={() => !readOnly && setDelayMode("variable")}
+          icon={<Variable className="h-3.5 w-3.5" />}
+          title="Dynamic delay"
+          subtitle="Wait until a variable's datetime"
+          disabled={readOnly}
+        />
+      </div>
+      {mode === "fixed" ? (
+        <Field label="Duration" required>
+          <div className="grid grid-cols-2 gap-2">
+            <Input disabled={readOnly} type="number" defaultValue={config?.delayValue ?? 24} className="h-9" onChange={() => mark(true)} />
+            <SelectLike disabled={readOnly} options={["Minutes", "Hours", "Days"]} onPick={() => mark(true)} defaultValue={config?.delayUnit ?? "Hours"} />
+          </div>
+        </Field>
+      ) : (
+        <>
+          <Field label="Wait until (datetime variable)" required>
+            <VariablePicker
+              defaultValue={config?.delayVariable ?? ""}
+              disabled={readOnly}
+              onChange={(v) => patch({ delayMode: "variable", delayVariable: v })}
+            />
+          </Field>
+          {/* Format dropdown is always visible in Dynamic mode — it's part of
+              the node's contract, not a follow-up question. Shown before the
+              user picks a variable so they see the full config surface upfront. */}
+          <Field label="Incoming Date-time Format" required>
+            <SelectLike
+              disabled={readOnly}
+              options={DELAY_VAR_FORMATS.map((f) => f.label)}
+              defaultValue={pickerLabel}
+              placeholder="Select format"
+              onPick={(label) => {
+                const match = DELAY_VAR_FORMATS.find((f) => f.label === label);
+                if (!match) return;
+                patch({ delayMode: "variable", delayVariableFormat: match.value });
+              }}
+            />
+          </Field>
+          {/* Fallback — required in Dynamic mode. Fires as a fixed wait when
+              the picked variable is missing/empty/unparseable at runtime, so
+              the node always advances instead of stranding the lead. */}
+          <Field label="Fallback duration" required>
+            <div className="grid grid-cols-2 gap-2">
+              <Input
+                disabled={readOnly}
+                type="number"
+                min={1}
+                value={config?.delayFallbackValue ?? ""}
+                placeholder="24"
+                className="h-9"
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  const n = raw === "" ? undefined : Number(raw);
+                  patch({
+                    delayMode: "variable",
+                    delayFallbackValue: n,
+                    delayFallbackUnit: config?.delayFallbackUnit ?? "Hours",
+                  });
+                }}
+              />
+              <SelectLike
+                disabled={readOnly}
+                options={["Minutes", "Hours", "Days"]}
+                defaultValue={config?.delayFallbackUnit ?? "Hours"}
+                onPick={(u) => patch({
+                  delayMode: "variable",
+                  delayFallbackUnit: u as "Minutes" | "Hours" | "Days",
+                  delayFallbackValue: config?.delayFallbackValue ?? 24,
+                })}
+              />
+            </div>
+            <p className="mt-1 text-[10.5px] text-muted-foreground">
+              Used when the datetime variable is missing, empty, or doesn't match the incoming format.
+            </p>
+          </Field>
+          <div className="mt-2 flex items-start gap-2 rounded-md border border-dashed border-border bg-muted/30 px-2.5 py-2 text-[11px] text-muted-foreground">
+            <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>
+              Node advances when the current time reaches the value in the picked variable — typically an upstream node's output like
+              <span className="font-mono text-foreground"> voice_1.callback_time</span> or a scheduled follow-up datetime. If the datetime is in the past when the lead arrives, the node advances immediately. If the datetime can't be parsed, the fallback duration above kicks in instead.
+            </span>
+          </div>
+        </>
+      )}
+    </Section>
+  );
+}
+
+function ModeTile({ selected, onClick, icon, title, subtitle, disabled }: { selected: boolean; onClick: () => void; icon: React.ReactNode; title: string; subtitle: string; disabled?: boolean }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={cn(
+        "flex flex-col items-start gap-1 rounded-lg border px-2.5 py-2 text-left transition-colors",
+        selected ? "border-ai/50 bg-ai/5" : "border-border bg-card hover:bg-accent/40",
+        disabled && "cursor-not-allowed opacity-60",
+      )}
+    >
+      <div className={cn("flex items-center gap-1.5", selected ? "text-ai" : "text-muted-foreground")}>
+        {icon}
+        <span className="text-[12px] font-medium">{title}</span>
+      </div>
+      <span className="text-[10.5px] text-muted-foreground">{subtitle}</span>
+    </button>
   );
 }

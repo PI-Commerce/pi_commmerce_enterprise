@@ -438,7 +438,7 @@ export function InboundBuilderCanvas({ ep, isNew }: { ep: EntryPoint; isNew: boo
           onChange={(patch) => selected && updateNodeData(selected.id, patch)}
           onDelete={() => selected && deleteNode(selected.id)}
           onDuplicate={() => selected && duplicateNode(selected.id)}
-          onlyExtraVariables
+          suppressSampleVariables
           extraVariables={variables.filter((v) => {
             const ns = selected?.data?.serial ?? selected?.id;
             return !selected || !v.key.startsWith(`${ns}.`);

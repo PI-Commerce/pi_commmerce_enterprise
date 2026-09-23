@@ -1,7 +1,8 @@
 import { useState } from "react";
 import {
   Users, GitBranch, Split, Phone, MessageCircle,
-  MessageSquare, Clock, Megaphone, Plus, X, Webhook, Headset, Wand2, Square,
+  MessageSquare, MessageSquareText, Clock, Megaphone, Plus, X, Webhook,
+  Headset, Sparkles, Flag, Workflow, Square,
   type LucideIcon,
 } from "lucide-react";
 import type { NodeKind } from "@/lib/campaign-types";
@@ -16,10 +17,13 @@ const ICONS: Partial<Record<NodeKind, LucideIcon>> = {
   delay: Clock,
   voiceCall: Phone,
   whatsapp: MessageCircle,
+  whatsappFreeform: Workflow,
   sms: MessageSquare,
+  rcs: MessageSquareText,
   agentSession: Headset,
-  aiTransform: Wand2,
+  aiTransform: Sparkles,
   adsCampaign: Megaphone,
+  needsReview: Flag,
   end: Square,
 };
 
@@ -30,7 +34,8 @@ export type PaletteSection = { label: string; nodes: NodeKind[] };
 export const CAMPAIGN_SECTIONS: PaletteSection[] = [
   { label: "Data Nodes", nodes: ["apiToolCall"] },
   { label: "Logic Nodes", nodes: ["conditional", "abSplit", "delay"] },
-  { label: "Action Nodes", nodes: ["voiceCall", "whatsapp", "sms"] },
+  { label: "AI Nodes", nodes: ["aiTransform"] },
+  { label: "Action Nodes", nodes: ["voiceCall", "whatsapp", "whatsappFreeform", "sms", "rcs", "needsReview"] },
   { label: "Ads Nodes", nodes: ["adsCampaign"] },
 ];
 
@@ -48,7 +53,7 @@ export const INBOUND_SECTIONS: PaletteSection[] = [
 
 // Out of scope for v1: cannot be added to new campaigns (disabled in palette),
 // but retained in existing example campaigns (render + read-only config).
-const DISABLED_KINDS = new Set<NodeKind>(["sms", "adsCampaign"]);
+const DISABLED_KINDS = new Set<NodeKind>(["adsCampaign"]);
 
 export function NodePalette({
   onAdd, disabled, sections = CAMPAIGN_SECTIONS,

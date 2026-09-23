@@ -6,11 +6,16 @@ import ReactFlow, {
   type ReactFlowInstance,
 } from "reactflow";
 import { Wand2 } from "lucide-react";
-import { nodeTypes } from "./nodes";
+import { nodeTypes, FreeformNodePreviewContext } from "./nodes";
+import { FreeformCanvas } from "./FreeformCanvas";
+import { getFreeformWorkflow } from "@/lib/freeform-types";
+import {
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
 import { edgeTypes } from "./edges";
 import type { WorkflowNodeData, NodeKind, CampaignStatus } from "@/lib/campaign-types";
 import { NODE_LABELS, SERIAL_PREFIX } from "@/lib/campaign-types";
-import { whatsappOutputs, completedOutput, apiOutcomeOutputs, deriveNodeOutcomeVariables } from "@/lib/wa-outputs";
+import { whatsappOutputs, freeformOutputs, completedOutput, smsOutputs, rcsOutputs, apiOutcomeOutputs, deriveNodeOutcomeVariables } from "@/lib/wa-outputs";
 import { EXAMPLE_CAMPAIGNS } from "@/lib/campaign-examples";
 import { getCampaignCopy } from "@/lib/campaign-templates";
 import { elkLayout, type Point } from "@/lib/flow-layout";
@@ -59,14 +64,18 @@ const DEFAULT_NODE_DATA: Record<NodeKind, Partial<WorkflowNodeData>> = {
   abSplit: { subtitle: "Split traffic", valid: false, error: "Set split %" },
   delay: { subtitle: "Wait", valid: false, error: "Set duration" },
   voiceCall: { subtitle: "AI voice outreach", valid: false, error: "Select agent", outputs: completedOutput() },
-  whatsapp: { subtitle: "Send WhatsApp message", valid: false, error: "Pick template", outputs: whatsappOutputs(undefined) },
-  sms: { subtitle: "Send SMS", valid: false, error: "Add message body", outputs: completedOutput() },
+  whatsapp: { subtitle: "Send WhatsApp template", valid: false, error: "Pick template", outputs: whatsappOutputs(undefined) },
+  whatsappFreeform: { subtitle: "Run a freeform workflow", valid: false, error: "Pick a workflow", outputs: freeformOutputs() },
+  sms: { subtitle: "Send SMS", valid: false, error: "Select a DLT template", outputs: smsOutputs() },
+  rcs: { subtitle: "Send RCS message", valid: false, error: "Select a template", outputs: rcsOutputs() },
+  aiTransform: { subtitle: "Derive AI variables", valid: true },
   adsCampaign: { subtitle: "WhatsApp CTWA ad", valid: false, error: "Complete setup" },
+  // Terminal — flags the lead as Human Escalation and exits to End (auto-wired on drop).
+  needsReview: { subtitle: "Flag & optionally notify", valid: true },
   // Inbound-only kinds. Present because campaigns and entry points share one
   // `NodeKind` union; the campaign palette never offers them (see NodePalette).
   inboundTrigger: { valid: true, locked: true },
   agentSession: { subtitle: "Hand to an agent", valid: false, error: "Select agent" },
-  aiTransform: { subtitle: "Extract with a model", valid: false, error: "Add a prompt" },
 };
 
 let nodeCounter = 100;
@@ -154,13 +163,16 @@ export function WorkflowCanvas({
   }, [tzAbbrev, symbol, setNodes]);
 
   // Initial ELK layout for the example/seed graph. Blank new campaigns ship
-  // pre-laid-out (see BLANK_NODES) so skip them here. The effect's deps are
-  // stable, so this runs once per mount — but we deliberately DON'T guard it
-  // with a persistent ref: under a mount→unmount→remount (StrictMode in dev, or
-  // a router transition on SPA navigation) the first run is cancelled by its
-  // cleanup, and a ref guard would make the re-run early-return, leaving
-  // `layingOut` stuck true → a blank canvas. Letting each mount re-run the
-  // (idempotent) layout guarantees the surviving invocation reveals ReactFlow.
+  // pre-laid-out (see BLANK_NODES) so skip them here.
+  //
+  // Deliberately NO run-once ref guard: React can mount → clean up → remount the
+  // same instance (client-side route navigation, StrictMode, Fast Refresh). A
+  // ref guard survives that cycle and strands the reveal — the first run is
+  // cancelled by the cleanup while the guard blocks the second from ever calling
+  // setLayingOut(false), so the canvas stays blank until a full page reload. The
+  // effect's deps are stable, so it only fires on a real (re)mount anyway, and
+  // re-laying an example graph is idempotent. The `cancelled` flag alone is the
+  // correct guard: on a double-invoke the second run reveals with a fresh flag.
   useEffect(() => {
     if (isNew) return;
     let cancelled = false;
@@ -229,6 +241,60 @@ export function WorkflowCanvas({
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [waButtonWiringSig, editable, setNodes]);
+
+  /**
+   * WhatsApp Freeform Workflow can ONLY start after a WA Template opens the
+   * 24-hour customer-service window, so its incoming edge must come from a WA
+   * Template node's `reply_received` output OR any of its trackable button
+   * outputs (`btn_*`). Any other wiring (or none) flips the node invalid with
+   * a targeted error, giving the author a clear next step.
+   *
+   * Signature is derived from node kinds + edges (not from valid/error) so the
+   * effect's own writes don't retrigger it.
+   */
+  const freeformIncomingSig = useMemo(() => {
+    const ffPart = nodes.filter((n) => n.data.kind === "whatsappFreeform").map((n) => n.id).join(",");
+    const waPart = nodes.filter((n) => n.data.kind === "whatsapp").map((n) => n.id).join(",");
+    const edgePart = edges.map((e) => `${e.source}(${e.sourceHandle ?? ""})>${e.target}`).join("|");
+    return `${ffPart}#${waPart}#${edgePart}`;
+  }, [nodes, edges]);
+
+  useEffect(() => {
+    if (!editable) return;
+    setNodes((nds) => {
+      const waIds = new Set(nds.filter((n) => n.data.kind === "whatsapp").map((n) => n.id));
+      let changed = false;
+      const next = nds.map((n) => {
+        if (n.data.kind !== "whatsappFreeform") return n;
+        const incoming = edges.filter((e) => e.target === n.id);
+        // Reject if not wired at all, or wired from a non-WA source, or wired
+        // from a WA output that isn't `reply_received` / `btn_*`.
+        const ok = incoming.some((e) => {
+          if (!waIds.has(e.source)) return false;
+          const handle = e.sourceHandle ?? "";
+          return handle === "reply_received" || handle.startsWith("btn_");
+        });
+        // Preserve any config-level error (e.g. "Pick a workflow") — the wiring
+        // error should not overwrite an actionable config error.
+        const wiringError = "Wire from a WhatsApp Template's Reply Received or a button output";
+        const hadWiringError = n.data.error === wiringError;
+        if (!ok) {
+          const cfgHasError = n.data.error && !hadWiringError;
+          if (cfgHasError) return n;
+          if (n.data.valid === false && n.data.error === wiringError) return n;
+          changed = true;
+          return { ...n, data: { ...n.data, valid: false, error: wiringError } };
+        }
+        if (hadWiringError) {
+          changed = true;
+          return { ...n, data: { ...n.data, valid: true, error: undefined } };
+        }
+        return n;
+      });
+      return changed ? next : nds;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [freeformIncomingSig, editable, setNodes]);
 
   const outcomeVariables = useMemo(() => deriveNodeOutcomeVariables(nodes), [nodes]);
 
@@ -332,9 +398,27 @@ export function WorkflowCanvas({
           },
         ];
       });
+      // Human Escalation is terminal — auto-wire an edge to End on drop so the
+      // "always ends in End" invariant is preserved without user work. The
+      // edge is a normal routed edge and can be re-routed by dragging.
+      if (kind === "needsReview") {
+        setEdges((eds) => {
+          const end = nodesRef.current.find((n) => n.data.kind === "end");
+          if (!end) return eds;
+          return [
+            ...eds,
+            {
+              id: `e_${newId}_end`,
+              source: newId,
+              target: end.id,
+              type: "routed" as const,
+            },
+          ];
+        });
+      }
       onDirty?.();
     },
-    [setNodes, onDirty],
+    [setNodes, setEdges, onDirty],
   );
 
   const defaultEdgeOptions = useMemo(() => ({ type: "routed" as const }), []);
@@ -356,7 +440,21 @@ export function WorkflowCanvas({
     setTimeout(() => rfRef.current?.fitView({ padding: 0.2, duration: 400 }), 60);
   }, [setNodes, setEdges, onDirty]);
 
+  // Preview modal for the WhatsApp Freeform Workflow node's eye button.
+  // Reuses the same read-only FreeformCanvas that lives inside the config
+  // panel's Preview action, so both entry points look identical.
+  const [freeformPreview, setFreeformPreview] = useState<{ id?: string } | null>(null);
+  const previewedWorkflow = useMemo(
+    () => (freeformPreview?.id ? getFreeformWorkflow(freeformPreview.id) : undefined),
+    [freeformPreview],
+  );
+  const handleFreeformPreview = useCallback((data: WorkflowNodeData) => {
+    const wfId = data.config?.ffWorkflowId as string | undefined;
+    setFreeformPreview({ id: wfId });
+  }, []);
+
   return (
+    <FreeformNodePreviewContext.Provider value={editable ? handleFreeformPreview : null}>
     <div className="relative h-full w-full">
       {layingOut && <div className="absolute inset-0" aria-hidden />}
       {!layingOut && (
@@ -425,6 +523,34 @@ export function WorkflowCanvas({
           return !selected || !v.key.startsWith(`${ns}.`);
         })}
       />
+
+      <Dialog
+        open={!!freeformPreview}
+        onOpenChange={(o) => { if (!o) setFreeformPreview(null); }}
+      >
+        <DialogContent className="max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>{previewedWorkflow?.name ?? "Workflow preview"}</DialogTitle>
+            <DialogDescription>
+              Read-only view. Pan and zoom to inspect; nothing here is editable.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="h-[70vh] overflow-hidden rounded-lg border border-border bg-background">
+            {previewedWorkflow ? (
+              <FreeformCanvas
+                initialNodes={previewedWorkflow.nodes}
+                initialEdges={previewedWorkflow.edges}
+                previewOnly
+              />
+            ) : (
+              <div className="grid h-full place-items-center text-[13px] text-muted-foreground">
+                Pick a workflow first, then click the eye to preview it.
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
+    </FreeformNodePreviewContext.Provider>
   );
 }
