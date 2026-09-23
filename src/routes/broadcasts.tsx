@@ -656,9 +656,6 @@ function CreateBroadcastDialog({
                     className="h-9 pl-8 text-sm"
                   />
                 </div>
-                <p className="text-[11px] text-muted-foreground">
-                  Fires once at this time. The send window stays open for 1 year, so late arrivals still deliver.
-                </p>
                 {scheduledAt && !scheduleValid && (
                   <p className="text-[11px] text-destructive">
                     Pick a time in the future.
