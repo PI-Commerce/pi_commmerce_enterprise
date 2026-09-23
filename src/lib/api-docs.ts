@@ -297,35 +297,146 @@ export const ENDPOINTS: Endpoint[] = [
     notes:
       'Per-recipient variables are positional for WhatsApp (keys "1", "2", ...). The language value must match your template in Meta — use the same code shown in WhatsApp Manager or Meta\'s supported languages list. See Response shape for the per-record rows.',
   },
+  /* --- Send SMS Template: verbatim from prod --- */
   {
     id: "send-sms-template",
     method: "POST",
     path: "/v1/messages/sms/send",
     title: "Send SMS Template",
     description:
-      "Send an approved DLT-registered SMS template directly, without creating a campaign.",
+      "Queue an SMS DLT template to a list of recipients. SMS templates use named variables.",
     pathParams: [],
-    headers: [],
+    headers: [
+      { name: "X-API-Key", type: "string", required: true, description: "Your client API key." },
+      { name: "Content-Type", type: "string", required: true, description: "Must be application/json." },
+      { name: "Idempotency-Key", type: "string", required: false, description: "Optional retry-safety key; see Idempotency." },
+    ],
     bodyDescription: "",
-    bodyParams: [],
-    requestExample: "",
-    responseOkExample: "",
-    stub: true,
+    bodyParams: [
+      {
+        name: "template_id",
+        type: "string",
+        required: true,
+        description: "The approved DLT content template id string.",
+      },
+      {
+        name: "sender_id",
+        type: "string",
+        required: false,
+        description:
+          "Optional DLT sender/header (e.g. PICOMM). Omit to use the template registered header.",
+      },
+      {
+        name: "recipients",
+        type: "array",
+        required: true,
+        description:
+          'Min 1, max 1,000 { to, variables } objects. Variables are named ({{name}} → value). A blank "to" is rejected per recipient.',
+      },
+    ],
+    requestExample: `curl -X POST '${BASE_URL}/v1/messages/sms/send' \\
+  -H 'X-API-Key: YOUR_API_KEY' \\
+  -H 'Content-Type: application/json' \\
+  -H 'Idempotency-Key: order-12345-retry-1' \\
+  -d '{
+    "template_id": "your_template_id",
+    "sender_id": "YOUR_SENDER_ID",
+    "default_country": "IN",
+    "recipients": [
+      { "to": "+919876543210", "variables": { "name": "value" } }
+    ]
+  }'`,
+    responseOkExample: `{
+  "status": "SUCCESS",
+  "code": "200",
+  "message": "successfully queued the request",
+  "data": {
+    "run_id": "run_abc123",
+    "queued": 1,
+    "rejected": 0,
+    "records": [
+      { "index": 0, "status": "queued", "record_id": "run_abc123_01HZY..." }
+    ]
+  }
+}`,
+    rateLimits:
+      "Minimum 1 recipient per request; maximum 1,000. Request body maximum 4 MB. An empty recipients list is HTTP 400. More than 1,000 is HTTP 413 records_over_limit. A body larger than 4 MB is HTTP 413 payload_over_limit.",
+    notes:
+      "Per-recipient variables are named for SMS. See Response shape for the per-record rows.",
   },
+  /* --- Send RCS Template: verbatim from prod --- */
   {
     id: "send-rcs-template",
     method: "POST",
     path: "/v1/messages/rcs/send",
     title: "Send RCS Template",
     description:
-      "Send an approved RCS template directly, without creating a campaign.",
+      "Queue an RCS template to a list of recipients. RCS templates use named variables and carry no language field.",
     pathParams: [],
-    headers: [],
+    headers: [
+      { name: "X-API-Key", type: "string", required: true, description: "Your client API key." },
+      { name: "Content-Type", type: "string", required: true, description: "Must be application/json." },
+      { name: "Idempotency-Key", type: "string", required: false, description: "Optional retry-safety key; see Idempotency." },
+    ],
     bodyDescription: "",
-    bodyParams: [],
-    requestExample: "",
-    responseOkExample: "",
-    stub: true,
+    bodyParams: [
+      {
+        name: "template_id",
+        type: "string",
+        required: true,
+        description: "The local RCS template id (decimal string).",
+      },
+      {
+        name: "agent_name",
+        type: "string",
+        required: false,
+        description:
+          "Optional. Preferred RCS agent identity (maps to rcs_sender.bot_name). When omitted and agent_id is blank, the API uses the template registered RCS agent.",
+      },
+      {
+        name: "agent_id",
+        type: "string",
+        required: false,
+        description:
+          "Legacy agent id (vendor bot_id or numeric sender id). Prefer agent_name.",
+      },
+      {
+        name: "recipients",
+        type: "array",
+        required: true,
+        description:
+          'Min 1, max 1,000 { to, variables } objects. Variables are named ({{name}} → value). A blank "to" is rejected per recipient.',
+      },
+    ],
+    requestExample: `curl -X POST '${BASE_URL}/v1/messages/rcs/send' \\
+  -H 'X-API-Key: YOUR_API_KEY' \\
+  -H 'Content-Type: application/json' \\
+  -H 'Idempotency-Key: order-12345-retry-1' \\
+  -d '{
+    "template_id": "your_template_id",
+    "agent_name": "YOUR_AGENT_NAME",
+    "default_country": "IN",
+    "recipients": [
+      { "to": "+919876543210", "variables": { "name": "value_name" } }
+    ]
+  }'`,
+    responseOkExample: `{
+  "status": "SUCCESS",
+  "code": "200",
+  "message": "successfully queued the request",
+  "data": {
+    "run_id": "run_abc123",
+    "queued": 1,
+    "rejected": 0,
+    "records": [
+      { "index": 0, "status": "queued", "record_id": "run_abc123_01HZY..." }
+    ]
+  }
+}`,
+    rateLimits:
+      "Minimum 1 recipient per request; maximum 1,000. Request body maximum 4 MB. An empty recipients list is HTTP 400. More than 1,000 is HTTP 413 records_over_limit. A body larger than 4 MB is HTTP 413 payload_over_limit.",
+    notes:
+      "Per-recipient variables are named for RCS; there is no language field. See Response shape for the per-record rows.",
   },
 ];
 
