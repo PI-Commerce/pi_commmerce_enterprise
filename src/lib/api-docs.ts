@@ -214,23 +214,88 @@ export const ENDPOINTS: Endpoint[] = [
       "An empty array [] is rejected with HTTP 400 EMPTY_LIST. A non-object array element is rejected as an INVALID_PAYLOAD row at its index while the rest of the batch still returns 202.",
   },
 
-  /* --- Channel APIs: nav entries only. Prod screenshots do not show the
-   * full endpoint pages, so we render a "documentation pending" note rather
-   * than invent field lists / samples. --- */
+  /* --- Send WhatsApp Template: verbatim from prod --- */
   {
     id: "send-whatsapp-template",
     method: "POST",
     path: "/v1/messages/whatsapp/send",
     title: "Send WhatsApp Template",
     description:
-      "Send an approved WhatsApp template directly, without creating a campaign.",
+      "Queue a WhatsApp template broadcast to a list of recipients. WhatsApp templates use positional variables.",
     pathParams: [],
-    headers: [],
+    headers: [
+      { name: "X-API-Key", type: "string", required: true, description: "Your client API key." },
+      { name: "Content-Type", type: "string", required: true, description: "Must be application/json." },
+      { name: "Idempotency-Key", type: "string", required: false, description: "Optional retry-safety key; see Idempotency." },
+    ],
     bodyDescription: "",
-    bodyParams: [],
-    requestExample: "",
-    responseOkExample: "",
-    stub: true,
+    bodyParams: [
+      {
+        name: "template_name",
+        type: "string",
+        required: true,
+        description:
+          "Preferred Meta template name (wins over template_id when both are set).",
+      },
+      {
+        name: "language",
+        type: "string",
+        required: true,
+        description:
+          "Language code for the template you are sending. It must match the language on your approved Meta template — for example hi, en_GB, or en_US. The sample curl uses en_US only as an example; Pi Commerce accepts any language code Meta supports. See Meta supported languages.",
+      },
+      {
+        name: "from",
+        type: "string",
+        required: false,
+        description:
+          "WhatsApp sender display number (or Meta phone_number_id). Recommended when a WABA has several numbers; omit to use the template WABA default.",
+      },
+      {
+        name: "recipients",
+        type: "array",
+        required: true,
+        description:
+          'Min 1, max 1,000 { to, variables } objects. Variables are positional ("1"..."N"). A blank "to" is rejected per recipient.',
+      },
+      {
+        name: "template_id",
+        type: "string",
+        required: false,
+        description:
+          "Legacy Meta template id; used only when template_name is omitted.",
+      },
+    ],
+    requestExample: `curl -X POST '${BASE_URL}/v1/messages/whatsapp/send' \\
+  -H 'X-API-Key: YOUR_API_KEY' \\
+  -H 'Content-Type: application/json' \\
+  -H 'Idempotency-Key: order-12345-retry-1' \\
+  -d '{
+    "template_name": "your_template_name",
+    "language": "en_US",
+    "from": "YOUR_WHATSAPP_NUMBER",
+    "default_country": "IN",
+    "recipients": [
+      { "to": "+919876543210", "variables": { "1": "value1" } }
+    ]
+  }'`,
+    responseOkExample: `{
+  "status": "SUCCESS",
+  "code": "200",
+  "message": "successfully queued the request",
+  "data": {
+    "run_id": "run_abc123",
+    "queued": 1,
+    "rejected": 0,
+    "records": [
+      { "index": 0, "status": "queued", "record_id": "run_abc123_01HZY..." }
+    ]
+  }
+}`,
+    rateLimits:
+      "Minimum 1 recipient per request; maximum 1,000. Request body maximum 4 MB. An empty recipients list is HTTP 400. More than 1,000 is HTTP 413 records_over_limit. A body larger than 4 MB is HTTP 413 payload_over_limit.",
+    notes:
+      'Per-recipient variables are positional for WhatsApp (keys "1", "2", ...). The language value must match your template in Meta — use the same code shown in WhatsApp Manager or Meta\'s supported languages list. See Response shape for the per-record rows.',
   },
   {
     id: "send-sms-template",
