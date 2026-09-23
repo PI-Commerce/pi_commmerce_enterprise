@@ -1,27 +1,27 @@
 /**
- * API Docs, data model.
+ * API Docs data (public-docs branch).
  *
- * A structured catalog of the platform's public HTTP APIs, rendered in
- * Developer > API Docs. Kept as data (not JSX) so we can:
- *   - reuse a single error-code catalogue across endpoints,
- *   - keep sample requests / responses in one place,
- *   - later regenerate this from a spec (OpenAPI) if we want to.
+ * VERBATIM from prod screenshots. Anything I did not have a screenshot for
+ * is either omitted or left as a "documentation pending" placeholder rather
+ * than invented.
  *
- * Endpoints are bucketed into two groups the way merchants think about them:
+ * Prod structure (from Developer > API Docs left nav):
  *
- *   Campaign Trigger APIs
- *     - Single Record  (POST /v1/runs/trigger/{run_id}, one-object body)
- *     - Batch          (POST /v1/runs/trigger/{run_id}, array body)
+ *   GET STARTED
+ *     - Overview
+ *     - Authentication
+ *     - Rate limits
+ *     - Idempotency
+ *     - Response shape
+ *     - Error codes
  *
- *   Channel APIs
- *     - Send WhatsApp Template  (POST /v1/messages/whatsapp/send)
- *     - Send SMS Template       (POST /v1/messages/sms/send)
- *     - Send RCS Template       (POST /v1/messages/rcs/send)
+ *   CAMPAIGN TRIGGER APIS
+ *     - Trigger Campaign Run   POST
  *
- * Note for the dev team: the fields, error codes and rate limits here are
- * placeholders in the sense that engineering owns the exact final shape.
- * The larger structure (grouping, per-endpoint sections, shared response
- * shape, shared error catalogue) is the important thing to keep.
+ *   CHANNEL APIS
+ *     - Send WhatsApp Template  POST
+ *     - Send SMS Template       POST
+ *     - Send RCS Template       POST
  */
 
 export type Method = "POST" | "GET" | "PUT" | "DELETE" | "PATCH";
@@ -33,15 +33,15 @@ export type Param = {
   description: string;
 };
 
-export type WholeCallErrorCode = {
-  http: number;
+/**
+ * Error catalog row, as shown in the prod Error codes screen.
+ * Casing is preserved exactly as emitted by prod.
+ */
+export type ErrorRow = {
   code: string;
-  when: string;
-};
-
-export type RecordErrorCode = {
-  code: string;
-  covers: string;
+  status: string;
+  scope: string;
+  cause: string;
 };
 
 export type Endpoint = {
@@ -49,401 +49,213 @@ export type Endpoint = {
   method: Method;
   path: string;
   title: string;
-  short: string;
+  /** Short prose that sits under the title. */
   description: string;
-  auth: string;
-  headers: Param[];
   pathParams: Param[];
-  bodyRoot: {
-    type: "object" | "array";
-    /** For arrays: the shape of each item; for objects: the top-level fields. */
-    fields: Param[];
-  };
+  headers: Param[];
+  bodyDescription: string;
+  /** Body parameter rows. */
+  bodyParams: Param[];
   requestExample: string;
   responseOkExample: string;
-  responseErrorExample: string;
-  rateLimits: string[];
-  notes?: string[];
+  /** When true, this endpoint is a stub — no verbatim prod screenshot to draw from. */
+  stub?: boolean;
 };
 
-/* ---------------- Shared: base URL, response fields, errors ---------------- */
+/* ---------------------------- Base URL ---------------------------- */
 
-export const BASE_URL = "https://api.picommerce.paytm.com";
+export const BASE_URL = "https://pi-commerce-api.paytm.com/api/pi-commerce";
 
-/** Fields returned inside the top-level HTTP 200 response for every endpoint. */
-export const RESPONSE_200_FIELDS: Param[] = [
-  { name: "request_id", type: "string", required: true, description: "Server-generated identifier for this call. Include when contacting support." },
-  { name: "run_id",     type: "string", required: false, description: "Present on trigger endpoints; echoes the run receiving the audience. Direct Channel APIs also generate a backend run_id (not visible in the Runs list)." },
-  { name: "queued",     type: "integer", required: true, description: "Count of records that passed validation and were accepted for processing. Not a promise of delivery." },
-  { name: "rejected",   type: "integer", required: true, description: "Count of records that failed validation." },
-  { name: "records",    type: "array<object>", required: true, description: "One entry per record in the request, in request order. Length equals request size. queued + rejected equals length." },
+/* ---------------------------- Error catalog (prod) ---------------------------- */
+
+export const ERROR_CATALOG: ErrorRow[] = [
+  {
+    code: "EMPTY_LIST",
+    status: "400",
+    scope: "Whole call",
+    cause: "The request body was an empty array `[]` — send at least one record.",
+  },
+  {
+    code: "INVALID_PAYLOAD",
+    status: "202",
+    scope: "Per record",
+    cause:
+      "An array element was not a JSON object; that index is rejected inside the 202.",
+  },
+  {
+    code: "INVALID_PHONE",
+    status: "202",
+    scope: "Per record",
+    cause:
+      "A recipient `to` value failed validation; that row is rejected inside the 202.",
+  },
+  {
+    code: "duplicate_request",
+    status: "409",
+    scope: "Whole call",
+    cause:
+      "Same Idempotency-Key seen within the 15-minute window — not a replay of the result.",
+  },
+  {
+    code: "invalid_idempotency_key",
+    status: "400",
+    scope: "Whole call",
+    cause: "Idempotency-Key did not match `^[A-Za-z0-9._~-]{8,128}$`.",
+  },
+  {
+    code: "payload_over_limit",
+    status: "413",
+    scope: "Whole call",
+    cause: "Request body exceeded 4 MB.",
+  },
+  {
+    code: "ALL_RECIPIENTS_REJECTED",
+    status: "422",
+    scope: "Whole call",
+    cause:
+      "Every record was rejected; the response still carries the full BatchSendResponse.",
+  },
+  {
+    code: "NOT_FOUND",
+    status: "404",
+    scope: "Whole call",
+    cause:
+      "The referenced run/template was not found. Shares a code with no finer distinction.",
+  },
+  {
+    code: "CONFLICT",
+    status: "409",
+    scope: "Whole call",
+    cause:
+      "One of six conflict conditions. All six emit the same code — not machine-distinguishable.",
+  },
 ];
 
-export const RESPONSE_RECORDS_ITEM_FIELDS: Param[] = [
-  { name: "index",     type: "integer", required: true, description: "Position of this record in the request array (0-indexed)." },
-  { name: "status",    type: "string",  required: true, description: '"queued" or "rejected".' },
-  { name: "record_id", type: "string",  required: false, description: 'Present when status is "queued". Opaque, stable, unique across runs and clients. Use it to correlate later.' },
-  { name: "error_code",type: "string",  required: false, description: 'Present when status is "rejected". One of the record-level error codes below.' },
+/* ---------------------------- Endpoints ---------------------------- */
+
+const TRIGGER_CAMPAIGN_HEADERS: Param[] = [
+  { name: "X-API-Key", type: "string", required: true, description: "Your client API key." },
+  { name: "Content-Type", type: "string", required: true, description: "Must be application/json." },
+  {
+    name: "Idempotency-Key",
+    type: "string",
+    required: false,
+    description: "Optional retry-safety key; see Idempotency.",
+  },
 ];
 
-export const RESPONSE_ERROR_FIELDS: Param[] = [
-  { name: "request_id", type: "string", required: true, description: "Server-generated identifier for this call, present even on errors. Include when contacting support." },
-  { name: "error_code", type: "string", required: true, description: "Stable machine identifier for the failure. See the error-code table below." },
+const TRIGGER_CAMPAIGN_PATH_PARAMS: Param[] = [
+  { name: "runID", type: "string", required: true, description: "The id of the campaign run to trigger." },
 ];
 
-/** Errors that can appear inside a records[] entry with status "rejected". */
-export const RECORD_ERRORS: RecordErrorCode[] = [
-  { code: "invalid_payload", covers: "A required field is missing, a field holds the wrong kind of value, or the record is not an object." },
-  { code: "invalid_number",  covers: "The phone value cannot be read as a valid phone number." },
+const TRIGGER_CAMPAIGN_BODY_PARAMS: Param[] = [
+  {
+    name: "[] (array of records)",
+    type: "array",
+    required: true,
+    description:
+      "JSON array of 1 to 1,000 audience record objects. Each object must include phone (E.164) plus any merge fields your run expects. For a single audience record, send a one-element array — the same shape as a batch call with one item.",
+  },
 ];
 
-/** Errors returned as HTTP 4xx / 5xx with the standard error body. */
-export const WHOLE_CALL_ERRORS: WholeCallErrorCode[] = [
-  { http: 400, code: "invalid_body",       when: "Body is not valid JSON." },
-  { http: 400, code: "empty_list",         when: "Body is an empty array." },
-  { http: 401, code: "auth_rejected",      when: "API key missing or invalid." },
-  { http: 404, code: "run_not_found",      when: "Run in the URL does not exist for this client." },
-  { http: 409, code: "run_not_live",       when: "Run exists but is not in a live state." },
-  { http: 413, code: "records_over_limit", when: "More than 1,000 records in one call." },
-  { http: 413, code: "payload_over_limit", when: "Body larger than 4 MB." },
-  { http: 429, code: "rate_limited",       when: "Calls-per-second exceeded. Retry-After header set." },
-];
-
-/** Rate-limit values that apply uniformly to every endpoint. */
-export const RATE_LIMITS = [
-  "1,000 records per call",
-  "4 MB body per call",
-  "15 calls per second per client",
-];
-
-/* ------------------------------ Endpoints ------------------------------ */
-
-const AUTH_LINE =
-  "Send X-API-Key with an API key generated under Developer > APIs & Webhooks. Keys are scoped to your client and can be revoked at any time.";
-
-const CAMPAIGN_TRIGGER_HEADERS: Param[] = [
-  { name: "Content-Type",     type: "string", required: true, description: "application/json" },
-  { name: "X-API-Key",        type: "string", required: true, description: "Your API key." },
-  { name: "Idempotency-Key",  type: "string", required: false, description: "Optional. Alphanumeric, unique per intended call. If sent, a repeat within 15 minutes returns the original response, including the same record_ids. Typical patterns: UUID or SHA-256 of the body." },
-];
-
-const CAMPAIGN_TRIGGER_PATH_PARAMS: Param[] = [
-  { name: "run_id", type: "string", required: true, description: "Identifier of the run receiving audience. Found in the Run details drawer under the campaign." },
-];
-
-const CAMPAIGN_TRIGGER_BODY_ITEM: Param = {
-  name: "<record>",
-  type: "object",
-  required: true,
-  description: 'A record matching the Audience-node schema for this run (for example { "phone": "...", "name": "..." }).',
-};
-
-const SINGLE_RECORD_REQUEST = `curl -X POST '${BASE_URL}/v1/runs/trigger/r_782' \\
+const TRIGGER_CAMPAIGN_REQUEST = `curl -X POST '${BASE_URL}/v1/runs/trigger/{runID}' \\
+  -H 'X-API-Key: YOUR_API_KEY' \\
   -H 'Content-Type: application/json' \\
-  -H 'X-API-Key: pk_YOUR_API_KEY' \\
+  -H 'Idempotency-Key: order-12345-retry-1' \\
   -d '[
-        { "phone": "9812345678", "name": "Asha" }
-      ]'`;
+    {
+      "phone": "+919812345678",
+      "field_name": "Asha"
+    },
+    {
+      "phone": "+919812345679",
+      "field_name": "Ravi"
+    }
+  ]'`;
 
-const SINGLE_RECORD_OK = `{
-  "request_id": "req_8f14e45f",
-  "run_id": "r_782",
-  "queued": 1,
-  "rejected": 0,
-  "records": [
-    { "index": 0, "status": "queued", "record_id": "rec_01HX7Y8ABCD" }
-  ]
-}`;
-
-const BATCH_REQUEST = `curl -X POST '${BASE_URL}/v1/runs/trigger/r_782' \\
-  -H 'Content-Type: application/json' \\
-  -H 'X-API-Key: pk_YOUR_API_KEY' \\
-  -H 'Idempotency-Key: 8f14e45f-ea8d-4b9a-9c1f-2b3d4e5f6a7b' \\
-  -d '[
-        { "phone": "9812345678", "name": "Asha" },
-        { "phone": "9812345679", "name": "Ravi" },
-        { "phone": "9812345680", "name": "Neha" }
-      ]'`;
-
-const BATCH_OK = `{
-  "request_id": "req_8f14e45f",
-  "run_id": "r_782",
-  "queued": 997,
-  "rejected": 3,
-  "records": [
-    { "index": 0,   "status": "queued",   "record_id": "rec_01HX7Y8ABCD" },
-    { "index": 1,   "status": "queued",   "record_id": "rec_01HX7Y8ABCE" },
-    { "index": 12,  "status": "rejected", "error_code": "invalid_payload" },
-    { "index": 340, "status": "rejected", "error_code": "invalid_number" },
-    { "index": 811, "status": "rejected", "error_code": "invalid_payload" }
-  ]
-}`;
-
-const TRIGGER_ERROR = `{
-  "request_id": "req_8f14e45f",
-  "error_code": "run_not_found"
-}`;
-
-const DIRECT_CHANNEL_HEADERS: Param[] = [
-  { name: "Content-Type",     type: "string", required: true, description: "application/json" },
-  { name: "X-API-Key",        type: "string", required: true, description: "Your API key." },
-  { name: "Idempotency-Key",  type: "string", required: false, description: "Optional. Same semantics as Batch Campaign Trigger." },
-];
-
-const WA_BODY: Param[] = [
-  { name: "template_id", type: "string", required: true, description: "Approved WhatsApp template ID." },
-  { name: "language",    type: "string", required: true, description: "BCP-47 language code, for example en_US." },
-  { name: "from",        type: "string", required: true, description: "WhatsApp phone number ID (WABA sender)." },
-  { name: "records",     type: "array<object>", required: true, description: "Recipients and template variables. Each item: { to, variables }." },
-];
-const SMS_BODY: Param[] = [
-  { name: "template_id", type: "string", required: true, description: "Approved DLT-registered SMS template ID." },
-  { name: "sender_id",   type: "string", required: true, description: "DLT-registered sender ID." },
-  { name: "records",     type: "array<object>", required: true, description: "Recipients and template variables. Each item: { to, variables }." },
-];
-const RCS_BODY: Param[] = [
-  { name: "template_id", type: "string", required: true, description: "Approved RCS template ID." },
-  { name: "agent_id",    type: "string", required: true, description: "Registered RCS bot / agent ID." },
-  { name: "records",     type: "array<object>", required: true, description: "Recipients and template variables. Each item: { to, variables }." },
-];
-
-const DIRECT_OK = `{
-  "request_id": "req_8f14e45f",
-  "run_id": "r_9033",
-  "queued": 2,
-  "rejected": 1,
-  "records": [
-    { "index": 0, "status": "queued",   "record_id": "msg_01HZX8A1", "to": "919876500001" },
-    { "index": 1, "status": "queued",   "record_id": "msg_01HZX8A2", "to": "919876500002" },
-    { "index": 2, "status": "rejected", "error_code": "invalid_number", "to": "91987650" }
-  ]
-}`;
-
-const DIRECT_ERROR = `{
-  "request_id": "req_8f14e45f",
-  "error_code": "auth_rejected"
-}`;
-
-const WA_REQUEST = `curl -X POST '${BASE_URL}/v1/messages/whatsapp/send' \\
-  -H 'Content-Type: application/json' \\
-  -H 'X-API-Key: pk_YOUR_API_KEY' \\
-  -d '{
-        "template_id": "10248301552093",
-        "language": "en_US",
-        "from": "PHONE_NUMBER_ID",
-        "records": [
-          { "to": "919876500001", "variables": { "1": "Aniket", "2": "ORD-4471", "3": "\\u20B91,299" } },
-          { "to": "919876500002", "variables": { "1": "Priya",  "2": "ORD-4472", "3": "\\u20B9899"   } }
-        ]
-      }'`;
-
-const SMS_REQUEST = `curl -X POST '${BASE_URL}/v1/messages/sms/send' \\
-  -H 'Content-Type: application/json' \\
-  -H 'X-API-Key: pk_YOUR_API_KEY' \\
-  -d '{
-        "template_id": "1707172700123456",
-        "sender_id":   "PIMKTG",
-        "records": [
-          { "to": "919876500001", "variables": { "1": "Aniket", "2": "ORD-4471" } }
-        ]
-      }'`;
-
-const RCS_REQUEST = `curl -X POST '${BASE_URL}/v1/messages/rcs/send' \\
-  -H 'Content-Type: application/json' \\
-  -H 'X-API-Key: pk_YOUR_API_KEY' \\
-  -d '{
-        "template_id": "rcs_tpl_welcome_offer",
-        "agent_id":    "acme_promo_bot",
-        "records": [
-          { "to": "919876500001", "variables": { "name": "Aniket", "offer": "20% off" } }
-        ]
-      }'`;
-
-/* ------------------ SMS Template registry (single endpoint, array body) ------------------ */
-
-const SMS_TEMPLATE_REGISTER_HEADERS: Param[] = [
-  { name: "Content-Type", type: "string", required: true, description: "application/json" },
-  { name: "X-API-Key",    type: "string", required: true, description: "Your API key." },
-];
-
-const SMS_TEMPLATE_FIELDS: Param[] = [
-  { name: "sms_type",        type: "string", required: true, description: 'One of "Text", "Unicode", "Text-class 0", "Unicode-class 0". Drives encoding and message class.' },
-  { name: "pe_id",           type: "string", required: true, description: "DLT Principal Entity ID. 8 to 25 digits. Must be provisioned by ops." },
-  { name: "category",        type: "string", required: true, description: 'One of "Promotional" or "Transactional".' },
-  { name: "sender_id",       type: "string", required: true, description: "DLT sender ID. 3 to 11 alphanumeric characters. Must be approved for the given pe_id + category." },
-  { name: "template_name",   type: "string", required: true, description: "Pi Commerce label, 1 to 120 characters. Not sent to the operator." },
-  { name: "template_id",     type: "string", required: true, description: "DLT-approved template ID. 8 to 25 digits. Unique per client. Immutable after registration." },
-  { name: "message_content", type: "string", required: true, description: "Full DLT-approved copy, 1 to 1600 characters. Use {{variable}} for named placeholders." },
-];
-
-const SMS_TEMPLATE_REGISTER_REQUEST = `curl -X POST '${BASE_URL}/v1/channels/sms/templates' \\
-  -H 'Content-Type: application/json' \\
-  -H 'X-API-Key: pk_YOUR_API_KEY' \\
-  -d '[
-        { "sms_type": "Text", "pe_id": "1101473820000034521", "category": "Transactional",
-          "sender_id": "PICOMM", "template_name": "order_confirm_txn",
-          "template_id": "1107168420993847112",
-          "message_content": "Hi {{name}}, your order {{order_id}} is confirmed. - PICOMM" },
-        { "sms_type": "Text", "pe_id": "1101473820000034521", "category": "Transactional",
-          "sender_id": "PICOMM", "template_name": "order_shipped_txn",
-          "template_id": "1107168420993847113",
-          "message_content": "Your order {{order_id}} has shipped. Track: {{link}} - PICOMM" }
-      ]'`;
-
-const SMS_TEMPLATE_REGISTER_OK = `{
-  "request_id": "req_8f14e45f",
-  "created": 1,
-  "duplicate": 1,
-  "failed": 0,
-  "results": [
-    { "index": 0, "status": "created",   "template_id": "1107168420993847112", "template_name": "order_confirm_txn",  "encoding": "GSM-7", "segments": 1, "variables": ["name", "order_id"] },
-    { "index": 1, "status": "duplicate", "template_id": "1107168420993847113", "template_name": "order_shipped_txn" }
-  ]
-}`;
-
-const SMS_TEMPLATE_REGISTER_ERROR = `{
-  "request_id": "req_8f14e45f",
-  "error_code": "batch_over_limit"
+const TRIGGER_CAMPAIGN_RESPONSE = `{
+  "status": "SUCCESS",
+  "code": "200",
+  "message": "successfully processed",
+  "data": {
+    "run_id": "run_abc123",
+    "queued": 2,
+    "rejected": 1,
+    "records": [
+      { "index": 0, "status": "queued", "record_id": "run_abc123_01HZY..." },
+      { "index": 1, "status": "queued", "record_id": "run_abc123_01HZZ..." }
+    ]
+  }
 }`;
 
 export const ENDPOINTS: Endpoint[] = [
   {
-    id: "campaign-trigger-single",
+    id: "trigger-campaign-run",
     method: "POST",
-    path: "/v1/runs/trigger/{run_id}",
-    title: "Single Record",
-    short: "Push one audience record into a running campaign.",
+    path: "/v1/runs/trigger/{runID}",
+    title: "Trigger Campaign Run",
     description:
-      "Use this shape when you want to send one record at a time. The body is a JSON array with a single object. Every field must match the run's Audience-node schema.",
-    auth: AUTH_LINE,
-    headers: CAMPAIGN_TRIGGER_HEADERS,
-    pathParams: CAMPAIGN_TRIGGER_PATH_PARAMS,
-    bodyRoot: { type: "array", fields: [CAMPAIGN_TRIGGER_BODY_ITEM] },
-    requestExample: SINGLE_RECORD_REQUEST,
-    responseOkExample: SINGLE_RECORD_OK,
-    responseErrorExample: TRIGGER_ERROR,
-    rateLimits: RATE_LIMITS,
-    notes: [
-      'The endpoint always accepts an array. For one record, send an array of one: [{...}].',
-      'For pushing many records in a single call, see Batch.',
-    ],
-  },
-  {
-    id: "campaign-trigger-batch",
-    method: "POST",
-    path: "/v1/runs/trigger/{run_id}",
-    title: "Batch",
-    short: "Push up to 1,000 audience records into a running campaign in one call.",
-    description:
-      "Same endpoint as Single Record. The body is a JSON array of records, up to 1,000 per call. Each record is validated on its own; a bad record never blocks the rest of the batch.",
-    auth: AUTH_LINE,
-    headers: CAMPAIGN_TRIGGER_HEADERS,
-    pathParams: CAMPAIGN_TRIGGER_PATH_PARAMS,
-    bodyRoot: { type: "array", fields: [CAMPAIGN_TRIGGER_BODY_ITEM] },
-    requestExample: BATCH_REQUEST,
-    responseOkExample: BATCH_OK,
-    responseErrorExample: TRIGGER_ERROR,
-    rateLimits: RATE_LIMITS,
-    notes: [
-      '"queued" means accepted for processing, not a promise of delivery. Business filters (dedupe, DND, channel failures) run on the queue afterwards.',
-      "Template and variable-substitution errors are never returned here. They show up in the run's analytics when the campaign node runs.",
-    ],
+      "Push audience records into a campaign run. Send the body as a JSON array of 1 to 1,000 record objects (use a one-element array for a single record). Request body maximum 4 MB.",
+    pathParams: TRIGGER_CAMPAIGN_PATH_PARAMS,
+    headers: TRIGGER_CAMPAIGN_HEADERS,
+    bodyDescription:
+      "JSON array of 1 to 1,000 audience record objects.",
+    bodyParams: TRIGGER_CAMPAIGN_BODY_PARAMS,
+    requestExample: TRIGGER_CAMPAIGN_REQUEST,
+    responseOkExample: TRIGGER_CAMPAIGN_RESPONSE,
   },
 
+  /* --- Channel APIs: nav entries only. Prod screenshots do not show the
+   * full endpoint pages, so we render a "documentation pending" note rather
+   * than invent field lists / samples. --- */
   {
-    id: "channel-whatsapp",
+    id: "send-whatsapp-template",
     method: "POST",
     path: "/v1/messages/whatsapp/send",
     title: "Send WhatsApp Template",
-    short: "Send an approved WhatsApp template directly, without creating a campaign.",
     description:
-      "Sends one WhatsApp template to one or many recipients in a single call. A backend run is created for reporting (visible in Channel Analytics) but does not surface in the Runs list.",
-    auth: AUTH_LINE,
-    headers: DIRECT_CHANNEL_HEADERS,
+      "Send an approved WhatsApp template directly, without creating a campaign.",
     pathParams: [],
-    bodyRoot: { type: "object", fields: WA_BODY },
-    requestExample: WA_REQUEST,
-    responseOkExample: DIRECT_OK,
-    responseErrorExample: DIRECT_ERROR,
-    rateLimits: RATE_LIMITS,
-    notes: [
-      'Variables use positional keys ("1", "2", ...) matching the template\'s variable positions.',
-      "Sends are counted in Channel Analytics > WhatsApp exactly like any other send.",
-    ],
+    headers: [],
+    bodyDescription: "",
+    bodyParams: [],
+    requestExample: "",
+    responseOkExample: "",
+    stub: true,
   },
   {
-    id: "channel-sms",
+    id: "send-sms-template",
     method: "POST",
     path: "/v1/messages/sms/send",
     title: "Send SMS Template",
-    short: "Send an approved DLT template directly, without creating a campaign.",
     description:
-      "Sends one DLT-approved SMS template to one or many recipients in a single call. A backend run is created for reporting (visible in Channel Analytics) but does not surface in the Runs list.",
-    auth: AUTH_LINE,
-    headers: DIRECT_CHANNEL_HEADERS,
+      "Send an approved DLT-registered SMS template directly, without creating a campaign.",
     pathParams: [],
-    bodyRoot: { type: "object", fields: SMS_BODY },
-    requestExample: SMS_REQUEST,
-    responseOkExample: DIRECT_OK,
-    responseErrorExample: DIRECT_ERROR,
-    rateLimits: RATE_LIMITS,
-    notes: [
-      'Variables use positional keys ("1", "2", ...) matching the DLT template.',
-      "Sends are counted in Channel Analytics > SMS.",
-    ],
+    headers: [],
+    bodyDescription: "",
+    bodyParams: [],
+    requestExample: "",
+    responseOkExample: "",
+    stub: true,
   },
   {
-    id: "channel-sms-templates-register",
-    method: "POST",
-    path: "/v1/channels/sms/templates",
-    title: "Register SMS Templates",
-    short: "Register one or many DLT-approved SMS templates on Pi Commerce.",
-    description:
-      "Registers DLT-approved SMS templates against a provisioned PE + Sender ID. Same seven fields as the Channels > SMS > Templates > Add template form. Body is a JSON array of 1 to 500 templates: send an array of one to register a single template, an array of many for a batch. Every row is validated on its own; one bad row never blocks the rest. Templates land active immediately (Pi Commerce mirrors DLT approval; there is no separate approval workflow here).",
-    auth: AUTH_LINE,
-    headers: SMS_TEMPLATE_REGISTER_HEADERS,
-    pathParams: [],
-    bodyRoot: { type: "array", fields: SMS_TEMPLATE_FIELDS },
-    requestExample: SMS_TEMPLATE_REGISTER_REQUEST,
-    responseOkExample: SMS_TEMPLATE_REGISTER_OK,
-    responseErrorExample: SMS_TEMPLATE_REGISTER_ERROR,
-    rateLimits: [
-      "500 templates per call",
-      "60 calls per minute per client",
-      "4 MB body per call",
-    ],
-    notes: [
-      "The endpoint always accepts an array. For one template, send an array of one: [{...}].",
-      "Per-row semantics: results[] is same length and order as the input; each entry carries status ('created' | 'duplicate' | 'failed'). Failed rows carry a stable error_code (invalid_pe_id, invalid_sender_id, template_id_exists, sender_not_approved, template_id_duplicate_in_batch, ...).",
-      "Successful rows echo the derived fields: variables[] (extracted named placeholders), encoding (GSM-7 or UCS-2), segments (worst-case). Registered templates land active immediately.",
-      "template_id is unique per client and immutable after registration. A retry with the same template_id returns that row as 'duplicate' with the existing resource, so retries are safe.",
-      "Named placeholders use {{variable}} (DLT convention). Numbered placeholders like {{1}} are treated as literal text.",
-    ],
-  },
-  {
-    id: "channel-rcs",
+    id: "send-rcs-template",
     method: "POST",
     path: "/v1/messages/rcs/send",
     title: "Send RCS Template",
-    short: "Send an approved RCS template directly, without creating a campaign.",
     description:
-      "Sends one RCS template to one or many recipients in a single call. A backend run is created for reporting (visible in Channel Analytics) but does not surface in the Runs list.",
-    auth: AUTH_LINE,
-    headers: DIRECT_CHANNEL_HEADERS,
+      "Send an approved RCS template directly, without creating a campaign.",
     pathParams: [],
-    bodyRoot: { type: "object", fields: RCS_BODY },
-    requestExample: RCS_REQUEST,
-    responseOkExample: DIRECT_OK,
-    responseErrorExample: DIRECT_ERROR,
-    rateLimits: RATE_LIMITS,
-    notes: [
-      'Variables use named keys ("{{name}}") matching the RCS template placeholders.',
-      "Sends are counted in Channel Analytics > RCS.",
-    ],
+    headers: [],
+    bodyDescription: "",
+    bodyParams: [],
+    requestExample: "",
+    responseOkExample: "",
+    stub: true,
   },
 ];
 
-/* ------------------------------ Navigation ------------------------------ */
+/* ---------------------------- Navigation ---------------------------- */
 
 export type NavSection =
   | { kind: "prose"; id: string; title: string }
@@ -453,50 +265,30 @@ export const NAV_GROUPS: { title: string; items: NavSection[] }[] = [
   {
     title: "Get started",
     items: [
-      { kind: "prose", id: "overview",       title: "Overview" },
+      { kind: "prose", id: "overview", title: "Overview" },
       { kind: "prose", id: "authentication", title: "Authentication" },
-      { kind: "prose", id: "rate-limits",    title: "Rate limits" },
-      { kind: "prose", id: "idempotency",    title: "Idempotency" },
+      { kind: "prose", id: "rate-limits", title: "Rate limits" },
+      { kind: "prose", id: "idempotency", title: "Idempotency" },
       { kind: "prose", id: "response-shape", title: "Response shape" },
-      { kind: "prose", id: "errors",         title: "Error codes" },
-    ],
-  },
-  {
-    title: "Webhooks",
-    items: [
-      { kind: "prose", id: "webhooks-overview",   title: "Overview" },
-      { kind: "prose", id: "webhooks-register",   title: "Register a webhook" },
-      { kind: "prose", id: "webhooks-auth",       title: "Auth" },
-      { kind: "prose", id: "webhooks-delivery",   title: "Delivery and retries" },
-      { kind: "prose", id: "webhooks-wa",         title: "Payload: WhatsApp" },
-      { kind: "prose", id: "webhooks-sms",        title: "Payload: SMS" },
-      { kind: "prose", id: "webhooks-rcs",        title: "Payload: RCS" },
-      { kind: "prose", id: "webhooks-testing",    title: "Test event" },
-      { kind: "prose", id: "webhooks-reference",  title: "Reference" },
+      { kind: "prose", id: "errors", title: "Error codes" },
     ],
   },
   {
     title: "Campaign Trigger APIs",
-    items: ENDPOINTS
-      .filter((e) => e.id.startsWith("campaign-trigger-"))
-      .map((e) => ({ kind: "endpoint" as const, id: e.id, title: e.title, method: e.method })),
+    items: ENDPOINTS.filter((e) => e.id === "trigger-campaign-run").map((e) => ({
+      kind: "endpoint" as const,
+      id: e.id,
+      title: e.title,
+      method: e.method,
+    })),
   },
   {
-    title: "WhatsApp APIs",
-    items: ENDPOINTS
-      .filter((e) => e.id.startsWith("channel-whatsapp"))
-      .map((e) => ({ kind: "endpoint" as const, id: e.id, title: e.title, method: e.method })),
-  },
-  {
-    title: "SMS APIs",
-    items: ENDPOINTS
-      .filter((e) => e.id === "channel-sms" || e.id.startsWith("channel-sms-"))
-      .map((e) => ({ kind: "endpoint" as const, id: e.id, title: e.title, method: e.method })),
-  },
-  {
-    title: "RCS APIs",
-    items: ENDPOINTS
-      .filter((e) => e.id.startsWith("channel-rcs"))
-      .map((e) => ({ kind: "endpoint" as const, id: e.id, title: e.title, method: e.method })),
+    title: "Channel APIs",
+    items: ENDPOINTS.filter((e) => e.id.startsWith("send-")).map((e) => ({
+      kind: "endpoint" as const,
+      id: e.id,
+      title: e.title,
+      method: e.method,
+    })),
   },
 ];

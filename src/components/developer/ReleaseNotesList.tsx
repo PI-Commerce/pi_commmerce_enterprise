@@ -21,7 +21,6 @@ import {
 
 /** Category tint. Uses semantic tokens so it inherits from dark/light theme. */
 const CATEGORY_TINT: Record<ReleaseCategory, string> = {
-  Connections: "border-success/30 bg-success/10 text-success",
   Channels:    "border-ai/30 bg-ai/10 text-ai",
   Workflow:    "border-warning/30 bg-warning/10 text-warning",
   Developer:   "border-border bg-secondary text-foreground",
@@ -35,26 +34,13 @@ const CATEGORY_TINT: Record<ReleaseCategory, string> = {
  *     not part of the shell.
  */
 export function ReleaseNotesList({ hideAppLinks = false }: { hideAppLinks?: boolean } = {}) {
+  const v21 = getEntriesByVersion("v2.1");
   const v2 = getEntriesByVersion("v2");
-  const v1 = getEntriesByVersion("v1");
 
   return (
     <div className="max-w-4xl">
-      <VersionBlock label="v2" entries={v2} hideAppLinks={hideAppLinks} />
-      {v1.length > 0 ? (
-        <VersionBlock label="v1" entries={v1} className="mt-14" hideAppLinks={hideAppLinks} />
-      ) : (
-        <div className="mt-14">
-          <VersionHeader label="v1" count={0} />
-          <div className="mt-6 rounded-xl border border-dashed border-border bg-card/40 px-6 py-10 text-center">
-            <p className="text-[13px] font-medium">v1 notes coming soon</p>
-            <p className="mx-auto mt-1 max-w-sm text-[12px] text-muted-foreground">
-              We're back-filling release notes for the v1 launch. Check back
-              shortly.
-            </p>
-          </div>
-        </div>
-      )}
+      <VersionBlock label="v2.1" entries={v21} hideAppLinks={hideAppLinks} />
+      <VersionBlock label="v2" entries={v2} className="mt-14" hideAppLinks={hideAppLinks} />
       <p className="mt-16 text-[11px] text-muted-foreground">
         {RELEASE_ENTRIES.length} entries. Newest first.
       </p>

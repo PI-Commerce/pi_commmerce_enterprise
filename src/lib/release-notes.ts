@@ -1,29 +1,22 @@
 /**
- * Release Notes source of truth.
+ * Release Notes source of truth (public-docs branch).
  *
- * Entries are grouped by product version (v2, v1) and ordered newest first.
- * Kept brief on purpose. Each entry documents one shipped capability and
- * mirrors what went out in the corresponding release notes PDF.
+ * VERBATIM copy of what ships on prod today. Every string here was
+ * transcribed from the live in-app Release Notes screenshots — no
+ * invented bullets, no drift. If prod changes, update this file.
  *
- * Releases under v2 so far:
- *   - 20 August 2026: SMS, Delay v2, API Tool Node, WhatsApp Template
- *     Timeout, API Keys.
- *   - 25 August 2026: RCS, Direct Channel APIs, Batch API for Campaigns,
- *     CLM Connectors, CSV upload limits.
- *   - 3 September 2026: API Docs.
- *   - 9 September 2026: WhatsApp Freeform Workflows.
- *   - 10 September 2026: Broadcast Campaigns.
- *   - 15 September 2026: Channel Webhooks.
+ * Grouped exactly like prod:
+ *   - V2.1: the four September 2026 releases
+ *   - V2:   the ten August + June 2026 releases
  */
 
 export type ReleaseCategory =
-  | "Connections"
   | "Channels"
   | "Workflow"
   | "Developer"
   | "Campaigns";
 
-export type ReleaseVersion = "v2" | "v1";
+export type ReleaseVersion = "v2.1" | "v2";
 
 export type ReleaseEntry = {
   id: string;
@@ -34,7 +27,7 @@ export type ReleaseEntry = {
   title: string;
   /** One-line summary shown under the title. */
   summary: string;
-  /** 2 to 4 short bullets. Each should fit on one line. */
+  /** Bullet highlights, verbatim from prod. */
   highlights: string[];
   /** Optional path inside the app users can jump to. */
   linkTo?: string;
@@ -43,50 +36,46 @@ export type ReleaseEntry = {
 };
 
 export const RELEASE_ENTRIES: ReleaseEntry[] = [
+  /* ============================== V2.1 ============================== */
+
   /* ---------------- 15 September 2026 ---------------- */
   {
     id: "channel-webhooks",
-    version: "v2",
+    version: "v2.1",
     date: "2026-09-15",
     category: "Developer",
     title: "Channel Webhooks",
     summary:
       "Register an HTTPS endpoint and receive Delivery Status and Incoming Messages events in real time, scoped to one channel and one sender.",
     highlights: [
-      "Delivery Status on WhatsApp, SMS and RCS; Incoming Messages on WhatsApp",
+      "Events: Delivery Status on WhatsApp, SMS and RCS; Incoming Messages on WhatsApp",
       "Scope a webhook to a WABA and phone number, a DLT sender ID, or an RCS agent",
-      "Bearer token generated at creation and shown once; Pi metadata rides in headers, never in the body",
-      "Your endpoint has 10 seconds to return 2xx; five retries across roughly 13 hours, then auto-pause",
-      "Send a test event from the row menu or the create dialog to verify your receiver before going live",
+      "Auth: Bearer token generated at creation and shown once; Pi metadata rides in headers, never in the body",
+      "Test Event: Send a test event from the row menu or the create dialog to verify your receiver before going live",
     ],
-    linkTo: "/developer",
-    linkLabel: "Open Webhooks",
   },
 
   /* ---------------- 10 September 2026 ---------------- */
   {
     id: "broadcast-campaigns",
-    version: "v2",
+    version: "v2.1",
     date: "2026-09-10",
     category: "Campaigns",
     title: "Broadcast Campaigns",
     summary:
-      "A one-shot send that sits alongside Workflows. Pick a channel, pick an approved template, upload a CSV audience, and go.",
+      "A one-shot send that sits alongside Workflow Campaigns. Pick a channel, pick an approved template, upload a CSV audience, and go.",
     highlights: [
       "Campaigns is now a group with Workflows and Broadcasts as separate surfaces",
       "WhatsApp, SMS and RCS supported; template variables fill from CSV columns of the same name",
       "Sender identity derives from the template: WABA phone, DLT sender ID with PE, or RCS agent",
-      "Pause, resume and terminate a running broadcast from the Broadcasts table",
       "Channel Analytics gains View by Broadcast with the same KPI cards, chart, funnel and logs as View by Template",
     ],
-    linkTo: "/broadcasts",
-    linkLabel: "Open Broadcasts",
   },
 
   /* ---------------- 9 September 2026 ---------------- */
   {
     id: "freeform-workflows",
-    version: "v2",
+    version: "v2.1",
     date: "2026-09-09",
     category: "Channels",
     title: "WhatsApp Freeform Workflows",
@@ -98,15 +87,14 @@ export const RELEASE_ENTRIES: ReleaseEntry[] = [
       "Attach a workflow to a campaign off a WhatsApp Template's Reply Received or button output, with variable mapping across the whole graph",
       "Session closure timer runs on Total Session Time or User Inactivity Time up to 24 hours, with Success, Timeout and Failed outputs",
       "A workflow locks once a campaign run uses it; Duplicate to edit clones it into a fresh draft",
-      "Campaign analytics reports In, Out and Drop-off per workflow, and Inbox conversations carry entry and exit trace pills",
+      "Campaign analytics reports In, Out and Drop-off per workflow",
     ],
-    linkTo: "/channels/whatsapp",
-    linkLabel: "Open WhatsApp",
   },
+
   /* ---------------- 3 September 2026 ---------------- */
   {
     id: "api-docs",
-    version: "v2",
+    version: "v2.1",
     date: "2026-09-03",
     category: "Developer",
     title: "API Docs",
@@ -116,31 +104,58 @@ export const RELEASE_ENTRIES: ReleaseEntry[] = [
       "Get started pages cover Overview, Authentication, Rate limits, Idempotency, Response shape and Error codes",
       "Endpoints grouped by Campaign Trigger, WhatsApp, SMS and RCS, so each channel has its own home",
       "Every endpoint page carries a sample request, a success response, an error response and its own limits",
-      "New SMS template registry endpoint: register 1 to 500 DLT templates in one call, with per-row results",
       "API Keys, Logs and Release Notes now sit alongside API Docs on the same surface",
     ],
-    linkTo: "/developer",
-    linkLabel: "Open API Docs",
   },
+
+  /* =============================== V2 =============================== */
 
   /* ---------------- 25 August 2026 bundle ---------------- */
   {
-    id: "rcs-channel",
+    id: "csv-upload-limits",
     version: "v2",
     date: "2026-08-25",
-    category: "Channels",
-    title: "RCS as a Channel",
+    category: "Campaigns",
+    title: "CSV upload limits and validation",
     summary:
-      "RCS is now a first-class channel with template management, campaign node and delivery analytics.",
+      "CSV audience uploads now enforce size limits and schema validation up front, before the campaign starts.",
     highlights: [
-      "Text and Rich card templates with up to 4 buttons (Quick reply, Open URL, Dial number)",
-      "Template creation and approval on the platform, just like WhatsApp",
-      "Onboarding is off-platform, just like SMS",
-      "RCS node in the Campaign builder with variable mapping and DLR wait window",
-      "Delivery, engagement and per-recipient log under Channel Analytics > RCS, with CSV export",
+      "Max 500,000 rows per file, max 100 MB file size",
+      "Files with missing values in any row are rejected",
+      "Column headers must exactly match the Audience node schema",
+      "Errors surface in the upload dialog for easy fix and retry",
     ],
-    linkTo: "/channels/rcs",
-    linkLabel: "Open RCS",
+  },
+  {
+    id: "clm-connectors",
+    version: "v2",
+    date: "2026-08-25",
+    category: "Developer",
+    title: "CLM Connectors for Campaign Trigger",
+    summary:
+      "The Run modal now shows sample cURLs pre-formatted for CleverTap, WebEngage and MoEngage.",
+    highlights: [
+      "Sample request tabs on the Run modal: Default, CleverTap, WebEngage, MoEngage",
+      "Variable syntax rendered per tool: $phone for CleverTap, {{phone}} for WebEngage, ${phone} for MoEngage",
+      "Endpoint, run ID and campaign ID all copyable from the same modal",
+      "Works for both single-record and array-of-records requests",
+    ],
+  },
+  {
+    id: "batch-campaign-trigger",
+    version: "v2",
+    date: "2026-08-25",
+    category: "Developer",
+    title: "Batch API for Campaigns",
+    summary:
+      "The API-based campaign trigger accepts a JSON array of records in one call. Every request uses the same shape, even for a single record.",
+    highlights: [
+      "One endpoint, always JSON array of records (an array with one object for a single record)",
+      "Each record is validated on its own; a bad record never blocks the rest",
+      "Every request returns a request_id, every queued record gets a record_id",
+      "Optional Idempotency-Key header for safe retries within a 15 minute window",
+      "Rate limits: 1,000 records per call, 4 MB body, 15 calls per second per client",
+    ],
   },
   {
     id: "direct-channel-apis",
@@ -157,113 +172,37 @@ export const RELEASE_ENTRIES: ReleaseEntry[] = [
       "Authenticated with API keys, same as the Campaign APIs",
       "Sends are counted in the respective channel analytics",
     ],
-    linkTo: "/developer",
-    linkLabel: "Open API Docs",
   },
   {
-    id: "batch-campaign-trigger",
+    id: "rcs-channel",
     version: "v2",
     date: "2026-08-25",
-    category: "Developer",
-    title: "Batch API for Campaigns",
+    category: "Channels",
+    title: "RCS as a Channel",
     summary:
-      "The API-based campaign trigger accepts a JSON array of records in one call. Every request uses the same shape, even for a single record.",
+      "RCS is now a first-class channel with template management, campaign node and delivery analytics.",
     highlights: [
-      "One endpoint, always a JSON array of records (an array with one object for a single record)",
-      "Each record is validated on its own; a bad record never blocks the rest",
-      "Every request returns a request_id, every queued record gets a record_id",
-      "Optional Idempotency-Key header for safe retries within a 15 minute window",
-      "Rate limits: 1,000 records per call, 4 MB body, 15 calls per second per client",
+      "Text and Rich card templates with up to 4 buttons (Quick reply, Open URL, Dial number)",
+      "Template creation and approval on the platform, just like WhatsApp",
+      "Onboarding is off-platform, just like SMS",
+      "RCS node in the Campaign builder with variable mapping and DLR wait window",
+      "Delivery, engagement and per-recipient log under Channel Analytics > RCS, with CSV export",
     ],
-    linkTo: "/developer",
-    linkLabel: "Open API Docs",
-  },
-  {
-    id: "clm-connectors",
-    version: "v2",
-    date: "2026-08-25",
-    category: "Developer",
-    title: "CLM Connectors for Campaign Trigger",
-    summary:
-      "The Run modal now shows sample cURLs pre-formatted for CleverTap, WebEngage and MoEngage.",
-    highlights: [
-      "Sample request tabs on the Run modal: Default, CleverTap, WebEngage, MoEngage",
-      "Variable syntax rendered per tool: $phone for CleverTap, {{phone}} for WebEngage, ${phone} for MoEngage",
-      "Endpoint, run ID and campaign ID all copyable from the same modal",
-      "Works for both single-record and array-of-records requests",
-    ],
-    linkTo: "/campaigns",
-    linkLabel: "Open Campaigns",
-  },
-  {
-    id: "csv-upload-limits",
-    version: "v2",
-    date: "2026-08-25",
-    category: "Campaigns",
-    title: "CSV upload limits and validation",
-    summary:
-      "CSV audience uploads now enforce size limits and schema validation up front, before the campaign starts.",
-    highlights: [
-      "Max 500,000 rows per file, max 100 MB file size",
-      "Files with missing values in any row are rejected",
-      "Column headers must exactly match the Audience node schema",
-      "Errors surface in the upload dialog for easy fix and retry",
-    ],
-    linkTo: "/campaigns",
-    linkLabel: "Open Campaigns",
   },
 
   /* ---------------- 20 August 2026 bundle ---------------- */
   {
-    id: "sms-channel",
+    id: "api-keys",
     version: "v2",
     date: "2026-08-20",
-    category: "Channels",
-    title: "SMS as a Channel",
-    summary:
-      "SMS is now a first-class channel with DLT template management, campaign node and delivery analytics.",
+    category: "Developer",
+    title: "API Keys",
+    summary: "Keys can now be generated and managed directly on the platform.",
     highlights: [
-      "DLT-registered templates can be added on the platform, singly or in bulk",
-      "SMS appears as a Node in the Campaign builder and is usable across campaigns",
-      "Delivery analytics available under Channel Analytics > SMS",
-      "Onboarding is off-platform for now (not self-serve)",
+      "Create keys with a friendly name; full secret shown once",
+      "Public prefix visible everywhere for safe identification",
+      "Revoke active keys; delete keys once revoked",
     ],
-    linkTo: "/channels/sms",
-    linkLabel: "Open SMS",
-  },
-  {
-    id: "delay-node-v2",
-    version: "v2",
-    date: "2026-08-20",
-    category: "Workflow",
-    title: "Delay Node v2: Static or Dynamic Wait",
-    summary:
-      "The Delay node can now wait a fixed duration or wait until a datetime carried on an incoming variable.",
-    highlights: [
-      "Static: wait a fixed duration (as before)",
-      "Dynamic: map to an incoming disposition datetime variable",
-      "Specify the incoming date-time format for correct parsing",
-      "Fallback static duration used when the variable is null, empty or non-sensical",
-    ],
-    linkTo: "/campaigns",
-    linkLabel: "Open Campaigns",
-  },
-  {
-    id: "api-tool-node",
-    version: "v2",
-    date: "2026-08-20",
-    category: "Workflow",
-    title: "API Tool Node",
-    summary:
-      "A new node to hit external APIs from inside a campaign. The underlying APIs are configured as a Tool inside Agents > Tools and then reused across campaigns.",
-    highlights: [
-      "Paste a cURL command to auto-fill URL, headers and body",
-      "Nested body editor with tree view for JSON payloads",
-      "Pick response fields via checkbox to expose them downstream",
-      "Success and Failure branches on the canvas",
-    ],
-    linkTo: "/campaigns",
-    linkLabel: "Open Campaigns",
   },
   {
     id: "wa-template-timeout",
@@ -279,24 +218,53 @@ export const RELEASE_ENTRIES: ReleaseEntry[] = [
       "Default branches on the node remain unchanged",
       "Backwards compatible with existing published campaigns",
     ],
-    linkTo: "/campaigns",
-    linkLabel: "Open Campaigns",
   },
   {
-    id: "api-keys",
+    id: "api-tool-node",
     version: "v2",
     date: "2026-08-20",
-    category: "Developer",
-    title: "API Keys",
+    category: "Workflow",
+    title: "API Tool Node",
     summary:
-      "Keys can now be generated and managed directly on the platform.",
+      "A new node to hit external APIs from inside a campaign. The underlying APIs are configured as a Tool inside Agents > Tools and then reused across campaigns.",
     highlights: [
-      "Create keys with a friendly name; full secret shown once",
-      "Public prefix visible everywhere for safe identification",
-      "Revoke active keys; delete keys once revoked",
+      "Paste a cURL command to auto-fill URL, headers and body",
+      "Nested body editor with tree view for JSON payloads",
+      "Pick response fields via checkbox to expose them downstream",
+      "Success and Failure branches on the canvas",
     ],
-    linkTo: "/developer",
-    linkLabel: "Open Developer",
+  },
+  {
+    id: "sms-channel",
+    version: "v2",
+    date: "2026-08-20",
+    category: "Channels",
+    title: "SMS as a Channel",
+    summary:
+      "SMS is now a first-class channel with DLT template management, campaign node and delivery analytics.",
+    highlights: [
+      "DLT-registered templates can be added on the platform, singly or in bulk",
+      "SMS appears as a Node in the Campaign builder and is usable across campaigns",
+      "Delivery analytics available under Channel Analytics > SMS",
+      "Onboarding is off-platform for now (not self-serve)",
+    ],
+  },
+
+  /* ---------------- 20 June 2026 ---------------- */
+  {
+    id: "delay-node-v2",
+    version: "v2",
+    date: "2026-06-20",
+    category: "Workflow",
+    title: "Delay Node v2: Static or Dynamic Wait",
+    summary:
+      "The Delay node can now wait a fixed duration or wait until a datetime carried on an incoming variable.",
+    highlights: [
+      "Static: wait a fixed duration (as before)",
+      "Dynamic: map to an incoming disposition datetime variable",
+      "Specify the incoming date-time format for correct parsing",
+      "Fallback static duration used when the variable is null, empty or non-sensical",
+    ],
   },
 ];
 
@@ -317,7 +285,6 @@ export function formatReleaseDate(iso: string): string {
 }
 
 export const CATEGORY_STYLE: Record<ReleaseCategory, string> = {
-  Connections: "text-success bg-success/10 border-success/25",
   Channels: "text-ai bg-ai/10 border-ai/25",
   Workflow: "text-warning bg-warning/10 border-warning/25",
   Developer: "text-foreground bg-secondary border-border",
