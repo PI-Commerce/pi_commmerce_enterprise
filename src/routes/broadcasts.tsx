@@ -15,7 +15,8 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  Plus, Search, MoreHorizontal, Send, Upload, Play, Pause, Square, Check,
+  Plus, Search, MoreHorizontal, Send, Upload, Square, Check,
+  CalendarClock, Clock,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -51,6 +52,7 @@ const CHANNEL_LABEL: Record<Channel, string> = {
 };
 
 const STATUS_TONE: Record<BroadcastStatus, string> = {
+  scheduled:  "border-ai/30 bg-ai/10 text-ai",
   running:    "border-success/30 bg-success/10 text-success",
   paused:     "border-warning/30 bg-warning/10 text-warning",
   completed:  "border-border bg-secondary text-muted-foreground",
@@ -119,22 +121,31 @@ function BroadcastsPage() {
   const handleCreate = (payload: CreateBroadcastPayload) => {
     const id = `bc_${Math.floor(Math.random() * 9000 + 1000)}`;
     const now = new Date();
-    const at = `Today, ${now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+    const nowAt = `Today, ${now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+    // Schedule tab → row lands as "scheduled" with its Started column showing
+    // when the send is due to fire. Send-now tab → row lands "running" now.
+    const isScheduled = !!payload.scheduledFor;
     const row: BroadcastRow = {
       id,
       name: payload.name,
       channel: payload.channel,
       assetName: payload.assetName,
+      templateId: payload.assetId,
       csvName: payload.csvName,
-      status: "running",
-      startedAt: at,
+      status: isScheduled ? "scheduled" : "running",
+      startedAt: isScheduled ? payload.scheduledFor! : nowAt,
       completedAt: "ongoing",
       sent: 0,
       total: payload.audienceSize,
+      ...(isScheduled ? { scheduledFor: payload.scheduledFor } : {}),
     };
     setRows((prev) => [row, ...prev]);
     setCreateOpen(false);
-    toast.success("Broadcast started", { description: `${payload.name} · ${CHANNEL_LABEL[payload.channel]} · ${payload.audienceSize.toLocaleString()} recipients` });
+    if (isScheduled) {
+      toast.success("Broadcast scheduled", { description: `${payload.name} · ${CHANNEL_LABEL[payload.channel]} · fires ${payload.scheduledFor}` });
+    } else {
+      toast.success("Broadcast started", { description: `${payload.name} · ${CHANNEL_LABEL[payload.channel]} · ${payload.audienceSize.toLocaleString()} recipients` });
+    }
   };
 
   return (
@@ -176,6 +187,7 @@ function BroadcastsPage() {
           onChange={(v) => setFStatus(v as typeof fStatus)}
           options={[
             { value: "all", label: "All statuses" },
+            { value: "scheduled", label: "Scheduled" },
             { value: "running", label: "Running" },
             { value: "paused", label: "Paused" },
             { value: "completed", label: "Completed" },
@@ -197,7 +209,7 @@ function BroadcastsPage() {
                 <th className="px-4 py-2.5 text-left font-medium">Template</th>
                 <th className="px-4 py-2.5 text-left font-medium">Audience CSV</th>
                 <th className="px-4 py-2.5 text-left font-medium">Status</th>
-                <th className="px-4 py-2.5 text-left font-medium">Started</th>
+                <th className="px-4 py-2.5 text-left font-medium">Started / Scheduled</th>
                 <th className="px-4 py-2.5 text-left font-medium w-[220px]">Progress</th>
                 <th className="w-10 px-2 py-2.5" />
               </tr>
@@ -223,7 +235,16 @@ function BroadcastsPage() {
                         {r.status}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-[12px] text-muted-foreground">{r.startedAt}</td>
+                    <td className="px-4 py-3 text-[12px] text-muted-foreground">
+                      {r.status === "scheduled" ? (
+                        <span className="inline-flex items-center gap-1.5 text-ai">
+                          <CalendarClock className="h-3.5 w-3.5" />
+                          {r.scheduledFor ?? r.startedAt}
+                        </span>
+                      ) : (
+                        r.startedAt
+                      )}
+                    </td>
                     <td className="px-4 py-3">
                       <div className="flex flex-col gap-1">
                         <Progress value={pct} className="h-1.5 w-44" />
@@ -235,8 +256,6 @@ function BroadcastsPage() {
                     <td className="px-2 py-3 text-right">
                       <RowMenu
                         status={r.status}
-                        onPause={() => setRowStatus(r.id, "paused", "Broadcast paused")}
-                        onResume={() => setRowStatus(r.id, "running", "Broadcast resumed")}
                         onTerminate={() => setRowStatus(r.id, "terminated", "Broadcast terminated", true)}
                       />
                     </td>
@@ -280,23 +299,20 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
 }
 
 function RowMenu({
-  status, onPause, onResume, onTerminate,
+  status, onTerminate,
 }: {
   status: BroadcastStatus;
-  onPause: () => void;
-  onResume: () => void;
   onTerminate: () => void;
 }) {
-  // Lifecycle:
-  //   running → Pause, Terminate
-  //   paused  → Resume, Terminate
-  //   completed / failed / terminated → no actions (menu shows a placeholder).
-  // No run-id copy: direct-channel API sends share one run id per client, and
-  // the UI does not surface individual broadcast ids.
-  const canPause = status === "running";
-  const canResume = status === "paused";
-  const canTerminate = status === "running" || status === "paused";
-  const hasLifecycle = canPause || canResume || canTerminate;
+  // Only scheduled broadcasts expose an action, and it's Terminate only.
+  // Rationale:
+  //   - Instant sends (status "running" via Send now) complete too fast to
+  //     Pause or Terminate meaningfully from the UI.
+  //   - Once a scheduled broadcast fires (moves to "running"), the same is
+  //     true: you're already sending, you can't take it back.
+  //   - Terminated / Completed / Failed are terminal; nothing to do.
+  // So the menu shows Terminate only when the send is still queued.
+  const canTerminate = status === "scheduled";
 
   return (
     <DropdownMenu>
@@ -306,25 +322,14 @@ function RowMenu({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-44">
-        {canPause && (
-          <DropdownMenuItem className="gap-2 text-xs" onClick={onPause}>
-            <Pause className="h-3.5 w-3.5" /> Pause
-          </DropdownMenuItem>
-        )}
-        {canResume && (
-          <DropdownMenuItem className="gap-2 text-xs" onClick={onResume}>
-            <Play className="h-3.5 w-3.5" /> Resume
-          </DropdownMenuItem>
-        )}
-        {canTerminate && (
+        {canTerminate ? (
           <DropdownMenuItem
             className="gap-2 text-xs text-destructive focus:text-destructive"
             onClick={onTerminate}
           >
             <Square className="h-3.5 w-3.5" /> Terminate
           </DropdownMenuItem>
-        )}
-        {!hasLifecycle && (
+        ) : (
           <DropdownMenuItem disabled className="gap-2 text-xs">
             No actions available
           </DropdownMenuItem>
@@ -369,7 +374,49 @@ type CreateBroadcastPayload = {
   csvId: string;
   csvName: string;
   audienceSize: number;
+  /** Populated only when the user picked the Schedule tab. Pre-formatted for
+   *  display so the runs table can render it verbatim. */
+  scheduledFor?: string;
 };
+
+type SendMode = "now" | "schedule";
+
+/**
+ * Format a datetime-local value ("2026-09-25T10:00") as the compact display
+ * string the runs table uses: "Today, 10:00 AM", "Tomorrow, 10:00 AM", or
+ * "Sep 30, 10:00 AM". Falls back to the raw value if the string is malformed.
+ */
+function formatScheduledFor(dtLocal: string): string {
+  if (!dtLocal) return "";
+  const d = new Date(dtLocal);
+  if (Number.isNaN(d.getTime())) return dtLocal;
+  const now = new Date();
+  const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const sameDay = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  const tomorrow = new Date(now);
+  tomorrow.setDate(now.getDate() + 1);
+  if (sameDay(d, now)) return `Today, ${time}`;
+  if (sameDay(d, tomorrow)) return `Tomorrow, ${time}`;
+  const md = d.toLocaleDateString("en-US", { month: "short", day: "2-digit" });
+  return `${md}, ${time}`;
+}
+
+/** Default value for the datetime-local input: an hour from now, on the hour. */
+function defaultScheduledAt(): string {
+  const d = new Date(Date.now() + 60 * 60 * 1000);
+  d.setMinutes(0, 0, 0);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** Minimum accepted value — 15 minutes from now, so the schedule always sits
+ *  at least one tick in the future. */
+function scheduleMin(): string {
+  const d = new Date(Date.now() + 15 * 60 * 1000);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 
 function defaultBroadcastName() {
   const d = new Date();
@@ -413,6 +460,8 @@ function CreateBroadcastDialog({
   const [assetId, setAssetId] = useState("");
   const [csvId, setCsvId] = useState("");
   const [localCsvs, setLocalCsvs] = useState<CsvAsset[]>([]);
+  const [mode, setMode] = useState<SendMode>("now");
+  const [scheduledAt, setScheduledAt] = useState<string>(defaultScheduledAt());
 
   const reset = () => {
     setName(defaultBroadcastName());
@@ -420,6 +469,8 @@ function CreateBroadcastDialog({
     setAssetId(prefillTemplateId ?? "");
     setCsvId("");
     setLocalCsvs([]);
+    setMode("now");
+    setScheduledAt(defaultScheduledAt());
   };
 
   useEffect(() => {
@@ -456,7 +507,14 @@ function CreateBroadcastDialog({
     setCsvId(asset.id);
   };
 
-  const canSend = !!channel && !!asset && !!csv && name.trim().length > 0;
+  // Schedule tab requires a parsable datetime that sits in the future.
+  // Send-now tab doesn't touch scheduledAt.
+  const scheduleValid = mode === "now" || (
+    !!scheduledAt &&
+    !Number.isNaN(new Date(scheduledAt).getTime()) &&
+    new Date(scheduledAt).getTime() > Date.now()
+  );
+  const canSend = !!channel && !!asset && !!csv && name.trim().length > 0 && scheduleValid;
 
   const submit = () => {
     if (!canSend || !channel || !asset || !csv) return;
@@ -468,6 +526,7 @@ function CreateBroadcastDialog({
       csvId: csv.id,
       csvName: csv.name,
       audienceSize: csv.rowCount > 0 ? csv.rowCount : 1000,
+      ...(mode === "schedule" ? { scheduledFor: formatScheduledFor(scheduledAt) } : {}),
     });
     reset();
   };
@@ -478,9 +537,39 @@ function CreateBroadcastDialog({
         <DialogHeader>
           <DialogTitle className="text-base">Create broadcast</DialogTitle>
           <DialogDescription className="text-xs">
-            Pick a channel, choose a template, upload a CSV audience. That's it.
+            Pick a channel, choose a template, upload a CSV audience. Send it now or schedule for later.
           </DialogDescription>
         </DialogHeader>
+
+        {/* Send-mode toggle. Left tab fires right away, right tab holds the
+            send until the chosen start time. Backend end-time stays 1 year
+            from start in both cases; scheduling only shifts the start. */}
+        <div className="grid grid-cols-2 gap-1 rounded-md border border-input bg-muted/40 p-1">
+          <button
+            type="button"
+            onClick={() => setMode("now")}
+            className={cn(
+              "flex items-center justify-center gap-1.5 rounded px-2 py-1.5 text-[12px] font-medium transition-colors",
+              mode === "now"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <Send className="h-3.5 w-3.5" /> Send now
+          </button>
+          <button
+            type="button"
+            onClick={() => setMode("schedule")}
+            className={cn(
+              "flex items-center justify-center gap-1.5 rounded px-2 py-1.5 text-[12px] font-medium transition-colors",
+              mode === "schedule"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            <CalendarClock className="h-3.5 w-3.5" /> Schedule
+          </button>
+        </div>
 
         <div className="max-h-[65vh] space-y-5 overflow-y-auto py-1 pr-1">
           <Section title="Broadcast">
@@ -551,6 +640,34 @@ function CreateBroadcastDialog({
             </Section>
           )}
 
+          {mode === "schedule" && (
+            <Section title="Schedule">
+              <div className="space-y-1.5">
+                <Label className="text-xs">
+                  Start time <span className="text-destructive">*</span>
+                </Label>
+                <div className="relative">
+                  <Clock className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    type="datetime-local"
+                    value={scheduledAt}
+                    min={scheduleMin()}
+                    onChange={(e) => setScheduledAt(e.target.value)}
+                    className="h-9 pl-8 text-sm"
+                  />
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  Fires once at this time. The send window stays open for 1 year, so late arrivals still deliver.
+                </p>
+                {scheduledAt && !scheduleValid && (
+                  <p className="text-[11px] text-destructive">
+                    Pick a time in the future.
+                  </p>
+                )}
+              </div>
+            </Section>
+          )}
+
           {channel && (
             <Section title="Audience">
               <div className="space-y-1.5">
@@ -591,7 +708,11 @@ function CreateBroadcastDialog({
             Cancel
           </Button>
           <Button size="sm" className="h-8 gap-1.5 text-xs" disabled={!canSend} onClick={submit}>
-            <Send className="h-3 w-3" /> Send broadcast
+            {mode === "schedule" ? (
+              <><CalendarClock className="h-3 w-3" /> Schedule broadcast</>
+            ) : (
+              <><Send className="h-3 w-3" /> Send broadcast</>
+            )}
           </Button>
         </DialogFooter>
       </DialogContent>
