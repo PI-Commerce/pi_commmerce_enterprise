@@ -459,6 +459,20 @@ export const NAV_GROUPS: { title: string; items: NavSection[] }[] = [
     ],
   },
   {
+    title: "Webhooks",
+    items: [
+      { kind: "prose", id: "webhooks-overview", title: "Overview" },
+      { kind: "prose", id: "webhooks-register", title: "Register a webhook" },
+      { kind: "prose", id: "webhooks-auth", title: "Auth" },
+      { kind: "prose", id: "webhooks-delivery", title: "Delivery and retries" },
+      { kind: "prose", id: "webhooks-payload-whatsapp", title: "Payload: WhatsApp" },
+      { kind: "prose", id: "webhooks-payload-sms", title: "Payload: SMS" },
+      { kind: "prose", id: "webhooks-payload-rcs", title: "Payload: RCS" },
+      { kind: "prose", id: "webhooks-test-event", title: "Test event" },
+      { kind: "prose", id: "webhooks-reference", title: "Reference" },
+    ],
+  },
+  {
     title: "Campaign Trigger APIs",
     items: ENDPOINTS.filter((e) => e.id === "trigger-campaign-run").map((e) => ({
       kind: "endpoint" as const,
