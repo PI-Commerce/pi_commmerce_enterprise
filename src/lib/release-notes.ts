@@ -38,6 +38,23 @@ export type ReleaseEntry = {
 export const RELEASE_ENTRIES: ReleaseEntry[] = [
   /* ============================== V2.1 ============================== */
 
+  /* ---------------- 23 September 2026 ---------------- */
+  {
+    id: "broadcast-schedule",
+    version: "v2.1",
+    date: "2026-09-23",
+    category: "Campaigns",
+    title: "Broadcast Schedule",
+    summary:
+      "Broadcasts can now be sent immediately or scheduled for a later start date and time.",
+    highlights: [
+      "Send Now or Schedule for later, picked at the moment you create the broadcast",
+      "Scheduled start must be at least 15 minutes in the future",
+      "Terminate a scheduled broadcast any time before it moves into Running state",
+      "A terminated broadcast cannot be resumed; create a fresh one to resend",
+    ],
+  },
+
   /* ---------------- 15 September 2026 ---------------- */
   {
     id: "channel-webhooks",
