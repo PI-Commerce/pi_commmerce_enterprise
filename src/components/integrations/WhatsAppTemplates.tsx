@@ -1273,8 +1273,12 @@ function ButtonEditor({ index, scope, canUp, canDown, button, capped, dialCode, 
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1.5">
                 Track clicks on this button
-                <span className="rounded-sm bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700">On by default</span>
-                <InfoTip text="When on, Pi Commerce serves this link through its tracking domain (track.picomm.in) and logs every tap. Clicks become a branch signal you can wire in the campaign canvas and freeform workflows. Turn off if you need your raw URL to land in the Meta-approved template." />
+                {button.clickTracking !== false ? (
+                  <span className="rounded-sm bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700">Tracked</span>
+                ) : (
+                  <span className="rounded-sm bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">Not tracked</span>
+                )}
+                <InfoTip text="On by default. When on, Pi Commerce serves this link through its tracking domain (track.picomm.in) and logs every tap. Clicks become a branch signal you can wire in the campaign canvas and freeform workflows. Turn off if you need your raw URL to land in the Meta-approved template." />
               </div>
               <div className="mt-0.5 text-[11px] text-muted-foreground">
                 Clicks are logged and redirected through Pi Commerce. Turn off to keep your raw URL on the approved template.

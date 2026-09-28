@@ -774,10 +774,14 @@ function CtaUrlEditor({
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
             Track clicks on this button
-            <span className="rounded-sm bg-emerald-50 px-1 py-0.5 text-[9.5px] font-medium text-emerald-700">On by default</span>
+            {b.clickTracking !== false ? (
+              <span className="rounded-sm bg-emerald-50 px-1 py-0.5 text-[9.5px] font-medium text-emerald-700">Tracked</span>
+            ) : (
+              <span className="rounded-sm bg-muted px-1 py-0.5 text-[9.5px] font-medium text-muted-foreground">Not tracked</span>
+            )}
           </div>
           <p className="mt-0.5 text-[10.5px] leading-snug text-muted-foreground">
-            When on, Pi Commerce serves the link through track.picomm.in and this step advances on click. Turn off to advance on delivered instead.
+            On by default. When on, Pi Commerce serves the link through track.picomm.in and this step advances on click. Turn off to advance on delivered instead.
           </p>
         </div>
       </label>
