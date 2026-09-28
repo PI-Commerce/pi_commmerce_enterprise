@@ -1671,9 +1671,24 @@ function WhatsAppCore({
                   <p className="text-foreground">{template.body}</p>
                   {template.buttons && template.buttons.length > 0 && (
                     <div className="mt-2 flex flex-wrap gap-1.5">
-                      {template.buttons.map((b, i) => (
-                        <span key={i} className="rounded border border-border bg-background px-2 py-1 text-[11px]">{b.text}</span>
-                      ))}
+                      {template.buttons.map((b, i) => {
+                        const trackedUrl = b.type === "URL" && b.clickTracking !== false;
+                        return (
+                          <span
+                            key={i}
+                            className="inline-flex items-center gap-1 rounded border border-border bg-background px-2 py-1 text-[11px]"
+                            title={trackedUrl ? "Clicks are tracked. Shows up as a branch handle below." : undefined}
+                          >
+                            {b.text}
+                            {trackedUrl && (
+                              <span className="rounded-sm bg-emerald-50 px-1 py-0.5 text-[9.5px] font-medium text-emerald-700">tracked</span>
+                            )}
+                            {b.type === "URL" && b.clickTracking === false && (
+                              <span className="rounded-sm bg-muted px-1 py-0.5 text-[9.5px] font-medium text-muted-foreground">not tracked</span>
+                            )}
+                          </span>
+                        );
+                      })}
                     </div>
                   )}
                 </div>

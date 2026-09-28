@@ -2553,6 +2553,90 @@ function ChannelDetail({
     [funnelOrdered, color],
   );
 
+  // Per-button click breakdown: one row for every URL button on every in-scope
+  // WhatsApp template. Tracked buttons carry deterministic click stats derived
+  // from delivered volume + a stable per-button hash seed. Opted-out URL buttons
+  // are surfaced with a Not-tracked pill and no metric row so the merchant sees
+  // exactly which links are measurable and which they turned off.
+  const urlButtonRows = useMemo(() => {
+    if (kind !== "whatsapp") return [] as Array<{
+      templateName: string;
+      buttonId: string;
+      label: string;
+      url: string;
+      tracked: boolean;
+      clicks: number;
+      uniqueClicks: number;
+      clickRate: number;
+      delivered: number;
+    }>;
+    const rows: Array<{
+      templateName: string;
+      buttonId: string;
+      label: string;
+      url: string;
+      tracked: boolean;
+      clicks: number;
+      uniqueClicks: number;
+      clickRate: number;
+      delivered: number;
+    }> = [];
+    for (const { template, entered } of scopeTemplates) {
+      const buttons = (template.buttons ?? []).filter((b) => b.type === "URL");
+      if (buttons.length === 0) continue;
+      // Approximate delivered volume this template pushed through.
+      const delivered = Math.round(entered * 0.94);
+      buttons.forEach((b, i) => {
+        const tracked = b.clickTracking !== false;
+        if (!tracked) {
+          rows.push({
+            templateName: template.name,
+            buttonId: `${template.id}:${i}`,
+            label: b.text,
+            url: b.url ?? "",
+            tracked: false,
+            clicks: 0,
+            uniqueClicks: 0,
+            clickRate: 0,
+            delivered,
+          });
+          return;
+        }
+        // Deterministic click rate per button: 6-24% of delivered, seeded by
+        // template + button index so the numbers are stable across renders.
+        const seed = hashSeed(`${template.id}:${i}:clicks`);
+        const rate = 6 + (seed % 19); // 6..24
+        const uniqueClicks = Math.round((delivered * rate) / 100);
+        // Total clicks scale up by 1.05..1.25 to reflect repeat taps.
+        const repeatMult = 1.05 + ((seed % 21) / 100);
+        const clicks = Math.round(uniqueClicks * repeatMult);
+        rows.push({
+          templateName: template.name,
+          buttonId: `${template.id}:${i}`,
+          label: b.text,
+          url: b.url ?? "",
+          tracked: true,
+          clicks,
+          uniqueClicks,
+          clickRate: rate,
+          delivered,
+        });
+      });
+    }
+    return rows;
+  }, [kind, scopeTemplates]);
+
+  const urlButtonTotals = useMemo(() => {
+    const tracked = urlButtonRows.filter((r) => r.tracked);
+    const clicks = tracked.reduce((s, r) => s + r.clicks, 0);
+    const uniqueClicks = tracked.reduce((s, r) => s + r.uniqueClicks, 0);
+    const delivered = tracked.reduce((s, r) => s + r.delivered, 0);
+    const clickRate = delivered > 0 ? (uniqueClicks / delivered) * 100 : 0;
+    return { clicks, uniqueClicks, delivered, clickRate };
+  }, [urlButtonRows]);
+
+  const showUrlClicksBlock = kind === "whatsapp" && urlButtonRows.length > 0;
+
   // Logs: pick the latest selected run, restrict to that run's selected nodes.
   const logsRun = useMemo<RunRow | undefined>(() => {
     if (refs.length === 0) return undefined;
@@ -2696,6 +2780,87 @@ function ChannelDetail({
           </div>
         </div>
       </div>
+
+      {showUrlClicksBlock && (
+        <div className="mt-4 rounded-xl border border-border bg-card">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3">
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-semibold">URL button clicks</h3>
+              <span className="rounded-sm bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700">
+                Tracked via track.picomm.in
+              </span>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              {urlButtonRows.filter((r) => r.tracked).length} tracked, {urlButtonRows.filter((r) => !r.tracked).length} not tracked
+            </p>
+          </div>
+          <div className="grid grid-cols-3 gap-3 border-b border-border px-4 py-3">
+            <div>
+              <p className="text-[11px] uppercase tracking-wider text-muted-foreground">Total clicks</p>
+              <p className="mt-1 text-xl font-semibold tracking-tight">
+                {urlButtonTotals.clicks.toLocaleString()}
+              </p>
+              <p className="mt-0.5 text-[10px] text-muted-foreground">Every tap, including repeat taps by the same recipient.</p>
+            </div>
+            <div>
+              <p className="text-[11px] uppercase tracking-wider text-muted-foreground">Unique clicks</p>
+              <p className="mt-1 text-xl font-semibold tracking-tight">
+                {urlButtonTotals.uniqueClicks.toLocaleString()}
+              </p>
+              <p className="mt-0.5 text-[10px] text-muted-foreground">Distinct recipients who tapped at least once.</p>
+            </div>
+            <div>
+              <p className="text-[11px] uppercase tracking-wider text-muted-foreground">Click rate</p>
+              <p className="mt-1 text-xl font-semibold tracking-tight">
+                {urlButtonTotals.clickRate.toFixed(1)}%
+              </p>
+              <p className="mt-0.5 text-[10px] text-muted-foreground">Unique clicks divided by delivered messages.</p>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-[12px]">
+              <thead>
+                <tr className="border-b border-border text-left text-[10.5px] uppercase tracking-wider text-muted-foreground">
+                  <th className="px-4 py-2 font-medium">Button</th>
+                  <th className="px-4 py-2 font-medium">Destination</th>
+                  <th className="px-4 py-2 text-right font-medium">Clicks</th>
+                  <th className="px-4 py-2 text-right font-medium">Unique</th>
+                  <th className="px-4 py-2 text-right font-medium">Click rate</th>
+                </tr>
+              </thead>
+              <tbody>
+                {urlButtonRows.map((r) => (
+                  <tr key={r.buttonId} className="border-b border-border/50 last:border-b-0">
+                    <td className="px-4 py-2.5">
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-medium text-foreground">{r.label || "(unnamed)"}</span>
+                        {r.tracked ? (
+                          <span className="rounded-sm bg-emerald-50 px-1 py-0.5 text-[9.5px] font-medium text-emerald-700">tracked</span>
+                        ) : (
+                          <span className="rounded-sm bg-muted px-1 py-0.5 text-[9.5px] font-medium text-muted-foreground">not tracked</span>
+                        )}
+                      </div>
+                      <p className="mt-0.5 text-[10.5px] text-muted-foreground">{r.templateName}</p>
+                    </td>
+                    <td className="px-4 py-2.5 text-muted-foreground">
+                      <span className="block max-w-[280px] truncate" title={r.url}>{r.url || "(no URL)"}</span>
+                    </td>
+                    <td className="px-4 py-2.5 text-right tabular-nums">
+                      {r.tracked ? r.clicks.toLocaleString() : <span className="text-muted-foreground">.</span>}
+                    </td>
+                    <td className="px-4 py-2.5 text-right tabular-nums">
+                      {r.tracked ? r.uniqueClicks.toLocaleString() : <span className="text-muted-foreground">.</span>}
+                    </td>
+                    <td className="px-4 py-2.5 text-right tabular-nums">
+                      {r.tracked ? `${r.clickRate.toFixed(1)}%` : <span className="text-muted-foreground">.</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {logsRun && (
         <>

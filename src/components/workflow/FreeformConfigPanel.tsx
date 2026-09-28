@@ -559,9 +559,18 @@ function ButtonsBlockEditor({
         id: `b_${Math.random().toString(36).slice(2, 8)}`,
         label: "",
         url: "",
+        clickTracking: true,
       },
     });
   };
+
+  const progression = (() => {
+    if (!block) return { label: "Advances on delivered", tone: "muted" as const, help: "This step advances when WhatsApp confirms delivery. Add a quick reply or a tracked CTA URL to advance on click instead." };
+    if (block.mode === "quick_reply") return { label: "Advances on click", tone: "on" as const, help: "This step advances when the lead taps any quick reply." };
+    const tracked = block.button.clickTracking !== false;
+    if (tracked) return { label: "Advances on click", tone: "on" as const, help: "This step advances when the lead taps the tracked CTA URL. Pi Commerce logs every tap through its tracking domain." };
+    return { label: "Advances on delivered", tone: "muted" as const, help: "Click tracking is off on this URL, so the step advances when WhatsApp confirms delivery instead. Turn tracking on to advance on click." };
+  })();
 
   return (
     <Section title="Buttons">
@@ -602,6 +611,24 @@ function ButtonsBlockEditor({
       {block?.mode === "cta_url" && (
         <CtaUrlEditor block={block} onChange={onChange} />
       )}
+
+      <div className="mt-1 rounded-md border border-dashed border-border bg-muted/30 p-2">
+        <div className="flex items-center gap-1.5 text-[11px]">
+          <span className="text-muted-foreground">Progression:</span>
+          <span
+            className={
+              progression.tone === "on"
+                ? "rounded-sm bg-emerald-50 px-1.5 py-0.5 font-medium text-emerald-700"
+                : "rounded-sm bg-muted px-1.5 py-0.5 font-medium text-muted-foreground"
+            }
+          >
+            {progression.label}
+          </span>
+        </div>
+        <p className="mt-1 text-[10.5px] leading-snug text-muted-foreground">
+          {progression.help}
+        </p>
+      </div>
     </Section>
   );
 }
@@ -735,6 +762,25 @@ function CtaUrlEditor({
           className="h-8 text-[12.5px]"
         />
       </Field>
+      <label className="mt-1 flex cursor-pointer items-start gap-2 rounded-md border border-dashed border-border bg-muted/30 p-2 text-[11.5px] text-foreground">
+        <input
+          type="checkbox"
+          checked={b.clickTracking !== false}
+          onChange={(e) =>
+            onChange({ mode: "cta_url", button: { ...b, clickTracking: e.target.checked } })
+          }
+          className="mt-0.5 h-3.5 w-3.5"
+        />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5">
+            Track clicks on this button
+            <span className="rounded-sm bg-emerald-50 px-1 py-0.5 text-[9.5px] font-medium text-emerald-700">On by default</span>
+          </div>
+          <p className="mt-0.5 text-[10.5px] leading-snug text-muted-foreground">
+            When on, Pi Commerce serves the link through track.picomm.in and this step advances on click. Turn off to advance on delivered instead.
+          </p>
+        </div>
+      </label>
     </div>
   );
 }

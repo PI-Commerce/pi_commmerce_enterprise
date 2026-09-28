@@ -21,15 +21,16 @@ import { getFreeformWorkflow, getFreeformCampaignOutputs } from "./freeform-type
 
 /**
  * Whether a template button produces a usable inbound signal we can branch on.
- *  - Quick Reply (Custom): always branchable — Meta delivers a button-reply webhook.
- *  - URL (Visit website): branchable ONLY when click tracking is enabled on the
- *    button; an untracked URL tap gives us no event, so it folds into "Timeout".
- *  - Phone Number (Call): no native WhatsApp webhook — never branchable.
- *  - Link Flow: legacy, not offered in v1 — never branchable.
+ *  - Quick Reply (Custom): always branchable, Meta delivers a button-reply webhook.
+ *  - URL (Visit website): tracked by default in v1 (Pi Commerce shortens the link
+ *    through its tracking domain and logs every tap). Branchable unless the merchant
+ *    explicitly opted out of tracking on that button (clickTracking === false).
+ *  - Phone Number (Call): no native WhatsApp webhook, never branchable.
+ *  - Link Flow: legacy, not offered in v1, never branchable.
  */
 export function isBranchableButton(b: TemplateButton): boolean {
   if (b.type === "Quick Reply") return true;
-  if (b.type === "URL") return !!b.clickTracking;
+  if (b.type === "URL") return b.clickTracking !== false;
   return false;
 }
 

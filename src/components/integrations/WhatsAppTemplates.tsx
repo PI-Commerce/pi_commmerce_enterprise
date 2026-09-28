@@ -474,7 +474,7 @@ function TemplateForm({ waba, initial, onCancel, onSave }: {
   const addButtonOfType = (type: TemplateButtonType) =>
     setButtons((b) => (b.length >= MAX_TEMPLATE_BUTTONS
       ? b
-      : [...b, { type, text: "", ...(type === "URL" ? { urlType: "Static" as const } : {}) }]));
+      : [...b, { type, text: "", ...(type === "URL" ? { urlType: "Static" as const, clickTracking: true } : {}) }]));
   const setButton = (i: number, patch: Partial<TemplateButton>) =>
     setButtons((b) => b.map((btn, idx) => (idx === i ? { ...btn, ...patch } : btn)));
   const removeButton = (i: number) => setButtons((b) => b.filter((_, idx) => idx !== i));
@@ -1264,13 +1264,24 @@ function ButtonEditor({ index, scope, canUp, canDown, button, capped, dialCode, 
         </button>
       </div>
 
-      {/* Tracking — only Visit-website (URL) buttons support conversion tracking. */}
+      {/* Click tracking — URL buttons redirect through Pi Commerce's tracking domain
+         so taps can be logged and used as branch signals in workflows. Default-on. */}
       {button.type === "URL" && (
-        <label className="mt-2 flex items-center gap-2 text-[12px] text-foreground">
-          <Checkbox checked={!!button.clickTracking} onCheckedChange={(v) => onChange({ clickTracking: v === true })} />
-          Track app conversions <span className="text-muted-foreground">(Marketing Messages API for WhatsApp only)</span>
-          <InfoTip text="You can map an Android deep link to a marketing template URL button that loads a particular location or content within your app. This feature is only available for the Marketing Messages API for WhatsApp." />
-        </label>
+        <div className="mt-2.5 rounded-md border border-dashed border-border bg-muted/40 p-2.5">
+          <label className="flex items-start gap-2 text-[12px] text-foreground">
+            <Checkbox className="mt-0.5" checked={button.clickTracking !== false} onCheckedChange={(v) => onChange({ clickTracking: v === true })} />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5">
+                Track clicks on this button
+                <span className="rounded-sm bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700">On by default</span>
+                <InfoTip text="When on, Pi Commerce serves this link through its tracking domain (track.picomm.in) and logs every tap. Clicks become a branch signal you can wire in the campaign canvas and freeform workflows. Turn off if you need your raw URL to land in the Meta-approved template." />
+              </div>
+              <div className="mt-0.5 text-[11px] text-muted-foreground">
+                Clicks are logged and redirected through Pi Commerce. Turn off to keep your raw URL on the approved template.
+              </div>
+            </div>
+          </label>
+        </div>
       )}
 
       {(textErr || urlErr || phoneErr) && (

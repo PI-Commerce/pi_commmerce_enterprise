@@ -61,7 +61,12 @@ export const FREEFORM_SERIAL_PREFIX: Record<FreeformNodeKind, string> = {
 export type ButtonsMode = "quick_reply" | "cta_url";
 
 export type QuickReplyButton = { id: string; label: string };
-export type UrlButton = { id: string; label: string; url: string };
+/** URL button.
+ *  `clickTracking` mirrors the WhatsApp template shape: when true (default),
+ *  Pi Commerce shortens the link through its tracking domain and logs every tap
+ *  so a freeform step can advance on click. When explicitly false, the raw URL
+ *  is dispatched and the step falls back to advancing on delivered. */
+export type UrlButton = { id: string; label: string; url: string; clickTracking?: boolean };
 
 export type ButtonsBlock =
   | { mode: "quick_reply"; buttons: QuickReplyButton[] }
