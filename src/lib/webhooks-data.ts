@@ -57,12 +57,19 @@ export const WEBHOOK_CHANNEL_LABEL: Record<WebhookChannel, string> = {
  * Event *buckets* per channel. v1 ships Delivery Status for all three
  * channels, and Incoming Messages for WhatsApp + RCS. Bodies mirror the
  * vendor's own webhook shape (Meta for WhatsApp, Jio for SMS, RBM for RCS).
+ *
+ * WhatsApp also carries URL Clicks: a Pi-native bucket that fires whenever
+ * a tap lands on a tracked URL button. Distinct from Incoming Messages
+ * because a URL tap is not an inbound message (no Meta relay); payload is
+ * Pi-shape rather than Meta-shape, and clients opt into it separately.
+ *
  * Templates bucket is planned for a follow-up.
  */
 export const CHANNEL_EVENTS: Record<WebhookChannel, { id: string; label: string }[]> = {
   whatsapp: [
     { id: "delivery_status", label: "Delivery Status" },
     { id: "incoming",        label: "Incoming Messages" },
+    { id: "url_click",       label: "URL Clicks" },
   ],
   sms: [
     { id: "delivery_status", label: "Delivery Status" },
@@ -221,6 +228,20 @@ export const SEED_WEBHOOKS: Webhook[] = [
     status: "active",
     createdAt: isoDaysAgo(60, 11, 5),
     lastDeliveryAt: isoHoursAgo(0, 8),
+  },
+  {
+    id: "wh_wa_url_clicks",
+    name: "wa-url-clicks-crm",
+    type: "channels",
+    channel: "whatsapp",
+    scope: { bmId: "1789442100981", wabaId: "104882190034771", phoneNumberId: "10934471290017" },
+    events: ["url_click"],
+    endpointUrl: "https://hooks.acmecorp.com/pi/whatsapp/clicks",
+    authToken: "pi_wh_urlclickurlclickurlclickurlcli00",
+    headers: [],
+    status: "active",
+    createdAt: isoDaysAgo(2, 10, 15),
+    lastDeliveryAt: isoHoursAgo(0, 22),
   },
   {
     id: "wh_sms_dlr",

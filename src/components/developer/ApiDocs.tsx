@@ -386,7 +386,7 @@ function WebhooksOverview() {
       <H2>What you get</H2>
       <ul className="mb-4 list-disc space-y-1 pl-5 text-[13.5px] leading-relaxed text-foreground/85">
         <li>One POST per event to your endpoint. No batching.</li>
-        <li>Body follows the vendor's own webhook shape as received. WhatsApp uses Meta's shape, SMS uses the canonicalised Bulk Panel DLR, RCS is normalised to a Meta-flavoured Pi shape.</li>
+        <li>Body follows the vendor's own webhook shape as received where a vendor callback exists: WhatsApp uses Meta's shape, SMS uses the canonicalised Bulk Panel DLR, RCS is normalised to a Meta-flavoured Pi shape. URL Clicks on WhatsApp are a Pi-native event (no Meta counterpart) and use a Pi-shape body.</li>
         <li>Pi metadata (record id, event id, attempt count, etc.) rides in HTTP headers, never inside the body.</li>
       </ul>
 
@@ -395,20 +395,21 @@ function WebhooksOverview() {
         You register a webhook against one channel and one sender. Options per channel:
       </P>
       <ul className="mb-4 list-disc space-y-1 pl-5 text-[13.5px] leading-relaxed text-foreground/85">
-        <li><strong>WhatsApp:</strong> WABA + phone number, subscribed to Delivery Status and/or Incoming Messages.</li>
+        <li><strong>WhatsApp:</strong> WABA + phone number, subscribed to any combination of Delivery Status, Incoming Messages, and URL Clicks.</li>
         <li><strong>SMS:</strong> Sender ID, subscribed to Delivery Status.</li>
         <li><strong>RCS:</strong> Agent, subscribed to Delivery Status.</li>
       </ul>
 
       <H2>Correlation</H2>
       <P>
-        Every callback carries <Kbd>X-Pi-Record-Id</Kbd> in the headers. That is the same <Kbd>record_id</Kbd> we returned to you when you called our send API, so you can join a callback back to the message you sent. For inbound WhatsApp replies to messages you sent via API, the same header carries the outbound's record id so you can thread the reply.
+        Every callback carries <Kbd>X-Pi-Record-Id</Kbd> in the headers. That is the same <Kbd>record_id</Kbd> we returned to you when you called our send API, so you can join a callback back to the message you sent. For inbound WhatsApp replies to messages you sent via API, the same header carries the outbound's record id so you can thread the reply. URL Clicks carry the record id of the outbound send whose button was tapped.
       </P>
 
       <H2>What fires and what does not</H2>
       <ul className="mb-4 list-disc space-y-1 pl-5 text-[13.5px] leading-relaxed text-foreground/85">
         <li><strong>Delivery Status</strong> fires only for messages you sent via the API. Messages sent from file-upload campaigns or the Broadcasts UI do not trigger callbacks.</li>
         <li><strong>Incoming Messages</strong> is currently available on WhatsApp only. It fires for every inbound message on the phone number you subscribed the webhook against. Cold-start inbounds and replies both flow through.</li>
+        <li><strong>URL Clicks</strong> fires every time a recipient taps a tracked URL button on a message you sent. Opted-out URL buttons produce no event (there is no tap signal for those). Available on WhatsApp only.</li>
       </ul>
     </div>
   );
@@ -429,7 +430,7 @@ function WebhooksRegister() {
         <li>Give it a name (slug-style: lowercase letters, digits, hyphens or underscores; 3 to 40 characters).</li>
         <li>Pick a channel and the sender it should listen on.</li>
         <li>Paste your HTTPS endpoint URL. Private and internal hosts are not allowed.</li>
-        <li>Pick which event buckets to subscribe to (Delivery Status, Incoming Messages if WhatsApp).</li>
+        <li>Pick which event buckets to subscribe to (Delivery Status; Incoming Messages and URL Clicks are additionally available on WhatsApp).</li>
         <li>Submit. An auth token is generated and shown once. Save it. It is not shown again.</li>
       </ol>
 
@@ -580,6 +581,26 @@ function WebhooksWA() {
     "type": "text"
   }]
 }`;
+  const urlClickExample = `{
+  "event": "url_click",
+  "recipient": {
+    "wa_id": "918802512442"
+  },
+  "message": {
+    "id": "wamid.HBgMOTE4ODAyNTEyNDQyFQIAERgSQTVBNTEzOEVCQjMxQkI2NEM1AA==",
+    "template": {
+      "id": "10248301338871",
+      "name": "cart_link_v1",
+      "language": "en"
+    }
+  },
+  "button": {
+    "index": 0,
+    "label": "Complete order",
+    "destination_url": "https://acme.example.com/cart/abc123"
+  },
+  "clicked_at": "2026-09-28T14:22:31Z"
+}`;
   return (
     <div>
       <SectionHeader
@@ -610,18 +631,30 @@ function WebhooksWA() {
         The <Kbd>messages[0].type</Kbd> field tells you which block to read. Meta types passed through as received:
       </P>
       <ul className="mb-4 list-disc space-y-1 pl-5 text-[13.5px] leading-relaxed text-foreground/85">
-        <li><Kbd>text</Kbd> — <Kbd>text.body</Kbd></li>
-        <li><Kbd>image</Kbd>, <Kbd>video</Kbd>, <Kbd>audio</Kbd>, <Kbd>document</Kbd> — <Kbd>{"{type}.id"}</Kbd>, <Kbd>mime_type</Kbd>, <Kbd>sha256</Kbd>, optional <Kbd>caption</Kbd> / <Kbd>filename</Kbd></li>
-        <li><Kbd>sticker</Kbd> — id, mime, sha256, <Kbd>animated</Kbd></li>
-        <li><Kbd>location</Kbd> — <Kbd>latitude</Kbd>, <Kbd>longitude</Kbd>, optional name / address</li>
-        <li><Kbd>contacts</Kbd> — array of contact cards</li>
-        <li><Kbd>interactive</Kbd> — <Kbd>button_reply</Kbd> / <Kbd>list_reply</Kbd> / <Kbd>nfm_reply</Kbd></li>
-        <li><Kbd>button</Kbd> — quick-reply payload from a template</li>
-        <li><Kbd>reaction</Kbd> — emoji reaction on a prior message</li>
-        <li><Kbd>order</Kbd> — WhatsApp Commerce order</li>
-        <li><Kbd>system</Kbd> — user changed number event</li>
-        <li><Kbd>unsupported</Kbd> — Meta got something it cannot render, with a message-level <Kbd>errors</Kbd> array</li>
+        <li><Kbd>text</Kbd> - <Kbd>text.body</Kbd></li>
+        <li><Kbd>image</Kbd>, <Kbd>video</Kbd>, <Kbd>audio</Kbd>, <Kbd>document</Kbd> - <Kbd>{"{type}.id"}</Kbd>, <Kbd>mime_type</Kbd>, <Kbd>sha256</Kbd>, optional <Kbd>caption</Kbd> / <Kbd>filename</Kbd></li>
+        <li><Kbd>sticker</Kbd> - id, mime, sha256, <Kbd>animated</Kbd></li>
+        <li><Kbd>location</Kbd> - <Kbd>latitude</Kbd>, <Kbd>longitude</Kbd>, optional name / address</li>
+        <li><Kbd>contacts</Kbd> - array of contact cards</li>
+        <li><Kbd>interactive</Kbd> - <Kbd>button_reply</Kbd> / <Kbd>list_reply</Kbd> / <Kbd>nfm_reply</Kbd></li>
+        <li><Kbd>button</Kbd> - quick-reply payload from a template</li>
+        <li><Kbd>reaction</Kbd> - emoji reaction on a prior message</li>
+        <li><Kbd>order</Kbd> - WhatsApp Commerce order</li>
+        <li><Kbd>system</Kbd> - user changed number event</li>
+        <li><Kbd>unsupported</Kbd> - Meta got something it cannot render, with a message-level <Kbd>errors</Kbd> array</li>
       </ul>
+
+      <H2>URL Clicks</H2>
+      <P>
+        Fires every time a recipient taps a tracked URL button on a message you sent. This is a Pi-native event: Meta does not emit URL click callbacks, so we ship a Pi-shape body rather than a Meta relay. URL Clicks are a separate bucket you subscribe to independently of Delivery Status and Incoming Messages.
+      </P>
+      <CodeBlock language="json" code={urlClickExample} />
+      <P>
+        <Kbd>button.destination_url</Kbd> is the merchant destination as it was resolved at send time (the URL you configured on the template, or the per-recipient value you passed for a dynamic button). The internal tracking URL never appears in the payload. The <Kbd>X-Pi-Record-Id</Kbd> header carries the outbound send's record id so you can join a click back to the message it originated from.
+      </P>
+      <P>
+        Opted-out URL buttons (tracking turned off on the template) never fire URL Clicks. Multiple taps by the same recipient on the same button each fire one event; dedupe on <Kbd>X-Pi-Event-Id</Kbd> if you want unique counts.
+      </P>
     </div>
   );
 }
