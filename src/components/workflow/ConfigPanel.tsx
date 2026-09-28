@@ -26,7 +26,8 @@ import {
 import { toast } from "sonner";
 import type { WorkflowNodeData, NodeKind, PresetConfig, PresetBranch, PresetCondition, PresetVarMap, PresetValueRemap, NodeOutput } from "@/lib/campaign-types";
 import { NODE_LABELS, SAMPLE_WORKFLOW_VARIABLES, branchConditions } from "@/lib/campaign-types";
-import { SEED_TEMPLATES, MEDIA_HINTS, validateMediaUrl, type TemplateFormat } from "@/lib/waba-templates";
+import { SEED_TEMPLATES, templatesForWaba, MEDIA_HINTS, validateMediaUrl, type TemplateFormat } from "@/lib/waba-templates";
+import { useSelectedWaba, useWorkspaceSession } from "@/lib/waba-store";
 import {
   whatsappOutputs, resolveWaTemplate, completedOutput, isBranchableButton,
   WA_TIMEOUT_HOURS, DEFAULT_WA_TIMEOUT_HOURS, waTimeoutLabel,
@@ -155,6 +156,11 @@ type Props = {
    *  Audience node, so those variables never exist at runtime and would be a
    *  footgun for authors to branch on. */
   suppressSampleVariables?: boolean;
+  /** Every node currently on the workflow — used by the WhatsApp Template
+   *  node to enforce the "one BM + one WABA per workflow" cross-node lock.
+   *  The first WA node's WABA pin governs the workflow; sibling WA nodes read
+   *  the pin instead of picking freely. */
+  allNodes?: { id: string; data: WorkflowNodeData }[];
 };
 
 const MIN_PANEL_W = 360;
@@ -223,7 +229,7 @@ function ResizablePanel({ children }: { children: React.ReactNode }) {
 // silently disconnect the example graph's edges mid-demo).
 const NOOP_CHANGE = (_patch: Partial<WorkflowNodeData>) => undefined;
 
-export function ConfigPanel({ node, readOnly, onClose, onChange, onDelete, onDuplicate, extraVariables, suppressSampleVariables }: Props) {
+export function ConfigPanel({ node, readOnly, onClose, onChange, onDelete, onDuplicate, extraVariables, suppressSampleVariables, allNodes }: Props) {
   if (!node) return null;
   const { data } = node;
   const valid = data.valid !== false;
@@ -279,7 +285,7 @@ export function ConfigPanel({ node, readOnly, onClose, onChange, onDelete, onDup
               </p>
             </div>
           ) : (
-            <NodeFields data={data} readOnly={ro} onChange={safeChange} />
+            <NodeFields data={data} nodeId={node.id} readOnly={ro} onChange={safeChange} allNodes={allNodes} />
           )}
         </div>
 
@@ -390,14 +396,38 @@ function DescriptionField({
 /* --------------------------- Per-kind fields --------------------------- */
 
 function NodeFields({
-  data, readOnly, onChange,
-}: { data: WorkflowNodeData; readOnly?: boolean; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
-  return <KindFields kind={data.kind} config={data.config} serial={data.serial} readOnly={readOnly} onChange={onChange} />;
+  data, nodeId, readOnly, onChange, allNodes,
+}: {
+  data: WorkflowNodeData;
+  nodeId?: string;
+  readOnly?: boolean;
+  onChange: (patch: Partial<WorkflowNodeData>) => void;
+  allNodes?: { id: string; data: WorkflowNodeData }[];
+}) {
+  return (
+    <KindFields
+      kind={data.kind}
+      config={data.config}
+      serial={data.serial}
+      nodeId={nodeId}
+      readOnly={readOnly}
+      onChange={onChange}
+      allNodes={allNodes}
+    />
+  );
 }
 
 function KindFields({
-  kind, config, serial, readOnly, onChange,
-}: { kind: NodeKind; config?: PresetConfig; serial?: string; readOnly?: boolean; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
+  kind, config, serial, nodeId, readOnly, onChange, allNodes,
+}: {
+  kind: NodeKind;
+  config?: PresetConfig;
+  serial?: string;
+  nodeId?: string;
+  readOnly?: boolean;
+  onChange: (patch: Partial<WorkflowNodeData>) => void;
+  allNodes?: { id: string; data: WorkflowNodeData }[];
+}) {
   const mark = (valid: boolean, error?: string) => onChange({ valid, error });
 
   switch (kind) {
@@ -427,7 +457,16 @@ function KindFields({
       return <VoiceCallFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
 
     case "whatsapp":
-      return <WhatsAppFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
+      return (
+        <WhatsAppFields
+          config={config}
+          readOnly={readOnly}
+          mark={mark}
+          onChange={onChange}
+          currentNodeId={nodeId}
+          allNodes={allNodes}
+        />
+      );
 
     case "whatsappFreeform":
       return <WhatsAppFreeformFields config={config} serial={serial} readOnly={readOnly} mark={mark} onChange={onChange} />;
@@ -1295,21 +1334,134 @@ function StepChip({ n, done, muted }: { n: number; done?: boolean; muted?: boole
 
 /* --------------------------- WhatsApp --------------------------- */
 
-function WhatsAppFields({ config, readOnly, mark, onChange }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
+function WhatsAppFields({
+  config, readOnly, mark, onChange, currentNodeId, allNodes,
+}: {
+  config?: PresetConfig;
+  readOnly?: boolean;
+  mark: (v: boolean, e?: string) => void;
+  onChange: (patch: Partial<WorkflowNodeData>) => void;
+  currentNodeId?: string;
+  allNodes?: { id: string; data: WorkflowNodeData }[];
+}) {
   return (
     <ActionNodeShell kind="whatsapp" config={config} readOnly={readOnly} mark={mark} onChange={onChange}
-      renderCore={(coreMark) => <WhatsAppCore config={config} readOnly={readOnly} mark={coreMark} onChange={onChange} />} />
+      renderCore={(coreMark) => (
+        <WhatsAppCore
+          config={config}
+          readOnly={readOnly}
+          mark={coreMark}
+          onChange={onChange}
+          currentNodeId={currentNodeId}
+          allNodes={allNodes}
+        />
+      )} />
   );
 }
 
-const APPROVED_TEMPLATES = SEED_TEMPLATES.filter((t) => t.status === "Approved");
+/**
+ * Fallback template pool used when there is no selected WABA yet (e.g. the
+ * disconnected demo state, or read-only preset previews). Global-approved
+ * templates keep the picker useful; the picker is still WABA-scoped when a
+ * session is live.
+ */
+const APPROVED_TEMPLATES_FALLBACK = SEED_TEMPLATES.filter((t) => t.status === "Approved");
 
 function WhatsAppCore({
-  config, readOnly, mark, onChange,
-}: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
-  const [mode, setMode] = useState<"template" | "freeform">(config?.waMode ?? "template");
+  config, readOnly, mark, onChange, currentNodeId, allNodes,
+}: {
+  config?: PresetConfig;
+  readOnly?: boolean;
+  mark: (v: boolean, e?: string) => void;
+  onChange: (patch: Partial<WorkflowNodeData>) => void;
+  currentNodeId?: string;
+  allNodes?: { id: string; data: WorkflowNodeData }[];
+}) {
+  // The WhatsApp node is pinned to a specific sender: Business Manager, WABA,
+  // and a phone number under that WABA. Templates are then scoped to the
+  // picked WABA. If the node's saved config predates multi-WABA (or is a
+  // preset), fall back to the workspace's currently-selected sender so
+  // nothing renders empty.
+  const session = useWorkspaceSession();
+  const selectedWaba = useSelectedWaba();
+
+  // Cross-node WABA lock: exactly one BM + WABA per workflow. The FIRST
+  // WhatsApp node in canvas order owns the pin; every other WhatsApp node
+  // inherits and shows BM + WABA readonly. This holds even for preset
+  // campaigns whose nodes haven't been explicitly stamped yet — the "first
+  // node's effective WABA" (its saved config or the workspace's currently
+  // selected WABA fallback) is what siblings inherit. Phone selection stays
+  // free per node.
+  const waNodes = (allNodes ?? []).filter((n) => n.data.kind === "whatsapp");
+  const firstWaNode = waNodes[0];
+  const isFirstNode = !firstWaNode || firstWaNode.id === currentNodeId;
+  const isLocked = !!firstWaNode && !isFirstNode;
+  // The first node's effective WABA / BM — either what it saved, or the
+  // workspace's currently selected sender as a fallback for unstamped presets.
+  const firstNodeWabaId =
+    firstWaNode?.data.config?.waWabaId ?? selectedWaba?.id ?? "";
+  const firstNodeBmId =
+    firstWaNode?.data.config?.waBmId ??
+    selectedWaba?.bmId ??
+    session?.businessManagers[0]?.id ??
+    "";
+  const pinnedFromLabel = firstWaNode?.data.serial ?? firstWaNode?.id;
+
+  const nodeBmId = isLocked
+    ? firstNodeBmId
+    : (config?.waBmId ?? selectedWaba?.bmId ?? session?.businessManagers[0]?.id ?? "");
+  const nodeWabaId = isLocked
+    ? firstNodeWabaId
+    : (config?.waWabaId ?? selectedWaba?.id ?? "");
+  const pinnedWabaId = isLocked ? firstNodeWabaId : undefined;
+  const pinnedBmId = isLocked ? firstNodeBmId : undefined;
+  const nodeWaba = session?.wabas.find((w) => w.id === nodeWabaId) ?? selectedWaba ?? null;
+  const nodePhoneId = config?.waPhoneNumberId ?? nodeWaba?.phones[0]?.id ?? "";
+  const nodePhone = nodeWaba?.phones.find((p) => p.id === nodePhoneId) ?? nodeWaba?.phones[0] ?? null;
+  // WABAs the merchant can pick from — always scoped to the picked BM so the
+  // "one BM per workflow" rule is enforced at the picker level too.
+  const bmWabas = session?.wabas.filter((w) => w.bmId === nodeBmId) ?? [];
+
+  const approvedTemplates = nodeWabaId
+    ? templatesForWaba(nodeWabaId).filter((t) => t.status === "Approved")
+    : APPROVED_TEMPLATES_FALLBACK;
+
+  const setSender = (patch: {
+    waBmId?: string; waWabaId?: string; waPhoneNumberId?: string;
+    // When WABA changes we also stamp the human-readable "waNumber" (used by
+    // downstream summaries + validation) and reset the template pick to avoid
+    // showing a template from the old WABA.
+    waNumber?: string; waTemplate?: string;
+  }) => {
+    onChange({ config: { ...config, ...patch } });
+  };
+
+  // When the workflow WABA is pinned by a sibling and this node's saved config
+  // hasn't caught up yet, persist the pin into this node's config so the lock
+  // survives save/reload and analytics/attribution reflect the right WABA.
+  useEffect(() => {
+    if (!isLocked) return;
+    if (config?.waWabaId === pinnedWabaId && config?.waBmId === pinnedBmId) return;
+    const p = nodeWaba?.phones[0];
+    setSender({
+      waBmId: pinnedBmId,
+      waWabaId: pinnedWabaId,
+      waPhoneNumberId: config?.waPhoneNumberId ?? p?.id,
+      waNumber: p ? `${p.display} · ${p.displayName}` : undefined,
+      // Clear template only if the saved one belonged to another WABA.
+      ...(config?.waTemplate && !templatesForWaba(pinnedWabaId!).some((t) => t.id === config.waTemplate)
+        ? { waTemplate: "" }
+        : {}),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLocked, pinnedWabaId, pinnedBmId]);
+
+  // WA template node is template-only — freeform now lives on the standalone
+  // WhatsApp Freeform Workflow node kind. Kept as a constant to leave the rest
+  // of the render tree unchanged.
+  const mode = "template" as const;
   const [templateId, setTemplateId] = useState(config?.waTemplate ?? "");
-  const [numberSelected, setNumberSelected] = useState(!!config?.waNumber);
+  const [numberSelected, setNumberSelected] = useState(!!nodePhoneId);
   const [contentReady, setContentReady] = useState(!!config?.waTemplate || !!config?.waBody);
   const [timeoutHours, setTimeoutHours] = useState(config?.waTimeoutHours ?? DEFAULT_WA_TIMEOUT_HOURS);
   const template = resolveWaTemplate(templateId);
@@ -1331,7 +1483,7 @@ function WhatsAppCore({
   // "Branchable" buttons produce a trackable handle (Quick Reply / tracked URL).
   // Phone numbers and untracked URLs are NOT branchable — those taps route through
   // the always-on "Timeout" path.
-  const hasButtons = mode !== "freeform" && !!template
+  const hasButtons = !!template
     && (template.buttons ?? []).some(isBranchableButton);
   const isType1 = !hasButtons;
 
@@ -1367,37 +1519,120 @@ function WhatsAppCore({
     mark(numberSelected && contentReady && mediaOk, err);
   }, [numberSelected, contentReady, mediaFormat, mediaMapped]);
 
-  // Publish the canvas handles (derived from template buttons + the Type-1 split
-  // toggle) AND persist the config so the node restores correctly when reopened.
+  // Publish the canvas handles (derived from template buttons) AND persist the
+  // config so the node restores correctly when reopened.
   useEffect(() => {
-    const outs = mode === "freeform" ? whatsappOutputs(undefined) : whatsappOutputs(template);
     onChange({
-      outputs: outs,
+      outputs: whatsappOutputs(template),
       config: { ...config, waMode: mode, waTemplate: templateId, waTimeoutHours: timeoutHours },
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, templateId, timeoutHours]);
+  }, [templateId, timeoutHours]);
 
   return (
     <>
-      <Section title="WhatsApp number">
-        <Field label="Connected number" required>
-          <SelectLike
-            disabled={readOnly}
-            options={["+91 98100 12345 · PiCommerce", "+91 98200 67890 · PiCommerce Support", "+91 98300 11223 · Paytm Money"]}
-            defaultValue={config?.waNumber}
-            onPick={() => setNumberSelected(true)}
-            placeholder="Select connected number…"
-          />
+      <Section title="Sender">
+        {/* BM → WABA → Phone. Cross-node lock: once any WhatsApp node in this
+            workflow has a WABA set, sibling WA nodes inherit BM + WABA. Phone
+            selection stays free (same WABA, different phone numbers is
+            allowed and encouraged for role separation). */}
+        <Field label="Business Manager" required>
+          <Select
+            value={nodeBmId || undefined}
+            disabled={readOnly || isLocked}
+            onValueChange={(v) => {
+              // Switching BM cascades: pick this BM's first WABA and that
+              // WABA's first phone. Templates reset since they were WABA-scoped.
+              const nextWaba = session?.wabas.find((w) => w.bmId === v);
+              const nextPhone = nextWaba?.phones[0];
+              setTemplateId("");
+              setContentReady(false);
+              setSender({
+                waBmId: v,
+                waWabaId: nextWaba?.id ?? "",
+                waPhoneNumberId: nextPhone?.id,
+                waNumber: nextPhone ? `${nextPhone.display} · ${nextPhone.displayName}` : undefined,
+                waTemplate: "",
+              });
+            }}
+          >
+            <SelectTrigger className="h-9 text-sm">
+              <SelectValue placeholder="Select Business Manager…" />
+            </SelectTrigger>
+            <SelectContent>
+              {(session?.businessManagers ?? []).map((b) => (
+                <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </Field>
+        <Field label="WhatsApp Business Account" required>
+          <Select
+            value={nodeWabaId || undefined}
+            disabled={readOnly || isLocked}
+            onValueChange={(v) => {
+              const nextWaba = session?.wabas.find((w) => w.id === v);
+              const nextPhone = nextWaba?.phones[0];
+              // Reset the template pick — the old template belonged to another
+              // WABA and won't resolve on send. Merchant must re-pick.
+              setTemplateId("");
+              setContentReady(false);
+              setSender({
+                waBmId: nextWaba?.bmId ?? nodeBmId,
+                waWabaId: v,
+                waPhoneNumberId: nextPhone?.id,
+                waNumber: nextPhone ? `${nextPhone.display} · ${nextPhone.displayName}` : undefined,
+                waTemplate: "",
+              });
+            }}
+          >
+            <SelectTrigger className="h-9 text-sm">
+              <SelectValue placeholder="Select WABA…" />
+            </SelectTrigger>
+            <SelectContent>
+              {bmWabas.map((w) => (
+                <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+        <Field label="Phone number" required>
+          <Select
+            value={nodePhoneId || undefined}
+            disabled={readOnly || !nodeWaba}
+            onValueChange={(v) => {
+              const p = nodeWaba?.phones.find((x) => x.id === v);
+              setNumberSelected(true);
+              setSender({
+                waPhoneNumberId: v,
+                waNumber: p ? `${p.display} · ${p.displayName}` : undefined,
+              });
+            }}
+          >
+            <SelectTrigger className="h-9 text-sm">
+              <SelectValue placeholder="Select number…" />
+            </SelectTrigger>
+            <SelectContent>
+              {(nodeWaba?.phones ?? []).map((p) => (
+                <SelectItem key={p.id} value={p.id}>{p.display} · {p.displayName}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+        {isLocked ? (
+          <p className="text-[11px] leading-relaxed text-muted-foreground">
+            Locked to {nodeWaba?.name ?? "the workflow's WABA"} by {pinnedFromLabel}. Every WhatsApp node in this workflow uses the same BM and WABA. Only the phone number can change.
+          </p>
+        ) : (
+          <p className="text-[11px] leading-relaxed text-muted-foreground">
+            The first WhatsApp node's BM and WABA set the whole workflow. Other WhatsApp nodes will follow the same BM and WABA. Phone number can still change per node.
+          </p>
+        )}
       </Section>
 
-      <Section title="Message type">
-        <div className="grid grid-cols-2 gap-2">
-          <SegmentBtn active={mode === "template"} onClick={() => setMode("template")} disabled={readOnly}>Template</SegmentBtn>
-          <SegmentBtn active={mode === "freeform"} onClick={() => setMode("freeform")} disabled={readOnly}>Freeform</SegmentBtn>
-        </div>
-      </Section>
+      {/* Freeform is its own workspace-scoped construct (WhatsApp Freeform
+          Workflows under Channels > WhatsApp). The WhatsApp Template node is
+          template-only — the toggle was retired. */}
 
       {mode === "template" ? (
         <Section title="Message">
@@ -1424,7 +1659,7 @@ function WhatsAppCore({
                   {templateId && !template && (
                     <SelectItem value={templateId}>{templateId} · legacy</SelectItem>
                   )}
-                  {APPROVED_TEMPLATES.map((t) => (
+                  {approvedTemplates.map((t) => (
                     <SelectItem key={t.id} value={t.id}>{t.name} · {t.category}</SelectItem>
                   ))}
                 </SelectContent>

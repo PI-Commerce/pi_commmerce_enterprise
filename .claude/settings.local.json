@@ -25,7 +25,8 @@
       "Bash(lsof -ti:3000 -sTCP:LISTEN)",
       "Bash(node -e \"const p=require\\('./package.json'\\);console.log\\(JSON.stringify\\(p.scripts,null,2\\)\\)\")",
       "Bash(npm run *)",
-      "Bash(curl -s -o /dev/null http://localhost:5173)"
+      "Bash(curl -s -o /dev/null http://localhost:5173)",
+      "WebSearch"
     ]
   }
 }

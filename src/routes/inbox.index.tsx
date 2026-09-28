@@ -413,6 +413,20 @@ function ChatListCard({
             </span>
           )}
         </div>
+        {lead.primaryWaPhoneDisplay && (
+          <p
+            className="mt-0.5 truncate text-[10px] text-muted-foreground"
+            title={[lead.primaryWaPhoneDisplay, lead.primaryWaWabaName, lead.primaryWaBmName]
+              .filter(Boolean)
+              .join(" · ")}
+          >
+            via {[
+              lead.primaryWaPhoneDisplay,
+              lead.primaryWaWabaName,
+              lead.primaryWaBmName,
+            ].filter(Boolean).join(" · ")}
+          </p>
+        )}
       </div>
     </button>
   );

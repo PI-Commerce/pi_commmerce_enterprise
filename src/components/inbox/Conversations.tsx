@@ -212,7 +212,7 @@ function ChatBubble({
   // Full template preview replaces the plain body when set.
   if (isOut && msg.template) {
     return (
-      <div className="flex justify-end">
+      <div className="flex flex-col items-end gap-1">
         <div className={cn("max-w-[75%] overflow-hidden rounded-2xl text-[13px] shadow-sm", tint)}>
           <TemplatePreview t={msg.template} />
           <div className="flex items-center justify-end gap-1 px-3 py-1.5 text-[10px] text-muted-foreground">
@@ -220,6 +220,7 @@ function ChatBubble({
             <DeliveryStatus status={msg.deliveryStatus} reason={msg.failureReason} />
           </div>
         </div>
+        <SenderMeta msg={msg} />
       </div>
     );
   }
@@ -243,7 +244,7 @@ function ChatBubble({
     );
   }
   return (
-    <div className={cn("flex", isOut ? "justify-end" : "justify-start")}>
+    <div className={cn("flex flex-col gap-1", isOut ? "items-end" : "items-start")}>
       <div className={cn("max-w-[75%] rounded-2xl px-3 py-2 text-[13px] shadow-sm", tint)}>
         <p className="whitespace-pre-wrap leading-snug text-foreground">{msg.body}</p>
         {msg.linkLabel && (
@@ -256,7 +257,30 @@ function ChatBubble({
           {isOut && <DeliveryStatus status={msg.deliveryStatus} reason={msg.failureReason} />}
         </div>
       </div>
+      <SenderMeta msg={msg} />
     </div>
+  );
+}
+
+/**
+ * "via +91 98100 12345 · ACME Retail · Paytm Commerce" chip shown under
+ * WhatsApp bubbles when the message carries a sender pin. Names the three
+ * levels of Meta's hierarchy (BM / WABA / phone number) so the operator
+ * can tell which sender a conversation belongs to at a glance. Only
+ * renders for WhatsApp — SMS / RCS have their own sender-identity model.
+ */
+function SenderMeta({ msg }: { msg: LeadChatMessage }) {
+  if (msg.channel !== "wa" || !msg.senderPhoneDisplay) return null;
+  const label = msg.direction === "out" ? "via" : "to";
+  const parts = [
+    msg.senderPhoneDisplay,
+    msg.senderWabaName,
+    msg.senderBmName,
+  ].filter(Boolean);
+  return (
+    <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+      {label} <span>{parts.join(" · ")}</span>
+    </span>
   );
 }
 

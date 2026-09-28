@@ -172,6 +172,17 @@ export type PresetConfig = {
   maxAttempts?: number;
   retryInterval?: string;
   // ---- WhatsApp core ----
+  /** BM the sender belongs to. Fixed to the workspace's single BM today;
+   *  captured on the node so the workflow is self-describing. */
+  waBmId?: string;
+  /** WABA the sender belongs to. Governs which templates the picker will show
+   *  — Meta approves templates per WABA. Recommended: keep every WA node in a
+   *  workflow on the same WABA. */
+  waWabaId?: string;
+  /** Phone number under {@link waWabaId} the send is pinned to. */
+  waPhoneNumberId?: string;
+  /** Human-readable "display · display name" for the picked number. Kept for
+   *  legacy summaries and validation code paths. */
   waNumber?: string;
   waMode?: "template" | "freeform";
   /** A {@link WaTemplate} id or name from the template registry. Unresolved values fall back to a no-button (Type 1) node. */

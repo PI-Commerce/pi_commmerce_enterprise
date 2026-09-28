@@ -13,11 +13,10 @@ import { useRegion, localizeTzAbbrev, localizeDialCode } from "@/lib/region";
  * connection metadata Pi Commerce tracks from Meta webhooks, and sender quality
  * & limits.
  *
- * Laid out as a full-width web dashboard (not a modal): assets are a responsive
- * card grid and the status / quality metrics spread across full-width stat rows.
- * Lifecycle actions (Reconnect · Disconnect) live in the page header; the only
- * in-body action is the section-level Refresh. Mock only — Refresh just nudges
- * "Last sync".
+ * Layout preserved from the pre-multi-WABA UI (three asset cards + status +
+ * quality stat rows). The multi-WABA rework happens above the tab (see the
+ * WABA switcher in the channel page header), so this component just renders
+ * the selected WABA + phone.
  */
 export function WhatsAppOverview({ data }: { data: ConnectedWaba }) {
   const { tzAbbrev, dialCode } = useRegion();

@@ -26,7 +26,7 @@ import { toast } from "sonner";
 import type { ConnectedWaba } from "@/lib/waba-onboarding";
 import { useRegion } from "@/lib/region";
 import {
-  SEED_TEMPLATES, TEMPLATE_CATEGORIES, TEMPLATE_BUTTON_TYPES, BUTTON_TYPE_LABELS,
+  templatesForWaba, TEMPLATE_CATEGORIES, TEMPLATE_BUTTON_TYPES, BUTTON_TYPE_LABELS,
   MEDIA_HINTS, languageLabel, fillVariables, variableCount,
   MAX_TEMPLATE_BUTTONS, cappedButtonTypes, buttonRuleErrors, buttonFieldErrors, duplicateButtonIndexes,
   bodyEdgeVariable, bodyTooManyVariables,
@@ -78,7 +78,12 @@ const EMOJIS = [
  * primitives) rather than Paytm's blue UI. Mock only — nothing is sent to Meta.
  */
 export function WhatsAppTemplates({ waba }: { waba: ConnectedWaba }) {
-  const [templates, setTemplates] = useState<WaTemplate[]>(SEED_TEMPLATES);
+  // Templates live under a specific WABA in Meta's model — approval is per
+  // template per language per WABA. Re-seed the list whenever the selected
+  // WABA changes so the merchant sees this WABA's approved catalog, not a
+  // stale one from before the switch.
+  const [templates, setTemplates] = useState<WaTemplate[]>(() => templatesForWaba(waba.waba.id));
+  useEffect(() => { setTemplates(templatesForWaba(waba.waba.id)); }, [waba.waba.id]);
   const [editing, setEditing] = useState<WaTemplate | null>(null);
   const [creating, setCreating] = useState(false);
 
@@ -87,10 +92,13 @@ export function WhatsAppTemplates({ waba }: { waba: ConnectedWaba }) {
   const close = () => { setCreating(false); setEditing(null); };
 
   const save = (t: WaTemplate) => {
+    // New templates land on the currently selected WABA — Meta's model
+    // requires a WABA at submit time.
+    const stamped: WaTemplate = { ...t, wabaId: t.wabaId ?? waba.waba.id };
     setTemplates((prev) => {
-      const i = prev.findIndex((x) => x.id === t.id);
-      if (i === -1) return [t, ...prev];
-      const next = [...prev]; next[i] = t; return next;
+      const i = prev.findIndex((x) => x.id === stamped.id);
+      if (i === -1) return [stamped, ...prev];
+      const next = [...prev]; next[i] = stamped; return next;
     });
     close();
   };

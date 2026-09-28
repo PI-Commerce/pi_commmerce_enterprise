@@ -69,7 +69,9 @@ import {
 } from "@/lib/analytics-leads";
 import { FreeformCanvas } from "@/components/workflow/FreeformCanvas";
 import { getFreeformWorkflow, type FreeformNodeConfig } from "@/lib/freeform-types";
-import { X as CloseIcon, Minimize2 } from "lucide-react";
+import { X as CloseIcon, Minimize2, Check, ChevronsUpDown } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { resolveWaTemplate, isBranchableButton } from "@/lib/wa-outputs";
 import { resolveSmsTemplate } from "@/lib/sms-store";
 import { smsOutcomeTotals } from "@/lib/analytics-sms";
@@ -1812,7 +1814,10 @@ function ChannelAnalytics({
   }, [kind]);
 
   // Asset picker options (Asset-mode): voice = unique resolved agents touching
-  // any ref; whatsapp = unique templates touching any ref. Sorted by latest-use.
+  // any ref; whatsapp = unique templates touching any ref. Sorted by
+  // latest-use. Analytics stays workspace-wide — a merchant looking at
+  // performance may legitimately want to compare templates across WABAs. The
+  // template dropdown is searchable so long lists stay usable.
   const assetOptions = useMemo(() => {
     if (kind === "voice") {
       const m = new Map<string, { id: string; label: string }>();
@@ -2016,27 +2021,18 @@ function ChannelAnalytics({
         ) : mode === "asset" ? (
           <div className="flex flex-1 flex-col gap-2 sm:flex-row sm:items-end">
             <FilterField label={tabMeta.assetLabel} className="sm:w-[280px]">
-              <Select
+              <AssetSearchCombobox
+                options={assetOptions}
                 value={selection.assetId ?? ""}
-                onValueChange={(v) =>
+                placeholder={`Pick a ${tabMeta.assetLabel}`}
+                onChange={(v) =>
                   onSelectionChange({
                     kind,
                     mode: "asset",
                     assetId: v,
                   })
                 }
-              >
-                <SelectTrigger className="h-9 w-full text-xs">
-                  <SelectValue placeholder={`Pick a ${tabMeta.assetLabel}`} />
-                </SelectTrigger>
-                <SelectContent>
-                  {assetOptions.map((a) => (
-                    <SelectItem key={a.id} value={a.id}>
-                      {a.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              />
             </FilterField>
             <FilterField label="Date range" className="sm:w-[280px]">
               <DateRangePicker
@@ -2222,6 +2218,66 @@ function FilterField({
       </p>
       {children}
     </div>
+  );
+}
+
+/**
+ * Searchable asset picker used for the WhatsApp / SMS / RCS template dropdown
+ * on Channel Analytics. Long template lists (30+ across all WABAs) are hard
+ * to scan in a plain Select; a search input on top lets the merchant type-to-
+ * find. Popover trigger mirrors the Select trigger's visual weight so the
+ * filter row stays aligned.
+ */
+function AssetSearchCombobox({
+  options, value, placeholder, onChange,
+}: {
+  options: { id: string; label: string }[];
+  value: string;
+  placeholder: string;
+  onChange: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const current = options.find((o) => o.id === value);
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          className="h-9 w-full justify-between font-normal text-xs"
+        >
+          <span className="truncate">
+            {current ? current.label : <span className="text-muted-foreground">{placeholder}</span>}
+          </span>
+          <ChevronsUpDown className="ml-2 h-3.5 w-3.5 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+        <Command>
+          <CommandInput placeholder="Search templates…" className="h-9 text-xs" />
+          <CommandList>
+            <CommandEmpty>No template matches.</CommandEmpty>
+            <CommandGroup>
+              {options.map((o) => (
+                <CommandItem
+                  key={o.id}
+                  value={o.label}
+                  onSelect={() => {
+                    onChange(o.id);
+                    setOpen(false);
+                  }}
+                  className="text-xs"
+                >
+                  <Check className={cn("mr-2 h-3.5 w-3.5", o.id === value ? "opacity-100" : "opacity-0")} />
+                  {o.label}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
   );
 }
 

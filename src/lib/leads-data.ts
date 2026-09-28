@@ -87,6 +87,17 @@ export type LeadChatMessage = {
   template?: WaTemplatePreview;
   /** Inbound only — the customer tapped a button on a prior template. */
   buttonReply?: { buttonLabel: string };
+  /** WhatsApp only. The (BM, WABA, phone number) the message rode. Rendered
+   *  as a "via +91 98100 12345 · ACME Retail · Paytm Commerce" chip so
+   *  operators can tell which sender number, which WABA and which BM a
+   *  conversation belongs to. Optional for backwards compat with legacy
+   *  seed rows. */
+  senderBmId?: string;
+  senderBmName?: string;
+  senderWabaId?: string;
+  senderWabaName?: string;
+  senderPhoneNumberId?: string;
+  senderPhoneDisplay?: string;
 };
 
 /** A completed voice call with its inline transcript. */
@@ -133,6 +144,16 @@ export type LeadRecord = {
   humanEscalated: boolean;
   campaigns: LeadCampaignEntry[];
   messages: LeadMessage[];
+  /** The primary WhatsApp sender this lead has been talking to. Derived from
+   *  the most recent WhatsApp message on the record. Rendered as a meta chip
+   *  in the inbox list ("via +91 98100 12345 · ACME Retail · Paytm Commerce")
+   *  so operators know which BM / WABA / number a lead lives on. */
+  primaryWaBmId?: string;
+  primaryWaBmName?: string;
+  primaryWaWabaId?: string;
+  primaryWaWabaName?: string;
+  primaryWaPhoneNumberId?: string;
+  primaryWaPhoneDisplay?: string;
 };
 
 /* -------------------------------------------------------------------------- *
@@ -603,4 +624,44 @@ function buildLead(i: number): LeadRecord {
 }
 
 /** ~50 seeded leads — deterministic so hot-reload doesn't shuffle rows. */
-export const LEAD_RECORDS: LeadRecord[] = Array.from({ length: 50 }, (_, i) => buildLead(i));
+const _LEAD_RECORDS_RAW: LeadRecord[] = Array.from({ length: 50 }, (_, i) => buildLead(i));
+
+/**
+ * Post-process: stamp every WhatsApp message and each lead with a plausible
+ * sender (BM + WABA + phone). Distribution is deterministic (by lead index):
+ * ~60% Retail Marketing, ~25% Retail Support, ~15% Fintech Payments. Keeps
+ * the demo showing multi-WABA-per-inbox without editing every seed message.
+ */
+const INBOX_SENDER_ROTATION = [
+  { bmId: "1789442100981", bmName: "Paytm Commerce",       wabaId: "104882190034771", wabaName: "ACME Retail",  phoneNumberId: "10934471290017", phoneDisplay: "+91 98100 12345" },
+  { bmId: "1789442100981", bmName: "Paytm Commerce",       wabaId: "104882190034771", wabaName: "ACME Retail",  phoneNumberId: "10934471290017", phoneDisplay: "+91 98100 12345" },
+  { bmId: "1789442100981", bmName: "Paytm Commerce",       wabaId: "104882190034771", wabaName: "ACME Retail",  phoneNumberId: "10934471290017", phoneDisplay: "+91 98100 12345" },
+  { bmId: "1789442100981", bmName: "Paytm Commerce",       wabaId: "104882190034771", wabaName: "ACME Retail",  phoneNumberId: "10934471290018", phoneDisplay: "+91 98100 45678" },
+  { bmId: "1789442100981", bmName: "Paytm Commerce",       wabaId: "210094477120983", wabaName: "ACME Fintech", phoneNumberId: "10934471290019", phoneDisplay: "+91 99872 10001" },
+];
+
+export const LEAD_RECORDS: LeadRecord[] = _LEAD_RECORDS_RAW.map((lead, i) => {
+  const sender = INBOX_SENDER_ROTATION[i % INBOX_SENDER_ROTATION.length];
+  const messages = lead.messages.map((m) => {
+    if (m.channel !== "wa") return m;
+    return {
+      ...m,
+      senderBmId: sender.bmId,
+      senderBmName: sender.bmName,
+      senderWabaId: sender.wabaId,
+      senderWabaName: sender.wabaName,
+      senderPhoneNumberId: sender.phoneNumberId,
+      senderPhoneDisplay: sender.phoneDisplay,
+    };
+  });
+  return {
+    ...lead,
+    messages,
+    primaryWaBmId: sender.bmId,
+    primaryWaBmName: sender.bmName,
+    primaryWaWabaId: sender.wabaId,
+    primaryWaWabaName: sender.wabaName,
+    primaryWaPhoneNumberId: sender.phoneNumberId,
+    primaryWaPhoneDisplay: sender.phoneDisplay,
+  };
+});

@@ -116,12 +116,15 @@ export type WebhookHeader = { key: string; value: string };
 
 /**
  * Scope inside a channel. What is required depends on the channel:
- *   whatsapp: wabaId + phoneNumberId (WABA + one of its numbers)
- *   sms:      senderId              (DLT-registered sender header)
- *   rcs:      agentId               (RBM agent under a brand)
- * Only the fields relevant to the picked channel are populated.
+ *   whatsapp: bmId + wabaId + phoneNumberId (BM + WABA + one of its numbers)
+ *   sms:      senderId                       (DLT-registered sender header)
+ *   rcs:      agentId                        (RBM agent under a brand)
+ * Only the fields relevant to the picked channel are populated. `bmId` is
+ * denormalized onto the scope for WhatsApp so the picker + list surfaces can
+ * label the webhook with its BM without re-resolving through the WABA.
  */
 export type WebhookScope = {
+  bmId?: string;
   wabaId?: string;
   phoneNumberId?: string;
   senderId?: string;
@@ -210,7 +213,7 @@ export const SEED_WEBHOOKS: Webhook[] = [
     name: "wa-delivery-events",
     type: "channels",
     channel: "whatsapp",
-    scope: { wabaId: "104882190034771", phoneNumberId: "10934471290017" },
+    scope: { bmId: "1789442100981", wabaId: "104882190034771", phoneNumberId: "10934471290017" },
     events: ["delivery_status", "incoming"],
     endpointUrl: "https://hooks.acmecorp.com/pi/whatsapp",
     authToken: "pi_wh_5m5m5m5m5m5m5m5m5m5m5m5m5m5m5m5m",

@@ -21,10 +21,13 @@ import {
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { CSV_LIBRARY, makeCsvAsset, type CsvAsset } from "@/lib/data-library";
-import { SEED_TEMPLATES } from "@/lib/waba-templates";
+import { SEED_TEMPLATES, templatesForWaba } from "@/lib/waba-templates";
 import { SEED_SMS_TEMPLATES } from "@/lib/sms-templates";
 import { SEED_RCS_TEMPLATES } from "@/lib/rcs-templates";
-import { useWabaConnection } from "@/lib/waba-store";
+import {
+  useWabaConnection, useSelectedWaba, useSelectedPhone, useAllWabas,
+  useWorkspaceSession, useSelectedBm,
+} from "@/lib/waba-store";
 import { SEED_SMS_CONFIG, entityById } from "@/lib/sms-config";
 import { SEED_RCS_CONFIG, providerLabel } from "@/lib/rcs-config";
 import { SEED_BROADCASTS } from "@/lib/broadcasts-seed";
@@ -67,6 +70,23 @@ function BroadcastsPage() {
   const [fStatus, setFStatus] = useState<"all" | BroadcastStatus>("all");
   const [createOpen, setCreateOpen] = useState(false);
 
+  // WhatsApp broadcasts are stamped with their (WABA, phone) at creation. The
+  // list filters WhatsApp rows to the currently selected WABA so switching in
+  // Channels > WhatsApp re-scopes the history. SMS and RCS rows are
+  // unaffected by WABA selection — they have their own sender identity model.
+  const selectedWaba = useSelectedWaba();
+  const selectedPhone = useSelectedPhone();
+  const allWabas = useAllWabas();
+  // Resolve a WhatsApp row's sender pin to a "+91… · WABA Name" label so
+  // operators can see which sender a broadcast used, inline in the list.
+  const senderLabelFor = (r: BroadcastRow): string | null => {
+    if (r.channel !== "whatsapp" || !r.wabaId || !r.phoneNumberId) return null;
+    const w = allWabas.find((x) => x.id === r.wabaId);
+    const p = w?.phones.find((x) => x.id === r.phoneNumberId);
+    if (!w || !p) return null;
+    return `${p.display} · ${w.name}`;
+  };
+
   // Prefill state — the create-modal reads these on open. Populated from
   // ?channel + ?templateId (deep-link from a template row's "Send broadcast").
   const [prefill, setPrefill] = useState<{ channel?: Channel; templateId?: string }>({});
@@ -91,6 +111,11 @@ function BroadcastsPage() {
   const filtered = rows.filter((r) => {
     if (fChannel !== "all" && r.channel !== fChannel) return false;
     if (fStatus !== "all" && r.status !== fStatus) return false;
+    // WhatsApp rows: hide anything that belongs to another WABA. Legacy rows
+    // without a wabaId (backwards compat) fall through and stay visible.
+    if (r.channel === "whatsapp" && selectedWaba && r.wabaId && r.wabaId !== selectedWaba.id) {
+      return false;
+    }
     if (query) {
       const q = query.toLowerCase();
       // Search over name + template (no run id surfaced to the user).
@@ -138,6 +163,11 @@ function BroadcastsPage() {
       sent: 0,
       total: payload.audienceSize,
       ...(isScheduled ? { scheduledFor: payload.scheduledFor } : {}),
+      // Stamp WhatsApp broadcasts with the sender the merchant explicitly
+      // picked inside the create modal (BM > WABA > Phone dropdowns).
+      ...(payload.channel === "whatsapp" && payload.wabaId && payload.phoneNumberId
+        ? { wabaId: payload.wabaId, phoneNumberId: payload.phoneNumberId }
+        : {}),
     };
     setRows((prev) => [row, ...prev]);
     setCreateOpen(false);
@@ -221,6 +251,11 @@ function BroadcastsPage() {
                   <tr key={r.id} className="transition-colors hover:bg-accent/30">
                     <td className="px-4 py-3">
                       <div className="font-medium">{r.name}</div>
+                      {senderLabelFor(r) && (
+                        <div className="mt-0.5 truncate text-[10.5px] text-muted-foreground">
+                          via {senderLabelFor(r)}
+                        </div>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <span className="inline-flex items-center rounded-full border border-border bg-secondary px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
@@ -377,6 +412,9 @@ type CreateBroadcastPayload = {
   /** Populated only when the user picked the Schedule tab. Pre-formatted for
    *  display so the runs table can render it verbatim. */
   scheduledFor?: string;
+  /** WhatsApp only. The (WABA, phone) the modal pinned the broadcast to. */
+  wabaId?: string;
+  phoneNumberId?: string;
 };
 
 type SendMode = "now" | "schedule";
@@ -429,12 +467,19 @@ function defaultBroadcastName() {
 
 type AssetOption = { id: string; name: string; sub?: string };
 
-function assetsFor(channel: Channel): AssetOption[] {
+function assetsFor(channel: Channel, whatsappWabaId?: string): AssetOption[] {
   switch (channel) {
-    case "whatsapp":
-      return SEED_TEMPLATES
+    case "whatsapp": {
+      // WhatsApp templates are WABA-scoped in Meta's model. Filter to the
+      // currently selected WABA so the broadcast picker only offers templates
+      // that will actually resolve when the send fires.
+      const pool = whatsappWabaId
+        ? templatesForWaba(whatsappWabaId)
+        : SEED_TEMPLATES;
+      return pool
         .filter((t) => t.status === "Approved")
         .map((t) => ({ id: t.id, name: t.name, sub: `${t.category} · ${t.language}` }));
+    }
     case "sms":
       return SEED_SMS_TEMPLATES.map((t) => ({ id: t.id, name: t.name, sub: `${t.category} · ${t.senderId}` }));
     case "rcs":
@@ -463,6 +508,22 @@ function CreateBroadcastDialog({
   const [mode, setMode] = useState<SendMode>("now");
   const [scheduledAt, setScheduledAt] = useState<string>(defaultScheduledAt());
 
+  // Sender pin lives in the modal for WhatsApp only — merchant picks BM > WABA
+  // > Phone right in the create flow, and templates filter to the picked WABA.
+  // Defaults come from the workspace's currently selected sender (Channels >
+  // WhatsApp header) so merchants who don't switch mid-flow don't have to
+  // touch these dropdowns.
+  const session = useWorkspaceSession();
+  const defaultBm = useSelectedBm();
+  const defaultWaba = useSelectedWaba();
+  const defaultPhone = useSelectedPhone();
+  const [bmId, setBmId] = useState<string>(defaultBm?.id ?? "");
+  const [wabaId, setWabaId] = useState<string>(defaultWaba?.id ?? "");
+  const [phoneNumberId, setPhoneNumberId] = useState<string>(defaultPhone?.id ?? "");
+  const wabasForBm = session?.wabas.filter((w) => w.bmId === bmId) ?? [];
+  const currentWaba = session?.wabas.find((w) => w.id === wabaId);
+  const phonesForWaba = currentWaba?.phones ?? [];
+
   const reset = () => {
     setName(defaultBroadcastName());
     setChannel(prefillChannel ?? "");
@@ -471,6 +532,9 @@ function CreateBroadcastDialog({
     setLocalCsvs([]);
     setMode("now");
     setScheduledAt(defaultScheduledAt());
+    setBmId(defaultBm?.id ?? "");
+    setWabaId(defaultWaba?.id ?? "");
+    setPhoneNumberId(defaultPhone?.id ?? "");
   };
 
   useEffect(() => {
@@ -478,7 +542,10 @@ function CreateBroadcastDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, prefillChannel, prefillTemplateId]);
 
-  const assets = useMemo(() => (channel ? assetsFor(channel) : []), [channel]);
+  const assets = useMemo(
+    () => (channel ? assetsFor(channel, wabaId) : []),
+    [channel, wabaId],
+  );
   const asset = useMemo(() => assets.find((a) => a.id === assetId), [assets, assetId]);
 
   // Reset asset when channel switches to a set that no longer contains it.
@@ -514,7 +581,11 @@ function CreateBroadcastDialog({
     !Number.isNaN(new Date(scheduledAt).getTime()) &&
     new Date(scheduledAt).getTime() > Date.now()
   );
-  const canSend = !!channel && !!asset && !!csv && name.trim().length > 0 && scheduleValid;
+  // WhatsApp broadcasts require a full BM > WABA > Phone pin picked in the
+  // modal itself. Non-whatsapp broadcasts have their identity embedded in the
+  // template so those fields don't gate the button.
+  const senderValid = channel !== "whatsapp" || (!!bmId && !!wabaId && !!phoneNumberId);
+  const canSend = !!channel && !!asset && !!csv && name.trim().length > 0 && scheduleValid && senderValid;
 
   const submit = () => {
     if (!canSend || !channel || !asset || !csv) return;
@@ -526,6 +597,7 @@ function CreateBroadcastDialog({
       csvId: csv.id,
       csvName: csv.name,
       audienceSize: csv.rowCount > 0 ? csv.rowCount : 1000,
+      ...(channel === "whatsapp" ? { wabaId, phoneNumberId } : {}),
       ...(mode === "schedule" ? { scheduledFor: formatScheduledFor(scheduledAt) } : {}),
     });
     reset();
@@ -610,13 +682,83 @@ function CreateBroadcastDialog({
             </div>
           </Section>
 
+          {channel === "whatsapp" && (
+            <Section title="Sender">
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Business Manager <span className="text-destructive">*</span></Label>
+                  <Select
+                    value={bmId}
+                    onValueChange={(v) => {
+                      setBmId(v);
+                      const firstWaba = session?.wabas.find((w) => w.bmId === v);
+                      setWabaId(firstWaba?.id ?? "");
+                      setPhoneNumberId(firstWaba?.phones[0]?.id ?? "");
+                      setAssetId("");
+                    }}
+                  >
+                    <SelectTrigger className="h-9 text-sm">
+                      <SelectValue placeholder="Select BM" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(session?.businessManagers ?? []).map((b) => (
+                        <SelectItem key={b.id} value={b.id} className="text-xs">{b.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">WhatsApp Business Account <span className="text-destructive">*</span></Label>
+                  <Select
+                    value={wabaId}
+                    onValueChange={(v) => {
+                      setWabaId(v);
+                      const w = session?.wabas.find((x) => x.id === v);
+                      setPhoneNumberId(w?.phones[0]?.id ?? "");
+                      setAssetId("");
+                    }}
+                    disabled={!bmId}
+                  >
+                    <SelectTrigger className="h-9 text-sm">
+                      <SelectValue placeholder="Select WABA" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {wabasForBm.map((w) => (
+                        <SelectItem key={w.id} value={w.id} className="text-xs">{w.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Phone number <span className="text-destructive">*</span></Label>
+                  <Select
+                    value={phoneNumberId}
+                    onValueChange={setPhoneNumberId}
+                    disabled={!wabaId}
+                  >
+                    <SelectTrigger className="h-9 text-sm">
+                      <SelectValue placeholder="Select number" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {phonesForWaba.map((p) => (
+                        <SelectItem key={p.id} value={p.id} className="text-xs">
+                          {p.display} · {p.displayName}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </Section>
+          )}
+
           {channel && (
             <Section title="Template">
               <div className="space-y-1.5">
                 <Label className="text-xs">
                   Template <span className="text-destructive">*</span>
                 </Label>
-                <Select value={assetId} onValueChange={setAssetId}>
+                <Select value={assetId} onValueChange={setAssetId} disabled={channel === "whatsapp" && !wabaId}>
                   <SelectTrigger className="h-9 text-sm">
                     <SelectValue placeholder="Select a template" />
                   </SelectTrigger>
@@ -635,8 +777,9 @@ function CreateBroadcastDialog({
               </div>
 
               {/* Sender identity — derived from the channel + template.
-                  WA: current WABA's phone. SMS/RCS: baked into template's DLT/agent registration. */}
-              {assetId && <SenderIdentityCard channel={channel} assetId={assetId} />}
+                  WA now uses the explicit BM/WABA/Phone dropdowns above; SMS/RCS
+                  still show their embedded DLT/agent identity here. */}
+              {channel !== "whatsapp" && assetId && <SenderIdentityCard channel={channel} assetId={assetId} />}
             </Section>
           )}
 
@@ -759,7 +902,7 @@ function SenderIdentityCard({ channel, assetId }: { channel: Channel; assetId: s
           { icon: PhoneIcon, label: "Phone number", value: waba.phone.display, verified: waba.phone.verified },
           { icon: Building2, label: "WABA", value: waba.waba.displayName, sub: waba.waba.name },
         ]}
-        hint="Uses this WABA's phone as the sender. Add more numbers under this WABA to pick from."
+        hint="Change sender by switching WABA or number in the sidebar picker."
       />
     );
   }

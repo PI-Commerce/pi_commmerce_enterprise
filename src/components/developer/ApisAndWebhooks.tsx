@@ -45,7 +45,7 @@ import {
   type Webhook as WebhookRow, type WebhookChannel, type WebhookScope,
 } from "@/lib/webhooks-data";
 import { useWebhooks, upsertWebhook, removeWebhook, toggleWebhook } from "@/lib/webhooks-store";
-import { useWabaConnection } from "@/lib/waba-store";
+import { useAllWabas, useAllBms } from "@/lib/waba-store";
 import { SEED_SMS_CONFIG } from "@/lib/sms-config";
 import { SEED_RCS_CONFIG } from "@/lib/rcs-config";
 
@@ -62,19 +62,32 @@ export function ApisAndWebhooks() {
  *  Scope catalogs
  * -------------------------------------------------------------------------- */
 
-type WaOption = { wabaId: string; wabaName: string; phoneNumberId: string; phoneDisplay: string };
+type WaOption = { bmId: string; bmName: string; wabaId: string; wabaName: string; phoneNumberId: string; phoneDisplay: string };
 type SmsOption = { senderId: string; entityName: string };
 type RcsOption = { agentId: string; agentName: string; brandName: string };
 
 function useWaOptions(): WaOption[] {
-  const conn = useWabaConnection();
-  if (!conn) return [];
-  return [{
-    wabaId: conn.waba.id,
-    wabaName: conn.waba.name,
-    phoneNumberId: conn.phone.id,
-    phoneDisplay: conn.phone.display,
-  }];
+  // Every (BM × WABA × number) triple on the workspace. Webhook scope is
+  // pinned at creation time, so the picker offers the full tree, not just
+  // the sender the header is currently viewing.
+  const bms = useAllBms();
+  const wabas = useAllWabas();
+  const bmNameById = new Map(bms.map((b) => [b.id, b.name]));
+  const out: WaOption[] = [];
+  for (const w of wabas) {
+    const bmName = bmNameById.get(w.bmId) ?? "";
+    for (const p of w.phones) {
+      out.push({
+        bmId: w.bmId,
+        bmName,
+        wabaId: w.id,
+        wabaName: w.name,
+        phoneNumberId: p.id,
+        phoneDisplay: p.display,
+      });
+    }
+  }
+  return out;
 }
 function smsOptions(): SmsOption[] {
   const out: SmsOption[] = [];
@@ -520,10 +533,22 @@ function WebhookDialog({
   const [url, setUrl] = useState(initial?.endpointUrl ?? "");
 
   const initialScope: WebhookScope = initial?.scope ?? {};
+  const [bmId, setBmId] = useState<string>(initialScope.bmId ?? wa[0]?.bmId ?? "");
   const [wabaId, setWabaId] = useState<string>(initialScope.wabaId ?? wa[0]?.wabaId ?? "");
   const [phoneNumberId, setPhoneNumberId] = useState<string>(initialScope.phoneNumberId ?? wa[0]?.phoneNumberId ?? "");
   const [senderId, setSenderId] = useState<string>(initialScope.senderId ?? sms[0]?.senderId ?? "");
   const [agentId, setAgentId] = useState<string>(initialScope.agentId ?? rcs[0]?.agentId ?? "");
+
+  // BMs / WABAs visible in the pickers, computed off the WA option triples.
+  const bmOptions = Array.from(
+    new Map(wa.map((o) => [o.bmId, { id: o.bmId, name: o.bmName }])).values(),
+  );
+  const wabasForBm = Array.from(
+    new Map(
+      wa.filter((o) => o.bmId === bmId).map((o) => [o.wabaId, { id: o.wabaId, name: o.wabaName }]),
+    ).values(),
+  );
+  const phonesForWaba = wa.filter((o) => o.wabaId === wabaId);
 
   // Events default to *all buckets* for the selected channel unless the
   // caller (edit path) had a prior explicit subset.
@@ -554,7 +579,7 @@ function WebhookDialog({
   const submit = () => {
     if (!canSubmit) return;
     const scope: WebhookScope =
-      channel === "whatsapp" ? { wabaId, phoneNumberId } :
+      channel === "whatsapp" ? { bmId, wabaId, phoneNumberId } :
       channel === "sms"      ? { senderId } :
                                { agentId };
     const id = initial?.id ?? `wh_${Math.random().toString(36).slice(2, 8)}`;
@@ -630,7 +655,34 @@ function WebhookDialog({
           </div>
 
           {channel === "whatsapp" && (
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-3 gap-3">
+              <div className="space-y-1.5">
+                <Label className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Business Manager</Label>
+                <Select
+                  value={bmId}
+                  onValueChange={(v) => {
+                    setBmId(v);
+                    const firstWaba = wa.find((o) => o.bmId === v);
+                    if (firstWaba) {
+                      setWabaId(firstWaba.wabaId);
+                      setPhoneNumberId(firstWaba.phoneNumberId);
+                    } else {
+                      setWabaId("");
+                      setPhoneNumberId("");
+                    }
+                  }}
+                  disabled={bmOptions.length === 0}
+                >
+                  <SelectTrigger className="h-9 text-[13px]">
+                    <SelectValue placeholder={bmOptions.length === 0 ? "No BM connected" : "Select a BM"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {bmOptions.map((b) => (
+                      <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="space-y-1.5">
                 <Label className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">WABA</Label>
                 <Select
@@ -640,14 +692,14 @@ function WebhookDialog({
                     const hit = wa.find((o) => o.wabaId === v);
                     if (hit) setPhoneNumberId(hit.phoneNumberId);
                   }}
-                  disabled={wa.length === 0}
+                  disabled={!bmId || wabasForBm.length === 0}
                 >
                   <SelectTrigger className="h-9 text-[13px]">
-                    <SelectValue placeholder={wa.length === 0 ? "No WABA connected" : "Select a WABA"} />
+                    <SelectValue placeholder={wabasForBm.length === 0 ? "No WABA under this BM" : "Select a WABA"} />
                   </SelectTrigger>
                   <SelectContent>
-                    {wa.map((o) => (
-                      <SelectItem key={o.wabaId} value={o.wabaId}>{o.wabaName}</SelectItem>
+                    {wabasForBm.map((o) => (
+                      <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -659,7 +711,7 @@ function WebhookDialog({
                     <SelectValue placeholder="Select a phone number" />
                   </SelectTrigger>
                   <SelectContent>
-                    {wa.filter((o) => o.wabaId === wabaId).map((o) => (
+                    {phonesForWaba.map((o) => (
                       <SelectItem key={o.phoneNumberId} value={o.phoneNumberId}>{o.phoneDisplay}</SelectItem>
                     ))}
                   </SelectContent>

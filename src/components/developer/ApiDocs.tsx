@@ -32,6 +32,7 @@ import {
   type Endpoint,
   type Param,
 } from "@/lib/api-docs";
+import { useSelectedPhone } from "@/lib/waba-store";
 
 /* --------------------------- Root --------------------------- */
 
@@ -434,7 +435,7 @@ function WebhooksRegister() {
 
       <H2>Limits</H2>
       <ul className="mb-4 list-disc space-y-1 pl-5 text-[13.5px] leading-relaxed text-foreground/85">
-        <li>Maximum <strong>5 webhooks per (channel, scope, bucket)</strong>. Fan-out to more than 5 receivers on the same event set is not supported.</li>
+        <li>WhatsApp: up to <strong>5 webhooks per WABA</strong> (across any combination of numbers and event buckets). SMS and RCS: up to <strong>5 webhooks per (channel, scope, bucket)</strong>. Fan-out to more than 5 receivers on the same event set is not supported.</li>
         <li>Endpoint must be a public HTTPS URL. Loopback, RFC1918, link-local, <Kbd>.internal</Kbd> and <Kbd>.local</Kbd> are rejected.</li>
       </ul>
 
@@ -521,7 +522,7 @@ function WebhooksDelivery() {
 
       <H2>Fan-out and rate limits</H2>
       <ul className="mb-4 list-disc space-y-1 pl-5 text-[13.5px] leading-relaxed text-foreground/85">
-        <li>Up to <strong>5 webhooks</strong> per (channel, scope, bucket). All subscribed webhooks fire in parallel.</li>
+        <li>WhatsApp: up to <strong>5 webhooks per WABA</strong> (across any combination of numbers and event buckets). SMS and RCS: up to <strong>5 webhooks per (channel, scope, bucket)</strong>. All subscribed webhooks fire in parallel.</li>
         <li>Up to <strong>25 requests per second</strong> sustained per single webhook URL, with a burst of 50.</li>
       </ul>
     </div>
@@ -529,11 +530,19 @@ function WebhooksDelivery() {
 }
 
 function WebhooksWA() {
+  // Render the payload with the currently selected sender's ids so the sample
+  // matches what this merchant would actually receive. Falls back to a stable
+  // demo pair when no session is connected.
+  const selectedPhone = useSelectedPhone();
+  const phoneNumberId = selectedPhone?.id ?? "1247847365076264";
+  const displayPhoneNumber = selectedPhone
+    ? selectedPhone.display.replace(/[^0-9]/g, "")
+    : "918031149385";
   const dlrExample = `{
   "messaging_product": "whatsapp",
   "metadata": {
-    "display_phone_number": "918031149385",
-    "phone_number_id": "1247847365076264"
+    "display_phone_number": "${displayPhoneNumber}",
+    "phone_number_id": "${phoneNumberId}"
   },
   "contacts": [{
     "wa_id": "918802512442",
@@ -550,8 +559,8 @@ function WebhooksWA() {
   const inboundExample = `{
   "messaging_product": "whatsapp",
   "metadata": {
-    "display_phone_number": "918031149385",
-    "phone_number_id": "1247847365076264"
+    "display_phone_number": "${displayPhoneNumber}",
+    "phone_number_id": "${phoneNumberId}"
   },
   "contacts": [{
     "profile": { "name": "Rahul Mehta" },

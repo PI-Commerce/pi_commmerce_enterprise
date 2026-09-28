@@ -137,7 +137,7 @@ export const TOOLS: ToolDef[] = [
     createdAt: "08 Jan 2026",
     updatedAt: "02 Jun 2026",
     inputs: [
-      { key: "phone_number_id", dataType: "String", in: "path", source: "constant", value: "10925431", description: "WABA phone number id" },
+      { key: "phone_number_id", dataType: "String", in: "path", source: "constant", value: "10934471290017", description: "WABA phone number id (defaults to the currently selected sender in the sidebar picker)" },
       { key: "Content-Type", dataType: "String", in: "header", source: "constant", value: "application/json", description: "Payload content type" },
       { key: "to", dataType: "String", in: "body", source: "campaign", value: "phone", description: "Recipient phone (E.164)" },
       { key: "template_name", dataType: "String", in: "body", source: "agent", description: "Template the agent chose to send" },

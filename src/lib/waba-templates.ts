@@ -38,6 +38,13 @@ export type WaTemplate = {
   body: string;
   footer?: string;
   buttons?: TemplateButton[];
+  /**
+   * The WABA this template lives under. Meta approves templates per WABA per
+   * language, so the same template name can exist independently across WABAs.
+   * Optional in the type for historical seeds that predate multi-WABA; the
+   * exported {@link SEED_TEMPLATES} always has it populated.
+   */
+  wabaId?: string;
 };
 
 export const TEMPLATE_CATEGORIES: TemplateCategory[] = ["Marketing", "Utility", "Authentication"];
@@ -170,8 +177,53 @@ export function validateMediaUrl(
   return null;
 }
 
-/** Seed templates for the connected Paytm Commerce WABA. */
-export const SEED_TEMPLATES: WaTemplate[] = [
+/**
+ * The three WABAs the demo seed distributes templates across. Kept as string
+ * literals (not imports) so this file stays free of circular references with
+ * `waba-onboarding.ts` and can be read during module init.
+ */
+const WABA_RETAIL_ID = "104882190034771";
+const WABA_FINTECH_ID = "210094477120983";
+const WABA_LABS_ID = "315221009887744";
+
+/** Template names that live on the Fintech WABA. Bucket by product intent —
+ *  BFSI / OTP / statements / collections. */
+const FINTECH_TEMPLATE_NAMES = new Set<string>([
+  "payment_reminder", "login_otp", "monthly_statement",
+  // BFSI · Lead Qualification
+  "application_link_v1", "lead_urgency_v1", "lead_offer_v1", "lead_followup_v1", "awareness_v1",
+  // BFSI · Insurance Renewal
+  "renewal_link_v1", "renewal_benefits_v1", "renewal_savings_v1", "renewal_followup_v1",
+  // BFSI · Upsell / Cross-Sell
+  "offer_apply_v1", "upsell_offer_v1", "upsell_urgency_v1",
+  // BFSI · Collections
+  "collections_reminder_v1", "payment_link_v1",
+]);
+
+/** Template names that live on the Labs WABA — the mildly restricted /
+ *  in-review WABA. Kept small on purpose so switching to Labs visibly shows
+ *  a leaner catalog. Includes both approved and pending/rejected/draft rows
+ *  so the picker inside a WA node has something to actually pick when the
+ *  merchant is scoped to Labs. */
+const LABS_TEMPLATE_NAMES = new Set<string>([
+  "delivery_update_hi",
+  "winback_we_miss_you",
+  "welcome_series_1",
+  // Approved Labs-only templates so the picker isn't empty here.
+  "labs_pilot_intro",
+  "labs_feedback_v1",
+  "labs_beta_reminder",
+]);
+
+function bucketWabaId(name: string): string {
+  if (FINTECH_TEMPLATE_NAMES.has(name)) return WABA_FINTECH_ID;
+  if (LABS_TEMPLATE_NAMES.has(name)) return WABA_LABS_ID;
+  return WABA_RETAIL_ID;
+}
+
+/** Raw catalog — Paytm-flavored templates seeded before multi-WABA. Do not
+ *  export directly; consumers read the bucketed {@link SEED_TEMPLATES}. */
+const RAW_SEED_TEMPLATES: WaTemplate[] = [
   {
     id: "10248301552093",
     name: "order_confirmation",
@@ -450,7 +502,38 @@ export const SEED_TEMPLATES: WaTemplate[] = [
   { id: "10248298001402", name: "backinstock_popularity_v1", category: "Marketing", language: "en", format: "TEXT", status: "Approved", createdAt: "01 Jun 2026",
     body: "Great news {{1}}! The popular {{2}} is back in stock. Thousands grabbed it last time — get yours now.", footer: "Reply STOP to opt out",
     buttons: [{ type: "URL", text: "Buy now" }] },
+
+  // Labs · Approved templates (so a merchant scoped to the Labs WABA still
+  // has something to pick from — Labs otherwise ships only draft/pending
+  // seeds which the picker filters out).
+  { id: "10248299700101", name: "labs_pilot_intro", category: "Utility", language: "en", format: "TEXT", status: "Approved", createdAt: "18 Jun 2026",
+    body: "Hi {{1}}, welcome to the {{2}} pilot. We'll send updates from this number as your test moves forward.", footer: "ACME Labs",
+    buttons: [{ type: "URL", text: "See what's next" }] },
+  { id: "10248299700102", name: "labs_feedback_v1", category: "Utility", language: "en", format: "TEXT", status: "Approved", createdAt: "17 Jun 2026",
+    body: "Hi {{1}}, quick 30-second question — how has {{2}} worked for you so far? Tap below to answer.", footer: "ACME Labs",
+    buttons: [{ type: "Quick Reply", text: "Share feedback" }] },
+  { id: "10248299700103", name: "labs_beta_reminder", category: "Marketing", language: "en", format: "TEXT", status: "Approved", createdAt: "16 Jun 2026",
+    body: "{{1}}, your {{2}} beta window closes {{3}}. Any last thing you want us to fix before general availability?", footer: "ACME Labs" },
 ];
+
+/**
+ * Seed templates with `wabaId` populated from {@link bucketWabaId}. This is the
+ * export every consumer reads. Callers scoping to the selected WABA should use
+ * {@link templatesForWaba}; the global-by-id lookup path in
+ * {@link file://./wa-outputs.ts} still walks the whole list because a run
+ * knows its template by id regardless of which WABA the operator is currently
+ * viewing.
+ */
+export const SEED_TEMPLATES: WaTemplate[] = RAW_SEED_TEMPLATES.map((t) => ({
+  ...t,
+  wabaId: bucketWabaId(t.name),
+}));
+
+/** Templates that live under a specific WABA. Cheap linear filter — the seed
+ *  is small enough that memoization would be overkill. */
+export function templatesForWaba(wabaId: string): WaTemplate[] {
+  return SEED_TEMPLATES.filter((t) => t.wabaId === wabaId);
+}
 
 /** Replace {{1}}, {{2}}… with sample params (for the live preview). */
 export function fillVariables(text: string, params: string[]): string {

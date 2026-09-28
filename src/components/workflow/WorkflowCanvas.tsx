@@ -511,6 +511,7 @@ export function WorkflowCanvas({
           const ns = selected?.data?.serial ?? selected?.id;
           return !selected || !v.key.startsWith(`${ns}.`);
         })}
+        allNodes={nodes.map((n) => ({ id: n.id, data: n.data }))}
       />
 
       <Dialog
