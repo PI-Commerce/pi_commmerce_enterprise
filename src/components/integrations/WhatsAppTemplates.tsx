@@ -1264,8 +1264,9 @@ function ButtonEditor({ index, scope, canUp, canDown, button, capped, dialCode, 
         </button>
       </div>
 
-      {/* Click tracking — URL buttons redirect through Pi Commerce's tracking domain
-         so taps can be logged and used as branch signals in workflows. Default-on. */}
+      {/* Click tracking on URL buttons. Default-on. Merchant-facing copy avoids
+         exposing the underlying mechanics — the toggle is presented purely in
+         terms of what the merchant gets (engagement counts + workflow branching). */}
       {button.type === "URL" && (
         <div className="mt-2.5 rounded-md border border-dashed border-border bg-muted/40 p-2.5">
           <label className="flex items-start gap-2 text-[12px] text-foreground">
@@ -1278,10 +1279,10 @@ function ButtonEditor({ index, scope, canUp, canDown, button, capped, dialCode, 
                 ) : (
                   <span className="rounded-sm bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">Not tracked</span>
                 )}
-                <InfoTip text="On by default. When on, Pi Commerce serves this link through its tracking domain (track.picomm.in) and logs every tap. Clicks become a branch signal you can wire in the campaign canvas and freeform workflows. Turn off if you need your raw URL to land in the Meta-approved template." />
+                <InfoTip text="On by default. Enable this to count taps on this button and to branch your campaign or freeform workflow based on whether the recipient tapped. Turn off if you don't want tracking on this button." />
               </div>
               <div className="mt-0.5 text-[11px] text-muted-foreground">
-                Clicks are logged and redirected through Pi Commerce. Turn off to keep your raw URL on the approved template.
+                See how many recipients tap this button, and use taps as a branch trigger in campaigns and workflows.
               </div>
             </div>
           </label>

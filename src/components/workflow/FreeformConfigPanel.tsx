@@ -565,11 +565,11 @@ function ButtonsBlockEditor({
   };
 
   const progression = (() => {
-    if (!block) return { label: "Advances on delivered", tone: "muted" as const, help: "This step advances when WhatsApp confirms delivery. Add a quick reply or a tracked CTA URL to advance on click instead." };
-    if (block.mode === "quick_reply") return { label: "Advances on click", tone: "on" as const, help: "This step advances when the lead taps any quick reply." };
+    if (!block) return { label: "Advances on delivered", tone: "muted" as const, help: "This step advances when WhatsApp confirms delivery. Add a quick reply or a tracked CTA URL to advance on tap instead." };
+    if (block.mode === "quick_reply") return { label: "Advances on tap", tone: "on" as const, help: "This step advances when the recipient taps any quick reply." };
     const tracked = block.button.clickTracking !== false;
-    if (tracked) return { label: "Advances on click", tone: "on" as const, help: "This step advances when the lead taps the tracked CTA URL. Pi Commerce logs every tap through its tracking domain." };
-    return { label: "Advances on delivered", tone: "muted" as const, help: "Click tracking is off on this URL, so the step advances when WhatsApp confirms delivery instead. Turn tracking on to advance on click." };
+    if (tracked) return { label: "Advances on tap", tone: "on" as const, help: "This step advances when the recipient taps the CTA URL." };
+    return { label: "Advances on delivered", tone: "muted" as const, help: "Click tracking is off on this URL, so the step advances when WhatsApp confirms delivery instead. Turn tracking on to advance on tap." };
   })();
 
   return (
@@ -781,7 +781,7 @@ function CtaUrlEditor({
             )}
           </div>
           <p className="mt-0.5 text-[10.5px] leading-snug text-muted-foreground">
-            On by default. When on, Pi Commerce serves the link through track.picomm.in and this step advances on click. Turn off to advance on delivered instead.
+            On by default. When on, taps are counted and this step advances when the recipient taps the button. Turn off to advance when the message is delivered instead.
           </p>
         </div>
       </label>
