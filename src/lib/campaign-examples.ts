@@ -439,6 +439,12 @@ const sAud = (subtitle: string, keys: string[]): Spec => ({
   config: {
     audienceMode: "csv", fileName: "audience.csv", primaryKey: "customer_id", phoneCol: "phone",
     csvKeys: ["customer_id", "phone", "first_name", ...keys], rowCount: "—",
+    // Every preset ships with the workflow sender pinned to the ACME Retail
+    // WABA on Paytm Commerce. This makes example campaigns self-configured:
+    // the WhatsApp Template nodes' phone lists + template pickers scope to
+    // this WABA out of the box.
+    audienceBmId: "1789442100981",
+    audienceWabaId: "104882190034771",
   },
 });
 

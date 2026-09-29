@@ -28,6 +28,7 @@ import type { WorkflowNodeData, NodeKind, PresetConfig, PresetBranch, PresetCond
 import { NODE_LABELS, SAMPLE_WORKFLOW_VARIABLES, branchConditions } from "@/lib/campaign-types";
 import { SEED_TEMPLATES, templatesForWaba, MEDIA_HINTS, validateMediaUrl, type TemplateFormat } from "@/lib/waba-templates";
 import { useSelectedWaba, useWorkspaceSession } from "@/lib/waba-store";
+import type { Waba, WorkspaceSession } from "@/lib/waba-onboarding";
 import {
   whatsappOutputs, resolveWaTemplate, completedOutput, isBranchableButton,
   WA_TIMEOUT_HOURS, DEFAULT_WA_TIMEOUT_HOURS, waTimeoutLabel,
@@ -436,7 +437,7 @@ function KindFields({
       return null;
 
     case "audience":
-      return <AudienceFields config={config} readOnly={readOnly} mark={mark} />;
+      return <AudienceFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} allNodes={allNodes} />;
 
     case "apiToolCall":
       return <ApiToolCallFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
@@ -493,7 +494,15 @@ function KindFields({
 // or stored) OR defined manually as typed fields. No source-type modes, primary key,
 // duplicate validation, row-level phone validation, filtering, or runtime endpoint —
 // runtime data delivery now lives in the Run modal + Data tab.
-function AudienceFields({ config, readOnly, mark }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void }) {
+function AudienceFields({
+  config, readOnly, mark, onChange, allNodes,
+}: {
+  config?: PresetConfig;
+  readOnly?: boolean;
+  mark: (v: boolean, e?: string) => void;
+  onChange?: (patch: Partial<WorkflowNodeData>) => void;
+  allNodes?: { id: string; data: WorkflowNodeData }[];
+}) {
   // Schema is *always* hand-editable as key → data-type rows. A CSV drop is purely a
   // convenience: it merges its column headers into those same rows (new names appended,
   // existing names left untouched), and the user can keep editing afterward.
@@ -513,16 +522,27 @@ function AudienceFields({ config, readOnly, mark }: { config?: PresetConfig; rea
   const phoneTypeOk = namedFields.some((f) => f.name === phoneField && f.type === "String");
   const phoneOk = !!phoneField && keys.includes(phoneField) && phoneTypeOk;
 
+  // ---- Sender pin (BM + WABA) — optional by default, required as soon as
+  // any WhatsApp Template node is added to the workflow. The workflow's whole
+  // send identity lives here so downstream WA nodes only pick a phone.
+  const session = useWorkspaceSession();
+  const [audienceBmId, setAudienceBmId] = useState<string>(config?.audienceBmId ?? "");
+  const [audienceWabaId, setAudienceWabaId] = useState<string>(config?.audienceWabaId ?? "");
+  const wabasForBm = session?.wabas.filter((w) => w.bmId === audienceBmId) ?? [];
+  const hasWhatsAppNode = (allNodes ?? []).some((n) => n.data.kind === "whatsapp");
+  const senderOk = !hasWhatsAppNode || (!!audienceBmId && !!audienceWabaId);
+
   useEffect(() => {
-    const ok = schemaOk && phoneOk;
+    const ok = schemaOk && phoneOk && senderOk;
     const err = !schemaOk
       ? "Add at least one schema field"
       : !phoneField ? "Select the phone number field"
       : !keys.includes(phoneField) ? "Phone field is not in the current schema"
       : !phoneTypeOk ? "Phone field must be a String type"
+      : !senderOk ? "Add BM and WABA in Sender: this workflow has a WhatsApp node"
       : undefined;
     mark(ok, err);
-  }, [schemaOk, phoneOk, phoneField]);
+  }, [schemaOk, phoneOk, phoneField, senderOk]);
 
   // CSV drop — simulates reading the header row only, then *merges* any new columns into
   // the existing editable rows (never clobbers what's already there).
@@ -596,7 +616,121 @@ function AudienceFields({ config, readOnly, mark }: { config?: PresetConfig; rea
         )}
         <p className="text-[11px] text-muted-foreground">Required when the workflow contains Voice or WhatsApp nodes. Must be a String field.</p>
       </Section>
+
+      {/* Section: Sender (collapsible, optional by default; mandatory as soon
+          as any WhatsApp node is on the canvas). BM and WABA on the Audience
+          node give the whole workflow one sender identity. WhatsApp Template
+          nodes then only pick a phone. */}
+      <AudienceSenderSection
+        session={session}
+        audienceBmId={audienceBmId}
+        audienceWabaId={audienceWabaId}
+        wabasForBm={wabasForBm}
+        hasWhatsAppNode={hasWhatsAppNode}
+        senderOk={senderOk}
+        readOnly={readOnly}
+        onBmChange={(v) => {
+          setAudienceBmId(v);
+          const firstWaba = session?.wabas.find((w) => w.bmId === v);
+          const nextWabaId = firstWaba?.id ?? "";
+          setAudienceWabaId(nextWabaId);
+          onChange?.({ config: { ...config, audienceBmId: v, audienceWabaId: nextWabaId } });
+        }}
+        onWabaChange={(v) => {
+          setAudienceWabaId(v);
+          onChange?.({ config: { ...config, audienceBmId, audienceWabaId: v } });
+        }}
+      />
     </>
+  );
+}
+
+/**
+ * Collapsible Sender block on the Audience node's config panel. Optional
+ * until any WhatsApp Template node is added to the workflow, then required.
+ * Auto-expands when required-and-unset so the merchant sees the fields
+ * without clicking. Otherwise defaults to closed to keep the config panel
+ * short for voice-only or SMS-only workflows.
+ */
+function AudienceSenderSection({
+  session, audienceBmId, audienceWabaId, wabasForBm,
+  hasWhatsAppNode, senderOk, readOnly,
+  onBmChange, onWabaChange,
+}: {
+  session: WorkspaceSession | null;
+  audienceBmId: string;
+  audienceWabaId: string;
+  wabasForBm: Waba[];
+  hasWhatsAppNode: boolean;
+  senderOk: boolean;
+  readOnly?: boolean;
+  onBmChange: (id: string) => void;
+  onWabaChange: (id: string) => void;
+}) {
+  // Open by default when: sender is required and not set, OR any value is
+  // already picked (so returning to the node keeps the selection visible).
+  const shouldStartOpen = (hasWhatsAppNode && !senderOk) || !!audienceBmId || !!audienceWabaId;
+  const [open, setOpen] = useState(shouldStartOpen);
+  useEffect(() => {
+    if (hasWhatsAppNode && !senderOk) setOpen(true);
+  }, [hasWhatsAppNode, senderOk]);
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger asChild>
+        <button
+          type="button"
+          className="flex w-full items-center justify-between rounded-md px-1 py-1 text-left hover:bg-accent/40"
+        >
+          <span className="flex items-center gap-2">
+            <span className="text-[13px] font-medium">Sender</span>
+            {hasWhatsAppNode ? (
+              <span className="inline-flex items-center rounded-full border border-warning/30 bg-warning/10 px-1.5 py-0.5 text-[10px] font-medium text-warning">
+                Required
+              </span>
+            ) : (
+              <span className="inline-flex items-center rounded-full border border-border bg-secondary px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                Optional
+              </span>
+            )}
+          </span>
+          <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", open && "rotate-180")} />
+        </button>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="mt-2 space-y-3">
+        <p className="text-[11px] leading-relaxed text-muted-foreground">
+          Pick the BM and WABA the whole workflow sends from. Required as soon as a WhatsApp node is added. Every WhatsApp Template node in this workflow uses the same BM and WABA; individual nodes only pick a phone number.
+        </p>
+        <Field label="Business Manager" required={hasWhatsAppNode}>
+          <Select value={audienceBmId || undefined} disabled={readOnly} onValueChange={onBmChange}>
+            <SelectTrigger className="h-9 text-sm">
+              <SelectValue placeholder="Select Business Manager…" />
+            </SelectTrigger>
+            <SelectContent>
+              {(session?.businessManagers ?? []).map((b) => (
+                <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+        <Field label="WhatsApp Business Account" required={hasWhatsAppNode}>
+          <Select
+            value={audienceWabaId || undefined}
+            disabled={readOnly || !audienceBmId}
+            onValueChange={onWabaChange}
+          >
+            <SelectTrigger className="h-9 text-sm">
+              <SelectValue placeholder="Select WABA…" />
+            </SelectTrigger>
+            <SelectContent>
+              {wabasForBm.map((w) => (
+                <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
 
@@ -1377,84 +1511,36 @@ function WhatsAppCore({
   currentNodeId?: string;
   allNodes?: { id: string; data: WorkflowNodeData }[];
 }) {
-  // The WhatsApp node is pinned to a specific sender: Business Manager, WABA,
-  // and a phone number under that WABA. Templates are then scoped to the
-  // picked WABA. If the node's saved config predates multi-WABA (or is a
-  // preset), fall back to the workspace's currently-selected sender so
-  // nothing renders empty.
+  // WhatsApp Template node is scoped by the workflow's Audience node. BM and
+  // WABA live on the Audience node's Sender section (one pick per workflow);
+  // this node only picks a phone. Templates and the phone list filter to the
+  // Audience node's WABA. If no Audience node exists (or it hasn't been
+  // configured yet), fall back to the workspace's currently-selected sender
+  // so the picker isn't empty in preview / disconnected states.
   const session = useWorkspaceSession();
   const selectedWaba = useSelectedWaba();
+  const audienceNode = (allNodes ?? []).find((n) => n.data.kind === "audience");
+  const audienceBmId = audienceNode?.data.config?.audienceBmId ?? "";
+  const audienceWabaId = audienceNode?.data.config?.audienceWabaId ?? "";
+  const workflowHasSenderPin = !!audienceBmId && !!audienceWabaId;
 
-  // Cross-node WABA lock: exactly one BM + WABA per workflow. The FIRST
-  // WhatsApp node in canvas order owns the pin; every other WhatsApp node
-  // inherits and shows BM + WABA readonly. This holds even for preset
-  // campaigns whose nodes haven't been explicitly stamped yet — the "first
-  // node's effective WABA" (its saved config or the workspace's currently
-  // selected WABA fallback) is what siblings inherit. Phone selection stays
-  // free per node.
-  const waNodes = (allNodes ?? []).filter((n) => n.data.kind === "whatsapp");
-  const firstWaNode = waNodes[0];
-  const isFirstNode = !firstWaNode || firstWaNode.id === currentNodeId;
-  const isLocked = !!firstWaNode && !isFirstNode;
-  // The first node's effective WABA / BM — either what it saved, or the
-  // workspace's currently selected sender as a fallback for unstamped presets.
-  const firstNodeWabaId =
-    firstWaNode?.data.config?.waWabaId ?? selectedWaba?.id ?? "";
-  const firstNodeBmId =
-    firstWaNode?.data.config?.waBmId ??
-    selectedWaba?.bmId ??
-    session?.businessManagers[0]?.id ??
-    "";
-  const pinnedFromLabel = firstWaNode?.data.serial ?? firstWaNode?.id;
-
-  const nodeBmId = isLocked
-    ? firstNodeBmId
-    : (config?.waBmId ?? selectedWaba?.bmId ?? session?.businessManagers[0]?.id ?? "");
-  const nodeWabaId = isLocked
-    ? firstNodeWabaId
-    : (config?.waWabaId ?? selectedWaba?.id ?? "");
-  const pinnedWabaId = isLocked ? firstNodeWabaId : undefined;
-  const pinnedBmId = isLocked ? firstNodeBmId : undefined;
-  const nodeWaba = session?.wabas.find((w) => w.id === nodeWabaId) ?? selectedWaba ?? null;
+  const effectiveWabaId = audienceWabaId || selectedWaba?.id || "";
+  const nodeWaba = session?.wabas.find((w) => w.id === effectiveWabaId) ?? selectedWaba ?? null;
   const nodePhoneId = config?.waPhoneNumberId ?? nodeWaba?.phones[0]?.id ?? "";
   const nodePhone = nodeWaba?.phones.find((p) => p.id === nodePhoneId) ?? nodeWaba?.phones[0] ?? null;
-  // WABAs the merchant can pick from — always scoped to the picked BM so the
-  // "one BM per workflow" rule is enforced at the picker level too.
-  const bmWabas = session?.wabas.filter((w) => w.bmId === nodeBmId) ?? [];
 
-  const approvedTemplates = nodeWabaId
-    ? templatesForWaba(nodeWabaId).filter((t) => t.status === "Approved")
+  const approvedTemplates = effectiveWabaId
+    ? templatesForWaba(effectiveWabaId).filter((t) => t.status === "Approved")
     : APPROVED_TEMPLATES_FALLBACK;
 
   const setSender = (patch: {
-    waBmId?: string; waWabaId?: string; waPhoneNumberId?: string;
-    // When WABA changes we also stamp the human-readable "waNumber" (used by
-    // downstream summaries + validation) and reset the template pick to avoid
-    // showing a template from the old WABA.
-    waNumber?: string; waTemplate?: string;
+    waPhoneNumberId?: string;
+    /** Human-readable "display · display name" for the picked number. */
+    waNumber?: string;
+    waTemplate?: string;
   }) => {
     onChange({ config: { ...config, ...patch } });
   };
-
-  // When the workflow WABA is pinned by a sibling and this node's saved config
-  // hasn't caught up yet, persist the pin into this node's config so the lock
-  // survives save/reload and analytics/attribution reflect the right WABA.
-  useEffect(() => {
-    if (!isLocked) return;
-    if (config?.waWabaId === pinnedWabaId && config?.waBmId === pinnedBmId) return;
-    const p = nodeWaba?.phones[0];
-    setSender({
-      waBmId: pinnedBmId,
-      waWabaId: pinnedWabaId,
-      waPhoneNumberId: config?.waPhoneNumberId ?? p?.id,
-      waNumber: p ? `${p.display} · ${p.displayName}` : undefined,
-      // Clear template only if the saved one belonged to another WABA.
-      ...(config?.waTemplate && !templatesForWaba(pinnedWabaId!).some((t) => t.id === config.waTemplate)
-        ? { waTemplate: "" }
-        : {}),
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLocked, pinnedWabaId, pinnedBmId]);
 
   // WA template node is template-only — freeform now lives on the standalone
   // WhatsApp Freeform Workflow node kind. Kept as a constant to leave the rest
@@ -1532,70 +1618,10 @@ function WhatsAppCore({
   return (
     <>
       <Section title="Sender">
-        {/* BM → WABA → Phone. Cross-node lock: once any WhatsApp node in this
-            workflow has a WABA set, sibling WA nodes inherit BM + WABA. Phone
-            selection stays free (same WABA, different phone numbers is
-            allowed and encouraged for role separation). */}
-        <Field label="Business Manager" required>
-          <Select
-            value={nodeBmId || undefined}
-            disabled={readOnly || isLocked}
-            onValueChange={(v) => {
-              // Switching BM cascades: pick this BM's first WABA and that
-              // WABA's first phone. Templates reset since they were WABA-scoped.
-              const nextWaba = session?.wabas.find((w) => w.bmId === v);
-              const nextPhone = nextWaba?.phones[0];
-              setTemplateId("");
-              setContentReady(false);
-              setSender({
-                waBmId: v,
-                waWabaId: nextWaba?.id ?? "",
-                waPhoneNumberId: nextPhone?.id,
-                waNumber: nextPhone ? `${nextPhone.display} · ${nextPhone.displayName}` : undefined,
-                waTemplate: "",
-              });
-            }}
-          >
-            <SelectTrigger className="h-9 text-sm">
-              <SelectValue placeholder="Select Business Manager…" />
-            </SelectTrigger>
-            <SelectContent>
-              {(session?.businessManagers ?? []).map((b) => (
-                <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </Field>
-        <Field label="WhatsApp Business Account" required>
-          <Select
-            value={nodeWabaId || undefined}
-            disabled={readOnly || isLocked}
-            onValueChange={(v) => {
-              const nextWaba = session?.wabas.find((w) => w.id === v);
-              const nextPhone = nextWaba?.phones[0];
-              // Reset the template pick — the old template belonged to another
-              // WABA and won't resolve on send. Merchant must re-pick.
-              setTemplateId("");
-              setContentReady(false);
-              setSender({
-                waBmId: nextWaba?.bmId ?? nodeBmId,
-                waWabaId: v,
-                waPhoneNumberId: nextPhone?.id,
-                waNumber: nextPhone ? `${nextPhone.display} · ${nextPhone.displayName}` : undefined,
-                waTemplate: "",
-              });
-            }}
-          >
-            <SelectTrigger className="h-9 text-sm">
-              <SelectValue placeholder="Select WABA…" />
-            </SelectTrigger>
-            <SelectContent>
-              {bmWabas.map((w) => (
-                <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </Field>
+        {/* BM and WABA live on the Audience node (workflow-level Sender
+            section). This node only picks a phone. The phone list filters to
+            phones under the Audience node's WABA; template list further
+            below filters to templates on the same WABA. */}
         <Field label="Phone number" required>
           <Select
             value={nodePhoneId || undefined}
@@ -1619,13 +1645,13 @@ function WhatsAppCore({
             </SelectContent>
           </Select>
         </Field>
-        {isLocked ? (
+        {workflowHasSenderPin && nodeWaba ? (
           <p className="text-[11px] leading-relaxed text-muted-foreground">
-            Locked to {nodeWaba?.name ?? "the workflow's WABA"} by {pinnedFromLabel}. Every WhatsApp node in this workflow uses the same BM and WABA. Only the phone number can change.
+            Sending from {nodeWaba.name}. BM and WABA are set on the Audience node and apply to every WhatsApp node in this workflow. Only the phone number can change per node.
           </p>
         ) : (
-          <p className="text-[11px] leading-relaxed text-muted-foreground">
-            The first WhatsApp node's BM and WABA set the whole workflow. Other WhatsApp nodes will follow the same BM and WABA. Phone number can still change per node.
+          <p className="text-[11px] leading-relaxed text-warning">
+            BM and WABA are not set yet on the Audience node. Open the Audience node's Sender section to pick them; templates and phones on this node will scope to that WABA.
           </p>
         )}
       </Section>

@@ -171,15 +171,26 @@ export type PresetConfig = {
   timezone?: string;
   maxAttempts?: number;
   retryInterval?: string;
+  // ---- Audience sender pin (workflow-scoped) ----
+  /**
+   * BM the whole workflow sends from. Picked once on the Audience node's
+   * optional Sender section. Required as soon as any WhatsApp Template node
+   * is added to the workflow. Every WhatsApp Template node then reads this
+   * value and only picks a phone.
+   */
+  audienceBmId?: string;
+  /**
+   * WABA the whole workflow sends from. Picked on the Audience node next to
+   * {@link audienceBmId}. Templates and phone lists on every WhatsApp
+   * Template node filter to this WABA.
+   */
+  audienceWabaId?: string;
+
   // ---- WhatsApp core ----
-  /** BM the sender belongs to. Fixed to the workspace's single BM today;
-   *  captured on the node so the workflow is self-describing. */
-  waBmId?: string;
-  /** WABA the sender belongs to. Governs which templates the picker will show
-   *  — Meta approves templates per WABA. Recommended: keep every WA node in a
-   *  workflow on the same WABA. */
-  waWabaId?: string;
-  /** Phone number under {@link waWabaId} the send is pinned to. */
+  /**
+   * Phone number under the Audience node's WABA the send is pinned to. WhatsApp
+   * Template nodes only pick a phone; BM + WABA live on the Audience node.
+   */
   waPhoneNumberId?: string;
   /** Human-readable "display · display name" for the picked number. Kept for
    *  legacy summaries and validation code paths. */
