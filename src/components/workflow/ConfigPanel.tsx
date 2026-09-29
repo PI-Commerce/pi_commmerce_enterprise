@@ -683,7 +683,7 @@ function AudienceSenderSection({
           className="flex w-full items-center justify-between rounded-md px-1 py-1 text-left hover:bg-accent/40"
         >
           <span className="flex items-center gap-2">
-            <span className="text-[13px] font-medium">Sender</span>
+            <span className="text-[13px] font-medium">WhatsApp Sender</span>
             {hasWhatsAppNode ? (
               <span className="inline-flex items-center rounded-full border border-warning/30 bg-warning/10 px-1.5 py-0.5 text-[10px] font-medium text-warning">
                 Required
@@ -699,7 +699,7 @@ function AudienceSenderSection({
       </CollapsibleTrigger>
       <CollapsibleContent className="mt-2 space-y-3">
         <p className="text-[11px] leading-relaxed text-muted-foreground">
-          Pick the BM and WABA the whole workflow sends from. Required as soon as a WhatsApp node is added. Every WhatsApp Template node in this workflow uses the same BM and WABA; individual nodes only pick a phone number.
+          Pick the Business Manager (BM) and a WhatsApp Business Account (WABA) under it that this workflow will use to send WhatsApp messages from. Mandatory as soon as you add a WhatsApp Template node. Each WhatsApp node in the workflow then lets you pick which phone number under this WABA to send from.
         </p>
         <Field label="Business Manager" required={hasWhatsAppNode}>
           <Select value={audienceBmId || undefined} disabled={readOnly} onValueChange={onBmChange}>
@@ -1647,11 +1647,11 @@ function WhatsAppCore({
         </Field>
         {workflowHasSenderPin && nodeWaba ? (
           <p className="text-[11px] leading-relaxed text-muted-foreground">
-            Sending from {nodeWaba.name}. BM and WABA are set on the Audience node and apply to every WhatsApp node in this workflow. Only the phone number can change per node.
+            Sending from {nodeWaba.name}. The workflow's BM and WABA are set on the Audience node (WhatsApp Sender section) and apply to every WhatsApp node here. Pick a phone number under this WABA above.
           </p>
         ) : (
           <p className="text-[11px] leading-relaxed text-warning">
-            BM and WABA are not set yet on the Audience node. Open the Audience node's Sender section to pick them; templates and phones on this node will scope to that WABA.
+            This workflow has no WhatsApp sender yet. Open the Audience node's WhatsApp Sender section to pick a BM and WABA. Phones and templates on this node will scope to that WABA.
           </p>
         )}
       </Section>
