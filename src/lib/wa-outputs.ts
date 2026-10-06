@@ -123,6 +123,29 @@ export function completedOutput(): NodeOutput[] {
 }
 
 /**
+ * Outputs for the WhatsApp AI Chat Agent node — two fixed branches:
+ *   - `success` — the session closed cleanly: the agent captured a disposition
+ *                 OR the Agentic platform force-closed on idle. Branch on the
+ *                 semantic outcome downstream via a Conditional on
+ *                 `wa_ai_chat_N.disposition`.
+ *   - `failure` — handover or relay error, or the agent could not start the
+ *                 session.
+ *
+ * Idle timeout is intentionally NOT a separate branch at the campaign level:
+ * the inactivity window is owned by the Agentic platform's chat runtime (we
+ * only hit its session APIs). An idle-closed session is still a clean close
+ * from the campaign's point of view and routes through `success`;
+ * `wa_ai_chat_N.closure_reason` carries the distinction (`agent_closed` vs
+ * `idle_timeout`) for authors who want to branch on it.
+ */
+export function chatOutputs(): NodeOutput[] {
+  return [
+    { id: "success", label: "Success", kind: "outcome" },
+    { id: "failure", label: "Failure", kind: "outcome" },
+  ];
+}
+
+/**
  * Outputs for an SMS node — the one action node that branches on *delivery*
  * rather than advancing on send (PICOM-4726 §4).
  *
@@ -210,6 +233,7 @@ export function actionNodeOutputs(kind: NodeKind, config?: WorkflowNodeData["con
   if (kind === "sms") return smsOutputs();
   if (kind === "rcs") return rcsOutputs(resolveRcsTemplate(config?.rcsTemplateId));
   if (kind === "voiceCall") return completedOutput();
+  if (kind === "aiChat") return chatOutputs();
   return undefined;
 }
 
@@ -249,6 +273,20 @@ export function deriveNodeOutcomeVariables(
       // …plus the configured agent's post-call analysis eval variables. (Tool
       // outputs are in-call only and are deliberately NOT exposed downstream.)
       const agent = resolveAgent(config?.agent);
+      if (agent) for (const pc of agent.postCall) vars.push({ key: `${ns}.${pc.name}`, source });
+    } else if (kind === "aiChat") {
+      // Conversation facts every chat node produces:
+      // `disposition` (the closing outcome = one of the agent's dispositions,
+      // populated on `success` exits only),
+      // `closure_reason` (why it ended — `agent_closed` | `idle_timeout` |
+      // `relay_error`; the first two map to the Success handle, the third to
+      // Failure),
+      // and `conversation_length` (message count).
+      vars.push({ key: `${ns}.disposition`, source });
+      vars.push({ key: `${ns}.closure_reason`, source });
+      vars.push({ key: `${ns}.conversation_length`, source });
+      // …plus the configured chat agent's post-conversation analysis eval variables.
+      const agent = resolveAgent(config?.chatAgent);
       if (agent) for (const pc of agent.postCall) vars.push({ key: `${ns}.${pc.name}`, source });
     } else if (kind === "sms") {
       // Delivery facts this message produced. `delivery_state` mirrors the three

@@ -18,6 +18,8 @@ export type AgentRecord = {
   postCall: PostCallVar[];
   /** Optional eval instruction; when omitted the builder shows a boilerplate default. */
   evalPrompt?: string;
+  /** Chat-agent outcome labels. Each becomes a disposition output/edge on the AI Chat node. */
+  dispositions?: string[];
 };
 
 export const AGENT_RECORDS: Record<string, AgentRecord> = {
@@ -27,6 +29,7 @@ export const AGENT_RECORDS: Record<string, AgentRecord> = {
     type: "chat",
     status: "live",
     tools: ["send_whatsapp", "order_lookup", "knowledge_lookup"],
+    dispositions: ["interested", "not_interested", "query_resolved", "callback_requested", "opted_out"],
     masterPrompt:
       "# Role\nYou are **Pi Concierge**, the first line of help for Paytm customers on WhatsApp.\n\n## Goals\n- Understand why the customer reached out and resolve it on first contact.\n- Be warm, concise, and never over-promise.\n\n## Tools\nUse {{order_lookup}} to check delivery status before answering order questions, and {{knowledge_lookup}} for policy or how-to questions. Send confirmations with {{send_whatsapp}}.\n\n## Guardrails\n- Never give investment advice.\n- Escalate anything involving a failed payment over ₹10,000 to a human.",
     knowledgeBase:
@@ -113,6 +116,7 @@ export const AGENT_RECORDS: Record<string, AgentRecord> = {
     type: "chat",
     status: "live",
     tools: ["knowledge_lookup", "customer_context"],
+    dispositions: ["kyc_completed", "kyc_pending", "drop_off", "opted_out"],
     masterPrompt:
       "# Role\nYou are **KYC Helper**. You guide customers through completing KYC.\n\n## Tools\nUse {{customer_context}} to see which KYC stage the customer is stuck at, then give the exact next step.\n\n## Guardrails\n- Never ask the customer to share OTPs or passwords.",
     knowledgeBase:
@@ -132,6 +136,7 @@ export const AGENT_RECORDS: Record<string, AgentRecord> = {
     type: "chat",
     status: "draft",
     tools: ["knowledge_lookup"],
+    dispositions: ["interested", "not_interested", "query_resolved"],
     masterPrompt:
       "# Role\nYou answer pricing and plan questions for Paytm products.\n\n## Tools\nGround every answer in {{knowledge_lookup}} — never invent prices.",
     knowledgeBase:
@@ -174,6 +179,7 @@ export const AGENT_RECORDS: Record<string, AgentRecord> = {
       "refund_initiate",
       "knowledge_lookup",
     ],
+    dispositions: ["query_resolved", "refund_initiated", "escalated", "not_resolved", "opted_out"],
     masterPrompt:
       "# Role\nYou are **L1 Support** for Paytm orders and payments.\n\n## Tools\nLook up orders with {{order_lookup}}, answer policy questions with {{knowledge_lookup}}, and for confirmed failures initiate a refund with {{refund_initiate}}.\n\n## Guardrails\n- Verify the order belongs to the customer before any refund.",
     knowledgeBase:
@@ -208,6 +214,10 @@ export function resolveAgent(nameOrId?: string): AgentRecord | undefined {
 
 export function voiceAgents(): AgentRecord[] {
   return Object.values(AGENT_RECORDS).filter((a) => a.type === "voice");
+}
+
+export function chatAgents(): AgentRecord[] {
+  return Object.values(AGENT_RECORDS).filter((a) => a.type === "chat");
 }
 
 /** Output variables an agent's tools expose downstream (e.g. `order_lookup.delivered_status`). */

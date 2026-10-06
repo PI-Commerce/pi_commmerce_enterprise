@@ -149,6 +149,9 @@ const NODE_COLOR: Record<SankeyNodeKind, string> = {
   // darker so the two WhatsApp-kind nodes remain distinguishable on the graph.
   whatsappFreeform: "#15803d",
   voice: "#a78bfa",
+  // AI Chat picks up WhatsApp's green family (one more shade) since the
+  // session runs on the upstream WhatsApp sender.
+  chat: "#166534",
   sms: "#f59e0b",
   rcs: "#6366f1",
   ads: "#06b6d4",
@@ -166,6 +169,7 @@ const NODE_TYPE_LABEL: Record<SankeyNodeKind, string> = {
   whatsapp: "WhatsApp Template",
   whatsappFreeform: "WhatsApp Freeform Workflow",
   voice: "Voice Call",
+  chat: "WhatsApp AI Chat Agent",
   sms: "SMS",
   rcs: "RCS",
   ads: "Ads Campaign",

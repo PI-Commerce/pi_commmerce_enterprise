@@ -20,6 +20,7 @@ export type NodeKind =
   | "voiceCall"
   | "whatsapp"
   | "whatsappFreeform"
+  | "aiChat"
   | "sms"
   | "rcs"
   // ai
@@ -221,6 +222,11 @@ export type PresetConfig = {
   ffTimerMode?: "absolute" | "inactivity";
   /** Timer duration in minutes. Capped at 1440 (Meta's 24-hour freeform window). */
   ffTimerMinutes?: number;
+  // ---- AI Chat core ----
+  /** A {@link AgentRecord} id or name (type "chat") from the agent registry. Drives the disposition outputs. */
+  chatAgent?: string;
+  /** Maps the chat agent's campaign-input slots to CSV/audience columns. */
+  chatVarMap?: PresetVarMap[];
   // ---- SMS core ----
   /** DLT Template ID from the SMS registry — the node's primary selection. */
   smsTemplateId?: string;
@@ -342,6 +348,7 @@ export const NODE_GROUPS: Record<NodeKind, NodeGroup> = {
   voiceCall: "action",
   whatsapp: "action",
   whatsappFreeform: "action",
+  aiChat: "action",
   sms: "action",
   rcs: "action",
   aiTransform: "ai",
@@ -360,6 +367,7 @@ export const NODE_LABELS: Record<NodeKind, string> = {
   voiceCall: "Voice Call",
   whatsapp: "WhatsApp Template",
   whatsappFreeform: "WhatsApp Freeform Workflow",
+  aiChat: "WhatsApp AI Chat Agent",
   sms: "SMS",
   rcs: "RCS",
   aiTransform: "AI Transformation",
@@ -384,6 +392,7 @@ export const SERIAL_PREFIX: Record<NodeKind, string> = {
   voiceCall: "voice",
   whatsapp: "whatsapp",
   whatsappFreeform: "ffw",
+  aiChat: "wa_ai_chat",
   sms: "sms",
   rcs: "rcs",
   aiTransform: "ait",

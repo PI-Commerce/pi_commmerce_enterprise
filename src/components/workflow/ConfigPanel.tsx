@@ -34,6 +34,7 @@ import {
   WA_TIMEOUT_HOURS, DEFAULT_WA_TIMEOUT_HOURS, waTimeoutLabel,
   smsOutputs, SMS_DLR_WINDOWS, DEFAULT_SMS_DLR_WINDOW,
   rcsOutputs, RCS_DLR_WINDOWS, DEFAULT_RCS_DLR_WINDOW,
+  chatOutputs,
 } from "@/lib/wa-outputs";
 import {
   getFreeformWorkflows, getFreeformPlaceholders, getFreeformCampaignOutputs,
@@ -56,7 +57,7 @@ import {
 } from "@/lib/rcs-templates";
 import { getTool, TOOLS, type ToolInput } from "@/lib/tool-registry";
 import { flattenBody } from "@/lib/tool-body";
-import { resolveAgent, voiceAgents } from "@/lib/agent-data";
+import { resolveAgent, voiceAgents, chatAgents } from "@/lib/agent-data";
 import {
   CUSTOM_AI_ACTION,
   transformError, transformsError,
@@ -66,6 +67,7 @@ import { PromptEditor } from "@/components/workflow/PromptEditor";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 const VOICE_AGENTS = voiceAgents();
+const CHAT_AGENTS = chatAgents();
 
 /** Per-node outcome variables (e.g. `whatsapp_1.session_expired`) contributed by the
  *  action nodes present in the flow — merged into the Conditional variable picker. */
@@ -471,6 +473,9 @@ function KindFields({
 
     case "whatsappFreeform":
       return <WhatsAppFreeformFields config={config} serial={serial} readOnly={readOnly} mark={mark} onChange={onChange} />;
+
+    case "aiChat":
+      return <AiChatFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
 
     case "sms":
       return <SmsFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
@@ -2256,6 +2261,189 @@ function FreeformOutputVarsSection({
   );
 }
 
+/* --------------------------- AI Chat --------------------------- */
+
+function AiChatFields({ config, readOnly, mark, onChange }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
+  return (
+    <ActionNodeShell kind="aiChat" config={config} readOnly={readOnly} mark={mark} onChange={onChange}
+      renderCore={(coreMark) => <AiChatCore config={config} readOnly={readOnly} mark={coreMark} onChange={onChange} />} />
+  );
+}
+
+function AiChatCore({ config, readOnly, mark, onChange }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
+  const [agent, setAgent] = useState<string>(config?.chatAgent ?? "");
+  const agentSelected = !!agent;
+
+  const varMap = config?.chatVarMap ?? [
+    { v: "{{name}}", def: "contact.first_name" },
+    { v: "{{phone}}", def: "contact.phone" },
+  ];
+  const agentRecord = resolveAgent(agent);
+  const dispositions = agentRecord?.dispositions ?? [];
+  // Chat agents, like voice agents, can bring tools (configured in the agent
+  // builder). At the node we only map each tool's inputs to a variable for
+  // this campaign — identical to {@link VoiceCallCore}'s Tool configuration.
+  const agentTools = (agentRecord?.tools ?? []).map(getTool).filter((t): t is NonNullable<typeof t> => !!t);
+  const toolMap = config?.toolInputMap ?? [];
+
+  const setChatMapping = (key: string, def: string, mode?: "variable" | "constant") => {
+    const base = config?.chatVarMap ?? varMap;
+    const next = base.filter((m) => m.v !== key);
+    next.push({ v: key, def, mode });
+    onChange({ config: { ...config, chatVarMap: next } });
+  };
+  const setToolMapping = (key: string, def: string, mode?: "variable" | "constant") => {
+    const next = toolMap.filter((m) => m.v !== key);
+    next.push({ v: key, def, mode });
+    onChange({ config: { ...config, toolInputMap: next } });
+  };
+
+  // A row is "unmapped" when its resolved target is blank. Mirrors the SMS /
+  // template variable-mapping guard.
+  const resolvedVarMap = varMap.map((row) => config?.chatVarMap?.find((m) => m.v === row.v) ?? row);
+  const unmapped = resolvedVarMap.filter((m) => !m.def?.trim()).length;
+
+  // Validity: (a) a chat agent is selected AND (b) every agent variable is mapped.
+  // The AI Chat node has no WABA of its own — it takes over the conversation
+  // already running on the upstream WhatsApp node's sender number (that's why it
+  // can only be wired off `reply_received`). Missing mappings block save, exactly
+  // like the AI Call / SMS nodes.
+  useEffect(() => {
+    if (!agentSelected) mark(false, "Select a chat agent");
+    else if (unmapped > 0) mark(false, `Map ${unmapped} agent variable${unmapped === 1 ? "" : "s"}`);
+    else mark(true);
+  }, [agentSelected, unmapped]);
+
+  // Two fixed handles (Success / Failure); persist config so the node restores
+  // on reopen. Idle timeout is owned by the Agentic chat runtime, not the
+  // campaign — a clean idle-close exits via Success with `closure_reason =
+  // idle_timeout`.
+  useEffect(() => {
+    onChange({
+      outputs: chatOutputs(),
+      config: { ...config, chatAgent: agent },
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [agent]);
+
+  return (
+    <>
+      <Section title="Chat agent">
+        <div className="rounded-xl border border-border bg-card/50 p-4 space-y-4">
+          {/* Step 1: pick chat agent */}
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <StepChip n={1} done={agentSelected} />
+              <Label className="flex items-center gap-1 text-[12px] font-medium text-foreground">
+                Chat agent <span className="text-destructive">*</span>
+              </Label>
+            </div>
+            <SelectLike
+              disabled={readOnly}
+              options={CHAT_AGENTS.map((a) => a.name)}
+              defaultValue={config?.chatAgent}
+              onPick={(v) => setAgent(v)}
+              placeholder="Select agent…"
+            />
+            {agentSelected && dispositions.length > 0 && (
+              <p className="text-[11px] text-muted-foreground">
+                Closes conversations with {dispositions.length} disposition{dispositions.length === 1 ? "" : "s"}, available downstream as <span className="font-mono text-foreground">wa_ai_chat_N.disposition</span> — branch on it with a Conditional.
+              </p>
+            )}
+          </div>
+
+          <div className="border-t border-border/60" />
+
+          {/* Step 2: variable mapping — gated on agent selection */}
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <StepChip n={2} muted={!agentSelected} done={agentSelected && unmapped === 0} />
+              <Label className="text-[12px] font-medium text-foreground">Variable mapping</Label>
+            </div>
+            <p className="text-[11px] text-muted-foreground">Map agent variables to upstream workflow variables.</p>
+            {agentSelected ? (
+              <div className="space-y-2 pt-1">
+                {varMap.map((row) => {
+                  const saved = config?.chatVarMap?.find((m) => m.v === row.v) ?? row;
+                  return (
+                    <div key={row.v} className="grid grid-cols-[110px_1fr] items-center gap-2">
+                      <span className="font-mono text-[11.5px] text-muted-foreground">{row.v}</span>
+                      <VariablePicker
+                        defaultValue={saved.def}
+                        disabled={readOnly}
+                        allowConstant
+                        mode={saved.mode}
+                        onChange={(v, mode) => setChatMapping(row.v, v, mode)}
+                      />
+                    </div>
+                  );
+                })}
+                {unmapped > 0 && (
+                  <StatusBanner
+                    ok={false}
+                    title={`Map ${unmapped} agent variable${unmapped === 1 ? "" : "s"}`}
+                    detail="Every agent variable must be mapped before the node can be saved."
+                  />
+                )}
+              </div>
+            ) : (
+              <div className="rounded-md border border-dashed border-border bg-muted/30 px-3 py-3 text-[11.5px] text-muted-foreground">
+                Select a chat agent above to map its variables.
+              </div>
+            )}
+          </div>
+        </div>
+      </Section>
+
+      {/* Tool configuration — the selected chat agent's tools; map each input
+          to a CSV / upstream variable or a constant. Uses the plain
+          VariablePicker (same as the Variable mapping section above) so chat
+          configuration stays consistent across its two mapping surfaces. */}
+      {agentSelected && agentTools.length > 0 && (
+        <Section title="Tool configuration">
+          <div className="rounded-xl border border-border bg-card/50 p-4 space-y-3">
+            <p className="text-[11px] text-muted-foreground">
+              <span className="font-mono text-foreground">{agent}</span> brings {agentTools.length} tool{agentTools.length === 1 ? "" : "s"}. Map each input to a CSV or upstream variable.
+            </p>
+            {agentTools.map((tool) => {
+              const mappable = tool.inputs.filter((i) => i.source !== "constant");
+              return (
+                <div key={tool.handle} className="rounded-lg border border-border bg-background/60 p-3 space-y-2.5">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="font-mono text-[12px] font-medium text-ai">@{tool.handle}</span>
+                    <span className="truncate text-[10.5px] text-muted-foreground">{tool.description}</span>
+                  </div>
+                  {mappable.length > 0 ? mappable.map((inp) => {
+                    const v = `${tool.handle}.${inp.key}`;
+                    const saved = toolMap.find((m) => m.v === v);
+                    const fallback = inp.source === "campaign" ? `contact.${inp.value ?? inp.key}` : "";
+                    const def = saved?.def ?? fallback;
+                    return (
+                      <div key={v} className="grid grid-cols-[130px_1fr] items-center gap-2">
+                        <span className="truncate font-mono text-[11.5px] text-muted-foreground" title={inp.description}>{inp.key}</span>
+                        <VariablePicker
+                          defaultValue={def}
+                          disabled={readOnly}
+                          allowConstant
+                          mode={saved?.mode}
+                          onChange={(val, mode) => setToolMapping(v, val, mode)}
+                        />
+                      </div>
+                    );
+                  }) : (
+                    <p className="text-[11px] text-muted-foreground">All inputs are fixed at the tool.</p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </Section>
+      )}
+
+      <ActionAdvanceBanner kind="aiChat" />
+    </>
+  );
+}
 /* --------------------------- SMS --------------------------- */
 
 function SmsFields({ config, readOnly, mark, onChange }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
@@ -3224,7 +3412,7 @@ function PlatformChip({ active, disabled, children }: { active?: boolean; disabl
 /* Action-node shell: Core + A/B Experiments + AI Transformations + Exits */
 /* ====================================================================== */
 
-type ActionKind = "voiceCall" | "whatsapp" | "sms" | "rcs";
+type ActionKind = "voiceCall" | "whatsapp" | "aiChat" | "sms" | "rcs";
 
 /**
  * In-memory shape used by the config panel. Superset of {@link PresetTransform}
@@ -3413,6 +3601,8 @@ function ActionAdvanceBanner({ kind, type1, timeoutHours }: { kind: ActionKind; 
   const text =
     kind === "voiceCall"
       ? "Leads advance when the call concludes or retries are exhausted. Branch on the outcome with a Conditional node downstream."
+      : kind === "aiChat"
+        ? "The lead exits this node through two branches, Success and Failure. Success is when the agent closed the chat with a disposition, or the Agentic chat runtime closed the session after its inactivity window. Failure is when the handover or the platform errored. Branch on the disposition downstream with a Conditional."
       : kind === "sms"
         ? "Always three outputs: “Delivered”, “Failed” and “Timeout” (no receipt within the wait window). Wire all three."
         : kind === "rcs"

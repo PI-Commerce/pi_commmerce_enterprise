@@ -29,6 +29,7 @@ export type SankeyNodeKind =
   | "whatsapp"
   | "whatsappFreeform"
   | "voice"
+  | "chat"
   | "sms"
   | "rcs"
   | "ads"
@@ -109,6 +110,7 @@ const KIND_TO_SANKEY: Record<NodeKind, SankeyNodeKind> = {
   voiceCall: "voice",
   whatsapp: "whatsapp",
   whatsappFreeform: "whatsappFreeform",
+  aiChat: "chat",
   sms: "sms",
   rcs: "rcs",
   adsCampaign: "ads",
@@ -136,6 +138,7 @@ const PASS_RATE: Record<SankeyNodeKind, number> = {
   // freeform-entry to freeform-exit is moderate: most complete, some time out,
   // a few fail. Slightly higher retention than the send-first Template node.
   whatsappFreeform: 0.86,
+  chat: 0.8,
   sms: 0.9,
   rcs: 0.88,
   ads: 0.95,
