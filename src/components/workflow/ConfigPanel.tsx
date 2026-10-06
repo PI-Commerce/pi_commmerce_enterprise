@@ -1326,7 +1326,7 @@ function VoiceCallCore({ config, readOnly, mark, onChange }: { config?: PresetCo
         <Section title="Tool configuration">
           <div className="rounded-xl border border-border bg-card/50 p-4 space-y-3">
             <p className="text-[11px] text-muted-foreground">
-              <span className="font-mono text-foreground">{agent}</span> brings {agentTools.length} tool{agentTools.length === 1 ? "" : "s"}. Map each input to a CSV or upstream variable, or let the agent decide.
+              <span className="font-mono text-foreground">{agent}</span> brings {agentTools.length} tool{agentTools.length === 1 ? "" : "s"}. Map each input to a CSV or upstream variable.
             </p>
             {agentTools.map((tool) => {
               const mappable = tool.inputs.filter((i) => i.source !== "constant");
@@ -1339,14 +1339,15 @@ function VoiceCallCore({ config, readOnly, mark, onChange }: { config?: PresetCo
                   {mappable.length > 0 ? mappable.map((inp) => {
                     const v = `${tool.handle}.${inp.key}`;
                     const saved = toolMap.find((m) => m.v === v);
-                    const fallback = inp.source === "campaign" ? `contact.${inp.value ?? inp.key}` : "__llm__";
+                    const fallback = inp.source === "campaign" ? `contact.${inp.value ?? inp.key}` : "";
                     const def = saved?.def ?? fallback;
                     return (
                       <div key={v} className="grid grid-cols-[130px_1fr] items-center gap-2">
                         <span className="truncate font-mono text-[11.5px] text-muted-foreground" title={inp.description}>{inp.key}</span>
-                        <ToolInputMapPicker
+                        <VariablePicker
                           defaultValue={def}
                           disabled={readOnly}
+                          allowConstant
                           mode={saved?.mode}
                           onChange={(val, mode) => setToolMapping(v, val, mode)}
                         />
@@ -1381,76 +1382,6 @@ function VoiceCallCore({ config, readOnly, mark, onChange }: { config?: PresetCo
       </Section>
       <ActionAdvanceBanner kind="voiceCall" />
     </>
-  );
-}
-
-/** Maps a single tool input to "Let LLM decide", a CSV/upstream variable, or a constant. */
-function ToolInputMapPicker({
-  defaultValue, disabled, mode = "variable", onChange,
-}: {
-  defaultValue?: string; disabled?: boolean;
-  mode?: "variable" | "constant";
-  onChange?: (v: string, mode?: "variable" | "constant") => void;
-}) {
-  const [v, setV] = useState(defaultValue ?? "__llm__");
-  const [m, setM] = useState<"variable" | "constant">(mode);
-  useEffect(() => { setM(mode); }, [mode]);
-  const extraVariables = useContext(ExtraVariablesContext);
-  const suppressSamples = useContext(SuppressSampleVariablesContext);
-  const allVariables = mergeVariables(extraVariables, suppressSamples);
-  const isCustom = v !== "__llm__" && !!v && !allVariables.some((s) => s.key === v);
-  const grouped = groupVariablesBySource(allVariables);
-
-  const pickMode = (next: "variable" | "constant") => {
-    setM(next);
-    const reset = next === "variable" ? "__llm__" : "";
-    setV(reset);
-    onChange?.(reset, next);
-  };
-  const toggleBtn = (
-    <VarValueToggle mode={m} disabled={disabled} onPick={pickMode} size="h-8" />
-  );
-
-  if (m === "constant") {
-    return (
-      <div className="flex min-w-0 items-center gap-1">
-        <div className="relative min-w-0 flex-1">
-          <Hash className="pointer-events-none absolute left-2.5 top-1/2 z-10 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={v}
-            disabled={disabled}
-            onChange={(e) => { setV(e.target.value); onChange?.(e.target.value, "constant"); }}
-            placeholder="Constant value…"
-            className="h-8 min-w-0 pl-7 font-mono text-[12px]"
-          />
-        </div>
-        {toggleBtn}
-      </div>
-    );
-  }
-  return (
-    <div className="flex min-w-0 items-center gap-1">
-      <Select value={v || "__llm__"} disabled={disabled} onValueChange={(val) => { setV(val); onChange?.(val, "variable"); }}>
-        <SelectTrigger className="h-8 min-w-0 font-mono text-[12px] [&>span]:truncate"><SelectValue /></SelectTrigger>
-        <SelectContent>
-          <SelectItem value="__llm__" className="text-[12px]">
-            <span className="inline-flex items-center gap-1.5"><Sparkles className="h-3 w-3 text-ai" /> Let LLM decide</span>
-          </SelectItem>
-          {isCustom && (
-            <SelectItem value={v} className="font-mono text-[12px]">{v} <span className="text-muted-foreground">· upstream</span></SelectItem>
-          )}
-          {grouped.map((g) => (
-            <SelectGroup key={g.source}>
-              <SelectLabel className="text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground">{g.source}</SelectLabel>
-              {g.items.map((s) => (
-                <SelectItem key={s.key} value={s.key} className="pl-7 font-mono text-[12px]">{s.key}</SelectItem>
-              ))}
-            </SelectGroup>
-          ))}
-        </SelectContent>
-      </Select>
-      {toggleBtn}
-    </div>
   );
 }
 
