@@ -6,8 +6,11 @@ import { Input } from "@/components/ui/input";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Wrench, Search, Plus } from "lucide-react";
+import { Wrench, Search, Plus, Phone, MessageCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { TOOLS, STATUS_LABEL } from "@/lib/tool-registry";
 
@@ -72,6 +75,7 @@ function Builder() {
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
   const [fStatus, setFStatus] = useState<"all" | AgentStatus>("all");
+  const [newOpen, setNewOpen] = useState(false);
 
   const filtered = INITIAL_AGENTS.filter((a) => {
     if (fStatus !== "all" && a.status !== fStatus) return false;
@@ -97,7 +101,25 @@ function Builder() {
           onChange={(v) => setFStatus(v as typeof fStatus)}
           options={[{ value: "all", label: "All statuses" }, ...AGENT_STATUSES.map((s) => ({ value: s, label: cap(s) }))]}
         />
+        <div className="ml-auto">
+          <Button
+            size="sm"
+            className="h-8 gap-1.5 text-xs"
+            onClick={() => setNewOpen(true)}
+          >
+            <Plus className="h-3.5 w-3.5" /> New agent
+          </Button>
+        </div>
       </div>
+
+      <NewAgentDialog
+        open={newOpen}
+        onOpenChange={setNewOpen}
+        onPick={(type) => {
+          setNewOpen(false);
+          navigate({ to: "/agents/new", search: { type } });
+        }}
+      />
 
       {filtered.length === 0 ? (
         <div className="rounded-xl border border-dashed border-border bg-card/40 px-6 py-16 text-center">
@@ -237,6 +259,68 @@ function Tools() {
 }
 
 function cap(s: string) { return s[0].toUpperCase() + s.slice(1); }
+
+/** Modal shown from Agents > Builder "New agent": pick Voice or Chat, then
+ *  route to /agents/new?type=<chosen> where the shared AgentBuilder takes over. */
+function NewAgentDialog({
+  open, onOpenChange, onPick,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  onPick: (type: AgentType) => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="text-base">New agent</DialogTitle>
+          <DialogDescription className="text-xs">
+            What kind of agent do you want to create? Voice agents run outbound calls; chat agents hold multi-turn WhatsApp conversations.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="mt-2 grid grid-cols-2 gap-3">
+          <AgentTypeCard
+            icon={Phone}
+            label="Voice"
+            hint="Outbound AI call"
+            onClick={() => onPick("voice")}
+          />
+          <AgentTypeCard
+            icon={MessageCircle}
+            label="Chat"
+            hint="WhatsApp conversation"
+            onClick={() => onPick("chat")}
+          />
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function AgentTypeCard({
+  icon: Icon, label, hint, onClick,
+}: {
+  icon: typeof Phone;
+  label: string;
+  hint: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="group flex flex-col items-start gap-2 rounded-lg border border-border bg-card p-4 text-left transition-all hover:border-primary/40 hover:bg-accent/40"
+    >
+      <span className="flex h-8 w-8 items-center justify-center rounded-md border border-border bg-secondary text-muted-foreground transition-colors group-hover:border-primary/40 group-hover:text-foreground">
+        <Icon className="h-4 w-4" />
+      </span>
+      <div>
+        <p className="text-sm font-medium text-foreground">{label}</p>
+        <p className="text-[11.5px] text-muted-foreground">{hint}</p>
+      </div>
+    </button>
+  );
+}
 
 function FilterSelect({
   label, value, onChange, options,
