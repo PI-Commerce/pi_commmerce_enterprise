@@ -31,25 +31,25 @@ export type RcsStatus =
  * "Recipient not RCS-capable" carries the largest weight, ahead of the true
  * hard-failure reasons.
  */
-const FAILURE_REASONS: { reason: string; weight: number }[] = [
-  { reason: "Recipient not RCS-capable", weight: 58 },
-  { reason: "Invalid or non-existent number", weight: 13 },
-  { reason: "Message rejected by carrier RBM", weight: 9 },
-  { reason: "Handset unreachable or switched off", weight: 8 },
-  { reason: "Payload exceeded 250 KB card limit", weight: 5 },
-  { reason: "Agent not provisioned for recipient carrier", weight: 4 },
-  { reason: "Message expired before delivery", weight: 3 },
+const FAILURE_REASONS: { code: string; reason: string; weight: number }[] = [
+  { code: "not_found", reason: "Recipient not RCS-capable", weight: 58 },
+  { code: "invalid_recipient", reason: "Invalid or non-existent number", weight: 13 },
+  { code: "rbm_rejected", reason: "Message rejected by carrier RBM", weight: 9 },
+  { code: "unreachable", reason: "Handset unreachable or switched off", weight: 8 },
+  { code: "payload_too_large", reason: "Payload exceeded 250 KB card limit", weight: 5 },
+  { code: "agent_not_provisioned", reason: "Agent not provisioned for recipient carrier", weight: 4 },
+  { code: "ttl_expired", reason: "Message expired before delivery", weight: 3 },
 ];
 
 const REASON_TOTAL = FAILURE_REASONS.reduce((s, r) => s + r.weight, 0);
 
-function pickFailureReason(r: number): string {
+function pickFailure(r: number): { code: string; reason: string } {
   let acc = r * REASON_TOTAL;
   for (const f of FAILURE_REASONS) {
     acc -= f.weight;
-    if (acc <= 0) return f.reason;
+    if (acc <= 0) return { code: f.code, reason: f.reason };
   }
-  return FAILURE_REASONS[0].reason;
+  return { code: FAILURE_REASONS[0].code, reason: FAILURE_REASONS[0].reason };
 }
 
 /**
@@ -105,6 +105,9 @@ export type RcsMessage = {
   readAt: string | null;
   clickedAt: string | null;
   failedAt: string | null;
+  /** Structured error code from the aggregator; Jio sends a string like
+   *  "not_found", Netcore does not send one so this stays blank. */
+  errorCode: string | null;
   failureReason: string | null;
   /** Seconds from submission to delivery receipt; null unless delivered. */
   deliveryLatency: number | null;
@@ -228,7 +231,9 @@ export function buildRcsMessages({ run, node }: RcsRef, limit = 120): RcsMessage
       readAt: read ? stamp(readMin) : null,
       clickedAt: clicked ? stamp(clickedMin) : null,
       failedAt: failed ? stamp(failedMin) : null,
-      failureReason: failed ? pickFailureReason(r()) : null,
+      ...(failed
+        ? (() => { const f = pickFailure(r()); return { errorCode: f.code, failureReason: f.reason }; })()
+        : { errorCode: null, failureReason: null }),
       deliveryLatency: reached ? deliverySec : null,
       date: l.updatedDate,
     };
@@ -236,8 +241,9 @@ export function buildRcsMessages({ run, node }: RcsRef, limit = 120): RcsMessage
 }
 
 export function rcsMessagesToCsv(rows: RcsMessage[]): string {
-  // Matches PICOM-6133: prod columns, name for name, plus agent_id after
-  // agent and template_id after template_name. Fourteen columns total.
+  // Matches PICOM-6133: prod columns kept name for name, plus agent_id after
+  // agent, template_id after template_name, and error_code right before
+  // failure_reason. Fifteen columns total.
   const head = [
     "recipient",
     "agent",
@@ -252,6 +258,7 @@ export function rcsMessagesToCsv(rows: RcsMessage[]): string {
     "read_at",
     "clicked_at",
     "failed_at",
+    "error_code",
     "failure_reason",
   ];
   const body = rows.map((m) => [
@@ -268,6 +275,7 @@ export function rcsMessagesToCsv(rows: RcsMessage[]): string {
     m.readAt ?? "",
     m.clickedAt ?? "",
     m.failedAt ?? "",
+    m.errorCode ?? "",
     m.failureReason ?? "",
   ]);
   return [head, ...body]

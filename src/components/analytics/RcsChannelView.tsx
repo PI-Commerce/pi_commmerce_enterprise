@@ -724,13 +724,14 @@ function MessagesTable({ refs }: { refs: RcsRef[] }) {
                 <th className="px-4 py-2 font-medium">Delivered</th>
                 <th className="px-4 py-2 font-medium">Read</th>
                 <th className="px-4 py-2 font-medium">Clicked</th>
+                <th className="px-4 py-2 font-medium">Error code</th>
                 <th className="px-4 py-2 font-medium">Failure reason</th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={12} className="px-4 py-12 text-center text-muted-foreground">
+                  <td colSpan={13} className="px-4 py-12 text-center text-muted-foreground">
                     No messages match your filters.
                   </td>
                 </tr>
@@ -762,6 +763,7 @@ function MessagesTable({ refs }: { refs: RcsRef[] }) {
                     <td className="whitespace-nowrap px-4 py-2.5 text-[11.5px] text-muted-foreground">{m.deliveredAt ?? "—"}</td>
                     <td className="whitespace-nowrap px-4 py-2.5 text-[11.5px] text-muted-foreground">{m.readAt ?? "—"}</td>
                     <td className="whitespace-nowrap px-4 py-2.5 text-[11.5px] text-muted-foreground">{m.clickedAt ?? "—"}</td>
+                    <td className="whitespace-nowrap px-4 py-2.5 font-mono text-[11.5px] text-muted-foreground">{m.errorCode ?? "—"}</td>
                     <td className="px-4 py-2.5 text-[11.5px] text-muted-foreground">{m.failureReason ?? "—"}</td>
                   </tr>
                 ))
