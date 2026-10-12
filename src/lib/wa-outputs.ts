@@ -104,24 +104,49 @@ export function completedOutput(): NodeOutput[] {
 }
 
 /**
- * Outputs for an AI Chat node — three fixed branches (PRD FR-6):
- *   - `success` — the agent closed the conversation with a disposition; branch on
- *                 the semantic outcome via a downstream Conditional on
- *                 `chat_N.disposition`. Outcome variables are populated here only.
- *   - `timeout` — the customer stopped replying and the session idle window (or
- *                 Meta's 24h customer-service window) closed before a disposition
- *                 was reached. Distinct from `failure` so authors can re-engage
- *                 (nudge via SMS, retry) rather than treat it as an error.
- *   - `failure` — any other break: the relay to/from the Agentic platform failed,
- *                 the handover errored, or the agent could not start the session.
+ * Outputs for an AI Chat node — two fixed branches. A live chat has exactly two
+ * ways to end: the session ran its course, or it broke. We model those, not the
+ * internal reason, on the canvas — the reason is a variable a Conditional reads.
+ *
+ *   - `success` → "Session completed" — the session closed cleanly. This covers
+ *                 BOTH a disposition the agent captured AND the customer going idle
+ *                 past the inactivity window (`closure_reason` = agent_closed |
+ *                 idle_timeout). Idle is a normal end-of-conversation on chat, not
+ *                 an error, so it routes here rather than to a separate exit; branch
+ *                 on the outcome downstream with a Conditional on `chat_N.disposition`
+ *                 / `chat_N.closure_reason`. Outcome variables are populated here.
+ *   - `failure` → "Failed" — any session failure: the relay to/from the Agentic
+ *                 platform failed, the handover errored, or the agent could not
+ *                 start the session (`closure_reason` = relay_error).
+ *
+ * Handle ids (`success` / `failure`) are unchanged so existing wired edges survive;
+ * only the labels and the retired `timeout` handle changed. Idle timeout, which
+ * previously took its own `timeout` exit, now folds into "Session completed".
  */
 export function chatOutputs(): NodeOutput[] {
   return [
-    { id: "success", label: "Success", kind: "outcome" },
-    { id: "timeout", label: "Timeout", kind: "outcome" },
-    { id: "failure", label: "Failure", kind: "outcome" },
+    { id: "success", label: "Session completed", kind: "outcome" },
+    { id: "failure", label: "Failed", kind: "outcome" },
   ];
 }
+
+/**
+ * Inactivity (no customer reply) windows for the AI Chat node. When this window
+ * elapses with no inbound message, the session force-closes on an idle timeout and
+ * takes the "Session completed" path (`closure_reason` = idle_timeout). Bounded by
+ * Meta's 24-hour customer-service window, which is the hard maximum.
+ */
+export const CHAT_IDLE_WINDOWS = [
+  "5 minutes",
+  "15 minutes",
+  "30 minutes",
+  "1 hour",
+  "3 hours",
+  "6 hours",
+  "12 hours",
+  "24 hours",
+] as const;
+export const DEFAULT_CHAT_IDLE_WINDOW = "30 minutes";
 
 /**
  * Outputs for an SMS node — the one action node that branches on *delivery*
@@ -253,9 +278,10 @@ export function deriveNodeOutcomeVariables(
       const agent = resolveAgent(config?.agent);
       if (agent) for (const pc of agent.postCall) vars.push({ key: `${ns}.${pc.name}`, source });
     } else if (kind === "aiChat") {
-      // Conversation facts every chat node produces, mirroring its handles:
+      // Conversation facts every chat node produces:
       // `disposition` (the closing outcome, = one of the agent's dispositions),
-      // `closure_reason` (why it ended — disposition | timeout | handover_failed),
+      // `closure_reason` (why it ended — agent_closed | idle_timeout | relay_error;
+      //  the first two both exit "Session completed", relay_error exits "Failed"),
       // and `conversation_length` (message count).
       vars.push({ key: `${ns}.disposition`, source });
       vars.push({ key: `${ns}.closure_reason`, source });

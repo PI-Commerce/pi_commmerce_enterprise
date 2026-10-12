@@ -3,7 +3,7 @@ import { createFileRoute, useNavigate, useBlocker } from "@tanstack/react-router
 import { toast } from "sonner";
 import { WorkflowCanvas } from "@/components/workflow/WorkflowCanvas";
 import { BuilderTopBar } from "@/components/workflow/BuilderTopBar";
-import type { CampaignStatus } from "@/lib/campaign-types";
+import type { CampaignStatus, JourneyType } from "@/lib/campaign-types";
 import { EXAMPLE_CAMPAIGNS } from "@/lib/campaign-examples";
 import { VERSION_HISTORY, makeVersion, type CampaignVersion } from "@/lib/campaign-versions";
 import {
@@ -17,31 +17,32 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
-export const Route = createFileRoute("/campaigns/$id")({
+export const Route = createFileRoute("/journeys/$id")({
   component: CampaignBuilder,
-  validateSearch: (search: Record<string, unknown>): { name?: string; description?: string; objective?: string } => ({
+  validateSearch: (search: Record<string, unknown>): { name?: string; description?: string; objective?: string; journeyType?: JourneyType } => ({
     name: typeof search.name === "string" ? search.name : undefined,
     description: typeof search.description === "string" ? search.description : undefined,
     objective: typeof search.objective === "string" ? search.objective : undefined,
+    journeyType: search.journeyType === "inbound" || search.journeyType === "outbound" ? search.journeyType : undefined,
   }),
   head: ({ params }) => ({
     meta: [
-      { title: `Campaign ${params.id} · Pi Commerce Enterprise` },
-      { name: "description", content: "Full-screen orchestration canvas for AI-native campaigns." },
+      { title: `Journey ${params.id} · Pi Commerce Enterprise` },
+      { name: "description", content: "Full-screen orchestration canvas for AI-native journeys." },
     ],
   }),
 });
 
 function CampaignBuilder() {
   const { id } = Route.useParams();
-  const { name: seedName, description: seedDescription, objective: seedObjective } = Route.useSearch();
+  const { name: seedName, description: seedDescription, objective: seedObjective, journeyType: seedJourneyType } = Route.useSearch();
   const navigate = useNavigate();
   const isNew = id === "new";
   const example = EXAMPLE_CAMPAIGNS[id];
 
   const [name, setName] = useState(
     isNew
-      ? (seedName?.trim() || "Untitled campaign")
+      ? (seedName?.trim() || "Untitled journey")
       : example?.name ?? "Dormant Trader Reactivation",
   );
   const [status, setStatus] = useState<CampaignStatus>(
@@ -120,7 +121,7 @@ function CampaignBuilder() {
       makeVersion({
         version: nextNum,
         trigger: "edit",
-        summary: "Edited the campaign — saved as a new version.",
+        summary: "Edited the journey — saved as a new version.",
       }),
     ]);
     toast.success(`Saved as version ${nextNum}`, { description: name });
@@ -147,8 +148,8 @@ function CampaignBuilder() {
         version: nextNum,
         trigger: first ? "created" : "edit",
         summary: first
-          ? "Initial version — published the campaign."
-          : "Published a new version of the campaign.",
+          ? "Initial version — published the journey."
+          : "Published a new version of the journey.",
       }),
     ]);
     if (hasLiveRun) {
@@ -167,7 +168,7 @@ function CampaignBuilder() {
     performPublish();
   }, [hasLiveRun, performPublish]);
 
-  const handleExit = useCallback(() => { navigate({ to: "/campaigns" }); }, [navigate]);
+  const handleExit = useCallback(() => { navigate({ to: "/journeys" }); }, [navigate]);
   const handleValidity = useCallback((v: number, t: number) => { setValidCount(v); setTotal(t); }, []);
   const handleDirty = useCallback(() => setDirty(true), []);
 
@@ -193,6 +194,7 @@ function CampaignBuilder() {
         <WorkflowCanvas
           status={status}
           campaignId={id}
+          journeyType={isNew ? seedJourneyType : undefined}
           onValidityChange={handleValidity}
           onDirty={handleDirty}
           isNew={isNew}

@@ -13,6 +13,15 @@ export type TemplateCategory = "Marketing" | "Utility" | "Authentication";
 export type TemplateFormat = "TEXT" | "IMAGE" | "VIDEO" | "DOCUMENT";
 export type TemplateButtonType = "URL" | "Phone Number" | "Quick Reply" | "Link Flow";
 
+/**
+ * Managed Pi Commerce domain that tracked URL-button links are served from. When
+ * a URL button has link click tracking on, its base URL becomes this domain plus
+ * a {{n}} suffix; the BFF fills the suffix with a per-recipient short code that
+ * logs the tap and redirects to the real destination. Locked into the template
+ * once it is submitted to Meta.
+ */
+export const TRACKING_DOMAIN = "track.picomm.in";
+
 export type TemplateButton = {
   type: TemplateButtonType;
   text: string;
@@ -21,6 +30,15 @@ export type TemplateButton = {
   urlType?: "Static" | "Dynamic";
   urlSuffix?: string;
   clickTracking?: boolean;
+  /**
+   * Link click tracking (distinct from `clickTracking`, which maps an app
+   * conversion deep link). When on, the button link is served through the Pi
+   * Commerce tracking domain so every tap is logged: the button is forced to
+   * Dynamic, its base becomes {@link TRACKING_DOMAIN}, and the BFF mints a
+   * unique per-recipient short code at send time. The domain is baked into the
+   * approved template, so it is locked once the template is submitted to Meta.
+   */
+  trackLinkClicks?: boolean;
   /** Phone Number buttons: national number + selected country dial code. */
   phone?: string;
   dialCode?: string;
@@ -183,7 +201,7 @@ export const SEED_TEMPLATES: WaTemplate[] = [
     header: "Order {{1}} confirmed",
     body: "Hi {{1}}, your order {{2}} is confirmed and will be delivered by {{3}}. Track it anytime in the Paytm app.",
     footer: "Paytm Commerce",
-    buttons: [{ type: "URL", text: "Track order" }],
+    buttons: [{ type: "URL", text: "Track order", url: "https://picomm.in/order/", urlType: "Dynamic", urlSuffix: "{{1}}" }],
   },
   {
     id: "10248301338871",

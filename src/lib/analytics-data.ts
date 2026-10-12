@@ -102,6 +102,10 @@ export type RunRow = {
 const KIND_TO_SANKEY: Record<NodeKind, SankeyNodeKind> = {
   start: "start",
   end: "end",
+  // Inbound entry node — structurally a pass-through entry like Start. Inbound
+  // journeys have no Run, so this is never actually exercised (they're filtered
+  // out of analytics below); it exists only to keep the map type-complete.
+  trigger: "start",
   audience: "audience",
   conditional: "conditional",
   abSplit: "abSplit",
@@ -404,7 +408,10 @@ function deriveRun(
 
 export const CAMPAIGNS: CampaignAnalytics[] = Object.entries(
   EXAMPLE_CAMPAIGNS,
-).map(([id, ex], i) => ({
+)
+  // Inbound journeys have no Run construct — they never produce analytics runs.
+  .filter(([, ex]) => ex.journeyType !== "inbound")
+  .map(([id, ex], i) => ({
   id,
   name: ex.name,
   // Alternate run types so both the badge and the Always-on-only date filter are demonstrable.

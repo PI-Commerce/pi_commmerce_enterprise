@@ -73,10 +73,10 @@ export function BuilderTopBar({
         <button
           onClick={handleExit}
           className="flex h-8 items-center gap-1 rounded-md px-2 text-[12.5px] text-muted-foreground hover:bg-accent hover:text-foreground"
-          aria-label="Back to campaigns"
+          aria-label="Back to journeys"
         >
           <ChevronLeft className="h-4 w-4" />
-          <span className="hidden sm:inline">Campaigns</span>
+          <span className="hidden sm:inline">Journeys</span>
         </button>
         <span className="text-muted-foreground/40">/</span>
 
@@ -96,7 +96,7 @@ export function BuilderTopBar({
           <button
             onClick={() => setEditingName(true)}
             className="truncate rounded-md px-2 py-1 text-[13.5px] font-medium hover:bg-accent"
-            title={description || "Rename campaign"}
+            title={description || "Rename journey"}
           >
             {name}
           </button>
@@ -105,7 +105,7 @@ export function BuilderTopBar({
         {objective && OBJECTIVE_LABELS[objective] && (
           <span
             className="hidden items-center rounded-md border border-border bg-secondary px-2 py-1 text-[11px] font-medium text-muted-foreground md:inline-flex"
-            title="Campaign objective"
+            title="Journey objective"
           >
             {OBJECTIVE_LABELS[objective]}
           </span>
@@ -135,7 +135,7 @@ export function BuilderTopBar({
         </span>
 
         <Link
-          to="/campaigns/versions/$id"
+          to="/journeys/versions/$id"
           params={{ id: campaignId }}
           className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           title="View version history"
@@ -167,7 +167,7 @@ export function BuilderTopBar({
               ? "Resolve validation errors first"
               : hasLiveRun
                 ? "Publish a new version — new leads follow it"
-                : "Publish campaign"
+                : "Publish journey"
           }
         >
           <Rocket className="h-3.5 w-3.5" />

@@ -12,6 +12,10 @@ export type NodeKind =
   // data
   | "audience"
   | "apiToolCall"
+  // trigger — inbound entry node. An inbound journey starts here instead of
+  // Start + Audience; the lead enters when an external event fires (a native
+  // connector event, a generic incoming webhook, or a CTWA ad tap).
+  | "trigger"
   // logic
   | "conditional"
   | "abSplit"
@@ -41,6 +45,15 @@ export type NodeRunState = "idle" | "running" | "success" | "failed";
 export type CampaignStatus =
   | "draft"
   | "ready";
+
+/**
+ * A journey is either **outbound** (push): entry = Start + Audience, feeds a
+ * bounded or always-on **Run** that pushes to a CSV/API audience; or **inbound**
+ * (reactive): entry = a single **Trigger** node, no Run construct — leads enter
+ * one-at-a-time as external events fire. The type is fixed at creation and drives
+ * the blank graph, the builder entry node, and whether Runs exist for the journey.
+ */
+export type JourneyType = "inbound" | "outbound";
 
 export type RetryPolicy = { maxRetries: number; backoffSeconds: number };
 
@@ -158,6 +171,12 @@ export type PresetConfig = {
   payloadType?: "single" | "list" | "csv";
   fields?: PresetSchemaField[];
   phoneField?: string;
+  /**
+   * ISO country used to normalise phone numbers that arrive without a country code
+   * (e.g. a bare `9810012345` or a leading-`0` national number). A number that carries
+   * its own `+code`/`00` always overrides this. Defaults to the workspace region.
+   */
+  defaultCountry?: string;
   // ---- Conditional ----
   branches?: PresetBranch[];
   // ---- A/B Split (logic node) ----
@@ -202,7 +221,9 @@ export type PresetConfig = {
   chatVarMap?: PresetVarMap[];
   /** Max whole-minute cap on a single chat session before it is force-closed. */
   chatMaxDuration?: string;
-  /** Idle window (no customer reply) before the session times out and takes the "Timeout" path. */
+  /** Inactivity window (no customer reply) before the session force-closes on an
+   *  idle timeout and takes the "Session completed" path (closure_reason =
+   *  idle_timeout). A label from `CHAT_IDLE_WINDOWS`; capped at Meta's 24h window. */
   chatIdleTimeout?: string;
   // ---- SMS core ----
   /** DLT Template ID from the SMS registry — the node's primary selection. */
@@ -271,6 +292,42 @@ export type PresetConfig = {
    * this node fires.
    */
   notifyPayloadExtras?: string[];
+  // ---- Trigger (inbound entry) ----
+  /**
+   * Which kind of event starts this inbound journey:
+   *  - `connector` → a native integration event (see {@link file://./trigger-catalog.ts}),
+   *     e.g. Paytm `payment.success`, Shopify `order.created`.
+   *  - `webhook`   → a generic incoming webhook posted to a per-journey endpoint.
+   *  - `ctwa`      → a Click-to-WhatsApp ad tap (reuses {@link adId}/{@link adEntryStage}).
+   *  - `chat_message` → an inbound chat message to one of the merchant's senders
+   *     (WhatsApp in v1), optionally gated to specific keywords.
+   */
+  triggerType?: "connector" | "webhook" | "ctwa" | "chat_message";
+  /** For `triggerType: "connector"` — the selected connector + event ids. */
+  triggerConnectorId?: string;
+  triggerEventId?: string;
+  /** For `triggerType: "webhook"` — the incoming endpoint path + signing secret. */
+  triggerWebhookPath?: string;
+  triggerSigningSecret?: string;
+  /**
+   * Field mappings the trigger emits into the journey's variable space — each row
+   * binds an incoming payload path (`def`, a JSONPath) to a workflow variable (`v`,
+   * e.g. `contact.phone`). Mirrors how the Audience node seeds `contact.*`.
+   */
+  triggerVarMap?: PresetVarMap[];
+  /** Optional attribute filters that gate which inbound events actually enter the journey. */
+  triggerFilters?: PresetCondition[];
+  // ---- Trigger · On chat message (inbound conversational entry) ----
+  /** Inbound channel the journey listens on. WhatsApp in v1; RCS/SMS later. */
+  chatChannel?: "whatsapp";
+  /** Which sender (WABA number) receives the message — a `sendersFor("whatsapp")` id. */
+  chatSenderId?: string;
+  /** `any` admits every inbound message; `keyword` gates on {@link chatKeywords}. */
+  chatMatchMode?: "any" | "keyword";
+  /** Keywords (case-insensitive, substring match) that open the journey when
+   *  `chatMatchMode: "keyword"`. */
+  chatKeywords?: string[];
+
   // ---- Ads Campaign (CTWA entry) ----
   /**
    * {@link file://./ctwa-types.ts CtwaAd} id this node listens to. The ad itself is
@@ -332,6 +389,7 @@ export const NODE_GROUPS: Record<NodeKind, NodeGroup> = {
   end: "system",
   audience: "data",
   apiToolCall: "data",
+  trigger: "data",
   conditional: "logic",
   abSplit: "logic",
   delay: "logic",
@@ -350,6 +408,7 @@ export const NODE_LABELS: Record<NodeKind, string> = {
   end: "End",
   audience: "Audience",
   apiToolCall: "Tool",
+  trigger: "Trigger",
   conditional: "Conditional Branch",
   abSplit: "A/B Split",
   delay: "Delay",
@@ -374,6 +433,7 @@ export const SERIAL_PREFIX: Record<NodeKind, string> = {
   end: "end",
   audience: "audience",
   apiToolCall: "api",
+  trigger: "trigger",
   conditional: "cond",
   abSplit: "split",
   delay: "delay",
@@ -443,4 +503,17 @@ export const CTWA_SCHEMA_FIELDS: {
   { key: "contact.ad_body", label: "Ad body", group: "attribution", source: "referral.body" },
   { key: "contact.ad_media", label: "Ad media", group: "attribution", source: "referral.image_url" },
   { key: "contact.click_timestamp", label: "Click timestamp", group: "attribution", source: "messages[0].timestamp" },
+];
+
+/**
+ * Fixed schema an **On chat message** trigger carries into the journey. Like CTWA,
+ * the shape is platform-defined (Meta's inbound-message webhook), not mapped by
+ * hand, so downstream nodes resolve `contact.*` / `message.*` unchanged.
+ */
+export const CHAT_MESSAGE_SCHEMA_FIELDS: { key: string; label: string; source: string }[] = [
+  { key: "contact.phone", label: "Phone number", source: "messages[0].from" },
+  { key: "contact.name", label: "WhatsApp profile name", source: "contacts[0].profile.name" },
+  { key: "message.text", label: "Message text", source: "messages[0].text.body" },
+  { key: "message.type", label: "Message type", source: "messages[0].type" },
+  { key: "message.timestamp", label: "Received at", source: "messages[0].timestamp" },
 ];

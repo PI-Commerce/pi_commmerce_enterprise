@@ -7,16 +7,42 @@
 import { type WaTemplate } from "@/lib/waba-templates";
 import { type SmsTemplate, smsPlaceholders } from "@/lib/sms-templates";
 import { type RcsTemplate, templatePlaceholders } from "@/lib/rcs-templates";
-import { SEED_RCS_CONFIG } from "@/lib/rcs-config";
+import { SEED_RCS_CONFIG, agentById } from "@/lib/rcs-config";
 
-/** The (fake) send endpoint we advertise. */
-export const SEND_API_BASE = "https://api.picommerce.paytm.com/v1";
+/** The send endpoint we advertise (mirrors production BFF). */
+export const SEND_API_BASE = "https://pi-commerce-bff.paytm.com/api/pi-commerce/v1";
 
 /** A demo API key. Real product would mint merchant-scoped, revocable keys. */
 export const DEMO_API_KEY = "pk_live_9f2c7b41a8e34d02b6c1f5e9d7a03c88";
 
 export type CurlChannel = "whatsapp" | "sms" | "rcs";
-export type TemplateVar = { token: string; sample: string };
+
+/**
+ * A single template variable. WhatsApp numbers {{n}} PER COMPONENT: the header,
+ * the body, and each button all restart at {{1}}, so a header {{1}} and a body
+ * {{1}} are different values. We therefore tag every WhatsApp var with the
+ * component it belongs to; without that they collide on one flat key (the bug
+ * this fixes). SMS/RCS use flat named variables, so `component`/`buttonIndex`
+ * stay undefined there.
+ */
+export type VarComponent = "header" | "body" | "button";
+export type TemplateVar = {
+  token: string;
+  sample: string;
+  component?: VarComponent;
+  /** 0-based button position, set only when component === "button". */
+  buttonIndex?: number;
+};
+
+/**
+ * A media header (image/video/document) has no {{n}} token — it binds a media
+ * link (and, for documents, a filename) instead of positional text.
+ */
+export type HeaderMedia = {
+  format: "IMAGE" | "VIDEO" | "DOCUMENT";
+  sampleUrl: string;
+  filename?: string;
+};
 
 /** Channel-agnostic descriptor the Get-cURL dialog renders from. */
 export type CurlTemplate = {
@@ -25,6 +51,8 @@ export type CurlTemplate = {
   name: string;
   language?: string;
   variables: TemplateVar[];
+  /** WhatsApp media-header templates only: the header media link binding. */
+  headerMedia?: HeaderMedia;
   /**
    * The sender this template is already pinned to, if any. SMS templates carry a
    * DLT header and RCS templates carry an agent, so those resolve automatically;
@@ -45,7 +73,7 @@ export type Sender = { id: string; label: string; meta?: string };
 /**
  * Per-channel sender metadata: the JSON field the API expects, plus the copy used
  * in the dialog. WhatsApp sends from a phone number (`from`), SMS from a DLT header
- * (`sender_id`), RCS from an agent (`agent_id`).
+ * (`sender_id`), RCS from an agent (`agent_name`).
  */
 export const SENDER_META: Record<
   CurlChannel,
@@ -66,10 +94,10 @@ export const SENDER_META: Record<
     empty: "No SMS header registered.",
   },
   rcs: {
-    field: "agent_id",
+    field: "agent_name",
     label: "RCS agent",
     hint: "The RCS agent the message is sent from.",
-    placeholder: "AGENT_ID",
+    placeholder: "AGENT_NAME",
     empty: "No RCS agent configured.",
   },
 };
@@ -96,9 +124,10 @@ const SMS_SENDERS: Sender[] = [
 export function sendersFor(channel: CurlChannel): Sender[] {
   if (channel === "whatsapp") return WHATSAPP_SENDERS;
   if (channel === "sms") return SMS_SENDERS;
-  // RCS — flatten every agent across the merchant's brands.
+  // RCS — flatten every agent across the merchant's brands. The payload field is
+  // `agent_name`, so the sender id IS the agent name (what production sends).
   return SEED_RCS_CONFIG.brands.flatMap((b) =>
-    b.agents.map((a) => ({ id: a.id, label: a.name, meta: `${b.name} · ${a.type}` })),
+    b.agents.map((a) => ({ id: a.name, label: a.name, meta: `${b.name} · ${a.type}` })),
   );
 }
 
@@ -119,14 +148,67 @@ export function extractVariables(...texts: (string | undefined)[]): number[] {
   return [...set].sort((a, b) => a - b);
 }
 
-/** Adapt a WhatsApp template into the channel-agnostic curl descriptor. */
+/**
+ * Header/button sample values are deliberately kept DIFFERENT from the body
+ * samples so a template that reuses {{1}} across components (e.g. header {{1}} +
+ * body {{1}}) shows two distinct values in the curl — making it obvious they no
+ * longer collide.
+ */
+const SAMPLE_REFERENCE = "OD-2291";
+
+function sampleMediaUrl(format: HeaderMedia["format"]): string {
+  if (format === "IMAGE") return "https://cdn.picomm.in/media/banner.jpg";
+  if (format === "VIDEO") return "https://cdn.picomm.in/media/promo.mp4";
+  return "https://cdn.picomm.in/docs/statement.pdf";
+}
+
+/**
+ * Adapt a WhatsApp template into the channel-agnostic curl descriptor. WhatsApp
+ * numbers {{n}} per component, so scan the header, body, and each button
+ * separately and tag every variable with the component it belongs to. A media
+ * header (image/video/document) carries no {{n}} — it binds a link instead.
+ */
 export function waToCurlTemplate(t: WaTemplate): CurlTemplate {
+  const variables: TemplateVar[] = [];
+
+  // Header text variable (Meta allows exactly one). Media-format headers bind a
+  // link via `headerMedia` instead, so only scan TEXT headers for tokens.
+  if (t.format === "TEXT" && t.header) {
+    for (const n of extractVariables(t.header)) {
+      variables.push({ token: String(n), sample: SAMPLE_REFERENCE, component: "header" });
+    }
+  }
+
+  // Body variables — the common case.
+  for (const n of extractVariables(t.body)) {
+    variables.push({ token: String(n), sample: sampleFor(n), component: "body" });
+  }
+
+  // Dynamic URL button variables, keyed by the button's position in the list.
+  (t.buttons ?? []).forEach((b, i) => {
+    if (b.type === "URL" && b.urlType === "Dynamic" && b.urlSuffix) {
+      for (const n of extractVariables(b.urlSuffix)) {
+        variables.push({ token: String(n), sample: SAMPLE_REFERENCE, component: "button", buttonIndex: i });
+      }
+    }
+  });
+
+  const headerMedia: HeaderMedia | undefined =
+    t.format === "TEXT"
+      ? undefined
+      : {
+          format: t.format,
+          sampleUrl: sampleMediaUrl(t.format),
+          ...(t.format === "DOCUMENT" ? { filename: "statement.pdf" } : {}),
+        };
+
   return {
     channel: "whatsapp",
     id: t.id,
     name: t.name,
     language: t.language,
-    variables: extractVariables(t.body).map((n) => ({ token: String(n), sample: sampleFor(n) })),
+    variables,
+    headerMedia,
   };
 }
 
@@ -175,7 +257,9 @@ export function rcsToCurlTemplate(t: RcsTemplate): CurlTemplate {
     id: t.id,
     name: t.name,
     variables: templatePlaceholders(t).map((name) => ({ token: name, sample: sampleForName(name) })),
-    defaultSenderId: t.agentId,
+    // The template pins an agent by its stable id; the payload names it by
+    // `agent_name`, so resolve the id to the agent's display name.
+    defaultSenderId: agentById(SEED_RCS_CONFIG, t.agentId)?.name,
   };
 }
 
@@ -183,27 +267,77 @@ export function endpointFor(channel: CurlChannel): string {
   return `${SEND_API_BASE}/messages/${channel}/send`;
 }
 
+/** Gather one component's vars into a positional map, or null if it has none. */
+function collectScope(vars: TemplateVar[], component: VarComponent): Record<string, string> | null {
+  const out: Record<string, string> = {};
+  for (const v of vars) if (v.component === component) out[v.token] = v.sample;
+  return Object.keys(out).length ? out : null;
+}
+
 /** The copy-paste curl for a template. */
 export function curlSnippet(
   t: CurlTemplate,
-  opts: { apiKey: string; phone?: string; senderId?: string },
+  opts: { apiKey: string; phone?: string; senderId?: string; defaultCountry?: string },
 ): string {
-  const variables: Record<string, string> = {};
-  for (const v of t.variables) variables[v.token] = v.sample;
-
   const recipient: Record<string, unknown> = { to: opts.phone ?? "+919876543210" };
-  if (t.variables.length) recipient.variables = variables;
 
-  // Sender is a top-level field (per channel: `from` / `sender_id` / `agent_id`).
+  if (t.channel === "whatsapp") {
+    // Component-scoped: header / body / buttons each keep their own {{n}}, so a
+    // token reused across components (header {{1}} + body {{1}}) never collides.
+    // The BFF maps each scope onto Meta's template.components[].parameters[].
+    const scoped: Record<string, unknown> = {};
+
+    if (t.headerMedia) {
+      scoped.header = {
+        media_url: t.headerMedia.sampleUrl,
+        ...(t.headerMedia.filename ? { filename: t.headerMedia.filename } : {}),
+      };
+    } else {
+      const header = collectScope(t.variables, "header");
+      if (header) scoped.header = header;
+    }
+
+    const body = collectScope(t.variables, "body");
+    if (body) scoped.body = body;
+
+    const buttons: Record<string, Record<string, string>> = {};
+    for (const v of t.variables) {
+      if (v.component !== "button") continue;
+      const idx = String(v.buttonIndex ?? 0);
+      (buttons[idx] ??= {})[v.token] = v.sample;
+    }
+    if (Object.keys(buttons).length) scoped.buttons = buttons;
+
+    if (Object.keys(scoped).length) recipient.variables = scoped;
+  } else {
+    // SMS / RCS: flat named variables, no components.
+    const variables: Record<string, string> = {};
+    for (const v of t.variables) variables[v.token] = v.sample;
+    if (t.variables.length) recipient.variables = variables;
+  }
+
+  // Sender is a top-level field (per channel: `from` / `sender_id` / `agent_name`).
   // Fall back to the channel placeholder so the shape is always visible even
   // before the caller has picked one.
   const senderField = SENDER_META[t.channel].field;
   const senderValue = opts.senderId ?? SENDER_META[t.channel].placeholder;
 
+  // WhatsApp names the template by `template_name`; SMS/RCS name it by
+  // `template_id`. WhatsApp is the only channel that carries a `language`.
+  const isWhatsApp = t.channel === "whatsapp";
+  const templateRef = isWhatsApp ? { template_name: t.name } : { template_id: t.id };
+
+  // Every template channel accepts an optional `default_country`: a recipient carrying
+  // its own +code is used as-is, and a bare national number is parsed against this ISO
+  // code (passed straight to libphonenumber as its defaultCountry). WhatsApp can send
+  // anywhere, so this is a plain parse hint. For SMS/RCS it is accepted too and not
+  // gated here — if the resolved country does not match where the sender/carrier
+  // operates, the send still queues and the failure surfaces later in Analytics/DLT.
   const body: Record<string, unknown> = {
-    template_id: t.id,
+    ...templateRef,
     ...(t.language ? { language: t.language } : {}),
     [senderField]: senderValue,
+    ...(opts.defaultCountry ? { default_country: opts.defaultCountry } : {}),
     recipients: [recipient],
   };
 
@@ -214,7 +348,7 @@ export function curlSnippet(
 
   return [
     `curl -X POST '${endpointFor(t.channel)}' \\`,
-    `  -H 'Authorization: Bearer ${opts.apiKey}' \\`,
+    `  -H 'X-API-Key: ${opts.apiKey}' \\`,
     `  -H 'Content-Type: application/json' \\`,
     `  -d '${json}'`,
   ].join("\n");

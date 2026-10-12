@@ -17,26 +17,26 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  Plus, Search, MoreHorizontal, Copy, Workflow,
+  Plus, Search, MoreHorizontal, Copy, CopyPlus, Workflow, Trash2, Power, PowerOff,
   CircleDashed, CircleCheck, CircleX, CirclePause, CircleDot,
   Pause, Play, Square, ArrowUp, ArrowDown, ChevronsUpDown, Check,
   Upload, Download, FileSpreadsheet, Database, ChevronLeft, ChevronRight,
-  Webhook,
+  Webhook, Zap, Megaphone, ArrowLeft,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { STATUS_TONE, type CampaignStatus } from "@/lib/campaign-types";
+import { STATUS_TONE, type CampaignStatus, type JourneyType } from "@/lib/campaign-types";
 import { EXAMPLE_CAMPAIGN_NAMES } from "@/lib/campaign-examples";
 import { CreateRunDialog, type CampaignOption, type CreateRunPayload } from "@/components/workflow/CreateRunDialog";
 import { CSV_LIBRARY, makeCsvAsset, type CsvAsset } from "@/lib/data-library";
 
 
-export const Route = createFileRoute("/campaigns/")({
+export const Route = createFileRoute("/journeys/")({
   component: CampaignList,
   head: () => ({
     meta: [
-      { title: "Campaigns · Pi Commerce Enterprise" },
-      { name: "description", content: "Design, run and review every orchestrated campaign." },
+      { title: "Journeys · Pi Commerce Enterprise" },
+      { name: "description", content: "Design, run and review every orchestrated journey — outbound and inbound." },
     ],
   }),
 });
@@ -48,6 +48,7 @@ type CampaignRow = {
   id: string;
   name: string;
   state: CampaignStatus;
+  journeyType: JourneyType;
   createdAt: string;
   createdAtTs: number;
   lastEdited: string;
@@ -60,6 +61,10 @@ type CampaignRow = {
   /** Count of live/associated runs — surfaced so the user sees editing risk
    *  (publishing edits mints a new version that only new leads follow). */
   activeRuns: number;
+  /** Inbound journeys have no Run construct — their liveness is a simple
+   *  Active (listening for trigger events) / Inactive (paused) toggle.
+   *  Only meaningful when journeyType === "inbound". */
+  inboundActive?: boolean;
 };
 
 const NOW = Date.now();
@@ -77,13 +82,17 @@ const EXAMPLE_ROWS: CampaignRow[] = EXAMPLE_CAMPAIGN_NAMES.map((e, i) => ({
   id: e.id,
   name: e.name,
   state: e.status,
+  journeyType: e.journeyType,
   createdAt: "Today · 09:00",
   createdAtTs: NOW - 1 * H,
   lastEdited: "just now",
   lastEditedTs: NOW - (i + 1) * 1000,
   runType: "one-time" as RunType,
   lastRun: "—" as LastRunStatus,
-  activeRuns: e.status === "ready" ? RUN_SEED[i % RUN_SEED.length] : 0,
+  activeRuns: e.journeyType === "inbound" ? 0 : e.status === "ready" ? RUN_SEED[i % RUN_SEED.length] : 0,
+  // Inbound journeys are either actively listening or paused. Seed a mix so both
+  // states are visible; cloned journeys always start inactive.
+  inboundActive: e.journeyType === "inbound" ? e.id !== "c_in2" : undefined,
 }));
 
 // Only the sales-team example library is shown — older demo campaigns were
@@ -142,12 +151,23 @@ const RUNS: RunRow[] = [
   { id: "r_8414", campaign: "E-commerce · Price Drop",       status: "completed",  runType: "recurring", triggerMode: "api",    startedAt: "Yesterday, 09:00 AM",completedAt: "Yesterday, 10:12 AM", leadsProcessed: 980 },
 ];
 
-type Tab = "data" | "campaigns" | "runs";
+// Top-level split: a journey is either Outbound (Start + Audience, broadcast to a
+// list, has Runs) or Inbound (Trigger entry, reacts to events in real time, no
+// Runs). Outbound further splits into Journeys / Runs / Data; Inbound is just a
+// Journeys list.
+type Plane = JourneyType;
+type OutTab = "journeys" | "runs" | "data";
 
 function CampaignList() {
   const navigate = useNavigate();
-  const [tab, setTab] = useState<Tab>("campaigns");
-  const [rows] = useState<CampaignRow[]>(INITIAL);
+  const [plane, setPlane] = useState<Plane>("outbound");
+  const [outTab, setOutTab] = useState<OutTab>("journeys");
+  const [rows, setRows] = useState<CampaignRow[]>(INITIAL);
+
+  // What the main body shows, derived from the two-level selection.
+  const showData = plane === "outbound" && outTab === "data";
+  const showRuns = plane === "outbound" && outTab === "runs";
+  const showJourneys = !showData && !showRuns;
 
   // Data library (CSV library tab — scope C1–C3). Shared source of truth with
   // the Run modal's "select previously uploaded CSV" dropdown (WS6).
@@ -174,6 +194,8 @@ function CampaignList() {
   };
   const [query, setQuery] = useState("");
   const [fState, setFState] = useState<"all" | CampaignStatus>("all");
+  // Inbound journeys filter on Active/Inactive (their only "status" concept).
+  const [fInbound, setFInbound] = useState<"all" | "active" | "inactive">("all");
   const [createOpen, setCreateOpen] = useState(false);
   const [createRunOpen, setCreateRunOpen] = useState(false);
   const [runFor, setRunFor] = useState<CampaignRow | null>(null);
@@ -199,9 +221,17 @@ function CampaignList() {
     else { setSortKey(k); setSortDir(k === "name" || k === "state" ? "asc" : "desc"); }
   };
 
-  const filtered = rows.filter((r) => {
-    if (fState !== "all" && r.state !== fState) return false;
+  // Rows for the currently-selected plane (Inbound vs Outbound).
+  const planeRows = rows.filter((r) => r.journeyType === plane);
+
+  const filtered = planeRows.filter((r) => {
     if (query && !r.name.toLowerCase().includes(query.toLowerCase())) return false;
+    if (plane === "inbound") {
+      // Inbound journeys have no draft/ready state — filter on Active/Inactive.
+      if (fInbound !== "all" && (fInbound === "active") !== !!r.inboundActive) return false;
+    } else if (fState !== "all" && r.state !== fState) {
+      return false;
+    }
     return true;
   });
 
@@ -210,7 +240,12 @@ function CampaignList() {
     const NULL_LO = sortDir === "asc" ? Infinity : -Infinity;
     switch (sortKey) {
       case "name":       return a.name.localeCompare(b.name) * dir;
-      case "state":      return a.state.localeCompare(b.state) * dir;
+      case "state": {
+        if (plane === "inbound") {
+          return ((a.inboundActive ? 1 : 0) - (b.inboundActive ? 1 : 0)) * dir;
+        }
+        return a.state.localeCompare(b.state) * dir;
+      }
       case "lastEdited": return (a.lastEditedTs - b.lastEditedTs) * dir;
       case "createdAt":  return (a.createdAtTs - b.createdAtTs) * dir;
       case "lastRun": {
@@ -224,7 +259,7 @@ function CampaignList() {
   // Pagination for the campaigns table.
   const C_PAGE_SIZE = 8;
   const [cPage, setCPage] = useState(1);
-  useEffect(() => { setCPage(1); }, [query, fState, sortKey, sortDir]);
+  useEffect(() => { setCPage(1); }, [query, fState, fInbound, sortKey, sortDir, plane, outTab]);
   const cTotalPages = Math.max(1, Math.ceil(sorted.length / C_PAGE_SIZE));
   const cPageSafe = Math.min(cPage, cTotalPages);
   const pageRows = sorted.slice((cPageSafe - 1) * C_PAGE_SIZE, cPageSafe * C_PAGE_SIZE);
@@ -242,12 +277,39 @@ function CampaignList() {
     return true;
   });
 
-  // Duplicate & Archive campaign are OOS for v1 (scope D1/D2) — handlers removed.
+  // Inbound journey row actions. Inbound has no Run construct, so its lifecycle is
+  // just: clone, toggle Active/Inactive, and delete.
+  const handleClone = (c: CampaignRow) => {
+    const now = Date.now();
+    const copy: CampaignRow = {
+      ...c,
+      id: `c_${now.toString(36)}`,
+      name: `${c.name} (copy)`,
+      lastEdited: "just now",
+      lastEditedTs: now,
+      createdAt: "just now",
+      createdAtTs: now,
+      activeRuns: 0,
+      inboundActive: false, // clones start paused
+    };
+    setRows((prev) => [copy, ...prev]);
+    toast.success("Journey cloned", { description: copy.name });
+  };
 
-  const handleCreate = (name: string, description?: string, objective?: string) => {
+  const handleDelete = (c: CampaignRow) => {
+    setRows((prev) => prev.filter((r) => r.id !== c.id));
+    toast.success("Journey deleted", { description: c.name });
+  };
+
+  const toggleInboundActive = (c: CampaignRow) => {
+    setRows((prev) => prev.map((r) => (r.id === c.id ? { ...r, inboundActive: !r.inboundActive } : r)));
+    toast.success(c.inboundActive ? "Journey deactivated" : "Journey activated", { description: c.name });
+  };
+
+  const handleCreate = (journeyType: JourneyType, name: string, description?: string, objective?: string) => {
     setCreateOpen(false);
-    toast.success("Campaign created", { description: `${name} · opening builder in Draft` });
-    navigate({ to: "/campaigns/$id", params: { id: "new" }, search: { name, description, objective } as never });
+    toast.success("Journey created", { description: `${name} · opening builder in Draft` });
+    navigate({ to: "/journeys/$id", params: { id: "new" }, search: { name, description, objective, journeyType } as never });
   };
 
   // After an API-sourced run is created, surface its unique trigger endpoint in a
@@ -264,30 +326,31 @@ function CampaignList() {
     }
   };
 
-  const hasAny = rows.length > 0;
+  const hasAny = planeRows.length > 0;
   const runningCount = RUNS.filter((r) => r.status === "running").length;
+  const outboundCount = rows.filter((r) => r.journeyType === "outbound").length;
+  const inboundCount = rows.filter((r) => r.journeyType === "inbound").length;
 
   return (
     <AppShell>
       <PageHeader
-        title="Campaigns"
-        description="Design and orchestrate every customer journey across channels."
+        title="Journeys"
+        description="Design and orchestrate every customer journey across channels — outbound broadcasts and inbound, event-triggered flows."
         actions={
-          tab === "data" ? (
+          showData ? (
             <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={() => fileRef.current?.click()}>
               <Upload className="h-3.5 w-3.5" /> Upload CSV
             </Button>
-          ) : tab === "campaigns" ? (
-            <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={() => setCreateOpen(true)}>
-              <Plus className="h-3.5 w-3.5" /> Create campaign
+          ) : showRuns ? (
+            <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={() => setCreateRunOpen(true)}>
+              <Plus className="h-3.5 w-3.5" /> Run journey
             </Button>
           ) : (
-            <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={() => setCreateRunOpen(true)}>
-              <Plus className="h-3.5 w-3.5" /> Run Campaign
+            <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={() => setCreateOpen(true)}>
+              <Plus className="h-3.5 w-3.5" /> Create journey
             </Button>
           )
         }
-
       />
 
       <input
@@ -298,19 +361,33 @@ function CampaignList() {
         onChange={onPickCsv}
       />
 
-      <PageTabs<Tab>
+      {/* Primary split: Outbound vs Inbound journeys. */}
+      <PageTabs<Plane>
         tabs={[
-          { id: "data", label: "Data", count: assets.length },
-          { id: "campaigns", label: "Campaigns", count: rows.length },
-          { id: "runs", label: "Runs", count: runningCount },
+          { id: "outbound", label: "Outbound", count: outboundCount },
+          { id: "inbound", label: "Inbound", count: inboundCount },
         ]}
-        value={tab}
-        onChange={setTab}
+        value={plane}
+        onChange={setPlane}
       />
 
-      {tab === "data" ? (
+      {/* Secondary view — only Outbound carries Runs and a Data library.
+          Inbound journeys are event-triggered, so they have no Run construct. */}
+      {plane === "outbound" && (
+        <SubTabs<OutTab>
+          tabs={[
+            { id: "journeys", label: "Journeys", count: outboundCount },
+            { id: "runs", label: "Runs", count: runningCount },
+            { id: "data", label: "Data", count: assets.length },
+          ]}
+          value={outTab}
+          onChange={setOutTab}
+        />
+      )}
+
+      {showData ? (
         <DataLibraryPanel assets={assets} onUpload={() => fileRef.current?.click()} />
-      ) : tab === "campaigns" ? (
+      ) : showJourneys ? (
         <>
           {/* Toolbar */}
           <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -319,35 +396,52 @@ function CampaignList() {
               <Input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search campaigns…"
+                placeholder="Search journeys…"
                 className="h-8 pl-8 text-xs"
               />
             </div>
 
-            <FilterSelect
-              label="State"
-              value={fState}
-              onChange={(v) => setFState(v as typeof fState)}
-              options={[{ value: "all", label: "All states" }, ...STATES.map((s) => ({ value: s, label: cap(s) }))]}
-            />
+            {plane === "inbound" ? (
+              <FilterSelect
+                label="Status"
+                value={fInbound}
+                onChange={(v) => setFInbound(v as typeof fInbound)}
+                options={[
+                  { value: "all", label: "All statuses" },
+                  { value: "active", label: "Active" },
+                  { value: "inactive", label: "Inactive" },
+                ]}
+              />
+            ) : (
+              <FilterSelect
+                label="State"
+                value={fState}
+                onChange={(v) => setFState(v as typeof fState)}
+                options={[{ value: "all", label: "All states" }, ...STATES.map((s) => ({ value: s, label: cap(s) }))]}
+              />
+            )}
           </div>
 
           {!hasAny ? (
             <EmptyState onCreate={() => setCreateOpen(true)} />
           ) : filtered.length === 0 ? (
             <div className="rounded-xl border border-dashed border-border bg-card/40 px-6 py-16 text-center">
-              <p className="text-sm text-muted-foreground">No campaigns match these filters.</p>
+              <p className="text-sm text-muted-foreground">No journeys match these filters.</p>
             </div>
           ) : (
             <div className="overflow-hidden rounded-xl border border-border bg-card">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border bg-secondary/30 text-[11px] uppercase tracking-wider text-muted-foreground">
-                    <SortHeader label="Campaign name" k="name" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                    <SortHeader label="Journey name" k="name" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                     <SortHeader label="Status" k="state" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
-                    <th className="px-4 py-2.5 text-left font-medium">Associated runs</th>
+                    {plane === "outbound" && (
+                      <th className="px-4 py-2.5 text-left font-medium">Associated runs</th>
+                    )}
                     <SortHeader label="Last edited" k="lastEdited" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
-                    <SortHeader label="Last run" k="lastRun" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                    {plane === "outbound" && (
+                      <SortHeader label="Last run" k="lastRun" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                    )}
                     <SortHeader label="Created at" k="createdAt" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                     <th className="w-10 px-2 py-2.5" />
                   </tr>
@@ -358,13 +452,13 @@ function CampaignList() {
                     return (
                       <tr key={c.id} className="transition-colors hover:bg-accent/30">
                         <td className="px-4 py-3">
-                          <Link to="/campaigns/$id" params={{ id: c.id }} className="font-medium hover:underline">
+                          <Link to="/journeys/$id" params={{ id: c.id }} className="font-medium hover:underline">
                             {c.name}
                           </Link>
                           <button
                             type="button"
                             onClick={() => copyId(c.id)}
-                            title="Copy campaign ID"
+                            title="Copy journey ID"
                             className="group/id flex items-center gap-1 font-mono text-[11px] text-muted-foreground transition-colors hover:text-foreground"
                           >
                             {c.id}
@@ -376,41 +470,49 @@ function CampaignList() {
                           </button>
                         </td>
                         <td className="px-4 py-3">
-                          <StateTag state={c.state} />
-                        </td>
-                        <td className="px-4 py-3">
-                          {c.activeRuns > 0 ? (
-                            <span
-                              title={`${c.activeRuns} associated run${c.activeRuns > 1 ? "s" : ""} — editing and publishing mints a new version that only new leads follow`}
-                              className="inline-flex items-center gap-1.5 rounded-full border border-warning/30 bg-warning/10 px-2 py-0.5 text-[11px] font-medium text-warning"
-                            >
-                              <CircleDot className="h-3 w-3" />
-                              {c.activeRuns} run{c.activeRuns > 1 ? "s" : ""}
-                            </span>
+                          {plane === "inbound" ? (
+                            <InboundStateTag active={!!c.inboundActive} />
                           ) : (
-                            <span className="text-[12px] text-muted-foreground">No runs</span>
+                            <StateTag state={c.state} />
                           )}
                         </td>
-                        <td className="px-4 py-3 text-[12px] text-muted-foreground">{c.lastEdited}</td>
-                        <td className="px-4 py-3">
-                          {c.lastRunAt ? (
-                            <div className="flex flex-col leading-tight">
-                              <span className={cn("inline-flex items-center gap-1.5 text-[12px]", LR.tone)}>
-                                <LR.icon className={cn("h-3.5 w-3.5", c.lastRun === "running" && "animate-pulse")} />
-                                {c.lastRunAt}
+                        {plane === "outbound" && (
+                          <td className="px-4 py-3">
+                            {c.activeRuns > 0 ? (
+                              <span
+                                title={`${c.activeRuns} associated run${c.activeRuns > 1 ? "s" : ""} — editing and publishing mints a new version that only new leads follow`}
+                                className="inline-flex items-center gap-1.5 rounded-full border border-warning/30 bg-warning/10 px-2 py-0.5 text-[11px] font-medium text-warning"
+                              >
+                                <CircleDot className="h-3 w-3" />
+                                {c.activeRuns} run{c.activeRuns > 1 ? "s" : ""}
                               </span>
-                              {c.lastRunId && (
-                                <span className="ml-5 font-mono text-[11px] text-muted-foreground">{c.lastRunId}</span>
-                              )}
-                            </div>
-                          ) : (
-                            <span className="text-[12px] text-muted-foreground">—</span>
-                          )}
-                        </td>
+                            ) : (
+                              <span className="text-[12px] text-muted-foreground">No runs</span>
+                            )}
+                          </td>
+                        )}
+                        <td className="px-4 py-3 text-[12px] text-muted-foreground">{c.lastEdited}</td>
+                        {plane === "outbound" && (
+                          <td className="px-4 py-3">
+                            {c.lastRunAt ? (
+                              <div className="flex flex-col leading-tight">
+                                <span className={cn("inline-flex items-center gap-1.5 text-[12px]", LR.tone)}>
+                                  <LR.icon className={cn("h-3.5 w-3.5", c.lastRun === "running" && "animate-pulse")} />
+                                  {c.lastRunAt}
+                                </span>
+                                {c.lastRunId && (
+                                  <span className="ml-5 font-mono text-[11px] text-muted-foreground">{c.lastRunId}</span>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-[12px] text-muted-foreground">—</span>
+                            )}
+                          </td>
+                        )}
                         <td className="px-4 py-3 text-[12px] text-muted-foreground">{c.createdAt}</td>
                         <td className="px-2 py-3 text-right">
                           <div className="flex items-center justify-end gap-1">
-                          {c.state === "ready" && (
+                          {plane === "outbound" && c.state === "ready" && (
                             <Button
                               size="sm"
                               className="h-7 gap-1 px-2 text-xs"
@@ -425,13 +527,34 @@ function CampaignList() {
                                 <MoreHorizontal className="h-4 w-4" />
                               </Button>
                             </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-40">
+                            <DropdownMenuContent align="end" className="w-44">
                               <DropdownMenuItem
-                                onClick={() => navigate({ to: "/campaigns/$id", params: { id: c.id } })}
+                                onClick={() => navigate({ to: "/journeys/$id", params: { id: c.id } })}
                                 className="gap-2 text-xs"
                               >
                                 <Workflow className="h-3.5 w-3.5" /> Open
                               </DropdownMenuItem>
+                              {plane === "inbound" && (
+                                <>
+                                  <DropdownMenuItem onClick={() => toggleInboundActive(c)} className="gap-2 text-xs">
+                                    {c.inboundActive ? (
+                                      <><PowerOff className="h-3.5 w-3.5" /> Deactivate</>
+                                    ) : (
+                                      <><Power className="h-3.5 w-3.5" /> Activate</>
+                                    )}
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => handleClone(c)} className="gap-2 text-xs">
+                                    <CopyPlus className="h-3.5 w-3.5" /> Clone
+                                  </DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem
+                                    onClick={() => handleDelete(c)}
+                                    className="gap-2 text-xs text-destructive focus:text-destructive"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" /> Delete
+                                  </DropdownMenuItem>
+                                </>
+                              )}
                             </DropdownMenuContent>
                           </DropdownMenu>
                           </div>
@@ -447,7 +570,7 @@ function CampaignList() {
           {filtered.length > 0 && (
             <div className="mt-3 flex items-center justify-between gap-3">
               <p className="text-[12px] text-muted-foreground">
-                Showing {cRangeStart}–{cRangeEnd} of {sorted.length} campaigns
+                Showing {cRangeStart}–{cRangeEnd} of {sorted.length} journeys
               </p>
               {cTotalPages > 1 && (
                 <div className="flex items-center gap-1.5">
@@ -482,7 +605,7 @@ function CampaignList() {
               <Input
                 value={rQuery}
                 onChange={(e) => setRQuery(e.target.value)}
-                placeholder="Search by run id or campaign…"
+                placeholder="Search by run id or journey…"
                 className="h-8 pl-8 text-xs"
               />
             </div>
@@ -509,7 +632,7 @@ function CampaignList() {
               <thead>
                 <tr className="border-b border-border bg-secondary/30 text-[11px] uppercase tracking-wider text-muted-foreground">
                   <th className="px-4 py-2.5 text-left font-medium">Run ID</th>
-                  <th className="px-4 py-2.5 text-left font-medium">Campaign</th>
+                  <th className="px-4 py-2.5 text-left font-medium">Journey</th>
                   <th className="px-4 py-2.5 text-left font-medium">Status</th>
                   <th className="px-4 py-2.5 text-left font-medium">Run type</th>
                   <th className="px-4 py-2.5 text-left font-medium">Audience source</th>
@@ -592,6 +715,7 @@ function CampaignList() {
       <CreateCampaignDialog
         open={createOpen}
         onOpenChange={setCreateOpen}
+        defaultType={plane}
         onCreate={handleCreate}
       />
       <CreateRunDialog
@@ -740,6 +864,24 @@ function StateTag({ state }: { state: CampaignStatus }) {
   );
 }
 
+// Inbound journeys don't have draft/ready — they're either Active (listening for
+// trigger events) or Inactive (paused). A live pulse marks the active state.
+function InboundStateTag({ active }: { active: boolean }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium",
+        active
+          ? "border-success/30 bg-success/10 text-success"
+          : "border-border bg-secondary text-muted-foreground",
+      )}
+    >
+      <span className={cn("h-1.5 w-1.5 rounded-full bg-current", active ? "animate-pulse" : "opacity-60")} />
+      {active ? "Active" : "Inactive"}
+    </span>
+  );
+}
+
 function RunRowMenu({ status, runId, triggerMode }: { status: RunStatus; runId: string; triggerMode: TriggerMode }) {
   const canPause = status === "running";
   const canResume = status === "paused";
@@ -843,99 +985,240 @@ function FilterSelect({
   );
 }
 
+// Secondary, lighter tab control nested under the primary Outbound/Inbound split.
+// A segmented pill row keeps the two levels visually distinct from the primary
+// underline tabs above it.
+function SubTabs<T extends string>({
+  tabs, value, onChange,
+}: {
+  tabs: ReadonlyArray<{ id: T; label: string; count?: number }>;
+  value: T;
+  onChange: (id: T) => void;
+}) {
+  return (
+    <div className="mb-4 inline-flex items-center gap-0.5 rounded-lg border border-border bg-secondary/40 p-0.5">
+      {tabs.map((t) => {
+        const active = t.id === value;
+        return (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => onChange(t.id)}
+            className={cn(
+              "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
+              active ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {t.label}
+            {t.count !== undefined && (
+              <span className="font-mono text-[10px] text-muted-foreground">{t.count}</span>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function EmptyState({ onCreate }: { onCreate: () => void }) {
   return (
     <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border bg-card/40 px-6 py-20 text-center">
       <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl border border-border bg-secondary">
         <Workflow className="h-6 w-6 text-muted-foreground" />
       </div>
-      <h3 className="text-base font-semibold">No campaigns yet</h3>
+      <h3 className="text-base font-semibold">No journeys yet</h3>
       <p className="mt-1 max-w-sm text-sm text-muted-foreground">
-        Create your first campaign to start orchestrating customer journeys across channels.
+        Create your first journey to start orchestrating customer flows across channels.
       </p>
       <Button size="sm" className="mt-5 h-8 gap-1.5 text-xs" onClick={onCreate}>
-        <Plus className="h-3.5 w-3.5" /> Create campaign
+        <Plus className="h-3.5 w-3.5" /> Create journey
       </Button>
     </div>
   );
 }
 
+// Journey-type metadata for the first step of the create dialog. Keeps the card
+// copy and the step-2 badge in sync.
+const JOURNEY_TYPE_META: Record<JourneyType, { icon: typeof Zap; title: string; blurb: string; detail: string }> = {
+  outbound: {
+    icon: Megaphone,
+    title: "Outbound journey",
+    blurb: "Broadcast to an audience",
+    detail: "Starts from a Start + Audience node. Push to a CSV or API list on a schedule, then branch across channels. Launched as Runs.",
+  },
+  inbound: {
+    icon: Zap,
+    title: "Inbound journey",
+    blurb: "React to a live event",
+    detail: "Starts from a Trigger node — a connector event, webhook or CTWA ad tap. Leads enter in real time, event by event. No Runs.",
+  },
+};
+
 function CreateCampaignDialog({
-  open, onOpenChange, onCreate,
+  open, onOpenChange, onCreate, defaultType,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
-  onCreate: (name: string, description?: string, objective?: string) => void;
+  onCreate: (journeyType: JourneyType, name: string, description?: string, objective?: string) => void;
+  defaultType: JourneyType;
 }) {
+  // Two steps: choose the journey type, then name it.
+  const [step, setStep] = useState<"type" | "details">("type");
+  const [journeyType, setJourneyType] = useState<JourneyType>(defaultType);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [objective, setObjective] = useState<string>("");
 
-  const reset = () => { setName(""); setDescription(""); setObjective(""); };
+  const reset = () => {
+    setStep("type");
+    setJourneyType(defaultType);
+    setName("");
+    setDescription("");
+    setObjective("");
+  };
+
+  // When the dialog is (re)opened, start on the type step defaulted to the plane
+  // the user is currently viewing.
+  useEffect(() => {
+    if (open) { setStep("type"); setJourneyType(defaultType); }
+  }, [open, defaultType]);
+
+  const pickType = (t: JourneyType) => { setJourneyType(t); setStep("details"); };
   const submit = () => {
     if (!name.trim()) return;
-    onCreate(name.trim(), description.trim() || undefined, objective || undefined);
+    onCreate(journeyType, name.trim(), description.trim() || undefined, objective || undefined);
     reset();
   };
+
+  const meta = JOURNEY_TYPE_META[journeyType];
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) reset(); onOpenChange(v); }}>
       <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle className="text-base">Create a Campaign</DialogTitle>
-          <DialogDescription className="text-xs">
-            Name your campaign. You'll design the orchestration in the next step.
-          </DialogDescription>
-        </DialogHeader>
+        {step === "type" ? (
+          <>
+            <DialogHeader>
+              <DialogTitle className="text-base">Create a journey</DialogTitle>
+              <DialogDescription className="text-xs">
+                Choose how this journey starts. You'll design the orchestration in the next step.
+              </DialogDescription>
+            </DialogHeader>
 
-        <div className="space-y-4 py-2">
-          <div className="space-y-1.5">
-            <Label htmlFor="cname" className="text-xs">Campaign name <span className="text-destructive">*</span></Label>
-            <Input
-              id="cname"
-              autoFocus
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Dormant Trader Reactivation"
-              className="h-9 text-sm"
-              onKeyDown={(e) => { if (e.key === "Enter" && name.trim()) submit(); }}
-            />
-          </div>
+            <div className="grid gap-2.5 py-2">
+              {(["outbound", "inbound"] as JourneyType[]).map((t) => {
+                const m = JOURNEY_TYPE_META[t];
+                const Icon = m.icon;
+                return (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => pickType(t)}
+                    className="group flex items-start gap-3 rounded-lg border border-border bg-card p-3 text-left transition-all hover:border-foreground/40 hover:bg-accent/40"
+                  >
+                    <span className={cn(
+                      "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg",
+                      t === "inbound" ? "bg-ai/10 text-ai" : "bg-chart-2/10 text-chart-2",
+                    )}>
+                      <Icon className="h-4 w-4" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-sm font-medium">{m.title}</p>
+                        <span className="text-[11px] text-muted-foreground">{m.blurb}</span>
+                      </div>
+                      <p className="mt-0.5 text-[11.5px] leading-snug text-muted-foreground">{m.detail}</p>
+                    </div>
+                    <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-muted-foreground/50 transition-colors group-hover:text-foreground" />
+                  </button>
+                );
+              })}
+            </div>
 
-          <div className="space-y-1.5">
-            <Label htmlFor="cdesc" className="text-xs">Description</Label>
-            <Textarea
-              id="cdesc"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Briefly describe the goal of this campaign…"
-              rows={3}
-              className="resize-none text-sm"
-            />
-          </div>
+            <DialogFooter>
+              <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => onOpenChange(false)}>Cancel</Button>
+            </DialogFooter>
+          </>
+        ) : (
+          <>
+            <DialogHeader>
+              <DialogTitle className="text-base">Name your {meta.title.toLowerCase()}</DialogTitle>
+              <DialogDescription className="text-xs">
+                {journeyType === "inbound"
+                  ? "You'll pick the trigger and build the flow in the next step."
+                  : "You'll design the orchestration in the next step."}
+              </DialogDescription>
+            </DialogHeader>
 
-          <div className="space-y-1.5">
-            <Label className="text-xs">Objective</Label>
-            <Select value={objective} onValueChange={setObjective}>
-              <SelectTrigger className="h-9 text-sm">
-                <SelectValue placeholder="Select an objective" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="reactivation">Reactivation</SelectItem>
-                <SelectItem value="onboarding">Onboarding</SelectItem>
-                <SelectItem value="retention">Retention</SelectItem>
-                <SelectItem value="conversion">Conversion</SelectItem>
-                <SelectItem value="winback">Win-back</SelectItem>
-                <SelectItem value="awareness">Awareness</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
+            <button
+              type="button"
+              onClick={() => setStep("type")}
+              className="flex w-full items-center gap-2 rounded-md border border-border bg-secondary/40 px-3 py-2 text-left transition-colors hover:bg-accent/40"
+            >
+              <span className={cn(
+                "flex h-7 w-7 shrink-0 items-center justify-center rounded-md",
+                journeyType === "inbound" ? "bg-ai/10 text-ai" : "bg-chart-2/10 text-chart-2",
+              )}>
+                <meta.icon className="h-4 w-4" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-xs font-medium">{meta.title}</span>
+                <span className="block text-[10.5px] text-muted-foreground">{meta.blurb}</span>
+              </span>
+              <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                <ArrowLeft className="h-3 w-3" /> Change
+              </span>
+            </button>
 
-        <DialogFooter>
-          <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button size="sm" className="h-8 text-xs" disabled={!name.trim()} onClick={submit}>Create</Button>
-        </DialogFooter>
+            <div className="space-y-4 py-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="cname" className="text-xs">Journey name <span className="text-destructive">*</span></Label>
+                <Input
+                  id="cname"
+                  autoFocus
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder={journeyType === "inbound" ? "e.g. Payment Failure Recovery" : "e.g. Dormant Trader Reactivation"}
+                  className="h-9 text-sm"
+                  onKeyDown={(e) => { if (e.key === "Enter" && name.trim()) submit(); }}
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="cdesc" className="text-xs">Description</Label>
+                <Textarea
+                  id="cdesc"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="Briefly describe the goal of this journey…"
+                  rows={3}
+                  className="resize-none text-sm"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs">Objective</Label>
+                <Select value={objective} onValueChange={setObjective}>
+                  <SelectTrigger className="h-9 text-sm">
+                    <SelectValue placeholder="Select an objective" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="reactivation">Reactivation</SelectItem>
+                    <SelectItem value="onboarding">Onboarding</SelectItem>
+                    <SelectItem value="retention">Retention</SelectItem>
+                    <SelectItem value="conversion">Conversion</SelectItem>
+                    <SelectItem value="winback">Win-back</SelectItem>
+                    <SelectItem value="awareness">Awareness</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={() => setStep("type")}>Back</Button>
+              <Button size="sm" className="h-8 text-xs" disabled={!name.trim()} onClick={submit}>Create</Button>
+            </DialogFooter>
+          </>
+        )}
       </DialogContent>
     </Dialog>
   );

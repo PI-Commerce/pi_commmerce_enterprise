@@ -27,7 +27,7 @@ export type WebhookType = "channels" | "campaign" | "human_escalation";
 
 export const WEBHOOK_TYPE_LABEL: Record<WebhookType, string> = {
   channels:         "Channels",
-  campaign:         "Campaign",
+  campaign:         "Journey",
   human_escalation: "Human Escalation",
 };
 
@@ -44,7 +44,7 @@ export const WEBHOOK_TYPE_ENABLED: Record<WebhookType, boolean> = {
 
 export const WEBHOOK_TYPE_DESCRIPTION: Record<WebhookType, string> = {
   channels:         "Delivery events for a specific channel instance.",
-  campaign:         "Campaign lifecycle events (started, paused, completed, failed).",
+  campaign:         "Journey lifecycle events (started, paused, completed, failed).",
   human_escalation: "Fires when a lead reaches a Human Escalation node.",
 };
 
@@ -162,7 +162,7 @@ export const SEED_WEBHOOKS: Webhook[] = [
   },
   {
     id: "wh_campaign_lifecycle",
-    name: "Campaign lifecycle → Ops dashboard",
+    name: "Journey lifecycle → Ops dashboard",
     type: "campaign",
     endpointUrl: "https://ops.acmecorp.internal/pi/campaign-events",
     signingSecret: "whsec_c4mp41gnli4ecycl3c4mp41gnli4ecyc",

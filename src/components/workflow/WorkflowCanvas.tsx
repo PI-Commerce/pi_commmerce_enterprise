@@ -9,7 +9,7 @@ import { Wand2 } from "lucide-react";
 import { toast } from "sonner";
 import { nodeTypes } from "./nodes";
 import { edgeTypes } from "./edges";
-import type { WorkflowNodeData, NodeKind, CampaignStatus } from "@/lib/campaign-types";
+import type { WorkflowNodeData, NodeKind, CampaignStatus, JourneyType } from "@/lib/campaign-types";
 import { NODE_LABELS, SERIAL_PREFIX } from "@/lib/campaign-types";
 import { whatsappOutputs, completedOutput, chatOutputs, smsOutputs, rcsOutputs, apiOutcomeOutputs, deriveNodeOutcomeVariables } from "@/lib/wa-outputs";
 import { EXAMPLE_CAMPAIGNS } from "@/lib/campaign-examples";
@@ -53,6 +53,8 @@ const SEED_EDGES: Edge[] = [
 const DEFAULT_NODE_DATA: Record<NodeKind, Partial<WorkflowNodeData>> = {
   start: { valid: true, locked: true },
   end: { valid: true, locked: true },
+  // Inbound entry node — a journey begins here instead of Start+Audience.
+  trigger: { subtitle: "Choose a trigger", valid: false, error: "Choose how this journey starts" },
   audience: { subtitle: "CSV or runtime API", valid: false, error: "Select source" },
   apiToolCall: { subtitle: "Call an API", valid: false, error: "Select API tool", outputs: apiOutcomeOutputs() },
   conditional: { subtitle: "Route on variable", valid: false, error: "Add a branch" },
@@ -103,9 +105,25 @@ const BLANK_EDGES: Edge[] = [
   { id: "be1", source: "start", target: "audience" },
 ];
 
+// A fresh INBOUND journey has no Start/Audience and no Run — it is reactive. Its
+// single entry is the Trigger node (nothing flows into it; it wears the "Entry"
+// ribbon), pre-wired to an End placeholder the user re-routes once they add
+// action nodes. The trigger starts unconfigured until a trigger type is chosen.
+const INBOUND_BLANK_NODES: Node<WorkflowNodeData>[] = [
+  { id: "trigger", type: "workflow", position: { x: 0, y: 0 },
+    data: { kind: "trigger", title: "Trigger", subtitle: "Choose a trigger", locked: true, valid: false, error: "Choose how this journey starts" } },
+  { id: "end", type: "workflow", position: { x: 340, y: 0 },
+    data: { kind: "end", title: "End", locked: true, valid: true } },
+];
+
+const INBOUND_BLANK_EDGES: Edge[] = [
+  { id: "be1", source: "trigger", target: "end" },
+];
+
 export function WorkflowCanvas({
   status,
   campaignId,
+  journeyType,
   onValidityChange,
   onDirty,
   isNew = false,
@@ -113,6 +131,10 @@ export function WorkflowCanvas({
 }: {
   status: CampaignStatus;
   campaignId?: string;
+  /** Outbound (Start + Audience, has Runs) vs inbound (Trigger entry, no Runs).
+   *  For a new journey it comes from the creation choice; for an existing one it
+   *  is read off the authored example. Defaults to outbound. */
+  journeyType?: JourneyType;
   onValidityChange?: (validCount: number, total: number) => void;
   onDirty?: () => void;
   isNew?: boolean;
@@ -123,12 +145,20 @@ export function WorkflowCanvas({
   // Pre-built example campaigns ship their own authored graph; everything else
   // (the existing demo campaigns) falls back to the shared seed graph.
   const example = campaignId ? EXAMPLE_CAMPAIGNS[campaignId] : undefined;
+  // Resolve the journey type: a new journey trusts the prop; an existing one
+  // trusts the authored example (new leads of an inbound journey enter via its
+  // Trigger). Either way default to outbound.
+  const resolvedType: JourneyType = isNew
+    ? journeyType ?? "outbound"
+    : example?.journeyType ?? journeyType ?? "outbound";
+  const blankNodes = resolvedType === "inbound" ? INBOUND_BLANK_NODES : BLANK_NODES;
+  const blankEdges = resolvedType === "inbound" ? INBOUND_BLANK_EDGES : BLANK_EDGES;
   const { tzAbbrev, symbol } = useRegion();
   const [nodes, setNodes, onNodesChange] = useNodesState(
-    isNew ? BLANK_NODES : example?.nodes ?? SEED_NODES,
+    isNew ? blankNodes : example?.nodes ?? SEED_NODES,
   );
   const [edges, setEdges, onEdgesChange] = useEdgesState(
-    isNew ? BLANK_EDGES : example?.edges ?? SEED_EDGES,
+    isNew ? blankEdges : example?.edges ?? SEED_EDGES,
   );
   const [selected, setSelected] = useState<{ id: string; data: WorkflowNodeData } | null>(null);
   // Debounce for the "AI Chat must follow a WhatsApp reply" rejection toast —
@@ -321,6 +351,8 @@ export function WorkflowCanvas({
       if (!src || !tgt) return false;
       if (tgt.data.kind === "start") return false;
       if (src.data.kind === "end") return false;
+      // The Trigger node is an inbound entry — nothing can route into it.
+      if (tgt.data.kind === "trigger") return false;
       // AI Chat is not a standalone node: it exists only to take over a live
       // WhatsApp conversation once the customer has messaged back — either a free-text
       // reply (`reply_received`) or a button tap (`btn_*`), both of which open the 24h

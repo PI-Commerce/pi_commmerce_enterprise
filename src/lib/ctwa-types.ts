@@ -376,7 +376,7 @@ export function validateAd(ad: CtwaAd): AdValidation {
     );
   }
   if (!ad.campaignId) {
-    warnings.push("No campaign linked — inbound taps will land without an automated flow to enter.");
+    warnings.push("No journey linked — inbound taps will land without an automated flow to enter.");
   }
 
   return { valid: errors.length === 0, errors, warnings };

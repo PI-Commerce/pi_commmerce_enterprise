@@ -44,6 +44,7 @@ import {
   rangeDays,
 } from "@/components/analytics/DateRangePicker";
 import type { DateRange } from "react-day-picker";
+import { AnalyticsRefresh } from "@/components/analytics/AnalyticsRefresh";
 import { CampaignFlowView } from "@/components/analytics/CampaignFlowView";
 import { VoiceChannelView } from "@/components/analytics/VoiceChannelView";
 import { WhatsAppChatAgentView } from "@/components/analytics/WhatsAppChatAgentView";
@@ -338,6 +339,10 @@ function Analytics() {
   const [dateRange, setDateRange] = useState<DateRange | undefined>(() =>
     defaultDateRange(7),
   );
+  // Bumped on every refresh (manual or auto). Threaded into both analytics
+  // subtrees as the seam where a real refetch would re-pull data — in this mock
+  // it re-runs the seeded builders, deterministically producing the same view.
+  const [refreshNonce, setRefreshNonce] = useState(0);
 
   /** Drawer CTA → Channel tab. Deep-links into Campaign-mode pinned to the same
    *  C/V/R the user just inspected, so the channel view aggregates ALL nodes of
@@ -366,13 +371,18 @@ function Analytics() {
     <AppShell>
       <PageHeader
         title="Analytics"
-        description="Campaign, and node-level performance across your workspace."
+        description="Journey, and node-level performance across your workspace."
+        actions={
+          <AnalyticsRefresh
+            onRefresh={() => setRefreshNonce((n) => n + 1)}
+          />
+        }
       />
       <PageTabs<Tab>
         value={tab}
         onChange={setTab}
         tabs={[
-          { id: "campaign", label: "Campaign" },
+          { id: "campaign", label: "Journey" },
           { id: "channel", label: "Channel" },
         ]}
       />
@@ -381,6 +391,7 @@ function Analytics() {
           goToChannel={goToChannel}
           dateRange={dateRange}
           onDateRangeChange={setDateRange}
+          refreshNonce={refreshNonce}
         />
       ) : (
         <ChannelAnalytics
@@ -388,6 +399,7 @@ function Analytics() {
           onSelectionChange={setChannelSel}
           dateRange={dateRange}
           onDateRangeChange={setDateRange}
+          refreshNonce={refreshNonce}
         />
       )}
     </AppShell>
@@ -409,6 +421,7 @@ function CampaignAnalytics({
   goToChannel,
   dateRange,
   onDateRangeChange,
+  refreshNonce,
 }: {
   goToChannel: (opts: {
     kind: ChannelKind;
@@ -418,7 +431,12 @@ function CampaignAnalytics({
   }) => void;
   dateRange: DateRange | undefined;
   onDateRangeChange: (r: DateRange | undefined) => void;
+  /** Refetch seam: bumped by the header refresh control. */
+  refreshNonce?: number;
 }) {
+  // In production the refresh would invalidate the query feeding this view; here
+  // the reference keeps the seam explicit so a future refetch hangs off it.
+  void refreshNonce;
   const [campaignId, setCampaignId] = useState(CAMPAIGNS[0].id);
   const campaign = CAMPAIGNS.find((c) => c.id === campaignId)!;
   const [runId, setRunId] = useState(campaign.runs[0].id);
@@ -451,7 +469,7 @@ function CampaignAnalytics({
   return (
     <>
       <div className="mb-4 flex flex-wrap items-end gap-2">
-        <FilterField label="Campaign">
+        <FilterField label="Journey">
           <Select
             value={campaignId}
             onValueChange={(v) => {
@@ -462,7 +480,7 @@ function CampaignAnalytics({
             }}
           >
             <SelectTrigger className="h-9 w-[280px] text-xs">
-              <SelectValue placeholder="Campaign" />
+              <SelectValue placeholder="Journey" />
             </SelectTrigger>
             <SelectContent>
               {CAMPAIGNS.map((c) => (
@@ -544,19 +562,19 @@ function CampaignAnalytics({
         <KPI
           label="Eligible Leads"
           value={run.kpi.validLeads.toLocaleString()}
-          info="Leads that were valid and addressable, and entered the campaign workflow."
+          info="Leads that were valid and addressable, and entered the journey workflow."
         />
         <KPI
           label="Completed Leads"
           value={run.kpi.leadsProcessed.toLocaleString()}
-          info="Leads that completed the full campaign (reached the End Node of the selected Run)."
+          info="Leads that completed the full journey (reached the End Node of the selected Run)."
         />
       </div>
 
       <div className="mt-4 rounded-xl border border-border bg-card">
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <div>
-            <h3 className="text-sm font-semibold">Campaign Flow</h3>
+            <h3 className="text-sm font-semibold">Journey Flow</h3>
             <p className="text-[11px] text-muted-foreground">
               Each node shows Entered, Exited and Drop-off %. Click a node for
               details.
@@ -1513,12 +1531,18 @@ function ChannelAnalytics({
   onSelectionChange,
   dateRange,
   onDateRangeChange,
+  refreshNonce,
 }: {
   selection: ChannelSelection;
   onSelectionChange: (s: ChannelSelection) => void;
   dateRange: DateRange | undefined;
   onDateRangeChange: (r: DateRange | undefined) => void;
+  /** Refetch seam: bumped by the header refresh control. */
+  refreshNonce?: number;
 }) {
+  // In production the refresh would invalidate the query feeding this view; here
+  // the reference keeps the seam explicit so a future refetch hangs off it.
+  void refreshNonce;
   const { kind, mode } = selection;
   const tabMeta = CHANNEL_TABS.find((c) => c.kind === kind)!;
 
@@ -1804,7 +1828,7 @@ function ChannelAnalytics({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="asset">{tabMeta.assetLabel}</SelectItem>
-              <SelectItem value="campaign">Campaign run</SelectItem>
+              <SelectItem value="campaign">Journey run</SelectItem>
               {kind === "whatsapp" && (
                 <SelectItem value="agent">Chat Agent</SelectItem>
               )}
@@ -1876,7 +1900,7 @@ function ChannelAnalytics({
                 className="w-full"
               />
             </FilterField>
-            <FilterField label="Narrow campaigns (optional)" className="sm:w-[300px]">
+            <FilterField label="Narrow journeys (optional)" className="sm:w-[300px]">
               <CampaignTreeFilter
                 tree={assetCampaignTree}
                 excludedCampaigns={excludedCampaigns}
@@ -1888,7 +1912,7 @@ function ChannelAnalytics({
           </div>
         ) : (
           <div className="flex flex-1 flex-col gap-2 sm:flex-row sm:items-end">
-            <FilterField label="Campaign" className="sm:w-[260px]">
+            <FilterField label="Journey" className="sm:w-[260px]">
               <Select
                 value={selection.campaignId ?? ""}
                 onValueChange={(v) => {
@@ -1904,7 +1928,7 @@ function ChannelAnalytics({
                 }}
               >
                 <SelectTrigger className="h-9 w-full text-xs">
-                  <SelectValue placeholder="Pick a campaign" />
+                  <SelectValue placeholder="Pick a journey" />
                 </SelectTrigger>
                 <SelectContent>
                   {campaignChoices.map((c) => (
@@ -2089,8 +2113,8 @@ function CampaignTreeFilter({
   }, 0);
   const allOn = activeCampaigns === tree.length && activeRuns === totalRuns;
   const display = allOn
-    ? `All ${tree.length} campaign${tree.length === 1 ? "" : "s"}`
-    : `${activeCampaigns}/${tree.length} campaigns · ${activeRuns}/${totalRuns} runs`;
+    ? `All ${tree.length} journey${tree.length === 1 ? "" : "s"}`
+    : `${activeCampaigns}/${tree.length} journeys · ${activeRuns}/${totalRuns} runs`;
   return (
     <details className="group relative">
       <summary className="flex h-9 w-full cursor-pointer list-none items-center justify-between rounded-md border border-input bg-transparent px-3 py-2 text-xs shadow-sm">
@@ -2100,7 +2124,7 @@ function CampaignTreeFilter({
       <div className="absolute z-50 mt-1 max-h-[320px] w-[300px] overflow-auto rounded-md border border-border bg-popover p-2 shadow-md">
         {tree.length === 0 ? (
           <p className="px-2 py-3 text-center text-xs text-muted-foreground">
-            No campaigns
+            No journeys
           </p>
         ) : (
           tree.map(({ campaign, runs }) => {

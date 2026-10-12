@@ -89,7 +89,7 @@ export function RcsOverview({ config }: { config: RcsChannelConfig }) {
             <Step n={1}>Register your brand under a provider (JIO or Netcore-VI) and create one or more agents under it.</Step>
             <Step n={2}>Set each agent's type (Transactional or Promotional); the provider verifies the agent before it can send live traffic.</Step>
             <Step n={3}>Share your brand, agents and their Agent IDs / Keys with your account team — these credentials stay in the backend.</Step>
-            <Step n={4}>Pi Commerce operations records them here — after which your approved templates can be used in campaigns.</Step>
+            <Step n={4}>Pi Commerce operations records them here — after which your approved templates can be used in journeys.</Step>
           </ol>
           <p className="mt-3 flex items-start gap-1.5 text-[11px] text-muted-foreground">
             <Info className="mt-px h-3 w-3 shrink-0" />

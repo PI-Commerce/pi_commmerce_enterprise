@@ -32,7 +32,7 @@ import {
   WA_TIMEOUT_HOURS, DEFAULT_WA_TIMEOUT_HOURS, waTimeoutLabel,
   smsOutputs, SMS_DLR_WINDOWS, DEFAULT_SMS_DLR_WINDOW,
   rcsOutputs, RCS_DLR_WINDOWS, DEFAULT_RCS_DLR_WINDOW,
-  chatOutputs,
+  chatOutputs, CHAT_IDLE_WINDOWS, DEFAULT_CHAT_IDLE_WINDOW,
 } from "@/lib/wa-outputs";
 import { useSmsConfig, useSmsTemplates, resolveSmsTemplate } from "@/lib/sms-store";
 import { sendersForCategory } from "@/lib/sms-config";
@@ -59,6 +59,7 @@ import {
 } from "@/lib/ctwa-types";
 import { StatusPill } from "@/components/ads/ui";
 import { PromptEditor } from "@/components/workflow/PromptEditor";
+import { TriggerFields } from "@/components/workflow/TriggerFields";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 const VOICE_AGENTS = voiceAgents();
@@ -386,6 +387,9 @@ function KindFields({
     case "start":
     case "end":
       return null;
+
+    case "trigger":
+      return <TriggerFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
 
     case "audience":
       return <AudienceFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
@@ -1766,6 +1770,7 @@ function AiChatFields({ config, readOnly, mark, onChange }: { config?: PresetCon
 
 function AiChatCore({ config, readOnly, mark, onChange }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
   const [agent, setAgent] = useState<string>(config?.chatAgent ?? "");
+  const [idleWindow, setIdleWindow] = useState<string>(config?.chatIdleTimeout ?? DEFAULT_CHAT_IDLE_WINDOW);
   const agentSelected = !!agent;
 
   const varMap = config?.chatVarMap ?? [
@@ -1798,15 +1803,15 @@ function AiChatCore({ config, readOnly, mark, onChange }: { config?: PresetConfi
     else mark(true);
   }, [agentSelected, unmapped]);
 
-  // Three fixed handles (Success / Timeout / Failure); persist config so the
-  // node restores on reopen.
+  // Two fixed handles ("Session completed" / "Failed"); persist config so the
+  // node restores on reopen. The inactivity window rides along on the same config.
   useEffect(() => {
     onChange({
       outputs: chatOutputs(),
-      config: { ...config, chatAgent: agent },
+      config: { ...config, chatAgent: agent, chatIdleTimeout: idleWindow },
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [agent]);
+  }, [agent, idleWindow]);
 
   return (
     <>
@@ -1873,6 +1878,50 @@ function AiChatCore({ config, readOnly, mark, onChange }: { config?: PresetConfi
                 Select a chat agent above to map its variables.
               </div>
             )}
+          </div>
+        </div>
+      </Section>
+
+      <Section title="Inactivity window">
+        <Field label="Close the session after" required>
+          <Select value={idleWindow} disabled={readOnly} onValueChange={setIdleWindow}>
+            <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {CHAT_IDLE_WINDOWS.map((w) => (
+                <SelectItem key={w} value={w}>
+                  {w}{w === "24 hours" ? " · WhatsApp session limit" : ""}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="mt-1 text-[10.5px] text-muted-foreground">
+            The longest the agent waits with no customer reply before it force-closes the
+            conversation on an idle timeout. WhatsApp closes the customer-service session at
+            24 hours, so that is the maximum.
+          </p>
+        </Field>
+      </Section>
+
+      {/* Two fixed exits — describe what each one means and what routes to it, so
+          the author wires the graph correctly without opening the handle tooltip. */}
+      <Section title="Exits">
+        <div className="space-y-2">
+          <div className="rounded-md border border-border bg-card/50 px-3 py-2.5">
+            <div className="flex items-center gap-1.5 text-[12px] font-medium text-foreground">
+              <span className="h-2 w-2 rounded-full bg-emerald-500" /> Session completed
+            </div>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              Can happen on a successful disposition captured by the agent, or on customer
+              inactivity (idle timeout).
+            </p>
+          </div>
+          <div className="rounded-md border border-border bg-card/50 px-3 py-2.5">
+            <div className="flex items-center gap-1.5 text-[12px] font-medium text-foreground">
+              <span className="h-2 w-2 rounded-full bg-destructive" /> Failed
+            </div>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              Any session failure.
+            </p>
           </div>
         </div>
       </Section>
@@ -3134,7 +3183,7 @@ function ActionAdvanceBanner({ kind, type1, timeoutHours }: { kind: ActionKind; 
     kind === "voiceCall"
       ? "Leads advance when the call concludes or retries are exhausted. Branch on the outcome with a Conditional node downstream."
       : kind === "aiChat"
-        ? "Always three outputs: “Success” (agent closed with a disposition), “Timeout” (customer went quiet before the session window closed) and “Failure” (handover or platform error). Branch on the disposition with a Conditional downstream."
+        ? "Two outputs: “Session completed” (the agent closed with a disposition, or the customer went idle past the inactivity window) and “Failed” (relay, handover or platform error). Branch on the disposition with a Conditional downstream."
       : kind === "sms"
         ? "Always three outputs: “Delivered”, “Failed” and “Timeout” (no receipt within the wait window). Wire all three."
         : kind === "rcs"

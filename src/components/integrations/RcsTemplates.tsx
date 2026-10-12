@@ -723,7 +723,7 @@ function RcsTemplateForm({ config, initial, existing, onCancel, onSave }: {
                       <span key={v} className="rounded-md border border-border bg-secondary px-2 py-0.5 font-mono text-[11px] text-muted-foreground">{`{{${v}}}`}</span>
                     ))}
                   </div>
-                  <p className="mt-2 text-[11px] text-muted-foreground">These become the mapping rows on the RCS node in the campaign builder.</p>
+                  <p className="mt-2 text-[11px] text-muted-foreground">These become the mapping rows on the RCS node in the journey builder.</p>
                 </div>
               )}
             </Card>

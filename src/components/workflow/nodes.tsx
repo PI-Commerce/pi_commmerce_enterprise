@@ -2,7 +2,7 @@ import { Handle, Position, type NodeProps } from "reactflow";
 import {
   Play, Square, Users, GitBranch, Split,
   Phone, MessageCircle, MessageSquare, MessageSquareText,
-  Clock, Megaphone, AlertCircle, CheckCircle2, Loader2, Sparkles, FlaskConical, Webhook, Flag, Bot,
+  Clock, Megaphone, AlertCircle, CheckCircle2, Loader2, Sparkles, FlaskConical, Webhook, Flag, Bot, Zap,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -15,6 +15,7 @@ const ICONS: Record<NodeKind, LucideIcon> = {
   start: Play,
   end: Square,
   audience: Users,
+  trigger: Zap,
   apiToolCall: Webhook,
   conditional: GitBranch,
   abSplit: Split,
@@ -41,7 +42,11 @@ const GROUP_TONE: Record<string, string> = {
 export function WorkflowNode({ data, selected }: NodeProps<WorkflowNodeData>) {
   const Icon = ICONS[data.kind] ?? Sparkles;
   const group = NODE_GROUPS[data.kind];
-  const tone = GROUP_TONE[group];
+  // The Trigger node is an inbound *entry* node — nothing flows into it, so it
+  // drops the left target handle and wears a distinct accent + "Entry" ribbon,
+  // the n8n-style anchor for an inbound journey.
+  const isEntry = data.kind === "trigger";
+  const tone = isEntry ? "text-ai bg-ai/10" : GROUP_TONE[group];
   const invalid = data.valid === false;
   const running = data.runState === "running";
   const success = data.runState === "success";
@@ -110,7 +115,16 @@ export function WorkflowNode({ data, selected }: NodeProps<WorkflowNodeData>) {
         </div>
       )}
 
-      <Handle type="target" position={Position.Left} className="!h-2 !w-2 !border-2 !border-background !bg-muted-foreground/50" />
+      {isEntry && (
+        <div className="absolute -left-1.5 -top-2.5 z-10 flex items-center gap-1 rounded-full border border-ai/40 bg-ai/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-ai shadow-sm backdrop-blur-sm">
+          <Zap className="h-2.5 w-2.5" /> Entry
+        </div>
+      )}
+
+      {/* Entry nodes have no inbound edge — omit the left target handle. */}
+      {!isEntry && (
+        <Handle type="target" position={Position.Left} className="!h-2 !w-2 !border-2 !border-background !bg-muted-foreground/50" />
+      )}
 
       <div className="flex items-start gap-2.5 p-3">
         <div className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-lg", tone)}>

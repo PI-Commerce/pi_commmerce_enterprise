@@ -6,10 +6,10 @@ import { VersionTimeline } from "@/components/workflow/VersionTimeline";
 import { EXAMPLE_CAMPAIGNS } from "@/lib/campaign-examples";
 import { VERSION_HISTORY, type CampaignVersion } from "@/lib/campaign-versions";
 
-export const Route = createFileRoute("/campaigns/versions/$id")({
+export const Route = createFileRoute("/journeys/versions/$id")({
   component: VersionHistoryPage,
   head: ({ params }) => ({
-    meta: [{ title: `Version history · Campaign ${params.id} · Pi Commerce Enterprise` }],
+    meta: [{ title: `Version history · Journey ${params.id} · Pi Commerce Enterprise` }],
   }),
 });
 
@@ -17,7 +17,7 @@ function VersionHistoryPage() {
   const { id } = Route.useParams();
   const navigate = useNavigate();
 
-  const campaignName = EXAMPLE_CAMPAIGNS[id]?.name ?? "Campaign";
+  const campaignName = EXAMPLE_CAMPAIGNS[id]?.name ?? "Journey";
   const versions: CampaignVersion[] = VERSION_HISTORY[id] ? [...VERSION_HISTORY[id]] : [];
   const current = versions.length
     ? versions.reduce((a, b) => (b.version > a.version ? b : a))
@@ -31,7 +31,7 @@ function VersionHistoryPage() {
       {/* Top bar — mirrors the builder header so it reads as a full-page mode */}
       <header className="flex h-12 shrink-0 items-center gap-2 border-b border-border bg-background/90 px-3 backdrop-blur-xl">
         <button
-          onClick={() => navigate({ to: "/campaigns/$id", params: { id } })}
+          onClick={() => navigate({ to: "/journeys/$id", params: { id } })}
           className="flex h-8 items-center gap-1 rounded-md px-2 text-[12.5px] text-muted-foreground hover:bg-accent hover:text-foreground"
           aria-label="Back to builder"
         >

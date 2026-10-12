@@ -123,7 +123,7 @@ function LeadDetail() {
       {/* Tabs */}
       <div className="mb-4 flex items-center gap-1 border-b border-border">
         <TabBtn active={tab === "campaigns"} onClick={() => setTab("campaigns")}>
-          <Megaphone className="h-3.5 w-3.5" /> Campaigns
+          <Megaphone className="h-3.5 w-3.5" /> Journeys
           <span className="rounded-full bg-secondary px-1.5 text-[10px] text-muted-foreground">{lead.campaigns.length}</span>
         </TabBtn>
         <TabBtn active={tab === "conversations"} onClick={() => setTab("conversations")}>
@@ -183,7 +183,7 @@ function CampaignsTab({ lead }: { lead: LeadRecord }) {
   if (lead.campaigns.length === 0) {
     return (
       <div className="rounded-xl border border-border bg-card px-4 py-10 text-center text-[12.5px] text-muted-foreground">
-        This lead hasn't been part of any campaigns yet.
+        This lead hasn't been part of any journeys yet.
       </div>
     );
   }
@@ -192,7 +192,7 @@ function CampaignsTab({ lead }: { lead: LeadRecord }) {
       <table className="w-full text-[12.5px]">
         <thead className="bg-secondary/30 text-[10.5px] uppercase tracking-wider text-muted-foreground">
           <tr>
-            <th className="px-4 py-2.5 text-left font-medium">Campaign</th>
+            <th className="px-4 py-2.5 text-left font-medium">Journey</th>
             <th className="px-4 py-2.5 text-left font-medium">Run</th>
             <th className="px-4 py-2.5 text-left font-medium">Status</th>
             <th className="px-4 py-2.5 text-left font-medium">Entered</th>
@@ -314,9 +314,9 @@ function ConversationsTab({ lead }: { lead: LeadRecord }) {
       {/* Per-channel toolbar */}
       <div className="flex flex-wrap items-center gap-2 border-b border-border bg-secondary/20 px-3 py-2">
         <ChannelDropdown
-          label="Campaign"
+          label="Journey"
           value={campaignFilter}
-          options={[{ id: "all", name: "All campaigns" }, ...channelCampaigns]}
+          options={[{ id: "all", name: "All journeys" }, ...channelCampaigns]}
           onChange={setCampaignFilter}
         />
         <ChannelDropdown

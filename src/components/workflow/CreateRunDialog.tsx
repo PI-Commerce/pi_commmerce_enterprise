@@ -11,6 +11,8 @@ import {
 import { Play, Webhook, Lock, Zap, Upload, Clock, Infinity as InfinityIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CSV_LIBRARY, makeCsvAsset, type CsvAsset } from "@/lib/data-library";
+import { COUNTRY_OPTIONS } from "@/lib/phone-countries";
+import { useRegion } from "@/lib/region";
 
 // v1 run model (PRD change-log E1–E7):
 //   Run Type → Audience Source. Trigger Mode is no longer a separate field.
@@ -39,6 +41,12 @@ export type CreateRunPayload = {
   endAt?: string;
   /** Present when audienceSource === "csv": the chosen file name. */
   csvName?: string;
+  /**
+   * ISO country used to parse recipients that arrive without a country code. A
+   * number that already carries a +code overrides it. Applies to both the CSV and
+   * API sources — bare numbers can show up in either.
+   */
+  defaultCountry: string;
 };
 
 const CAMPAIGNS: CampaignOption[] = [
@@ -78,6 +86,7 @@ export function CreateRunDialog({
   }, [campaign, campaignName, campaignId]);
 
   const isLocked = !!lockedCampaign;
+  const region = useRegion();
 
   const [selectedId, setSelectedId] = useState<string>(lockedCampaign?.id ?? "");
   const [runName, setRunName] = useState(defaultRunName());
@@ -87,6 +96,7 @@ export function CreateRunDialog({
   const [localCsvs, setLocalCsvs] = useState<CsvAsset[]>([]);
   const [startAt, setStartAt] = useState("");
   const [endAt, setEndAt] = useState("");
+  const [defaultCountry, setDefaultCountry] = useState<string>(region.country);
 
   // Catalog includes the locked campaign if it isn't already in CAMPAIGNS.
   const catalog = useMemo(() => {
@@ -105,6 +115,7 @@ export function CreateRunDialog({
     setLocalCsvs([]);
     setStartAt("");
     setEndAt("");
+    setDefaultCountry(region.country);
   };
 
   // The dialog stays mounted, so the useState initializer can't pick up a campaign
@@ -169,6 +180,7 @@ export function CreateRunDialog({
       startAt: runType === "time-scoped" ? startAt : undefined,
       endAt: runType === "time-scoped" ? endAt : undefined,
       csvName,
+      defaultCountry,
     });
     reset();
   };
@@ -179,24 +191,24 @@ export function CreateRunDialog({
     <Dialog open={open} onOpenChange={(v) => { if (!v) reset(); onOpenChange(v); }}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle className="text-base">Run Campaign</DialogTitle>
+          <DialogTitle className="text-base">Run journey</DialogTitle>
           <DialogDescription className="text-xs">
             {isLocked
               ? <>Configure a new run for <span className="font-medium text-foreground">{lockedCampaign!.name}</span>.</>
-              : "Select a campaign, then choose how this run is scoped and sourced."}
+              : "Select a journey, then choose how this run is scoped and sourced."}
           </DialogDescription>
         </DialogHeader>
 
         <div className="max-h-[65vh] space-y-5 overflow-y-auto py-1 pr-1">
-          {/* ──────────── 1. Campaign ──────────── */}
-          <Section title="Campaign">
+          {/* ──────────── 1. Journey ──────────── */}
+          <Section title="Journey">
             <div className="space-y-1.5">
               <Label className="text-xs">
-                Campaign <span className="text-destructive">*</span>
+                Journey <span className="text-destructive">*</span>
               </Label>
               <Select value={selectedId} onValueChange={setSelectedId} disabled={isLocked}>
                 <SelectTrigger className="h-9 text-sm">
-                  <SelectValue placeholder="Select a campaign" />
+                  <SelectValue placeholder="Select a journey" />
                 </SelectTrigger>
                 <SelectContent>
                   {catalog.map((c) => (
@@ -208,7 +220,7 @@ export function CreateRunDialog({
               </Select>
               {isLocked && (
                 <p className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                  <Lock className="h-3 w-3" /> Auto-selected from Campaign Builder.
+                  <Lock className="h-3 w-3" /> Auto-selected from the journey builder.
                 </p>
               )}
             </div>
@@ -313,6 +325,31 @@ export function CreateRunDialog({
                   </div>
                 )}
 
+                {/* Default country — applies to whichever source is chosen. It is the
+                    parse hint for recipients that arrive WITHOUT a country code (bare,
+                    national-format numbers can appear in a CSV column or an API payload
+                    alike); a number that already carries a +code overrides it. */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs">
+                    Default country <span className="text-destructive">*</span>
+                  </Label>
+                  <Select value={defaultCountry} onValueChange={setDefaultCountry}>
+                    <SelectTrigger className="h-9 text-sm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {COUNTRY_OPTIONS.map((c) => (
+                        <SelectItem key={c.iso} value={c.iso} className="text-xs">
+                          {c.name} ({c.dial})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-[11px] text-muted-foreground">
+                    Used to parse recipients with no country code. A number that already has a +code is kept as-is.
+                  </p>
+                </div>
+
                 {/* CSV: pick from the Data library, or Upload inline (C3, E5) */}
                 {audienceSource === "csv" && (
                   <div className="space-y-1.5">
@@ -373,7 +410,7 @@ export function CreateRunDialog({
             Cancel
           </Button>
           <Button size="sm" className="h-8 gap-1.5 text-xs" disabled={!canStart} onClick={submit}>
-            <CtaIcon className="h-3 w-3 fill-current" /> Run Campaign Now
+            <CtaIcon className="h-3 w-3 fill-current" /> Run journey now
           </Button>
         </DialogFooter>
       </DialogContent>

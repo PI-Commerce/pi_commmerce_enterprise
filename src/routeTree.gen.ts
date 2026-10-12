@@ -10,26 +10,28 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as JourneysRouteImport } from './routes/journeys'
 import { Route as IntegrationsRouteImport } from './routes/integrations'
+import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as ChannelsRouteImport } from './routes/channels'
-import { Route as CampaignsRouteImport } from './routes/campaigns'
 import { Route as AnalyticsRouteImport } from './routes/analytics'
 import { Route as AgentsRouteImport } from './routes/agents'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as LeadsIndexRouteImport } from './routes/leads.index'
+import { Route as JourneysIndexRouteImport } from './routes/journeys.index'
 import { Route as IntegrationsIndexRouteImport } from './routes/integrations.index'
+import { Route as InboxIndexRouteImport } from './routes/inbox.index'
 import { Route as ChannelsIndexRouteImport } from './routes/channels.index'
-import { Route as CampaignsIndexRouteImport } from './routes/campaigns.index'
 import { Route as AgentsIndexRouteImport } from './routes/agents.index'
 import { Route as LeadsIdRouteImport } from './routes/leads.$id'
+import { Route as JourneysIdRouteImport } from './routes/journeys.$id'
 import { Route as ChannelsWhatsappRouteImport } from './routes/channels.whatsapp'
 import { Route as ChannelsSmsRouteImport } from './routes/channels.sms'
 import { Route as ChannelsRcsRouteImport } from './routes/channels.rcs'
 import { Route as ChannelsMetaAdsRouteImport } from './routes/channels.meta-ads'
-import { Route as CampaignsIdRouteImport } from './routes/campaigns.$id'
 import { Route as AgentsNewRouteImport } from './routes/agents.new'
 import { Route as AgentsIdRouteImport } from './routes/agents.$id'
-import { Route as CampaignsVersionsIdRouteImport } from './routes/campaigns.versions.$id'
+import { Route as JourneysVersionsIdRouteImport } from './routes/journeys.versions.$id'
 import { Route as AgentsToolsNewRouteImport } from './routes/agents.tools.new'
 
 const SettingsRoute = SettingsRouteImport.update({
@@ -37,19 +39,24 @@ const SettingsRoute = SettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
+const JourneysRoute = JourneysRouteImport.update({
+  id: '/journeys',
+  path: '/journeys',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IntegrationsRoute = IntegrationsRouteImport.update({
   id: '/integrations',
   path: '/integrations',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DashboardRoute = DashboardRouteImport.update({
+  id: '/dashboard',
+  path: '/dashboard',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ChannelsRoute = ChannelsRouteImport.update({
   id: '/channels',
   path: '/channels',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const CampaignsRoute = CampaignsRouteImport.update({
-  id: '/campaigns',
-  path: '/campaigns',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AnalyticsRoute = AnalyticsRouteImport.update({
@@ -72,20 +79,25 @@ const LeadsIndexRoute = LeadsIndexRouteImport.update({
   path: '/leads/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const JourneysIndexRoute = JourneysIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => JourneysRoute,
+} as any)
 const IntegrationsIndexRoute = IntegrationsIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => IntegrationsRoute,
 } as any)
+const InboxIndexRoute = InboxIndexRouteImport.update({
+  id: '/inbox/',
+  path: '/inbox/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ChannelsIndexRoute = ChannelsIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => ChannelsRoute,
-} as any)
-const CampaignsIndexRoute = CampaignsIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => CampaignsRoute,
 } as any)
 const AgentsIndexRoute = AgentsIndexRouteImport.update({
   id: '/',
@@ -96,6 +108,11 @@ const LeadsIdRoute = LeadsIdRouteImport.update({
   id: '/leads/$id',
   path: '/leads/$id',
   getParentRoute: () => rootRouteImport,
+} as any)
+const JourneysIdRoute = JourneysIdRouteImport.update({
+  id: '/$id',
+  path: '/$id',
+  getParentRoute: () => JourneysRoute,
 } as any)
 const ChannelsWhatsappRoute = ChannelsWhatsappRouteImport.update({
   id: '/whatsapp',
@@ -117,11 +134,6 @@ const ChannelsMetaAdsRoute = ChannelsMetaAdsRouteImport.update({
   path: '/meta-ads',
   getParentRoute: () => ChannelsRoute,
 } as any)
-const CampaignsIdRoute = CampaignsIdRouteImport.update({
-  id: '/$id',
-  path: '/$id',
-  getParentRoute: () => CampaignsRoute,
-} as any)
 const AgentsNewRoute = AgentsNewRouteImport.update({
   id: '/new',
   path: '/new',
@@ -132,10 +144,10 @@ const AgentsIdRoute = AgentsIdRouteImport.update({
   path: '/$id',
   getParentRoute: () => AgentsRoute,
 } as any)
-const CampaignsVersionsIdRoute = CampaignsVersionsIdRouteImport.update({
+const JourneysVersionsIdRoute = JourneysVersionsIdRouteImport.update({
   id: '/versions/$id',
   path: '/versions/$id',
-  getParentRoute: () => CampaignsRoute,
+  getParentRoute: () => JourneysRoute,
 } as any)
 const AgentsToolsNewRoute = AgentsToolsNewRouteImport.update({
   id: '/tools/new',
@@ -147,70 +159,76 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/agents': typeof AgentsRouteWithChildren
   '/analytics': typeof AnalyticsRoute
-  '/campaigns': typeof CampaignsRouteWithChildren
   '/channels': typeof ChannelsRouteWithChildren
+  '/dashboard': typeof DashboardRoute
   '/integrations': typeof IntegrationsRouteWithChildren
+  '/journeys': typeof JourneysRouteWithChildren
   '/settings': typeof SettingsRoute
   '/agents/$id': typeof AgentsIdRoute
   '/agents/new': typeof AgentsNewRoute
-  '/campaigns/$id': typeof CampaignsIdRoute
   '/channels/meta-ads': typeof ChannelsMetaAdsRoute
   '/channels/rcs': typeof ChannelsRcsRoute
   '/channels/sms': typeof ChannelsSmsRoute
   '/channels/whatsapp': typeof ChannelsWhatsappRoute
+  '/journeys/$id': typeof JourneysIdRoute
   '/leads/$id': typeof LeadsIdRoute
   '/agents/': typeof AgentsIndexRoute
-  '/campaigns/': typeof CampaignsIndexRoute
   '/channels/': typeof ChannelsIndexRoute
+  '/inbox/': typeof InboxIndexRoute
   '/integrations/': typeof IntegrationsIndexRoute
+  '/journeys/': typeof JourneysIndexRoute
   '/leads/': typeof LeadsIndexRoute
   '/agents/tools/new': typeof AgentsToolsNewRoute
-  '/campaigns/versions/$id': typeof CampaignsVersionsIdRoute
+  '/journeys/versions/$id': typeof JourneysVersionsIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/analytics': typeof AnalyticsRoute
+  '/dashboard': typeof DashboardRoute
   '/settings': typeof SettingsRoute
   '/agents/$id': typeof AgentsIdRoute
   '/agents/new': typeof AgentsNewRoute
-  '/campaigns/$id': typeof CampaignsIdRoute
   '/channels/meta-ads': typeof ChannelsMetaAdsRoute
   '/channels/rcs': typeof ChannelsRcsRoute
   '/channels/sms': typeof ChannelsSmsRoute
   '/channels/whatsapp': typeof ChannelsWhatsappRoute
+  '/journeys/$id': typeof JourneysIdRoute
   '/leads/$id': typeof LeadsIdRoute
   '/agents': typeof AgentsIndexRoute
-  '/campaigns': typeof CampaignsIndexRoute
   '/channels': typeof ChannelsIndexRoute
+  '/inbox': typeof InboxIndexRoute
   '/integrations': typeof IntegrationsIndexRoute
+  '/journeys': typeof JourneysIndexRoute
   '/leads': typeof LeadsIndexRoute
   '/agents/tools/new': typeof AgentsToolsNewRoute
-  '/campaigns/versions/$id': typeof CampaignsVersionsIdRoute
+  '/journeys/versions/$id': typeof JourneysVersionsIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/agents': typeof AgentsRouteWithChildren
   '/analytics': typeof AnalyticsRoute
-  '/campaigns': typeof CampaignsRouteWithChildren
   '/channels': typeof ChannelsRouteWithChildren
+  '/dashboard': typeof DashboardRoute
   '/integrations': typeof IntegrationsRouteWithChildren
+  '/journeys': typeof JourneysRouteWithChildren
   '/settings': typeof SettingsRoute
   '/agents/$id': typeof AgentsIdRoute
   '/agents/new': typeof AgentsNewRoute
-  '/campaigns/$id': typeof CampaignsIdRoute
   '/channels/meta-ads': typeof ChannelsMetaAdsRoute
   '/channels/rcs': typeof ChannelsRcsRoute
   '/channels/sms': typeof ChannelsSmsRoute
   '/channels/whatsapp': typeof ChannelsWhatsappRoute
+  '/journeys/$id': typeof JourneysIdRoute
   '/leads/$id': typeof LeadsIdRoute
   '/agents/': typeof AgentsIndexRoute
-  '/campaigns/': typeof CampaignsIndexRoute
   '/channels/': typeof ChannelsIndexRoute
+  '/inbox/': typeof InboxIndexRoute
   '/integrations/': typeof IntegrationsIndexRoute
+  '/journeys/': typeof JourneysIndexRoute
   '/leads/': typeof LeadsIndexRoute
   '/agents/tools/new': typeof AgentsToolsNewRoute
-  '/campaigns/versions/$id': typeof CampaignsVersionsIdRoute
+  '/journeys/versions/$id': typeof JourneysVersionsIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -218,80 +236,88 @@ export interface FileRouteTypes {
     | '/'
     | '/agents'
     | '/analytics'
-    | '/campaigns'
     | '/channels'
+    | '/dashboard'
     | '/integrations'
+    | '/journeys'
     | '/settings'
     | '/agents/$id'
     | '/agents/new'
-    | '/campaigns/$id'
     | '/channels/meta-ads'
     | '/channels/rcs'
     | '/channels/sms'
     | '/channels/whatsapp'
+    | '/journeys/$id'
     | '/leads/$id'
     | '/agents/'
-    | '/campaigns/'
     | '/channels/'
+    | '/inbox/'
     | '/integrations/'
+    | '/journeys/'
     | '/leads/'
     | '/agents/tools/new'
-    | '/campaigns/versions/$id'
+    | '/journeys/versions/$id'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/analytics'
+    | '/dashboard'
     | '/settings'
     | '/agents/$id'
     | '/agents/new'
-    | '/campaigns/$id'
     | '/channels/meta-ads'
     | '/channels/rcs'
     | '/channels/sms'
     | '/channels/whatsapp'
+    | '/journeys/$id'
     | '/leads/$id'
     | '/agents'
-    | '/campaigns'
     | '/channels'
+    | '/inbox'
     | '/integrations'
+    | '/journeys'
     | '/leads'
     | '/agents/tools/new'
-    | '/campaigns/versions/$id'
+    | '/journeys/versions/$id'
   id:
     | '__root__'
     | '/'
     | '/agents'
     | '/analytics'
-    | '/campaigns'
     | '/channels'
+    | '/dashboard'
     | '/integrations'
+    | '/journeys'
     | '/settings'
     | '/agents/$id'
     | '/agents/new'
-    | '/campaigns/$id'
     | '/channels/meta-ads'
     | '/channels/rcs'
     | '/channels/sms'
     | '/channels/whatsapp'
+    | '/journeys/$id'
     | '/leads/$id'
     | '/agents/'
-    | '/campaigns/'
     | '/channels/'
+    | '/inbox/'
     | '/integrations/'
+    | '/journeys/'
     | '/leads/'
     | '/agents/tools/new'
-    | '/campaigns/versions/$id'
+    | '/journeys/versions/$id'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AgentsRoute: typeof AgentsRouteWithChildren
   AnalyticsRoute: typeof AnalyticsRoute
-  CampaignsRoute: typeof CampaignsRouteWithChildren
   ChannelsRoute: typeof ChannelsRouteWithChildren
+  DashboardRoute: typeof DashboardRoute
   IntegrationsRoute: typeof IntegrationsRouteWithChildren
+  JourneysRoute: typeof JourneysRouteWithChildren
   SettingsRoute: typeof SettingsRoute
   LeadsIdRoute: typeof LeadsIdRoute
+  InboxIndexRoute: typeof InboxIndexRoute
   LeadsIndexRoute: typeof LeadsIndexRoute
 }
 
@@ -304,6 +330,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/journeys': {
+      id: '/journeys'
+      path: '/journeys'
+      fullPath: '/journeys'
+      preLoaderRoute: typeof JourneysRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/integrations': {
       id: '/integrations'
       path: '/integrations'
@@ -311,18 +344,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IntegrationsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/dashboard': {
+      id: '/dashboard'
+      path: '/dashboard'
+      fullPath: '/dashboard'
+      preLoaderRoute: typeof DashboardRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/channels': {
       id: '/channels'
       path: '/channels'
       fullPath: '/channels'
       preLoaderRoute: typeof ChannelsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/campaigns': {
-      id: '/campaigns'
-      path: '/campaigns'
-      fullPath: '/campaigns'
-      preLoaderRoute: typeof CampaignsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/analytics': {
@@ -353,6 +386,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LeadsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/journeys/': {
+      id: '/journeys/'
+      path: '/'
+      fullPath: '/journeys/'
+      preLoaderRoute: typeof JourneysIndexRouteImport
+      parentRoute: typeof JourneysRoute
+    }
     '/integrations/': {
       id: '/integrations/'
       path: '/'
@@ -360,19 +400,19 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IntegrationsIndexRouteImport
       parentRoute: typeof IntegrationsRoute
     }
+    '/inbox/': {
+      id: '/inbox/'
+      path: '/inbox'
+      fullPath: '/inbox/'
+      preLoaderRoute: typeof InboxIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/channels/': {
       id: '/channels/'
       path: '/'
       fullPath: '/channels/'
       preLoaderRoute: typeof ChannelsIndexRouteImport
       parentRoute: typeof ChannelsRoute
-    }
-    '/campaigns/': {
-      id: '/campaigns/'
-      path: '/'
-      fullPath: '/campaigns/'
-      preLoaderRoute: typeof CampaignsIndexRouteImport
-      parentRoute: typeof CampaignsRoute
     }
     '/agents/': {
       id: '/agents/'
@@ -387,6 +427,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/leads/$id'
       preLoaderRoute: typeof LeadsIdRouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/journeys/$id': {
+      id: '/journeys/$id'
+      path: '/$id'
+      fullPath: '/journeys/$id'
+      preLoaderRoute: typeof JourneysIdRouteImport
+      parentRoute: typeof JourneysRoute
     }
     '/channels/whatsapp': {
       id: '/channels/whatsapp'
@@ -416,13 +463,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ChannelsMetaAdsRouteImport
       parentRoute: typeof ChannelsRoute
     }
-    '/campaigns/$id': {
-      id: '/campaigns/$id'
-      path: '/$id'
-      fullPath: '/campaigns/$id'
-      preLoaderRoute: typeof CampaignsIdRouteImport
-      parentRoute: typeof CampaignsRoute
-    }
     '/agents/new': {
       id: '/agents/new'
       path: '/new'
@@ -437,12 +477,12 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AgentsIdRouteImport
       parentRoute: typeof AgentsRoute
     }
-    '/campaigns/versions/$id': {
-      id: '/campaigns/versions/$id'
+    '/journeys/versions/$id': {
+      id: '/journeys/versions/$id'
       path: '/versions/$id'
-      fullPath: '/campaigns/versions/$id'
-      preLoaderRoute: typeof CampaignsVersionsIdRouteImport
-      parentRoute: typeof CampaignsRoute
+      fullPath: '/journeys/versions/$id'
+      preLoaderRoute: typeof JourneysVersionsIdRouteImport
+      parentRoute: typeof JourneysRoute
     }
     '/agents/tools/new': {
       id: '/agents/tools/new'
@@ -470,22 +510,6 @@ const AgentsRouteChildren: AgentsRouteChildren = {
 
 const AgentsRouteWithChildren =
   AgentsRoute._addFileChildren(AgentsRouteChildren)
-
-interface CampaignsRouteChildren {
-  CampaignsIdRoute: typeof CampaignsIdRoute
-  CampaignsIndexRoute: typeof CampaignsIndexRoute
-  CampaignsVersionsIdRoute: typeof CampaignsVersionsIdRoute
-}
-
-const CampaignsRouteChildren: CampaignsRouteChildren = {
-  CampaignsIdRoute: CampaignsIdRoute,
-  CampaignsIndexRoute: CampaignsIndexRoute,
-  CampaignsVersionsIdRoute: CampaignsVersionsIdRoute,
-}
-
-const CampaignsRouteWithChildren = CampaignsRoute._addFileChildren(
-  CampaignsRouteChildren,
-)
 
 interface ChannelsRouteChildren {
   ChannelsMetaAdsRoute: typeof ChannelsMetaAdsRoute
@@ -519,15 +543,33 @@ const IntegrationsRouteWithChildren = IntegrationsRoute._addFileChildren(
   IntegrationsRouteChildren,
 )
 
+interface JourneysRouteChildren {
+  JourneysIdRoute: typeof JourneysIdRoute
+  JourneysIndexRoute: typeof JourneysIndexRoute
+  JourneysVersionsIdRoute: typeof JourneysVersionsIdRoute
+}
+
+const JourneysRouteChildren: JourneysRouteChildren = {
+  JourneysIdRoute: JourneysIdRoute,
+  JourneysIndexRoute: JourneysIndexRoute,
+  JourneysVersionsIdRoute: JourneysVersionsIdRoute,
+}
+
+const JourneysRouteWithChildren = JourneysRoute._addFileChildren(
+  JourneysRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AgentsRoute: AgentsRouteWithChildren,
   AnalyticsRoute: AnalyticsRoute,
-  CampaignsRoute: CampaignsRouteWithChildren,
   ChannelsRoute: ChannelsRouteWithChildren,
+  DashboardRoute: DashboardRoute,
   IntegrationsRoute: IntegrationsRouteWithChildren,
+  JourneysRoute: JourneysRouteWithChildren,
   SettingsRoute: SettingsRoute,
   LeadsIdRoute: LeadsIdRoute,
+  InboxIndexRoute: InboxIndexRoute,
   LeadsIndexRoute: LeadsIndexRoute,
 }
 export const routeTree = rootRouteImport

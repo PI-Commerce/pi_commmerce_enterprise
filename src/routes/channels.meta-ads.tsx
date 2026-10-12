@@ -34,7 +34,7 @@ function MetaAdsManage() {
             <div className="min-w-0">
               <h1 className="text-[22px] font-semibold tracking-tight">Ads</h1>
               <p className="mt-1 text-sm text-muted-foreground">
-                Click-to-WhatsApp ads linked from your Meta ad account. Reference them from a campaign's
+                Click-to-WhatsApp ads linked from your Meta ad account. Reference them from a journey's
                 Audience node to route clicks into a flow.
               </p>
             </div>

@@ -147,7 +147,7 @@ function LeadsManagement() {
     <AppShell>
       <PageHeader
         title="Leads"
-        description="One contact, many campaigns — persistent per-lead memory across every touchpoint."
+        description="One contact, many journeys — persistent per-lead memory across every touchpoint."
       />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -186,7 +186,7 @@ function LeadsManagement() {
               <Th onClick={() => toggleSort("lastInteraction")} sorted={sortKey === "lastInteraction" ? sortAsc : undefined}>
                 Last interaction
               </Th>
-              <Th>Campaigns</Th>
+              <Th>Journeys</Th>
               <Th onClick={() => toggleSort("created")} sorted={sortKey === "created" ? sortAsc : undefined}>Created</Th>
               {showEscalation && <Th>Human Escalation</Th>}
             </tr>
@@ -282,7 +282,7 @@ function Row({
  *  triggers it — click-through on the row still opens the lead. */
 function CampaignsCell({ campaigns }: { campaigns: LeadCampaignEntry[] }) {
   if (campaigns.length === 0) return <span className="text-[11px] text-muted-foreground">—</span>;
-  const label = campaigns.length === 1 ? "In 1 campaign" : `In ${campaigns.length} campaigns`;
+  const label = campaigns.length === 1 ? "In 1 journey" : `In ${campaigns.length} journeys`;
   return (
     <div className="relative inline-flex group">
       <span
@@ -403,7 +403,7 @@ function CampaignFilter({ selected, onToggle }: { selected: Set<string>; onToggl
                 <span className={cn("h-2 w-2 shrink-0 rounded-full", selected.has(c.id) ? "bg-ai" : "bg-muted-foreground/30")} />
                 <span className="truncate">{c.name}</span>
                 {c.hasHitl && (
-                  <span className="ml-auto inline-flex items-center gap-0.5 rounded border border-warning/30 bg-warning/10 px-1 py-0.5 text-[9.5px] font-medium text-warning" title="Campaign includes a Human Escalation node">
+                  <span className="ml-auto inline-flex items-center gap-0.5 rounded border border-warning/30 bg-warning/10 px-1 py-0.5 text-[9.5px] font-medium text-warning" title="Journey includes a Human Escalation node">
                     <Flag className="h-2.5 w-2.5" />
                   </span>
                 )}

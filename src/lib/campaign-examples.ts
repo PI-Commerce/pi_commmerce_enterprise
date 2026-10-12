@@ -14,11 +14,11 @@
  */
 import type { Edge, Node } from "reactflow";
 import type {
-  CampaignStatus, WorkflowNodeData, NodeKind, NodeOutput, NodeOutputKind,
+  CampaignStatus, JourneyType, WorkflowNodeData, NodeKind, NodeOutput, NodeOutputKind,
   PresetConfig, PresetVarMap,
 } from "./campaign-types";
 import { SERIAL_PREFIX } from "./campaign-types";
-import { whatsappOutputs, resolveWaTemplate, smsOutputs, completedOutput, DEFAULT_SMS_DLR_WINDOW, rcsOutputs, DEFAULT_RCS_DLR_WINDOW } from "./wa-outputs";
+import { whatsappOutputs, resolveWaTemplate, smsOutputs, completedOutput, DEFAULT_SMS_DLR_WINDOW, rcsOutputs, DEFAULT_RCS_DLR_WINDOW, apiOutcomeOutputs } from "./wa-outputs";
 import { SEED_SMS_TEMPLATES } from "./sms-templates";
 import { SEED_RCS_TEMPLATES } from "./rcs-templates";
 import { SEED_RCS_CONFIG, agentById } from "./rcs-config";
@@ -26,6 +26,7 @@ import { SEED_RCS_CONFIG, agentById } from "./rcs-config";
 export type ExampleCampaign = {
   name: string;
   status: CampaignStatus;
+  journeyType: JourneyType;
   nodes: Node<WorkflowNodeData>[];
   edges: Edge[];
 };
@@ -578,6 +579,14 @@ const sReview = (
   config: cfg,
 });
 
+// Inbound entry node. Unlike Start+Audience (outbound), an inbound journey begins
+// at a single locked Trigger node that declares how leads enter (a native
+// connector event, a generic webhook, or a CTWA ad tap). No left target handle;
+// no Run construct downstream.
+const sTrigger = (subtitle: string, cfg: PresetConfig): Spec => ({
+  id: "trigger", kind: "trigger", title: "Trigger", subtitle, locked: true, config: cfg,
+});
+
 const ed = (from: string, to: string, port?: string): SpecEdge => ({ from, to, port });
 
 /* ---- assembly: tag edges as routed; layout runs at render-time (ELK) ----- */
@@ -593,7 +602,7 @@ function assemble(rawNodes: Node<WorkflowNodeData>[], rawEdges: Edge[]): { nodes
   };
 }
 
-function buildCampaign(name: string, specs: Spec[], edges: SpecEdge[]): ExampleCampaign {
+function buildCampaign(name: string, specs: Spec[], edges: SpecEdge[], journeyType: JourneyType = "outbound"): ExampleCampaign {
   const rawNodes: Node<WorkflowNodeData>[] = specs.map((s) => ({
     id: s.id, type: "workflow", position: { x: 0, y: 0 },
     data: {
@@ -618,7 +627,7 @@ function buildCampaign(name: string, specs: Spec[], edges: SpecEdge[]): ExampleC
     }
   });
   const { nodes, edges: laidEdges } = assemble(rawNodes, rawEdges);
-  return { name, status: "ready", nodes, edges: laidEdges };
+  return { name, status: "ready", journeyType, nodes, edges: laidEdges };
 }
 
 /* ---- 1. BFSI · Lead Qualification -------------------------------------- */
@@ -811,6 +820,127 @@ const C_COLLECT = buildCampaign("BFSI · Collections", [
   ed("dpd", "vEsc", "late"), ed("vEsc", "plLate"), ed("plLate", "d1"),
   ed("d1", "paid"), ed("paid", "end", "yes"),
   ed("paid", "vfu", "no"), ed("vfu", "plFu"), ed("plFu", "end"),
+]);
+
+/* ---- 4b. BFSI · Smart Collections (Live Pay-Loop) ----------------------
+ * Reference build for the CEO demo. Mirrors, node-for-node, the graph to be
+ * built on the production platform:
+ *   1. Audience (CSV)  → loan_id / dpd / amount_due / due_date
+ *   2. DPD bucket split (3 ways) → cheapest-channel-first ladder per bucket
+ *        0–30 : SMS → WhatsApp pay link
+ *        31–90: WhatsApp reminder → Voice AI → [Call outcome] → WhatsApp pay link
+ *        90+  : Voice AI (escalated) → [Call outcome] → WhatsApp pay link
+ *      The Voice buckets gate the pay link on the AI-captured disposition: only
+ *      `Will Pay Now` / `Promise To Pay` route to the pay link; any other outcome
+ *      falls through the conditional default to End (no link sent).
+ *   3. Converge → Delay 1h → API Tool Call `payment_status` (GET /status)
+ *   4. Conditional Paid?  yes → thank-you WhatsApp ; no → final pay nudge
+ * The pay-link WhatsApp button resolves to {PAY_BASE}/p/{{loan_id}} — the same
+ * mock pay service running locally (collections-pay-demo). */
+const C_SMART_COLLECT = buildCampaign("BFSI · Smart Collections (Live Pay-Loop)", [
+  sStart(),
+  sAud("CSV · delinquent borrowers", ["dpd", "amount_due", "loan_id", "due_date"]),
+  sCond("dpd", "DPD bucket", "days_past_due", [
+    { id: "b1", label: "0–30 DPD",  op: "between", value: "0", value2: "30" },
+    { id: "b2", label: "31–90 DPD", op: "between", value: "31", value2: "90" },
+    { id: "b3", label: "90+ DPD",   op: "greater than", value: "90" },
+  ]),
+  // Bucket 1 (0–30): cheapest channels only — SMS then a WhatsApp pay link.
+  sSms("smsB1", "SMS reminder", "SMS · gentle nudge", SMS_PAYMENT_FAILED, {
+    vars: [
+      { v: "amount", def: "contact.amount_due" },
+      { v: "order_id", def: "contact.loan_id" },
+      { v: "link", def: "picomm.in/pay", mode: "constant" },
+      { v: "hours", def: "48", mode: "constant" },
+    ],
+  }),
+  sWa("plB1", "WhatsApp pay link", "WhatsApp · pay now", "payment_link_v1", {
+    vars: [{ v: "{{1}}", def: "contact.first_name" }, { v: "{{2}}", def: "contact.loan_id" }],
+  }),
+  // Bucket 2 (31–90): WhatsApp reminder → Voice AI → disposition router → pay link.
+  sWa("waB2", "WhatsApp reminder", "WhatsApp · payment due", "collections_reminder_v1"),
+  sVoice("vB2", "Voice AI call", "Collections call"),
+  sCond("dispo2", "Call outcome", "voice_1.call_intent", [
+    { id: "willpay", label: "Will Pay Now", value: "Will Pay Now" },
+    { id: "promise", label: "Promise To Pay", value: "Promise To Pay" },
+  ]),
+  sWa("plB2", "WhatsApp pay link", "WhatsApp · pay now", "payment_link_v1", {
+    vars: [{ v: "{{1}}", def: "contact.first_name" }, { v: "{{2}}", def: "contact.loan_id" }],
+  }),
+  // Bucket 3 (90+): escalated Voice AI → disposition router → pay link.
+  sVoice("vB3", "Voice AI escalated call", "Escalated collections"),
+  sCond("dispo3", "Call outcome", "voice_2.call_intent", [
+    { id: "willpay", label: "Will Pay Now", value: "Will Pay Now" },
+    { id: "promise", label: "Promise To Pay", value: "Promise To Pay" },
+  ]),
+  sWa("plB3", "WhatsApp pay link", "WhatsApp · pay now", "payment_link_v1", {
+    vars: [{ v: "{{1}}", def: "contact.first_name" }, { v: "{{2}}", def: "contact.loan_id" }],
+  }),
+  // Converge → wait → closed-loop verify against the pay service.
+  sDelay("d1", 1, "Hours"),
+  {
+    id: "chk", kind: "apiToolCall",
+    title: "Check payment status", subtitle: "GET /status · payment_status",
+    outputs: apiOutcomeOutputs(),
+    config: { apiTool: "payment_status", apiInputMap: [{ v: "loan_id", def: "contact.loan_id" }] },
+  },
+  sCond("paid", "Paid?", "payment_status", [
+    { id: "yes", label: "Paid", value: "paid" },
+    { id: "no", label: "Unpaid", value: "unpaid" },
+  ]),
+  sWa("thanks", "Thank-you", "WhatsApp · receipt", "collections_thankyou_v1"),
+  sWa("nudge", "Final pay nudge", "WhatsApp · pay now", "payment_link_v1", {
+    vars: [{ v: "{{1}}", def: "contact.first_name" }, { v: "{{2}}", def: "contact.loan_id" }],
+  }),
+  sEnd(),
+], [
+  ed("start", "aud"), ed("aud", "dpd"),
+  ed("dpd", "smsB1", "b1"), ed("smsB1", "plB1"), ed("plB1", "d1"),
+  ed("dpd", "waB2", "b2"), ed("waB2", "vB2"), ed("vB2", "dispo2", "success"),
+  ed("dispo2", "plB2", "willpay"), ed("dispo2", "plB2", "promise"), ed("plB2", "d1"),
+  ed("dpd", "vB3", "b3"), ed("vB3", "dispo3", "success"),
+  ed("dispo3", "plB3", "willpay"), ed("dispo3", "plB3", "promise"), ed("plB3", "d1"),
+  ed("d1", "chk"), ed("chk", "paid"),
+  ed("paid", "thanks", "yes"), ed("thanks", "end"),
+  ed("paid", "nudge", "no"), ed("nudge", "end"),
+]);
+
+/* ---- 4b. Retail · Post-Purchase Care & Protection (Croma) -------------- */
+/* Lean CEO-demo cut: care touch, then the money moment (Voice AI concierge
+   -> disposition routing -> WhatsApp pay link on the live pay-loop) -> confirm. */
+const C_CROMA_CARE = buildCampaign("Retail · Post-Purchase Care & Protection (Croma)", [
+  sStart(),
+  sAud("CSV · recent appliance buyers", ["product", "order_value", "plan_id"]),
+  // 1. Care + onboarding
+  sWa("welcome", "Delivery & care tips", "WhatsApp · welcome + setup", "onboarding_care_v1"),
+  sDelay("d1", 1, "Days"),
+  // 2. Protection attach (money moment, reuse live pay service)
+  sWa("offer", "Protection offer", "WhatsApp · add protection", "protection_offer_v1"),
+  sVoice("vConc", "Voice AI concierge", "Explain protection plan"),
+  sCond("wdispo", "Call outcome", "voice_1.call_intent", [
+    { id: "buy", label: "Will Buy Now", value: "Will Buy Now" },
+    { id: "int", label: "Interested", value: "Interested" },
+  ]),
+  sWa("payLink", "Protection pay link", "WhatsApp · pay for plan", "protection_pay_v1", { vars: [{ v: "{{1}}", def: "contact.first_name" }, { v: "{{2}}", def: "contact.plan_id" }] }),
+  sDelay("dPay", 1, "Minutes"),
+  { id: "chkPay", kind: "apiToolCall", title: "Check payment status", subtitle: "GET /status · payment_status", outputs: apiOutcomeOutputs(), config: { apiTool: "payment_status", apiInputMap: [{ v: "loan_id", def: "contact.plan_id" }] } },
+  sCond("paid", "Paid?", "payment_status", [
+    { id: "yes", label: "Paid", value: "paid" },
+    { id: "no", label: "Unpaid", value: "unpaid" },
+  ]),
+  // 3. Confirm
+  sWa("planOk", "Plan activated", "WhatsApp · policy doc", "protection_active_v1"),
+  sWa("nudge", "Final protection nudge", "WhatsApp · add protection", "protection_nudge_v1", { vars: [{ v: "{{1}}", def: "contact.first_name" }, { v: "{{2}}", def: "contact.plan_id" }] }),
+  sEnd(),
+], [
+  ed("start", "aud"), ed("aud", "welcome"),
+  ed("welcome", "d1"), ed("d1", "offer"),
+  ed("offer", "vConc"),
+  ed("vConc", "wdispo", "success"),
+  ed("wdispo", "payLink", "buy"), ed("wdispo", "payLink", "int"),
+  ed("payLink", "dPay"), ed("dPay", "chkPay"), ed("chkPay", "paid"),
+  ed("paid", "planOk", "yes"), ed("paid", "nudge", "no"),
+  ed("planOk", "end"), ed("nudge", "end"),
 ]);
 
 /* ---- 5. Retail · Activation -------------------------------------------- */
@@ -1530,6 +1660,60 @@ const C_HANDOFF = buildCampaign("Support · WhatsApp with human handoff", [
   ed("handoff", "end"),
 ]);
 
+/* ==============================================================
+ * INBOUND journeys — entry is a single Trigger node (no Start/Audience,
+ * no Run). Leads arrive event-by-event from a native connector or a
+ * generic webhook and flow straight into action nodes.
+ * ============================================================== */
+
+/* ---- Inbound 1 · Payment Failure Recovery (Paytm payment.failed) ------- */
+const C_IN_PAYFAIL = buildCampaign("Payment Failure Recovery", [
+  sTrigger("Paytm · payment.failed", {
+    triggerType: "connector",
+    triggerConnectorId: "paytm",
+    triggerEventId: "payment.failed",
+  }),
+  sWa("waRetry", "WhatsApp retry link", "WhatsApp · complete payment", "payment_link_v1"),
+  sDelay("d1", 1, "Hours"),
+  sSms("smsRetry", "SMS fallback", "SMS · payment failed", SMS_PAYMENT_FAILED, {
+    vars: [
+      { v: "name", def: "contact.first_name" },
+      { v: "amount", def: "amount" },
+      { v: "link", def: "picomm.in/pay", mode: "constant" },
+    ],
+  }),
+  sEnd(),
+], [
+  ed("trigger", "waRetry"),
+  ed("waRetry", "d1"), ed("d1", "smsRetry"), ed("smsRetry", "end"),
+], "inbound");
+
+/* ---- Inbound 2 · Cart Abandonment Nudge (orders cart.abandoned) -------- */
+const C_IN_CART = buildCampaign("Cart Abandonment Nudge", [
+  sTrigger("Orders · cart.abandoned", {
+    triggerType: "connector",
+    triggerConnectorId: "orders",
+    triggerEventId: "cart.abandoned",
+  }),
+  sDelay("d1", 30, "Minutes"),
+  sWa("waNudge", "WhatsApp cart nudge", "WhatsApp · complete your order", "cart_recovery_v1"),
+  sCond("recovered", "Recovered?", "waNudge.reply", [
+    { id: "yes", label: "Checked out", value: "checked_out" },
+    { id: "no", label: "Still idle", value: "idle" },
+  ]),
+  sSms("smsNudge", "SMS reminder", "SMS · finish checkout", SMS_CART_RECOVERY, {
+    vars: [
+      { v: "name", def: "contact.first_name" },
+      { v: "link", def: "picomm.in/cart", mode: "constant" },
+    ],
+  }),
+  sEnd(),
+], [
+  ed("trigger", "d1"), ed("d1", "waNudge"), ed("waNudge", "recovered"),
+  ed("recovered", "end", "yes"),
+  ed("recovered", "smsNudge", "no"), ed("smsNudge", "end"),
+], "inbound");
+
 const RAW_EXAMPLE_CAMPAIGNS: Record<string, ExampleCampaign> = {
   // Order here drives the Campaigns-list order (the list staggers `lastEdited` by
   // index). The ACME Corp FCC loyalty campaign leads, followed by the rest of the
@@ -1541,12 +1725,14 @@ const RAW_EXAMPLE_CAMPAIGNS: Record<string, ExampleCampaign> = {
   c_ex9: C_WINBACK,
   c_ex10: C_SUBSCRIPTION,
   c_ex11: C_SEASONAL,
-  c_ex1: { name: "Omni-channel React", status: "draft", nodes: EX1_LAID.nodes, edges: EX1_LAID.edges },
-  c_ex2: { name: "Voice-led win-back", status: "draft", nodes: EX2_LAID.nodes, edges: EX2_LAID.edges },
+  c_ex1: { name: "Omni-channel React", status: "draft", journeyType: "outbound", nodes: EX1_LAID.nodes, edges: EX1_LAID.edges },
+  c_ex2: { name: "Voice-led win-back", status: "draft", journeyType: "outbound", nodes: EX2_LAID.nodes, edges: EX2_LAID.edges },
   c_ex3: C_LEADQUAL,
   c_ex4: C_RENEWAL,
   c_ex5: C_UPSELL,
   c_ex6: C_COLLECT,
+  c_ex21: C_SMART_COLLECT,
+  c_ex22: C_CROMA_CARE,
   c_ex18: C_SMS_LIFECYCLE,
   c_ex19: C_RCS,
   c_ex12: C_ORDERCONF,
@@ -1555,6 +1741,9 @@ const RAW_EXAMPLE_CAMPAIGNS: Record<string, ExampleCampaign> = {
   c_ex15: C_PRICEDROP,
   c_ex16: C_BACKINSTOCK,
   c_ex20: C_HANDOFF,
+  // Inbound journeys (trigger-entry, no Run).
+  c_in1: C_IN_PAYFAIL,
+  c_in2: C_IN_CART,
 };
 
 /* ---- normalization ------------------------------------------------------
@@ -1669,6 +1858,6 @@ export const EXAMPLE_CAMPAIGNS: Record<string, ExampleCampaign> = Object.fromEnt
   Object.entries(RAW_EXAMPLE_CAMPAIGNS).map(([id, c]) => [id, normalizeCampaign(c)]),
 );
 
-/** Names + status for the campaigns list (kept in sync with the registry above). */
-export const EXAMPLE_CAMPAIGN_NAMES: { id: string; name: string; status: CampaignStatus }[] =
-  Object.entries(EXAMPLE_CAMPAIGNS).map(([id, c]) => ({ id, name: c.name, status: c.status }));
+/** Names + status + journey type for the journeys list (kept in sync with the registry above). */
+export const EXAMPLE_CAMPAIGN_NAMES: { id: string; name: string; status: CampaignStatus; journeyType: JourneyType }[] =
+  Object.entries(EXAMPLE_CAMPAIGNS).map(([id, c]) => ({ id, name: c.name, status: c.status, journeyType: c.journeyType }));

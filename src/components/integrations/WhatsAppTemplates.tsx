@@ -4,7 +4,7 @@ import {
   Smile, X, Trash2, Pencil, UploadCloud, Phone, Reply, Workflow, ExternalLink, Check,
   Signal, Wifi, BatteryFull, ChevronLeft, ChevronRight, AlertCircle,
   Bold, Italic, Strikethrough, Code, Info, List, ArrowUp, ArrowDown, ChevronDown, Copy,
-  MoreHorizontal, CopyPlus, Terminal,
+  MoreHorizontal, CopyPlus, Terminal, MousePointerClick, Lock,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,7 +30,7 @@ import {
   MEDIA_HINTS, languageLabel, fillVariables, variableCount,
   MAX_TEMPLATE_BUTTONS, cappedButtonTypes, buttonRuleErrors, buttonFieldErrors, duplicateButtonIndexes,
   bodyEdgeVariable, bodyTooManyVariables,
-  TEMPLATE_LIMITS,
+  TEMPLATE_LIMITS, TRACKING_DOMAIN,
   type WaTemplate, type TemplateStatus, type TemplateCategory, type TemplateFormat,
   type TemplateButton, type TemplateButtonType,
 } from "@/lib/waba-templates";
@@ -1240,7 +1240,59 @@ function ButtonEditor({ index, scope, canUp, canDown, button, capped, dialCode, 
         </button>
       </div>
 
-      {/* Tracking — only Visit-website (URL) buttons support conversion tracking. */}
+      {/* Link click tracking — route the button link through the Pi Commerce
+          tracking domain so every tap is logged in Analytics. URL buttons only.
+          Distinct from "Track app conversions" (deep-link mapping) below. */}
+      {button.type === "URL" && (
+        <div className="mt-2.5 rounded-lg border border-border bg-secondary/30 p-2.5">
+          <label className="flex items-start gap-2 text-[12px] text-foreground">
+            <Checkbox
+              className="mt-0.5"
+              checked={!!button.trackLinkClicks}
+              onCheckedChange={(v) => {
+                const on = v === true;
+                onChange(
+                  on
+                    ? { trackLinkClicks: true, urlType: "Dynamic", urlSuffix: button.urlSuffix || "{{1}}" }
+                    : { trackLinkClicks: false },
+                );
+              }}
+            />
+            <span className="flex-1">
+              <span className="flex items-center gap-1.5 font-medium">
+                <MousePointerClick className="h-3.5 w-3.5 text-primary" /> Track link clicks
+              </span>
+              <span className="mt-0.5 block text-[11px] text-muted-foreground">
+                Serve this link through {TRACKING_DOMAIN} so every tap is measured in Analytics. Works on campaign and API sends.
+              </span>
+            </span>
+            <InfoTip text="The button link is routed through the Pi Commerce tracking domain. At send time each recipient gets a unique short code that logs the tap, then redirects to your destination. Turning this on makes the button a Dynamic URL." />
+          </label>
+
+          {button.trackLinkClicks && (
+            <div className="mt-2.5 space-y-1.5 border-t border-border/60 pt-2.5">
+              <div className="flex items-center gap-2 text-[11px]">
+                <span className="w-[72px] shrink-0 uppercase tracking-wide text-muted-foreground">Tracked link</span>
+                <code className="min-w-0 flex-1 truncate rounded bg-secondary px-1.5 py-1 font-mono text-[11px] text-foreground">
+                  https://{TRACKING_DOMAIN}/{button.urlSuffix || "{{1}}"}
+                </code>
+              </div>
+              <div className="flex items-center gap-2 text-[11px]">
+                <span className="w-[72px] shrink-0 uppercase tracking-wide text-muted-foreground">Destination</span>
+                <code className="min-w-0 flex-1 truncate rounded bg-secondary px-1.5 py-1 font-mono text-[11px] text-muted-foreground">
+                  {button.url?.trim() || "https://www.example.com"}
+                </code>
+              </div>
+              <p className="flex items-start gap-1.5 text-[11px] text-warning">
+                <Lock className="mt-0.5 h-3 w-3 shrink-0" />
+                The tracking domain is locked once this template is submitted to Meta and cannot be changed after approval.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Track app conversions — only Visit-website (URL) buttons support it. */}
       {button.type === "URL" && (
         <label className="mt-2 flex items-center gap-2 text-[12px] text-foreground">
           <Checkbox checked={!!button.clickTracking} onCheckedChange={(v) => onChange({ clickTracking: v === true })} />

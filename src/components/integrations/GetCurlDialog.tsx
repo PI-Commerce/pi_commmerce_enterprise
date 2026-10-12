@@ -10,6 +10,7 @@ import { Copy, Check, Eye, EyeOff, Info, AlertTriangle } from "lucide-react";
 import {
   curlSnippet, endpointFor, sendersFor, SENDER_META, DEMO_API_KEY, type CurlTemplate,
 } from "@/lib/template-send";
+import { useRegion } from "@/lib/region";
 
 /**
  * "Get Curl" — the ready-to-fire curl for a single template. Reused by the
@@ -27,6 +28,7 @@ export function GetCurlDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const region = useRegion();
   const [revealed, setRevealed] = useState(false);
   const [copied, setCopied] = useState(false);
   const [senderId, setSenderId] = useState<string>("");
@@ -47,15 +49,23 @@ export function GetCurlDialog({
   const needsSender = !noSenders && !senderId;
   const blocked = noSenders || needsSender;
 
+  // Every template channel carries an optional `default_country` in the body
+  // (documented in the API docs, not surfaced as a picker): an E.164 recipient is used
+  // as-is, a bare number is parsed against it. WhatsApp can deliver anywhere; for
+  // SMS/RCS it is accepted but not gated here — a country that does not match where the
+  // sender/carrier operates still queues and fails later in Analytics/DLT.
+  const defaultCountry = region.country;
+
   const shown = curlSnippet(template, {
     apiKey: revealed ? DEMO_API_KEY : "YOUR_API_KEY",
     senderId: senderId || undefined,
+    defaultCountry,
   });
 
   function copy() {
     if (blocked) return;
     navigator.clipboard?.writeText(
-      curlSnippet(template!, { apiKey: DEMO_API_KEY, senderId }),
+      curlSnippet(template!, { apiKey: DEMO_API_KEY, senderId, defaultCountry }),
     );
     setCopied(true);
     toast.success("cURL copied");
@@ -69,7 +79,7 @@ export function GetCurlDialog({
           <DialogTitle>Get cURL</DialogTitle>
           <DialogDescription>
             Fire <span className="font-medium text-foreground">{template.name}</span> straight from your system.
-            Replace the phone number{template.variables.length ? " and variable values" : ""}, then send.
+            Replace the phone number{template.variables.length || template.headerMedia ? " and variable values" : ""}, then send.
           </DialogDescription>
         </DialogHeader>
 
@@ -148,7 +158,7 @@ export function GetCurlDialog({
           <p>
             Keep your API key secret. Add more objects to{" "}
             <code className="rounded bg-secondary px-1 py-0.5 font-mono text-[11px] text-foreground">recipients</code>{" "}
-            to send to multiple people. A campaign and run are created automatically, so this still shows up in Analytics.
+            to send to multiple people. A broadcast run is created once per client, so these sends appear in Runs.
           </p>
         </div>
       </DialogContent>
