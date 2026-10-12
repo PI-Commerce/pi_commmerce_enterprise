@@ -92,7 +92,8 @@ export function RcsTemplates({ config }: { config: RcsChannelConfig }) {
 
 /* ================================ List view ================================ */
 
-const GRID = "grid-cols-[1.6fr_1.2fr_1fr_0.9fr_1fr_1fr_auto]";
+// Columns: Name | Agent | Agent ID | Type | Template | Template ID | Approval | Create date | Action
+const GRID = "grid-cols-[1.6fr_1.2fr_1fr_0.9fr_0.9fr_1fr_1fr_1fr_auto]";
 
 function RcsTemplateList({ config, templates, onCreate, onEdit, onClone, onDelete }: {
   config: RcsChannelConfig;
@@ -173,7 +174,7 @@ function RcsTemplateList({ config, templates, onCreate, onEdit, onClone, onDelet
         {/* Table */}
         <div className="mt-4 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border">
           <div className={cn("grid shrink-0 items-center gap-3 border-b border-border bg-secondary/40 px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground", GRID)}>
-            <span>Name</span><span>Agent</span><span>Type</span><span>Template</span>
+            <span>Name</span><span>Agent</span><span>Agent ID</span><span>Type</span><span>Template</span><span>Template ID</span>
             <span>Approval</span><span>Create date</span><span className="w-16 text-right">Action</span>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto">
@@ -200,8 +201,10 @@ function RcsTemplateList({ config, templates, onCreate, onEdit, onClone, onDelet
                       <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">{t.body}</span>
                     </span>
                     <span className="min-w-0 truncate text-muted-foreground">{agent?.name ?? t.agentId}</span>
+                    <span className="min-w-0 truncate font-mono text-[11.5px] text-muted-foreground">{t.agentId}</span>
                     <span>{agent ? <AgentTypeTag type={agent.type} /> : <span className="text-[12px] text-muted-foreground">—</span>}</span>
                     <span className="text-[12px] text-muted-foreground">{t.type === "TEXT" ? "Text" : "Rich card"}</span>
+                    <span className="min-w-0 truncate font-mono text-[11.5px] text-muted-foreground">{t.id}</span>
                     <span><StatusTag status={t.approvalStatus} /></span>
                     <span className="text-muted-foreground">{t.createdAt}</span>
                     <span className="flex w-16 items-center justify-end" onClick={(e) => e.stopPropagation()}>
@@ -476,14 +479,21 @@ function RcsTemplateForm({ config, initial, existing, onCancel, onSave }: {
                 <FormField
                   label="Agent"
                   required
-                  hint={brandId ? (agent ? `Type · ${agent.type}` : "Agents registered under this brand") : "Select a brand first"}
+                  hint={brandId
+                    ? (agent ? `Type · ${agent.type} · ID · ${agent.id}` : "Agents registered under this brand (duplicate display names are allowed, so pick by ID when unsure)")
+                    : "Select a brand first"}
                   error={showErrors ? errors.agentId : undefined}
                 >
                   <Select value={agentId} onValueChange={setAgentId} disabled={!brandId}>
                     <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select Agent" /></SelectTrigger>
                     <SelectContent>
                       {agents.map((a) => (
-                        <SelectItem key={a.id} value={a.id}>{a.name} · {a.type}</SelectItem>
+                        <SelectItem key={a.id} value={a.id}>
+                          <span className="flex items-center gap-2">
+                            <span>{a.name} · {a.type}</span>
+                            <span className="font-mono text-[11px] text-muted-foreground">{a.id}</span>
+                          </span>
+                        </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>

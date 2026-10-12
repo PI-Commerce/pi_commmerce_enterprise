@@ -714,7 +714,10 @@ function MessagesTable({ refs }: { refs: RcsRef[] }) {
             <thead className="sticky top-0 z-10 bg-card text-[11px] uppercase tracking-wider text-muted-foreground">
               <tr className="border-b border-border">
                 <th className="px-4 py-2 font-medium">Recipient</th>
-                <th className="px-4 py-2 font-medium">Template / Agent</th>
+                <th className="px-4 py-2 font-medium">Agent</th>
+                <th className="px-4 py-2 font-medium">Agent ID</th>
+                <th className="px-4 py-2 font-medium">Template</th>
+                <th className="px-4 py-2 font-medium">Template ID</th>
                 <th className="px-4 py-2 font-medium">Status</th>
                 <th className="px-4 py-2 font-medium">Button</th>
                 <th className="px-4 py-2 font-medium">Sent</th>
@@ -727,7 +730,7 @@ function MessagesTable({ refs }: { refs: RcsRef[] }) {
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-12 text-center text-muted-foreground">
+                  <td colSpan={12} className="px-4 py-12 text-center text-muted-foreground">
                     No messages match your filters.
                   </td>
                 </tr>
@@ -737,12 +740,10 @@ function MessagesTable({ refs }: { refs: RcsRef[] }) {
                     <td className="whitespace-nowrap px-4 py-2.5">
                       <span className="block font-mono text-[12px]">{m.phone}</span>
                     </td>
-                    <td className="px-4 py-2.5">
-                      <span className="block">{m.templateName}</span>
-                      <span className="block text-[10.5px] text-muted-foreground">
-                        {m.agentName}{m.provider !== "—" ? ` · ${m.provider}` : ""}
-                      </span>
-                    </td>
+                    <td className="whitespace-nowrap px-4 py-2.5">{m.agentName}</td>
+                    <td className="whitespace-nowrap px-4 py-2.5 font-mono text-[11.5px] text-muted-foreground">{m.agentId}</td>
+                    <td className="whitespace-nowrap px-4 py-2.5">{m.templateName}</td>
+                    <td className="whitespace-nowrap px-4 py-2.5 font-mono text-[11.5px] text-muted-foreground">{m.templateId}</td>
                     <td className="px-4 py-2.5">
                       <span className={cn("whitespace-nowrap rounded-md px-2 py-0.5 text-[10.5px] font-medium", STATUS_TONE[m.status])}>
                         {m.status}

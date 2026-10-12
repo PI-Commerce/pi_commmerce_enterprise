@@ -88,8 +88,10 @@ export type RcsMessage = {
   customer: string;
   templateName: string;
   templateId: string;
-  /** Sending RCS agent + the provider it routes through — report-only. */
+  /** Sending RCS agent + the provider it routes through. */
   agentName: string;
+  /** Stable identifier of the agent (duplicate agent names are allowed). */
+  agentId: string;
   provider: string;
   status: RcsStatus;
   /** For a "Clicked" row, the suggestion button text the recipient clicked
@@ -217,6 +219,7 @@ export function buildRcsMessages({ run, node }: RcsRef, limit = 120): RcsMessage
       templateName: template?.name ?? "—",
       templateId: template?.id ?? "—",
       agentName: agent?.name ?? agentIdRef ?? "—",
+      agentId: agent?.id ?? agentIdRef ?? "—",
       provider: provider ? providerLabel(provider) : "—",
       status,
       clickedButton,
@@ -233,10 +236,12 @@ export function buildRcsMessages({ run, node }: RcsRef, limit = 120): RcsMessage
 }
 
 export function rcsMessagesToCsv(rows: RcsMessage[]): string {
+  // Matches PICOM-6133: prod columns, name for name, plus agent_id after
+  // agent and template_id after template_name. Fourteen columns total.
   const head = [
     "recipient",
-    "customer",
     "agent",
+    "agent_id",
     "provider",
     "template_name",
     "template_id",
@@ -248,12 +253,11 @@ export function rcsMessagesToCsv(rows: RcsMessage[]): string {
     "clicked_at",
     "failed_at",
     "failure_reason",
-    "delivery_latency_sec",
   ];
   const body = rows.map((m) => [
     phoneCsvCell(m.phone),
-    m.customer,
     m.agentName,
+    m.agentId,
     m.provider,
     m.templateName,
     m.templateId,
@@ -265,7 +269,6 @@ export function rcsMessagesToCsv(rows: RcsMessage[]): string {
     m.clickedAt ?? "",
     m.failedAt ?? "",
     m.failureReason ?? "",
-    m.deliveryLatency ?? "",
   ]);
   return [head, ...body]
     .map((row) =>
