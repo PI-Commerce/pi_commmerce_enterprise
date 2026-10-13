@@ -24,24 +24,24 @@ export type SmsStatus = "Sent" | "Delivered" | "Failed" | "Timed out";
  * Vendor/operator rejection reasons, weighted by how often they occur in
  * practice — invalid numbers and DND registrations dominate real failure logs.
  */
-const FAILURE_REASONS: { reason: string; weight: number }[] = [
-  { reason: "Invalid or non-existent number", weight: 34 },
-  { reason: "Recipient on DND / NDNC registry", weight: 27 },
-  { reason: "Handset unreachable or switched off", weight: 16 },
-  { reason: "Operator rejected — template mismatch", weight: 11 },
-  { reason: "Sender ID blocked by operator", weight: 7 },
-  { reason: "Message expired before delivery", weight: 5 },
+const FAILURE_REASONS: { code: string; reason: string; weight: number }[] = [
+  { code: "invalid_number", reason: "Invalid or non-existent number", weight: 34 },
+  { code: "dnd", reason: "Recipient on DND / NDNC registry", weight: 27 },
+  { code: "unreachable", reason: "Handset unreachable or switched off", weight: 16 },
+  { code: "template_mismatch", reason: "Operator rejected due to template mismatch", weight: 11 },
+  { code: "sender_blocked", reason: "Sender ID blocked by operator", weight: 7 },
+  { code: "ttl_expired", reason: "Message expired before delivery", weight: 5 },
 ];
 
 const REASON_TOTAL = FAILURE_REASONS.reduce((s, r) => s + r.weight, 0);
 
-function pickFailureReason(r: number): string {
+function pickFailure(r: number): { code: string; reason: string } {
   let acc = r * REASON_TOTAL;
   for (const f of FAILURE_REASONS) {
     acc -= f.weight;
-    if (acc <= 0) return f.reason;
+    if (acc <= 0) return { code: f.code, reason: f.reason };
   }
-  return FAILURE_REASONS[0].reason;
+  return { code: FAILURE_REASONS[0].code, reason: FAILURE_REASONS[0].reason };
 }
 
 /**
@@ -83,9 +83,17 @@ export type SmsMessage = {
   sentAt: string;
   deliveredAt: string | null;
   failedAt: string | null;
+  /** Structured operator code paired with failureReason. Blank unless failed. */
+  errorCode: string | null;
   failureReason: string | null;
-  /** Segments consumed by this message — the "SMS count" in §5. Report-only. */
+  /** Segments consumed by this message. The value finance reconciles against
+   *  (also surfaced in the webhook as X-Pi-Credit-Consumed). */
   smsCount: number;
+  /** Where the send originated. Mirrors the Source value shown on the
+   *  Analytics Logs table (for example "Campaign - CSV Based" or "API"). */
+  source: string;
+  /** Campaign id (Analytics-only; the DLR CSV does not carry it). */
+  campaignId: string | null;
   /** Seconds from submission to delivery receipt; null unless delivered. */
   deliveryLatency: number | null;
   /** ISO date (YYYY-MM-DD) for date-range filtering. */
@@ -177,10 +185,16 @@ export function buildSmsMessages({ run, node }: SmsRef, limit = 120): SmsMessage
       failedAt: failed
         ? `${fmtDate(l.updatedDate)}, ${fmtClock(sentMinutes + failLatency / 60)}`
         : null,
-      failureReason: failed ? pickFailureReason(r()) : null,
+      ...(failed
+        ? (() => { const f = pickFailure(r()); return { errorCode: f.code, failureReason: f.reason }; })()
+        : { errorCode: null, failureReason: null }),
       // A hard failure never reached the handset, so it consumes no segments;
       // everything that left the platform consumes its template's segment count.
       smsCount: status === "Failed" ? 0 : segments,
+      // Illustrative mix: campaigns (CSV-based + canvas), with a thin slice of
+      // API sends. Deterministic so screenshots stay stable.
+      source: r() < 0.9 ? "Campaign - CSV Based" : "API",
+      campaignId: run.id || null,
       deliveryLatency: delivered ? latency : null,
       date: l.updatedDate,
     };
@@ -193,9 +207,11 @@ export function templateForNode(node: SankeyNode): SmsTemplate | undefined {
 }
 
 export function smsMessagesToCsv(rows: SmsMessage[]): string {
+  // Matches PICOM-6132: prod columns kept name for name, with error_code
+  // inserted right before failure_reason and source appended at the end.
+  // Fourteen columns total.
   const head = [
     "recipient",
-    "customer",
     "pe_id",
     "sender_id",
     "template_name",
@@ -205,13 +221,13 @@ export function smsMessagesToCsv(rows: SmsMessage[]): string {
     "sent_at",
     "delivered_at",
     "failed_at",
+    "error_code",
     "failure_reason",
     "sms_count",
-    "delivery_latency_sec",
+    "source",
   ];
   const body = rows.map((m) => [
     phoneCsvCell(m.phone),
-    m.customer,
     m.peId,
     m.senderId,
     m.templateName,
@@ -221,9 +237,10 @@ export function smsMessagesToCsv(rows: SmsMessage[]): string {
     m.sentAt,
     m.deliveredAt ?? "",
     m.failedAt ?? "",
+    m.errorCode ?? "",
     m.failureReason ?? "",
     m.smsCount,
-    m.deliveryLatency ?? "",
+    m.source,
   ]);
   return [head, ...body]
     .map((row) =>

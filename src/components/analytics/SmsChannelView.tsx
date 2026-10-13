@@ -526,17 +526,24 @@ function MessagesTable({ refs }: { refs: SmsRef[] }) {
               <tr className="border-b border-border">
                 <th className="px-4 py-2 font-medium">Recipient</th>
                 <th className="px-4 py-2 font-medium">Template</th>
+                <th className="px-4 py-2 font-medium">Template ID</th>
+                <th className="px-4 py-2 font-medium">Sender ID</th>
+                <th className="px-4 py-2 font-medium">PE ID</th>
+                <th className="px-4 py-2 font-medium">Source</th>
+                <th className="px-4 py-2 font-medium">Campaign ID</th>
                 <th className="px-4 py-2 font-medium">Status</th>
                 <th className="px-4 py-2 font-medium">Sent</th>
                 <th className="px-4 py-2 font-medium">Delivered</th>
                 <th className="px-4 py-2 font-medium">Failed</th>
+                <th className="px-4 py-2 text-right font-medium">SMS count</th>
+                <th className="px-4 py-2 font-medium">Error code</th>
                 <th className="px-4 py-2 font-medium">Failure reason</th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center text-muted-foreground">
+                  <td colSpan={14} className="px-4 py-12 text-center text-muted-foreground">
                     No messages match your filters.
                   </td>
                 </tr>
@@ -546,10 +553,12 @@ function MessagesTable({ refs }: { refs: SmsRef[] }) {
                     <td className="whitespace-nowrap px-4 py-2.5">
                       <span className="block font-mono text-[12px]">{m.phone}</span>
                     </td>
-                    <td className="px-4 py-2.5">
-                      <span className="block">{m.templateName}</span>
-                      <span className="block font-mono text-[10.5px] text-muted-foreground">{m.templateId}</span>
-                    </td>
+                    <td className="whitespace-nowrap px-4 py-2.5">{m.templateName}</td>
+                    <td className="whitespace-nowrap px-4 py-2.5 font-mono text-[11.5px] text-muted-foreground">{m.templateId}</td>
+                    <td className="whitespace-nowrap px-4 py-2.5 font-mono text-[11.5px] text-muted-foreground">{m.senderId}</td>
+                    <td className="whitespace-nowrap px-4 py-2.5 font-mono text-[11.5px] text-muted-foreground">{m.peId}</td>
+                    <td className="whitespace-nowrap px-4 py-2.5 text-[11.5px] text-muted-foreground">{m.source}</td>
+                    <td className="whitespace-nowrap px-4 py-2.5 font-mono text-[11.5px] text-muted-foreground">{m.campaignId ?? "—"}</td>
                     <td className="px-4 py-2.5">
                       <span className={cn("whitespace-nowrap rounded-md px-2 py-0.5 text-[10.5px] font-medium", STATUS_TONE[m.status])}>
                         {m.status}
@@ -560,6 +569,8 @@ function MessagesTable({ refs }: { refs: SmsRef[] }) {
                       {m.deliveredAt ?? "—"}
                     </td>
                     <td className="whitespace-nowrap px-4 py-2.5 text-[11.5px] text-muted-foreground">{m.failedAt ?? "—"}</td>
+                    <td className="whitespace-nowrap px-4 py-2.5 text-right font-mono text-[11.5px]">{m.smsCount}</td>
+                    <td className="whitespace-nowrap px-4 py-2.5 font-mono text-[11.5px] text-muted-foreground">{m.errorCode ?? "—"}</td>
                     <td className="px-4 py-2.5 text-[11.5px] text-muted-foreground">{m.failureReason ?? "—"}</td>
                   </tr>
                 ))
