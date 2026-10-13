@@ -210,8 +210,8 @@ function TemplateList({ templates, onCreate, onEdit, onClone, onDelete }: {
 
       {/* Table — frozen header row, only the body rows scroll */}
       <div className="mt-4 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border">
-        <div className="grid shrink-0 grid-cols-[1.4fr_1.6fr_1fr_1fr_0.9fr_auto] items-center gap-3 border-b border-border bg-secondary/40 px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-          <span>ID</span><span>Name</span><span>Create date</span><span>Category</span><span>Status</span>
+        <div className="grid shrink-0 grid-cols-[1.4fr_1.6fr_1.1fr_1fr_1fr_0.9fr_auto] items-center gap-3 border-b border-border bg-secondary/40 px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <span>ID</span><span>Name</span><span>WABA ID</span><span>Create date</span><span>Category</span><span>Status</span>
           <span className="w-16 text-right">Action</span>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto">
@@ -224,7 +224,7 @@ function TemplateList({ templates, onCreate, onEdit, onClone, onDelete }: {
             <button
               key={t.id}
               onClick={() => onEdit(t)}
-              className="grid w-full grid-cols-[1.4fr_1.6fr_1fr_1fr_0.9fr_auto] items-center gap-3 border-b border-border px-4 py-3 text-left text-[13px] transition-colors last:border-0 hover:bg-accent/40"
+              className="grid w-full grid-cols-[1.4fr_1.6fr_1.1fr_1fr_1fr_0.9fr_auto] items-center gap-3 border-b border-border px-4 py-3 text-left text-[13px] transition-colors last:border-0 hover:bg-accent/40"
             >
               <span className="truncate font-mono text-[11.5px] text-muted-foreground">{t.id}</span>
               <span className="min-w-0">
@@ -234,6 +234,7 @@ function TemplateList({ templates, onCreate, onEdit, onClone, onDelete }: {
                 </span>
                 <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">{languageLabel(t.language)}</span>
               </span>
+              <span className="truncate font-mono text-[11.5px] text-muted-foreground">{t.wabaId ?? "—"}</span>
               <span className="text-muted-foreground">{t.createdAt}</span>
               <span><CategoryTag category={t.category} /></span>
               <span><StatusTag status={t.status} /></span>

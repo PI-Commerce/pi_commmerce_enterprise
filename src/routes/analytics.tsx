@@ -85,6 +85,7 @@ import {
 } from "@/lib/broadcasts-seed";
 import { cn } from "@/lib/utils";
 import { ExportDialog, type ExportDialogMode } from "@/components/analytics/ExportDialog";
+import { WaLogsTable } from "@/components/analytics/WaLogsTable";
 import {
   LARGE_EXPORT_MIN_RANGE_DAYS,
   MAX_RANGE_DAYS,
@@ -2710,14 +2711,22 @@ function ChannelDetail({
               KPIs and charts above.
             </p>
           )}
-          <LeadsTable
-            run={logsRun}
-            restrictToNodeIds={logsNodeIds}
-            title={logTitle}
-            hideStage={kind === "whatsapp"}
-            dateRange={dateRange}
-            channelForExport={kind === "ads" ? undefined : (kind as ReportChannel)}
-          />
+          {kind === "whatsapp" ? (
+            <WaLogsTable
+              refs={(logsNodeIds ?? []).map((nodeId) => {
+                const node = logsRun.sankey.nodes.find((n) => n.id === nodeId)!;
+                return { run: logsRun, node };
+              })}
+            />
+          ) : (
+            <LeadsTable
+              run={logsRun}
+              restrictToNodeIds={logsNodeIds}
+              title={logTitle}
+              dateRange={dateRange}
+              channelForExport={kind === "ads" ? undefined : (kind as ReportChannel)}
+            />
+          )}
         </>
       )}
     </>
