@@ -3,7 +3,7 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import {
   LayoutDashboard, Megaphone, Bot, BarChart3, Plug, Settings, Command,
   PanelLeftClose, PanelLeftOpen, Radio, ChevronRight, MessageCircle, MessageSquare, MessageSquareText,
-  Users, Sparkles, Inbox,
+  Users, Sparkles, Inbox, Workflow, Send,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useRegion } from "@/lib/region";
@@ -11,7 +11,8 @@ import { useRegion } from "@/lib/region";
 const primary = [
   { to: "/", label: "Ask Pi", icon: Sparkles, exact: true },
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { to: "/journeys", label: "Journeys", icon: Megaphone },
+  { to: "/journeys", label: "Workflows", icon: Workflow },
+  { to: "/broadcasts", label: "Broadcasts", icon: Send },
   { to: "/agents", label: "Agents", icon: Bot },
   { to: "/inbox", label: "Inbox", icon: Inbox },
   { to: "/leads", label: "Leads", icon: Users },

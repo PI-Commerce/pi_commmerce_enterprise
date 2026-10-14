@@ -35,8 +35,8 @@ export const Route = createFileRoute("/journeys/")({
   component: CampaignList,
   head: () => ({
     meta: [
-      { title: "Journeys · Pi Commerce Enterprise" },
-      { name: "description", content: "Design, run and review every orchestrated journey — outbound and inbound." },
+      { title: "Workflows · Pi Commerce Enterprise" },
+      { name: "description", content: "Design, run and review every orchestrated journey, outbound and inbound." },
     ],
   }),
 });
@@ -334,8 +334,8 @@ function CampaignList() {
   return (
     <AppShell>
       <PageHeader
-        title="Journeys"
-        description="Design and orchestrate every customer journey across channels — outbound broadcasts and inbound, event-triggered flows."
+        title="Workflows"
+        description="Design and orchestrate every customer journey across channels, both outbound and inbound, event-triggered flows."
         actions={
           showData ? (
             <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={() => fileRef.current?.click()}>

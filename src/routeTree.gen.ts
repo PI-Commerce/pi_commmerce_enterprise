@@ -14,6 +14,7 @@ import { Route as JourneysRouteImport } from './routes/journeys'
 import { Route as IntegrationsRouteImport } from './routes/integrations'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as ChannelsRouteImport } from './routes/channels'
+import { Route as BroadcastsRouteImport } from './routes/broadcasts'
 import { Route as AnalyticsRouteImport } from './routes/analytics'
 import { Route as AgentsRouteImport } from './routes/agents'
 import { Route as IndexRouteImport } from './routes/index'
@@ -57,6 +58,11 @@ const DashboardRoute = DashboardRouteImport.update({
 const ChannelsRoute = ChannelsRouteImport.update({
   id: '/channels',
   path: '/channels',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BroadcastsRoute = BroadcastsRouteImport.update({
+  id: '/broadcasts',
+  path: '/broadcasts',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AnalyticsRoute = AnalyticsRouteImport.update({
@@ -159,6 +165,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/agents': typeof AgentsRouteWithChildren
   '/analytics': typeof AnalyticsRoute
+  '/broadcasts': typeof BroadcastsRoute
   '/channels': typeof ChannelsRouteWithChildren
   '/dashboard': typeof DashboardRoute
   '/integrations': typeof IntegrationsRouteWithChildren
@@ -184,6 +191,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/analytics': typeof AnalyticsRoute
+  '/broadcasts': typeof BroadcastsRoute
   '/dashboard': typeof DashboardRoute
   '/settings': typeof SettingsRoute
   '/agents/$id': typeof AgentsIdRoute
@@ -208,6 +216,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/agents': typeof AgentsRouteWithChildren
   '/analytics': typeof AnalyticsRoute
+  '/broadcasts': typeof BroadcastsRoute
   '/channels': typeof ChannelsRouteWithChildren
   '/dashboard': typeof DashboardRoute
   '/integrations': typeof IntegrationsRouteWithChildren
@@ -236,6 +245,7 @@ export interface FileRouteTypes {
     | '/'
     | '/agents'
     | '/analytics'
+    | '/broadcasts'
     | '/channels'
     | '/dashboard'
     | '/integrations'
@@ -261,6 +271,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/analytics'
+    | '/broadcasts'
     | '/dashboard'
     | '/settings'
     | '/agents/$id'
@@ -284,6 +295,7 @@ export interface FileRouteTypes {
     | '/'
     | '/agents'
     | '/analytics'
+    | '/broadcasts'
     | '/channels'
     | '/dashboard'
     | '/integrations'
@@ -311,6 +323,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AgentsRoute: typeof AgentsRouteWithChildren
   AnalyticsRoute: typeof AnalyticsRoute
+  BroadcastsRoute: typeof BroadcastsRoute
   ChannelsRoute: typeof ChannelsRouteWithChildren
   DashboardRoute: typeof DashboardRoute
   IntegrationsRoute: typeof IntegrationsRouteWithChildren
@@ -356,6 +369,13 @@ declare module '@tanstack/react-router' {
       path: '/channels'
       fullPath: '/channels'
       preLoaderRoute: typeof ChannelsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/broadcasts': {
+      id: '/broadcasts'
+      path: '/broadcasts'
+      fullPath: '/broadcasts'
+      preLoaderRoute: typeof BroadcastsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/analytics': {
@@ -563,6 +583,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AgentsRoute: AgentsRouteWithChildren,
   AnalyticsRoute: AnalyticsRoute,
+  BroadcastsRoute: BroadcastsRoute,
   ChannelsRoute: ChannelsRouteWithChildren,
   DashboardRoute: DashboardRoute,
   IntegrationsRoute: IntegrationsRouteWithChildren,
