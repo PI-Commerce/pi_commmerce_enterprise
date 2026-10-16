@@ -1,11 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { AgentBuilder } from "@/components/agents/AgentBuilder";
-import type { AgentType } from "@/lib/agent-data";
+import { getAgentTemplate, type AgentType } from "@/lib/agent-data";
 
 export const Route = createFileRoute("/agents/new")({
   component: CreateAgent,
-  validateSearch: (s: Record<string, unknown>): { type: AgentType } => ({
+  validateSearch: (s: Record<string, unknown>): { type: AgentType; template?: string } => ({
     type: s.type === "voice" ? "voice" : "chat",
+    template: typeof s.template === "string" ? s.template : undefined,
   }),
   head: () => ({
     meta: [
@@ -16,6 +17,7 @@ export const Route = createFileRoute("/agents/new")({
 });
 
 function CreateAgent() {
-  const { type } = Route.useSearch();
-  return <AgentBuilder mode="create" type={type} />;
+  const { type, template } = Route.useSearch();
+  const record = template ? getAgentTemplate(type, template)?.record : undefined;
+  return <AgentBuilder mode="create" type={type} record={record} />;
 }
