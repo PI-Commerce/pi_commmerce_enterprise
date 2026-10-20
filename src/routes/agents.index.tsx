@@ -6,13 +6,14 @@ import { Input } from "@/components/ui/input";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Wrench, Search, Plus, Phone, MessageCircle } from "lucide-react";
+import { Wrench, Search, Plus, Phone, MessageCircle, ChevronLeft, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { TOOLS, STATUS_LABEL } from "@/lib/tool-registry";
+import { AGENT_TEMPLATES } from "@/lib/agent-data";
 
 export const Route = createFileRoute("/agents/")({
   component: Agents,
@@ -75,10 +76,12 @@ function Builder() {
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
   const [fStatus, setFStatus] = useState<"all" | AgentStatus>("all");
+  const [fType, setFType] = useState<"all" | AgentType>("all");
   const [newOpen, setNewOpen] = useState(false);
 
   const filtered = INITIAL_AGENTS.filter((a) => {
     if (fStatus !== "all" && a.status !== fStatus) return false;
+    if (fType !== "all" && a.type !== fType) return false;
     if (query && !a.name.toLowerCase().includes(query.toLowerCase())) return false;
     return true;
   });
@@ -95,6 +98,16 @@ function Builder() {
             className="h-8 pl-8 text-xs"
           />
         </div>
+        <FilterSelect
+          label="Type"
+          value={fType}
+          onChange={(v) => setFType(v as typeof fType)}
+          options={[
+            { value: "all", label: "All types" },
+            { value: "voice", label: "Voice" },
+            { value: "chat", label: "Chat" },
+          ]}
+        />
         <FilterSelect
           label="Status"
           value={fStatus}
@@ -115,9 +128,9 @@ function Builder() {
       <NewAgentDialog
         open={newOpen}
         onOpenChange={setNewOpen}
-        onPick={(type) => {
+        onPick={(type, template) => {
           setNewOpen(false);
-          navigate({ to: "/agents/new", search: { type } });
+          navigate({ to: "/agents/new", search: { type, template } });
         }}
       />
 
@@ -131,6 +144,7 @@ function Builder() {
             <thead>
               <tr className="border-b border-border bg-secondary/30 text-[11px] uppercase tracking-wider text-muted-foreground">
                 <th className="px-4 py-2.5 text-left font-medium">Agent name</th>
+                <th className="px-4 py-2.5 text-left font-medium">Type</th>
                 <th className="px-4 py-2.5 text-left font-medium">Status</th>
               </tr>
             </thead>
@@ -145,6 +159,9 @@ function Builder() {
                     <p className="font-medium">{a.name}</p>
                   </td>
                   <td className="px-4 py-3">
+                    <TypeChip type={a.type} />
+                  </td>
+                  <td className="px-4 py-3">
                     <StatusTag status={a.status} />
                   </td>
                 </tr>
@@ -154,6 +171,17 @@ function Builder() {
         </div>
       )}
     </>
+  );
+}
+
+function TypeChip({ type }: { type: AgentType }) {
+  const Icon = type === "voice" ? Phone : MessageCircle;
+  const tone = type === "voice" ? "text-ai" : "text-success";
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-md border border-border bg-secondary/40 px-2 py-0.5 text-[11.5px] font-medium capitalize">
+      <Icon className={cn("h-3 w-3", tone)} />
+      {type}
+    </span>
   );
 }
 
@@ -260,65 +288,102 @@ function Tools() {
 
 function cap(s: string) { return s[0].toUpperCase() + s.slice(1); }
 
-/** Modal shown from Agents > Builder "New agent": pick Voice or Chat, then
- *  route to /agents/new?type=<chosen> where the shared AgentBuilder takes over. */
+/**
+ * Modal shown from Agents > Builder "New agent" CTA. Two steps:
+ * (1) pick Voice vs Chat, (2) start from scratch or from a template.
+ * Routes to /agents/new?type=<chosen>[&template=<id>].
+ */
 function NewAgentDialog({
   open, onOpenChange, onPick,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
-  onPick: (type: AgentType) => void;
+  onPick: (type: AgentType, template?: string) => void;
 }) {
+  const [chosenType, setChosenType] = useState<AgentType | null>(null);
+  const reset = (next: boolean) => {
+    onOpenChange(next);
+    if (!next) setChosenType(null);
+  };
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={reset}>
       <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle className="text-base">New agent</DialogTitle>
-          <DialogDescription className="text-xs">
-            What kind of agent do you want to create? Voice agents run outbound calls; chat agents hold multi-turn WhatsApp conversations.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="mt-2 grid grid-cols-2 gap-3">
-          <AgentTypeCard
-            icon={Phone}
-            label="Voice"
-            hint="Outbound AI call"
-            onClick={() => onPick("voice")}
-          />
-          <AgentTypeCard
-            icon={MessageCircle}
-            label="Chat"
-            hint="WhatsApp conversation"
-            onClick={() => onPick("chat")}
-          />
-        </div>
+        {chosenType === null ? (
+          <>
+            <DialogHeader>
+              <DialogTitle>Create an agent</DialogTitle>
+              <DialogDescription>What kind of agent do you want to build?</DialogDescription>
+            </DialogHeader>
+            <div className="grid grid-cols-2 gap-3 pt-1">
+              {([
+                ["voice", "Voice agent", "Makes & takes phone calls", Phone, "text-ai"],
+                ["chat", "Chat agent", "Replies on WhatsApp & chat", MessageCircle, "text-success"],
+              ] as const).map(([type, title, desc, Icon, tone]) => (
+                <button
+                  key={type}
+                  type="button"
+                  onClick={() => setChosenType(type)}
+                  className="flex flex-col items-start gap-2 rounded-xl border border-border bg-card p-4 text-left transition-colors hover:border-foreground/30 hover:bg-accent"
+                >
+                  <span className={cn("flex h-9 w-9 items-center justify-center rounded-lg bg-accent", tone)}>
+                    <Icon className="h-4 w-4" />
+                  </span>
+                  <span className="text-sm font-semibold">{title}</span>
+                  <span className="text-[12px] text-muted-foreground">{desc}</span>
+                </button>
+              ))}
+            </div>
+          </>
+        ) : (
+          <>
+            <DialogHeader>
+              <button
+                type="button"
+                onClick={() => setChosenType(null)}
+                className="mb-1 inline-flex w-fit items-center gap-1 text-[12px] text-muted-foreground hover:text-foreground"
+              >
+                <ChevronLeft className="h-3.5 w-3.5" /> Back
+              </button>
+              <DialogTitle>Start a {chosenType === "voice" ? "voice" : "chat"} agent</DialogTitle>
+              <DialogDescription>Build from scratch, or start from a template.</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-2 pt-1">
+              <button
+                type="button"
+                onClick={() => onPick(chosenType)}
+                className="flex w-full items-center gap-3 rounded-xl border border-border bg-card p-3 text-left transition-colors hover:border-foreground/30 hover:bg-accent"
+              >
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent text-foreground">
+                  <Sparkles className="h-4 w-4" />
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-sm font-semibold">Build from scratch</span>
+                  <span className="block text-[12px] text-muted-foreground">Start with an empty agent and configure everything yourself.</span>
+                </span>
+              </button>
+
+              <div className="px-1 pt-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Templates</div>
+              {AGENT_TEMPLATES[chosenType].map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => onPick(chosenType, t.id)}
+                  className="flex w-full items-center gap-3 rounded-xl border border-border bg-card p-3 text-left transition-colors hover:border-foreground/30 hover:bg-accent"
+                >
+                  <span className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent", chosenType === "voice" ? "text-ai" : "text-success")}>
+                    {chosenType === "voice" ? <Phone className="h-4 w-4" /> : <MessageCircle className="h-4 w-4" />}
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-sm font-semibold">{t.label}</span>
+                    <span className="block text-[12px] text-muted-foreground">{t.description}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </>
+        )}
       </DialogContent>
     </Dialog>
-  );
-}
-
-function AgentTypeCard({
-  icon: Icon, label, hint, onClick,
-}: {
-  icon: typeof Phone;
-  label: string;
-  hint: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="group flex flex-col items-start gap-2 rounded-lg border border-border bg-card p-4 text-left transition-all hover:border-primary/40 hover:bg-accent/40"
-    >
-      <span className="flex h-8 w-8 items-center justify-center rounded-md border border-border bg-secondary text-muted-foreground transition-colors group-hover:border-primary/40 group-hover:text-foreground">
-        <Icon className="h-4 w-4" />
-      </span>
-      <div>
-        <p className="text-sm font-medium text-foreground">{label}</p>
-        <p className="text-[11.5px] text-muted-foreground">{hint}</p>
-      </div>
-    </button>
   );
 }
 
