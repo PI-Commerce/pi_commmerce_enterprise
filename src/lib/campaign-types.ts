@@ -164,6 +164,13 @@ export type PresetConfig = {
   abVariants?: PresetSplitVariant[];
   // ---- Voice Call core ----
   agent?: string;
+  /**
+   * Pinned agent version for this node. `"latest"` (or omitted) floats to the
+   * currently-active version at run time; a number pins to that specific
+   * version. The DSL snapshot taken at run start captures whichever version
+   * was resolved so an in-flight run isn't re-pointed by a later publish.
+   */
+  agentVersion?: number | "latest";
   voiceVarMap?: PresetVarMap[];
   /** Maps each tool campaign-input slot (`v` = "tool.param") to a CSV/audience column (`def`). */
   toolInputMap?: PresetVarMap[];

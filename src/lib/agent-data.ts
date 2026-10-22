@@ -323,6 +323,19 @@ const VERSIONS: Record<string, AgentVersion[]> = {};
  * adds personalization (input variables) and a WhatsApp confirmation tool.
  */
 const VERSION_SEEDS: Record<string, () => AgentVersion[]> = {
+  a_voice_react: () => {
+    const active = AGENT_RECORDS.a_voice_react;
+    if (!active) return [];
+    const v1: AgentRecord = {
+      ...active,
+      status: "paused",
+      masterPrompt: active.masterPrompt.replace(/##\s*Goals[\s\S]*?##/, "## Goals\n- Reactivate dormant traders with a short pitch.\n\n##"),
+    };
+    return [
+      { version: 1, state: "archived", record: v1, updatedAt: "4 weeks ago" },
+      { version: 2, state: "active", record: active, updatedAt: "9 days ago" },
+    ];
+  },
   a_offers: () => {
     const active = AGENT_RECORDS.a_offers;
     const v1: AgentRecord = {

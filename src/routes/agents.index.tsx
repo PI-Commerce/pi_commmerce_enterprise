@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { TOOLS, STATUS_LABEL } from "@/lib/tool-registry";
-import { AGENT_TEMPLATES } from "@/lib/agent-data";
+import { AGENT_TEMPLATES, getVersions, getActiveVersion } from "@/lib/agent-data";
 
 export const Route = createFileRoute("/agents/")({
   component: Agents,
@@ -145,32 +145,50 @@ function Builder() {
               <tr className="border-b border-border bg-secondary/30 text-[11px] uppercase tracking-wider text-muted-foreground">
                 <th className="px-4 py-2.5 text-left font-medium">Agent name</th>
                 <th className="px-4 py-2.5 text-left font-medium">Type</th>
+                <th className="px-4 py-2.5 text-left font-medium">Version</th>
                 <th className="px-4 py-2.5 text-left font-medium">Status</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {filtered.map((a) => (
-                <tr
-                  key={a.id}
-                  onClick={() => navigate({ to: "/agents/$id", params: { id: a.id } })}
-                  className="cursor-pointer transition-colors hover:bg-accent/30"
-                >
-                  <td className="px-4 py-3">
-                    <p className="font-medium">{a.name}</p>
-                  </td>
-                  <td className="px-4 py-3">
-                    <TypeChip type={a.type} />
-                  </td>
-                  <td className="px-4 py-3">
-                    <StatusTag status={a.status} />
-                  </td>
-                </tr>
-              ))}
+              {filtered.map((a) => {
+                const active = getActiveVersion(a.id);
+                const total = getVersions(a.id).length;
+                return (
+                  <tr
+                    key={a.id}
+                    onClick={() => navigate({ to: "/agents/$id", params: { id: a.id } })}
+                    className="cursor-pointer transition-colors hover:bg-accent/30"
+                  >
+                    <td className="px-4 py-3">
+                      <p className="font-medium">{a.name}</p>
+                    </td>
+                    <td className="px-4 py-3">
+                      <TypeChip type={a.type} />
+                    </td>
+                    <td className="px-4 py-3">
+                      <VersionCell active={active?.version} total={total} />
+                    </td>
+                    <td className="px-4 py-3">
+                      <StatusTag status={a.status} />
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
       )}
     </>
+  );
+}
+
+function VersionCell({ active, total }: { active?: number; total: number }) {
+  if (!active) return <span className="text-[12px] text-muted-foreground">—</span>;
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span className="rounded-md border border-border bg-secondary/40 px-1.5 py-0.5 font-mono text-[11px] text-foreground">v{active}</span>
+      {total > 1 && <span className="text-[11px] text-muted-foreground">of {total}</span>}
+    </span>
   );
 }
 

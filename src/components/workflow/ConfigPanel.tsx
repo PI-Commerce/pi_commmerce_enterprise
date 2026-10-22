@@ -57,7 +57,7 @@ import {
 } from "@/lib/rcs-templates";
 import { getTool, TOOLS, type ToolInput } from "@/lib/tool-registry";
 import { flattenBody } from "@/lib/tool-body";
-import { resolveAgent, voiceAgents, chatAgents } from "@/lib/agent-data";
+import { resolveAgent, voiceAgents, chatAgents, getVersions, getActiveVersion } from "@/lib/agent-data";
 import {
   CUSTOM_AI_ACTION,
   transformError, transformsError,
@@ -1283,6 +1283,14 @@ function VoiceCallCore({ config, readOnly, mark, onChange }: { config?: PresetCo
               onPick={(v) => { setAgent(v); mark(true); }}
               placeholder="Select agent…"
             />
+            {agentSelected && agentRecord && (
+              <AgentVersionPicker
+                agentId={agentRecord.id}
+                disabled={readOnly}
+                value={config?.agentVersion}
+                onChange={(v) => onChange({ config: { ...config, agentVersion: v } })}
+              />
+            )}
           </div>
 
           <div className="border-t border-border/60" />
@@ -1382,6 +1390,45 @@ function VoiceCallCore({ config, readOnly, mark, onChange }: { config?: PresetCo
       </Section>
       <ActionAdvanceBanner kind="voiceCall" />
     </>
+  );
+}
+
+/**
+ * Pins which agent version this node runs. "Latest" (default) always resolves
+ * to whatever is active at execution time. Picking a specific version pins the
+ * run to that snapshot — the DSL snapshot captures the chosen version so an
+ * in-flight run keeps its pinned version even if the agent is republished.
+ */
+function AgentVersionPicker({
+  agentId, value, disabled, onChange,
+}: { agentId: string; value?: number | "latest"; disabled?: boolean; onChange: (v: number | "latest") => void }) {
+  const versions = getVersions(agentId);
+  const active = getActiveVersion(agentId);
+  if (versions.length === 0) return null;
+  const current: number | "latest" = value ?? "latest";
+  return (
+    <div className="flex items-center gap-2 pt-1">
+      <Label className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Version</Label>
+      <Select
+        disabled={disabled}
+        value={String(current)}
+        onValueChange={(v) => onChange(v === "latest" ? "latest" : Number(v))}
+      >
+        <SelectTrigger className="h-7 w-auto gap-1.5 px-2 text-[11.5px]">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="latest" className="text-xs">
+            Latest {active ? <span className="text-muted-foreground">(v{active.version})</span> : null}
+          </SelectItem>
+          {[...versions].reverse().map((v) => (
+            <SelectItem key={v.version} value={String(v.version)} className="text-xs">
+              v{v.version} <span className="text-muted-foreground capitalize">· {v.state}</span>
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
   );
 }
 

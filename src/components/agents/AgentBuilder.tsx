@@ -17,7 +17,8 @@ import { cn } from "@/lib/utils";
 import { TOOLS, getTool } from "@/lib/tool-registry";
 import { renderMarkdown } from "@/lib/markdown";
 import type { AgentType, AgentRecord, PostCallVar, InputVar, AgentSettings, SpeechRate, Interruption, ReplyLength } from "@/lib/agent-data";
-import { saveDraftVersion, publishVersion } from "@/lib/agent-data";
+import { saveDraftVersion, publishVersion, getVersions, getEditableVersion, revertToVersion } from "@/lib/agent-data";
+import { VersionSwitcher, VersionStatePill } from "@/components/agents/version-chip";
 import {
   LANGUAGES, TTS_PROVIDERS, PROVIDER_LABELS, PHONE_NUMBERS,
   voicesForLang, getPhoneNumber, type TtsProvider,
@@ -27,8 +28,16 @@ const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9_]/g, "_");
 let seq = 0;
 const uid = () => `pcv_${++seq}_${Date.now().toString(36)}`;
 
-export function AgentBuilder({ mode, type, record }: { mode: "create" | "edit"; type: AgentType; record?: AgentRecord }) {
+export function AgentBuilder({ mode, type, record, selectedVersion }: { mode: "create" | "edit"; type: AgentType; record?: AgentRecord; selectedVersion?: number }) {
   const navigate = useNavigate();
+
+  // Versions (edit mode only). `selected` drives which version is being viewed
+  // and determines whether Save/Publish or Revert is offered.
+  const versions = mode === "edit" && record?.id ? getVersions(record.id) : [];
+  const editable = mode === "edit" && record?.id ? getEditableVersion(record.id) : undefined;
+  const selected = versions.find((v) => v.version === selectedVersion) ?? editable;
+  const viewingArchived = selected?.state === "archived";
+
   const [name, setName] = useState(record?.name ?? "");
   const [tools, setTools] = useState<string[]>(record?.tools ?? []);
   const [inputVars, setInputVars] = useState<InputVar[]>(record?.inputVars ?? []);
@@ -50,6 +59,16 @@ export function AgentBuilder({ mode, type, record }: { mode: "create" | "edit"; 
 
   const close = () => navigate({ to: "/agents" });
   const goView = () => close();
+  const pickVersion = (v: number) => {
+    if (!record?.id) return;
+    navigate({ to: "/agents/$id", params: { id: record.id }, search: { v } });
+  };
+  const revert = () => {
+    if (!record?.id || !selected) return;
+    revertToVersion(record.id, selected.version);
+    toast.success(`Reverted to v${selected.version}`, { description: "This version is now live." });
+    goView();
+  };
 
   const available = TOOLS.filter((t) => !tools.includes(t.handle));
   const status = mode === "edit" ? record?.status ?? "draft" : "draft";
@@ -108,15 +127,22 @@ export function AgentBuilder({ mode, type, record }: { mode: "create" | "edit"; 
           </Link>
           <span className="text-muted-foreground/40">/</span>
           <span className="truncate font-mono text-[13.5px] font-medium">{name.trim() || (mode === "edit" ? record?.name : "New agent")}</span>
-          <span className={cn(
-            "ml-2 inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium capitalize",
-            status === "live" ? "border-success/30 bg-success/10 text-success"
-              : status === "paused" ? "border-muted-foreground/30 bg-muted text-muted-foreground"
-              : "border-warning/30 bg-warning/10 text-warning",
-          )}>
-            <span className={cn("h-1.5 w-1.5 rounded-full", status === "live" ? "bg-success" : status === "paused" ? "bg-muted-foreground" : "bg-warning")} />
-            {status}
-          </span>
+          {mode === "edit" && selected ? (
+            <>
+              <VersionSwitcher versions={versions} selected={selected} onPick={pickVersion} />
+              <VersionStatePill state={selected.state} />
+            </>
+          ) : (
+            <span className={cn(
+              "ml-2 inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium capitalize",
+              status === "live" ? "border-success/30 bg-success/10 text-success"
+                : status === "paused" ? "border-muted-foreground/30 bg-muted text-muted-foreground"
+                : "border-warning/30 bg-warning/10 text-warning",
+            )}>
+              <span className={cn("h-1.5 w-1.5 rounded-full", status === "live" ? "bg-success" : status === "paused" ? "bg-muted-foreground" : "bg-warning")} />
+              {status}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-1.5">
           <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={close}>Cancel</Button>
@@ -125,9 +151,15 @@ export function AgentBuilder({ mode, type, record }: { mode: "create" | "edit"; 
               <Play className="h-3.5 w-3.5" /> Test agent
             </Button>
           )}
-          <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={saveDraft}>
-            <Save className="h-3.5 w-3.5" /> Save as draft
-          </Button>
+          {viewingArchived ? (
+            <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={revert}>
+              <RotateCcw className="h-3.5 w-3.5" /> Revert to v{selected?.version}
+            </Button>
+          ) : (
+            <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={saveDraft}>
+              <Save className="h-3.5 w-3.5" /> Save as draft
+            </Button>
+          )}
         </div>
       </header>
 
@@ -299,9 +331,15 @@ export function AgentBuilder({ mode, type, record }: { mode: "create" | "edit"; 
         </Button>
         <Button variant="outline" size="sm" className="h-8 px-4 text-xs" onClick={close}>Cancel</Button>
         {mode === "edit" ? (
-          <Button size="sm" className="h-8 gap-1.5 px-4 text-xs" disabled={name.trim().length < 2} onClick={publish}>
-            <Check className="h-3.5 w-3.5" /> Publish
-          </Button>
+          viewingArchived ? (
+            <Button size="sm" className="h-8 gap-1.5 px-4 text-xs" onClick={revert}>
+              <RotateCcw className="h-3.5 w-3.5" /> Revert to v{selected?.version}
+            </Button>
+          ) : (
+            <Button size="sm" className="h-8 gap-1.5 px-4 text-xs" disabled={name.trim().length < 2} onClick={publish}>
+              <Check className="h-3.5 w-3.5" /> Publish
+            </Button>
+          )
         ) : (
           <Button size="sm" className="h-8 gap-1.5 px-4 text-xs" disabled={name.trim().length < 2} onClick={createAgent}>
             <Plus className="h-3.5 w-3.5" /> Create agent

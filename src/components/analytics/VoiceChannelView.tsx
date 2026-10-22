@@ -44,7 +44,7 @@ import {
   type LeadStatus,
 } from "@/lib/analytics-leads";
 import type { RunRow, SankeyNode } from "@/lib/analytics-data";
-import { resolveAgent, type AgentRecord } from "@/lib/agent-data";
+import { resolveAgent, getActiveVersion, type AgentRecord } from "@/lib/agent-data";
 
 /**
  * App-engagement intent taxonomy. Illustrative only — the real intent labels are
@@ -92,6 +92,8 @@ type Call = {
   status: VoiceStatus;
   intent: string | null;
   agentId?: string;
+  /** Pinned agent version at run start. Resolves from the run's DSL snapshot. */
+  agentVersion?: number;
 };
 
 type VoiceRef = { run: RunRow; node: SankeyNode };
@@ -145,6 +147,12 @@ function toVoiceStatus(s: LeadStatus | undefined): VoiceStatus {
 
 function buildCalls({ run, node }: VoiceRef): Call[] {
   const agent = resolveAgent(node.config?.agent);
+  // Pinned at run start. Pins to the configured version when the node
+  // explicitly selects one; otherwise falls back to the version that was active
+  // when the run was created (we treat it as still-active here for demo).
+  const pinned = typeof node.config?.agentVersion === "number"
+    ? (node.config.agentVersion as number)
+    : agent ? getActiveVersion(agent.id)?.version : undefined;
   const leads = generateLeads(run).filter((l) => l.stageNodeId === node.id);
   const r = seed(node.id + run.id);
   return leads.slice(0, 80).map((l) => {
@@ -163,6 +171,7 @@ function buildCalls({ run, node }: VoiceRef): Call[] {
       status,
       intent: completed ? INTENTS[Math.floor(r() * INTENTS.length)] : null,
       agentId: agent?.id,
+      agentVersion: pinned,
     };
   });
 }
@@ -689,6 +698,7 @@ function callsToCsv(calls: Call[]): string {
     "customer",
     "duration_sec",
     "status",
+    "agent_version",
     "updated_at",
     "intent",
   ];
@@ -698,6 +708,7 @@ function callsToCsv(calls: Call[]): string {
     c.customer,
     c.duration ?? "",
     c.status,
+    c.agentVersion != null ? `v${c.agentVersion}` : "",
     c.updatedAt,
     c.intent ?? "",
   ]);
@@ -830,6 +841,7 @@ function CallsTable({ refs }: { refs: VoiceRef[] }) {
                 <th className="px-4 py-2 text-left font-medium">Phone</th>
                 <th className="px-4 py-2 text-right font-medium">Duration</th>
                 <th className="px-4 py-2 text-left font-medium">Status</th>
+                <th className="px-4 py-2 text-left font-medium">Version</th>
                 <th className="px-4 py-2 text-left font-medium">Updated At</th>
                 <th className="px-4 py-2" />
               </tr>
@@ -863,6 +875,13 @@ function CallsTable({ refs }: { refs: VoiceRef[] }) {
                       >
                         {c.status}
                       </Badge>
+                    </td>
+                    <td className="px-4 py-2.5">
+                      {c.agentVersion != null ? (
+                        <span className="rounded-md border border-border bg-secondary/40 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">v{c.agentVersion}</span>
+                      ) : (
+                        <span className="text-[12px] text-muted-foreground">—</span>
+                      )}
                     </td>
                     <td className="px-4 py-2.5 text-[12.5px] tabular-nums text-muted-foreground">
                       {c.updatedAt}
