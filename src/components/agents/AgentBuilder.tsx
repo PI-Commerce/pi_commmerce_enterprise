@@ -23,6 +23,14 @@ import {
   LANGUAGES, TTS_PROVIDERS, PROVIDER_LABELS, PHONE_NUMBERS,
   voicesForLang, getPhoneNumber, type TtsProvider,
 } from "@/lib/voice-data";
+import {
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { ToolEditor } from "@/routes/agents.tools.new";
 
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9_]/g, "_");
 let seq = 0;
@@ -53,6 +61,10 @@ export function AgentBuilder({ mode, type, record, selectedVersion }: { mode: "c
   const [section, setSection] = useState<"details" | "settings">("details");
   // Test-agent modal.
   const [testOpen, setTestOpen] = useState(false);
+  // Inline "+ New tool" modal state.
+  const [newToolOpen, setNewToolOpen] = useState(false);
+  const [newToolDirty, setNewToolDirty] = useState(false);
+  const [confirmCloseToolModal, setConfirmCloseToolModal] = useState(false);
 
   // Names available as {{ }} mentions in the prompt (voice-only input variables).
   const varNames = inputVars.map((v) => v.name).filter(Boolean);
@@ -228,20 +240,30 @@ export function AgentBuilder({ mode, type, record, selectedVersion }: { mode: "c
               })}
               {tools.length === 0 && <span className="text-[12px] text-muted-foreground">No tools added yet.</span>}
             </div>
-            {available.length > 0 && (
-              <div className="w-64">
-                <Select key={tools.join(",")} value="" onValueChange={(h) => setTools((ts) => [...ts, h])}>
-                  <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="+ Add tool…" /></SelectTrigger>
-                  <SelectContent>
-                    {available.map((t) => (
-                      <SelectItem key={t.handle} value={t.handle} className="text-sm">
-                        <span className="font-mono">{t.handle}</span> <span className="text-muted-foreground">· {t.description}</span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
+            <div className="flex items-center gap-2">
+              {available.length > 0 && (
+                <div className="w-64">
+                  <Select key={tools.join(",")} value="" onValueChange={(h) => setTools((ts) => [...ts, h])}>
+                    <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="+ Add tool…" /></SelectTrigger>
+                    <SelectContent>
+                      {available.map((t) => (
+                        <SelectItem key={t.handle} value={t.handle} className="text-sm">
+                          <span className="font-mono">{t.handle}</span> <span className="text-muted-foreground">· {t.description}</span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-9 gap-1.5 text-xs"
+                onClick={() => setNewToolOpen(true)}
+              >
+                <Plus className="h-3.5 w-3.5" /> New tool
+              </Button>
+            </div>
           </Card>
 
           {/* Master Prompt + Knowledge Base — connected by a vertical line */}
@@ -318,6 +340,70 @@ export function AgentBuilder({ mode, type, record, selectedVersion }: { mode: "c
           />
         )}
       </div>
+
+      {/* Inline "+ New tool" modal. Dismissing with unsaved edits triggers the
+          confirm dialog below instead of closing immediately. */}
+      <Dialog
+        open={newToolOpen}
+        onOpenChange={(next) => {
+          if (next) { setNewToolOpen(true); return; }
+          if (newToolDirty) setConfirmCloseToolModal(true);
+          else { setNewToolOpen(false); setNewToolDirty(false); }
+        }}
+      >
+        <DialogContent
+          className="max-w-4xl p-0 gap-0 overflow-hidden sm:max-h-[90vh]"
+          onInteractOutside={(e) => { if (newToolDirty) e.preventDefault(); }}
+          onEscapeKeyDown={(e) => { if (newToolDirty) e.preventDefault(); }}
+        >
+          <DialogHeader className="border-b border-border px-6 py-4">
+            <DialogTitle className="text-sm">New tool</DialogTitle>
+            <DialogDescription className="text-xs">
+              Register a tool for this agent. It'll be available in the tools picker across every agent.
+            </DialogDescription>
+          </DialogHeader>
+          <ToolEditor
+            hideChrome
+            onDirtyChange={setNewToolDirty}
+            onCancel={() => {
+              if (newToolDirty) setConfirmCloseToolModal(true);
+              else setNewToolOpen(false);
+            }}
+            onDone={(saved) => {
+              // Auto-add the newly created tool to this agent's tools list.
+              setTools((ts) => (ts.includes(saved.handle) ? ts : [...ts, saved.handle]));
+              setNewToolOpen(false);
+              setNewToolDirty(false);
+            }}
+          />
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog
+        open={confirmCloseToolModal}
+        onOpenChange={setConfirmCloseToolModal}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Discard this tool?</AlertDialogTitle>
+            <AlertDialogDescription>
+              You have unsaved changes to this tool. If you close now, your draft will be lost.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep editing</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setConfirmCloseToolModal(false);
+                setNewToolOpen(false);
+                setNewToolDirty(false);
+              }}
+            >
+              Discard
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Footer — Ask Pi centered, actions right */}
       <footer className="relative flex h-14 shrink-0 items-center justify-end gap-3 border-t border-border px-4">

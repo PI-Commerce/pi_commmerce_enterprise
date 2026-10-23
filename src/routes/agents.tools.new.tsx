@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,7 +17,7 @@ import {
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
-  getTool, type ToolDef, type ToolSource, type ToolDataType,
+  getTool, upsertTool, type ToolDef, type ToolInput, type ToolSource, type ToolDataType,
   type BodyRoot, type BodyNode, type TestResponse,
 } from "@/lib/tool-registry";
 import {
@@ -26,7 +26,7 @@ import {
 import { parseCurl } from "@/lib/curl-parse";
 
 export const Route = createFileRoute("/agents/tools/new")({
-  component: ToolEditor,
+  component: ToolRoutePage,
   validateSearch: (s: Record<string, unknown>): { tool?: string } => ({
     tool: typeof s.tool === "string" ? s.tool : undefined,
   }),
@@ -37,6 +37,22 @@ export const Route = createFileRoute("/agents/tools/new")({
     ],
   }),
 });
+
+/**
+ * Thin route wrapper. The real editor is {@link ToolEditor}, which also
+ * powers the inline create modal in the Agent Builder's Tools card.
+ */
+function ToolRoutePage() {
+  const navigate = useNavigate();
+  const { tool } = Route.useSearch();
+  return (
+    <ToolEditor
+      initialHandle={tool}
+      onDone={() => navigate({ to: "/agents", search: { tab: "tools" } })}
+      onCancel={() => navigate({ to: "/agents", search: { tab: "tools" } })}
+    />
+  );
+}
 
 /* --------------------------------------------------------- */
 /* Types & seed                                              */
@@ -165,15 +181,92 @@ function draftFromTool(t: ToolDef): ToolDraft {
 
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9_]/g, "_");
 
+/**
+ * Serializes the user-meaningful parts of a draft for dirty-check comparison.
+ * Row ids (which are regenerated per session) are stripped so adding then
+ * removing a row returns to the baseline.
+ */
+function signatureOf(d: ToolDraft): string {
+  const strip = <T extends { id: string }>(r: T) => { const { id: _id, ...rest } = r; return rest; };
+  return JSON.stringify({
+    handle: d.handle,
+    description: d.description,
+    method: d.method,
+    url: d.url,
+    connectTimeout: d.connectTimeout,
+    responseTimeout: d.responseTimeout,
+    auth: d.auth,
+    jwt: d.jwt,
+    headers: d.headers.map(strip),
+    query: d.query.map(strip),
+    body: d.body,
+    pathMeta: d.pathMeta,
+    outputs: d.outputs.map(strip),
+  });
+}
+
+/**
+ * Build a ToolDef from the editor draft. Preserves created-at when editing an
+ * existing tool and stamps updated-at as "just now".
+ */
+function draftToTool(d: ToolDraft, existing?: ToolDef): ToolDef {
+  const inputs: ToolInput[] = [
+    ...Object.entries(d.pathMeta).map(([key, m]) => ({
+      key, dataType: m.dataType, in: "path" as const, source: m.source, value: m.value, description: m.description,
+    })),
+    ...d.headers.map((h) => ({ key: h.key, dataType: h.dataType, in: "header" as const, source: h.source, value: h.value, description: h.description })),
+    ...d.query.map((q) => ({ key: q.key, dataType: q.dataType, in: "query" as const, source: q.source, value: q.value, description: q.description })),
+  ];
+  return {
+    handle: d.handle.trim(),
+    description: d.description,
+    type: "http",
+    method: d.method,
+    url: d.url,
+    auth: d.auth,
+    health: existing?.health ?? "ok",
+    status: existing?.status ?? "draft",
+    createdAt: existing?.createdAt ?? "just now",
+    updatedAt: "just now",
+    inputs,
+    body: d.body,
+    outputs: d.outputs.map((o) => ({ path: o.path, varName: o.varName, description: o.description, dataType: o.dataType })),
+    mockResponse: d.testResponse,
+  };
+}
+
 /* --------------------------------------------------------- */
 /* Page                                                      */
 /* --------------------------------------------------------- */
 
-function ToolEditor() {
-  const navigate = useNavigate();
-  const { tool: editHandle } = Route.useSearch();
-  const existing = editHandle ? getTool(editHandle) : undefined;
-  const [draft, setDraftState] = useState<ToolDraft>(() => (existing ? draftFromTool(existing) : blankDraft()));
+/**
+ * The reusable tool editor. Powers both the full-page route and the inline
+ * "+ New tool" modal in the Agent Builder. `hideChrome` skips the editor's
+ * own header + footer (the caller provides them). `onDirtyChange` reports
+ * whether the user has unsaved edits so the caller can gate dismissal.
+ */
+export function ToolEditor({
+  initialHandle, onDone, onCancel, hideChrome, onDirtyChange,
+}: {
+  initialHandle?: string;
+  /** Fired after a successful save. Receives the saved ToolDef. */
+  onDone?: (saved: ToolDef) => void;
+  /** Fired when the user clicks Cancel (not when saving). */
+  onCancel?: () => void;
+  /** When true, the editor renders only the body (no header, no footer). */
+  hideChrome?: boolean;
+  onDirtyChange?: (dirty: boolean) => void;
+}) {
+  const existing = initialHandle ? getTool(initialHandle) : undefined;
+  const initialDraft = useMemo(() => (existing ? draftFromTool(existing) : blankDraft()), [existing]);
+  const [draft, setDraftState] = useState<ToolDraft>(initialDraft);
+
+  // Dirty = current draft differs from the baseline. Signature-based so new
+  // input/output ids don't flip the flag by themselves.
+  const baselineRef = useRef<string>(signatureOf(initialDraft));
+  useEffect(() => {
+    onDirtyChange?.(signatureOf(draft) !== baselineRef.current);
+  }, [draft, onDirtyChange]);
 
   const set = <K extends keyof ToolDraft>(key: K, value: ToolDraft[K]) => {
     setDraftState((d) => ({ ...d, [key]: value }));
@@ -192,10 +285,13 @@ function ToolEditor() {
       toast.error("Tool name is required");
       return;
     }
-    toast.success(isNew ? "Tool created" : "Tool saved", {
-      description: draft.handle,
-    });
-    navigate({ to: "/agents", search: { tab: "tools" } });
+    const def = draftToTool(draft, existing);
+    upsertTool(def);
+    // Mark clean so dismissal guards don't fire after save.
+    baselineRef.current = signatureOf(draft);
+    onDirtyChange?.(false);
+    toast.success(isNew ? "Tool created" : "Tool saved", { description: draft.handle });
+    onDone?.(def);
   };
 
   const applyCurl = (parsed: ReturnType<typeof parseCurl>) => {
@@ -218,25 +314,34 @@ function ToolEditor() {
   };
 
   return (
-    <div className="flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground">
-      {/* Header — read-only view */}
-      <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-border bg-background/90 px-3 backdrop-blur-xl">
-        <div className="flex min-w-0 items-center gap-2">
-          <Link
-            to="/agents" search={{ tab: "tools" }}
-            className="flex h-8 items-center gap-1 rounded-md px-2 text-[12.5px] text-muted-foreground hover:bg-accent hover:text-foreground"
-          >
-            <ChevronLeft className="h-4 w-4" />
-            <span className="hidden sm:inline">Tools</span>
-          </Link>
-          <span className="text-muted-foreground/40">/</span>
-          <span className="truncate font-mono text-[13.5px] font-medium">{draft.handle.trim() || (existing ? existing.handle : "Tool")}</span>
-        </div>
-      </header>
+    <div className={cn(
+      hideChrome
+        ? "flex min-h-0 flex-1 flex-col text-foreground"
+        : "flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground",
+    )}>
+      {!hideChrome && (
+        <header className="flex h-12 shrink-0 items-center justify-between gap-3 border-b border-border bg-background/90 px-3 backdrop-blur-xl">
+          <div className="flex min-w-0 items-center gap-2">
+            <Link
+              to="/agents" search={{ tab: "tools" }}
+              className="flex h-8 items-center gap-1 rounded-md px-2 text-[12.5px] text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              <ChevronLeft className="h-4 w-4" />
+              <span className="hidden sm:inline">Tools</span>
+            </Link>
+            <span className="text-muted-foreground/40">/</span>
+            <span className="truncate font-mono text-[13.5px] font-medium">{draft.handle.trim() || (existing ? existing.handle : "Tool")}</span>
+          </div>
+        </header>
+      )}
 
       {/* Body — editable */}
-      <section className="flex min-h-0 flex-1 flex-col overflow-y-auto px-8 py-8">
-        <div className="mx-auto block w-full max-w-3xl min-w-0 space-y-5 border-0 p-0">
+      <section className={cn(
+        "flex min-h-0 flex-1 flex-col overflow-y-auto",
+        hideChrome ? "px-6 py-5" : "px-8 py-8",
+      )}>
+        <div className={cn("mx-auto block w-full min-w-0 space-y-5 border-0 p-0", hideChrome ? "max-w-full" : "max-w-3xl")}>
+
           {/* 1 · Tool Details */}
           <Card title="Tool Details" desc="Identify the tool. The name is how agents reference it in a prompt.">
             <FormField label="Tool name" required>
@@ -317,14 +422,22 @@ function ToolEditor() {
         </div>
       </section>
 
-      <footer className="flex h-14 shrink-0 items-center justify-center gap-3 border-t border-border px-4">
-        <Button asChild variant="outline" size="sm" className="h-8 px-4 text-xs">
-          <Link to="/agents" search={{ tab: "tools" }}>Cancel</Link>
-        </Button>
-        <Button size="sm" className="h-8 gap-1.5 px-4 text-xs" onClick={handleSave}>
-          {isNew ? "Create tool" : "Save tool"}
-        </Button>
-      </footer>
+      {!hideChrome && (
+        <footer className="flex h-14 shrink-0 items-center justify-center gap-3 border-t border-border px-4">
+          <Button variant="outline" size="sm" className="h-8 px-4 text-xs" onClick={onCancel}>Cancel</Button>
+          <Button size="sm" className="h-8 gap-1.5 px-4 text-xs" onClick={handleSave}>
+            {isNew ? "Create tool" : "Save tool"}
+          </Button>
+        </footer>
+      )}
+      {hideChrome && (
+        <div className="flex shrink-0 items-center justify-end gap-2 border-t border-border bg-background/60 px-6 py-3">
+          <Button variant="outline" size="sm" className="h-8 px-4 text-xs" onClick={onCancel}>Cancel</Button>
+          <Button size="sm" className="h-8 gap-1.5 px-4 text-xs" onClick={handleSave}>
+            {isNew ? "Create tool" : "Save tool"}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

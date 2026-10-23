@@ -428,3 +428,10 @@ export const TOOLS: ToolDef[] = [
 export function getTool(handle: string): ToolDef | undefined {
   return TOOLS.find((t) => t.handle === handle);
 }
+
+/** Append or replace a tool in the registry. Used by the Tool editor to save. */
+export function upsertTool(def: ToolDef): void {
+  const i = TOOLS.findIndex((t) => t.handle === def.handle);
+  if (i >= 0) TOOLS[i] = def;
+  else TOOLS.push(def);
+}
