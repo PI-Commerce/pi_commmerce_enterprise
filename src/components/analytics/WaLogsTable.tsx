@@ -111,6 +111,9 @@ export function WaLogsTable({ refs }: { refs: WaRef[] }) {
               <th className="px-3 py-2 font-medium">Delivered at</th>
               <th className="px-3 py-2 font-medium">Read at</th>
               <th className="px-3 py-2 font-medium">Replied at</th>
+              <th className="px-3 py-2 font-medium">Clicked URL</th>
+              <th className="px-3 py-2 font-medium">URL label</th>
+              <th className="px-3 py-2 font-medium">URL clicked at</th>
               <th className="px-3 py-2 font-medium">Failed at</th>
               <th className="px-3 py-2 font-medium">Last Updated</th>
               <th className="px-3 py-2 font-medium">Error code</th>
@@ -120,7 +123,7 @@ export function WaLogsTable({ refs }: { refs: WaRef[] }) {
           <tbody>
             {filtered.length === 0 ? (
               <tr>
-                <td colSpan={15} className="px-4 py-12 text-center text-muted-foreground">
+                <td colSpan={18} className="px-4 py-12 text-center text-muted-foreground">
                   No messages match your filters.
                 </td>
               </tr>
@@ -142,6 +145,9 @@ export function WaLogsTable({ refs }: { refs: WaRef[] }) {
                   <td className="whitespace-nowrap px-3 py-2.5 text-[11.5px] text-muted-foreground">{m.deliveredAt ?? "—"}</td>
                   <td className="whitespace-nowrap px-3 py-2.5 text-[11.5px] text-muted-foreground">{m.readAt ?? "—"}</td>
                   <td className="whitespace-nowrap px-3 py-2.5 text-[11.5px] text-muted-foreground">{m.repliedAt ?? "—"}</td>
+                  <td className="max-w-[200px] truncate px-3 py-2.5 font-mono text-[11.5px] text-muted-foreground" title={m.clickedUrl ?? undefined}>{m.clickedUrl ?? "—"}</td>
+                  <td className="whitespace-nowrap px-3 py-2.5 text-[11.5px] text-muted-foreground">{m.clickedUrlLabel ?? "—"}</td>
+                  <td className="whitespace-nowrap px-3 py-2.5 text-[11.5px] text-muted-foreground">{m.urlClickedAt ?? "—"}</td>
                   <td className="whitespace-nowrap px-3 py-2.5 text-[11.5px] text-muted-foreground">{m.failedAt ?? "—"}</td>
                   <td className="whitespace-nowrap px-3 py-2.5 text-[11.5px] text-muted-foreground">{m.lastUpdated}</td>
                   <td className="whitespace-nowrap px-3 py-2.5 font-mono text-[11.5px] text-muted-foreground">{m.errorCode ?? "—"}</td>

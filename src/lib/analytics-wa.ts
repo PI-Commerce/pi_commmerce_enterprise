@@ -39,6 +39,12 @@ export type WaMessage = {
   deliveredAt: string | null;
   readAt: string | null;
   repliedAt: string | null;
+  /** URL click signals (Pi-native URL Clicks webhook, not Meta DLR). Only the
+   *  first click per message is tracked; multi-button templates still only
+   *  carry the one that was tapped. Blank for templates without URL buttons. */
+  clickedUrl: string | null;
+  clickedUrlLabel: string | null;
+  urlClickedAt: string | null;
   failedAt: string | null;
   lastUpdated: string;
   errorCode: string | null;
@@ -74,6 +80,15 @@ function pickMetaError(r: number): { code: string; title: string } {
   }
   return { code: META_ERRORS[0].code, title: META_ERRORS[0].title };
 }
+
+/** Illustrative URL CTA buttons seen on live templates. */
+const URL_BUTTONS: { label: string; destBase: string }[] = [
+  { label: "Complete order", destBase: "https://acme.example.com/cart/" },
+  { label: "View invoice", destBase: "https://acme.example.com/invoice/" },
+  { label: "Track delivery", destBase: "https://acme.example.com/track/" },
+  { label: "Confirm appointment", destBase: "https://acme.example.com/confirm/" },
+  { label: "Apply now", destBase: "https://acme.example.com/apply/" },
+];
 
 const OUTCOME_MIX: { status: WaStatus; p: number }[] = [
   { status: "Read", p: 0.52 },
@@ -151,6 +166,24 @@ export function buildWaMessages({ run, node }: WaRef, limit = 120): WaMessage[] 
         : null;
     const err = status === "Failed" ? pickMetaError(r()) : null;
 
+    // URL click signal (Pi-native URL Clicks webhook). Only tracked on Delivered /
+    // Read / Replied rows (recipient must have at least received the message to
+    // click). Illustrative: assume ~55% of templates have a URL button, and of
+    // delivered messages on those templates, ~22% get a tap.
+    const templateHasUrlButton = r() < 0.55;
+    const clickRoll = r();
+    const canClick = status === "Delivered" || status === "Read" || status === "Replied";
+    const didClick = canClick && templateHasUrlButton && clickRoll < 0.22;
+    const button = didClick ? URL_BUTTONS[Math.floor(r() * URL_BUTTONS.length)] : null;
+    const clickLatency = Math.round(120 + r() * 2400);
+    // Deterministic short slug from the seeded rng, so screenshots stay stable.
+    const slug = Math.floor(r() * 2821109907455).toString(36);
+    const clickedUrl = button ? button.destBase + slug : null;
+    const clickedUrlLabel = button?.label ?? null;
+    const urlClickedAt = didClick
+      ? isoFromMinutes(l.updatedDate, sentMin + (delLatency + clickLatency) / 60)
+      : null;
+
     return {
       id: l.id,
       phone: l.phone,
@@ -166,8 +199,11 @@ export function buildWaMessages({ run, node }: WaRef, limit = 120): WaMessage[] 
       deliveredAt: delivered,
       readAt: read,
       repliedAt: replied,
+      clickedUrl,
+      clickedUrlLabel,
+      urlClickedAt,
       failedAt: failed,
-      lastUpdated: failed ?? replied ?? read ?? delivered ?? sent,
+      lastUpdated: urlClickedAt ?? failed ?? replied ?? read ?? delivered ?? sent,
       errorCode: err?.code ?? null,
       failureReason: err?.title ?? null,
       date: l.updatedDate,
@@ -176,8 +212,10 @@ export function buildWaMessages({ run, node }: WaRef, limit = 120): WaMessage[] 
 }
 
 export function waMessagesToCsv(rows: WaMessage[]): string {
-  // Matches PICOM-6131: 17 columns in the agreed order. Prod columns kept
-  // name for name; 11 new columns slot in around them.
+  // Matches PICOM-6131: 20 columns in the agreed order. Prod columns kept name
+  // for name; 14 new columns slot in around them. URL click triplet
+  // (clicked_url, clicked_url_label, url_clicked_at) sits right after
+  // replied_at so all interaction signals group together.
   const head = [
     "Recipient",
     "Lead ID",
@@ -192,6 +230,9 @@ export function waMessagesToCsv(rows: WaMessage[]): string {
     "delivered_at",
     "read_at",
     "replied_at",
+    "clicked_url",
+    "clicked_url_label",
+    "url_clicked_at",
     "failed_at",
     "Last Updated",
     "error_code",
@@ -211,6 +252,9 @@ export function waMessagesToCsv(rows: WaMessage[]): string {
     m.deliveredAt ?? "",
     m.readAt ?? "",
     m.repliedAt ?? "",
+    m.clickedUrl ?? "",
+    m.clickedUrlLabel ?? "",
+    m.urlClickedAt ?? "",
     m.failedAt ?? "",
     m.lastUpdated,
     m.errorCode ?? "",
