@@ -21,5 +21,5 @@ function EditAgent() {
   const versions = getVersions(id);
   const picked = v != null ? versions.find((ver) => ver.version === v) : undefined;
   const record = picked?.record ?? getEditableVersion(id)?.record ?? getAgentRecord(id) ?? AGENT_RECORDS.a_concierge;
-  return <AgentBuilder mode="edit" type={record.type} record={record} selectedVersion={picked?.version} />;
+  return <AgentBuilder mode="edit" record={record} selectedVersion={picked?.version} />;
 }

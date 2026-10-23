@@ -56,18 +56,19 @@ function Agents() {
   );
 }
 
-type AgentType = "chat" | "voice";
+type AgentChannel = "voice" | "chat";
 type AgentStatus = "live" | "draft" | "paused" | "archived";
 
-type Agent = { id: string; name: string; type: AgentType; status: AgentStatus; campaignNames: string[]; convs: string };
+type Agent = { id: string; name: string; channels: AgentChannel[]; status: AgentStatus; campaignNames: string[]; convs: string };
 
 const INITIAL_AGENTS: Agent[] = [
-  { id: "a_concierge", name: "Pi Concierge", type: "chat", status: "live", convs: "12.4K", campaignNames: ["New Trader Onboarding", "Dormant Trader Reactivation", "KYC Drop-off Recovery", "High-Value Win-Back", "Festive Cashback Push"] },
-  { id: "a_voice_react", name: "Reactivation Voice", type: "voice", status: "live", convs: "3.1K", campaignNames: ["Dormant Trader Reactivation", "High-Value Win-Back"] },
-  { id: "a_kyc", name: "KYC Helper", type: "chat", status: "live", convs: "9.0K", campaignNames: ["KYC Drop-off Recovery", "New Trader Onboarding", "Dormant Trader Reactivation"] },
-  { id: "a_pricing", name: "Pricing Q&A", type: "chat", status: "draft", convs: "—", campaignNames: [] },
-  { id: "a_winback", name: "Win-back Voice", type: "voice", status: "paused", convs: "412", campaignNames: ["High-Value Win-Back"] },
-  { id: "a_support", name: "L1 Support", type: "chat", status: "live", convs: "21.7K", campaignNames: ["New Trader Onboarding", "KYC Drop-off Recovery", "Festive Cashback Push", "Dormant Trader Reactivation"] },
+  { id: "a_concierge", name: "Pi Concierge", channels: ["chat"], status: "live", convs: "12.4K", campaignNames: ["New Trader Onboarding", "Dormant Trader Reactivation", "KYC Drop-off Recovery", "High-Value Win-Back", "Festive Cashback Push"] },
+  { id: "a_voice_react", name: "Reactivation Voice", channels: ["voice"], status: "live", convs: "3.1K", campaignNames: ["Dormant Trader Reactivation", "High-Value Win-Back"] },
+  { id: "a_premier", name: "Premier Support", channels: ["voice", "chat"], status: "live", convs: "6.8K", campaignNames: ["High-Value Win-Back", "VIP Onboarding"] },
+  { id: "a_kyc", name: "KYC Helper", channels: ["chat"], status: "live", convs: "9.0K", campaignNames: ["KYC Drop-off Recovery", "New Trader Onboarding", "Dormant Trader Reactivation"] },
+  { id: "a_pricing", name: "Pricing Q&A", channels: ["chat"], status: "draft", convs: "—", campaignNames: [] },
+  { id: "a_winback", name: "Win-back Voice", channels: ["voice"], status: "paused", convs: "412", campaignNames: ["High-Value Win-Back"] },
+  { id: "a_support", name: "L1 Support", channels: ["chat"], status: "live", convs: "21.7K", campaignNames: ["New Trader Onboarding", "KYC Drop-off Recovery", "Festive Cashback Push", "Dormant Trader Reactivation"] },
 ];
 
 const AGENT_STATUSES: AgentStatus[] = ["live", "draft", "paused", "archived"];
@@ -76,12 +77,12 @@ function Builder() {
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
   const [fStatus, setFStatus] = useState<"all" | AgentStatus>("all");
-  const [fType, setFType] = useState<"all" | AgentType>("all");
+  const [fChannel, setFChannel] = useState<"all" | AgentChannel>("all");
   const [newOpen, setNewOpen] = useState(false);
 
   const filtered = INITIAL_AGENTS.filter((a) => {
     if (fStatus !== "all" && a.status !== fStatus) return false;
-    if (fType !== "all" && a.type !== fType) return false;
+    if (fChannel !== "all" && !a.channels.includes(fChannel)) return false;
     if (query && !a.name.toLowerCase().includes(query.toLowerCase())) return false;
     return true;
   });
@@ -99,11 +100,11 @@ function Builder() {
           />
         </div>
         <FilterSelect
-          label="Type"
-          value={fType}
-          onChange={(v) => setFType(v as typeof fType)}
+          label="Channel"
+          value={fChannel}
+          onChange={(v) => setFChannel(v as typeof fChannel)}
           options={[
-            { value: "all", label: "All types" },
+            { value: "all", label: "All channels" },
             { value: "voice", label: "Voice" },
             { value: "chat", label: "Chat" },
           ]}
@@ -128,9 +129,9 @@ function Builder() {
       <NewAgentDialog
         open={newOpen}
         onOpenChange={setNewOpen}
-        onPick={(type, template) => {
+        onPick={(template) => {
           setNewOpen(false);
-          navigate({ to: "/agents/new", search: { type, template } });
+          navigate({ to: "/agents/new", search: { template } });
         }}
       />
 
@@ -144,7 +145,7 @@ function Builder() {
             <thead>
               <tr className="border-b border-border bg-secondary/30 text-[11px] uppercase tracking-wider text-muted-foreground">
                 <th className="px-4 py-2.5 text-left font-medium">Agent name</th>
-                <th className="px-4 py-2.5 text-left font-medium">Type</th>
+                <th className="px-4 py-2.5 text-left font-medium">Channels</th>
                 <th className="px-4 py-2.5 text-left font-medium">Version</th>
                 <th className="px-4 py-2.5 text-left font-medium">Status</th>
               </tr>
@@ -163,7 +164,7 @@ function Builder() {
                       <p className="font-medium">{a.name}</p>
                     </td>
                     <td className="px-4 py-3">
-                      <TypeChip type={a.type} />
+                      <ChannelChips channels={a.channels} />
                     </td>
                     <td className="px-4 py-3">
                       <VersionCell active={active?.version} total={total} />
@@ -192,13 +193,24 @@ function VersionCell({ active, total }: { active?: number; total: number }) {
   );
 }
 
-function TypeChip({ type }: { type: AgentType }) {
-  const Icon = type === "voice" ? Phone : MessageCircle;
-  const tone = type === "voice" ? "text-ai" : "text-success";
+export function ChannelChips({ channels }: { channels: AgentChannel[] }) {
+  if (channels.length === 0) {
+    return <span className="text-[12px] text-muted-foreground">—</span>;
+  }
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1">
+      {channels.map((c) => <ChannelChip key={c} channel={c} />)}
+    </span>
+  );
+}
+
+function ChannelChip({ channel }: { channel: AgentChannel }) {
+  const Icon = channel === "voice" ? Phone : MessageCircle;
+  const tone = channel === "voice" ? "text-ai" : "text-success";
   return (
     <span className="inline-flex items-center gap-1.5 rounded-md border border-border bg-secondary/40 px-2 py-0.5 text-[11.5px] font-medium capitalize">
       <Icon className={cn("h-3 w-3", tone)} />
-      {type}
+      {channel}
     </span>
   );
 }
@@ -307,99 +319,64 @@ function Tools() {
 function cap(s: string) { return s[0].toUpperCase() + s.slice(1); }
 
 /**
- * Modal shown from Agents > Builder "New agent" CTA. Two steps:
- * (1) pick Voice vs Chat, (2) start from scratch or from a template.
- * Routes to /agents/new?type=<chosen>[&template=<id>].
+ * Modal shown from Agents > Builder "New agent" CTA. Agents are channel-agnostic:
+ * users pick "Build from scratch" or a seeded template, and each template carries
+ * its channel chips so the user sees what it comes pre-wired for. Channels can be
+ * toggled on or off later in the builder's Settings pane.
  */
 function NewAgentDialog({
   open, onOpenChange, onPick,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
-  onPick: (type: AgentType, template?: string) => void;
+  onPick: (template?: string) => void;
 }) {
-  const [chosenType, setChosenType] = useState<AgentType | null>(null);
-  const reset = (next: boolean) => {
-    onOpenChange(next);
-    if (!next) setChosenType(null);
-  };
   return (
-    <Dialog open={open} onOpenChange={reset}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
-        {chosenType === null ? (
-          <>
-            <DialogHeader>
-              <DialogTitle>Create an agent</DialogTitle>
-              <DialogDescription>What kind of agent do you want to build?</DialogDescription>
-            </DialogHeader>
-            <div className="grid grid-cols-2 gap-3 pt-1">
-              {([
-                ["voice", "Voice agent", "Makes & takes phone calls", Phone, "text-ai"],
-                ["chat", "Chat agent", "Replies on WhatsApp & chat", MessageCircle, "text-success"],
-              ] as const).map(([type, title, desc, Icon, tone]) => (
-                <button
-                  key={type}
-                  type="button"
-                  onClick={() => setChosenType(type)}
-                  className="flex flex-col items-start gap-2 rounded-xl border border-border bg-card p-4 text-left transition-colors hover:border-foreground/30 hover:bg-accent"
-                >
-                  <span className={cn("flex h-9 w-9 items-center justify-center rounded-lg bg-accent", tone)}>
-                    <Icon className="h-4 w-4" />
-                  </span>
-                  <span className="text-sm font-semibold">{title}</span>
-                  <span className="text-[12px] text-muted-foreground">{desc}</span>
-                </button>
-              ))}
-            </div>
-          </>
-        ) : (
-          <>
-            <DialogHeader>
-              <button
-                type="button"
-                onClick={() => setChosenType(null)}
-                className="mb-1 inline-flex w-fit items-center gap-1 text-[12px] text-muted-foreground hover:text-foreground"
-              >
-                <ChevronLeft className="h-3.5 w-3.5" /> Back
-              </button>
-              <DialogTitle>Start a {chosenType === "voice" ? "voice" : "chat"} agent</DialogTitle>
-              <DialogDescription>Build from scratch, or start from a template.</DialogDescription>
-            </DialogHeader>
-            <div className="space-y-2 pt-1">
-              <button
-                type="button"
-                onClick={() => onPick(chosenType)}
-                className="flex w-full items-center gap-3 rounded-xl border border-border bg-card p-3 text-left transition-colors hover:border-foreground/30 hover:bg-accent"
-              >
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent text-foreground">
-                  <Sparkles className="h-4 w-4" />
-                </span>
-                <span className="min-w-0">
-                  <span className="block text-sm font-semibold">Build from scratch</span>
-                  <span className="block text-[12px] text-muted-foreground">Start with an empty agent and configure everything yourself.</span>
-                </span>
-              </button>
+        <DialogHeader>
+          <DialogTitle>Create an agent</DialogTitle>
+          <DialogDescription>Build from scratch, or start from a template.</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-2 pt-1">
+          <button
+            type="button"
+            onClick={() => onPick()}
+            className="flex w-full items-center gap-3 rounded-xl border border-border bg-card p-3 text-left transition-colors hover:border-foreground/30 hover:bg-accent"
+          >
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent text-foreground">
+              <Sparkles className="h-4 w-4" />
+            </span>
+            <span className="min-w-0">
+              <span className="block text-sm font-semibold">Build from scratch</span>
+              <span className="block text-[12px] text-muted-foreground">Start with an empty agent. Enable the channels you want in Settings.</span>
+            </span>
+          </button>
 
-              <div className="px-1 pt-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Templates</div>
-              {AGENT_TEMPLATES[chosenType].map((t) => (
-                <button
-                  key={t.id}
-                  type="button"
-                  onClick={() => onPick(chosenType, t.id)}
-                  className="flex w-full items-center gap-3 rounded-xl border border-border bg-card p-3 text-left transition-colors hover:border-foreground/30 hover:bg-accent"
-                >
-                  <span className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent", chosenType === "voice" ? "text-ai" : "text-success")}>
-                    {chosenType === "voice" ? <Phone className="h-4 w-4" /> : <MessageCircle className="h-4 w-4" />}
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block text-sm font-semibold">{t.label}</span>
-                    <span className="block text-[12px] text-muted-foreground">{t.description}</span>
-                  </span>
-                </button>
-              ))}
-            </div>
-          </>
-        )}
+          <div className="px-1 pt-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">Templates</div>
+          {AGENT_TEMPLATES.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => onPick(t.id)}
+              className="flex w-full items-start gap-3 rounded-xl border border-border bg-card p-3 text-left transition-colors hover:border-foreground/30 hover:bg-accent"
+            >
+              <span className={cn(
+                "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent",
+                t.record.channels.includes("voice") ? "text-ai" : "text-success",
+              )}>
+                {t.record.channels.includes("voice") ? <Phone className="h-4 w-4" /> : <MessageCircle className="h-4 w-4" />}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="flex items-center justify-between gap-2">
+                  <span className="truncate text-sm font-semibold">{t.label}</span>
+                  <ChannelChips channels={t.record.channels} />
+                </span>
+                <span className="mt-0.5 block text-[12px] text-muted-foreground">{t.description}</span>
+              </span>
+            </button>
+          ))}
+        </div>
       </DialogContent>
     </Dialog>
   );
