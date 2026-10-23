@@ -381,11 +381,11 @@ export function AgentBuilder({ mode, record, selectedVersion }: { mode: "create"
         }}
       >
         <DialogContent
-          className="max-w-4xl p-0 gap-0 overflow-hidden sm:max-h-[90vh]"
+          className="flex max-w-4xl flex-col gap-0 overflow-hidden p-0 sm:h-[85vh]"
           onInteractOutside={(e) => { if (newToolDirty) e.preventDefault(); }}
           onEscapeKeyDown={(e) => { if (newToolDirty) e.preventDefault(); }}
         >
-          <DialogHeader className="border-b border-border px-6 py-4">
+          <DialogHeader className="shrink-0 space-y-1 border-b border-border px-6 py-4">
             <DialogTitle className="text-sm">New tool</DialogTitle>
             <DialogDescription className="text-xs">
               Register a tool for this agent. It'll be available in the tools picker across every agent.
