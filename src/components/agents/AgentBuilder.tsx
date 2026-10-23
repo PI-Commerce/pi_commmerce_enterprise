@@ -16,7 +16,7 @@ import {
 import { cn } from "@/lib/utils";
 import { TOOLS, getTool } from "@/lib/tool-registry";
 import { renderMarkdown } from "@/lib/markdown";
-import type { AgentType, AgentChannel, AgentRecord, PostCallVar, InputVar, AgentSettings, SpeechRate, Interruption, ReplyLength } from "@/lib/agent-data";
+import type { AgentType, AgentRecord, PostCallVar, InputVar, AgentSettings, SpeechRate, Interruption, ReplyLength } from "@/lib/agent-data";
 import { saveDraftVersion, publishVersion, getVersions, getEditableVersion, revertToVersion } from "@/lib/agent-data";
 import { VersionSwitcher, VersionStatePill } from "@/components/agents/version-chip";
 import {
@@ -36,7 +36,7 @@ const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9_]/g, "_");
 let seq = 0;
 const uid = () => `pcv_${++seq}_${Date.now().toString(36)}`;
 
-export function AgentBuilder({ mode, record, selectedVersion }: { mode: "create" | "edit"; record?: AgentRecord; selectedVersion?: number }) {
+export function AgentBuilder({ mode, type, record, selectedVersion }: { mode: "create" | "edit"; type: AgentType; record?: AgentRecord; selectedVersion?: number }) {
   const navigate = useNavigate();
 
   // Versions (edit mode only). `selected` drives which version is being viewed
@@ -52,16 +52,6 @@ export function AgentBuilder({ mode, record, selectedVersion }: { mode: "create"
   const [masterPrompt, setMasterPrompt] = useState(record?.masterPrompt ?? "");
   const [knowledgeBase, setKnowledgeBase] = useState(record?.knowledgeBase ?? "");
   const [postCall, setPostCall] = useState<PostCallVar[]>(record?.postCall ?? []);
-  // Channels this agent is enabled for. Driven by Settings-pane toggles.
-  // Create defaults to both channels on; edit hydrates from the record.
-  const [channels, setChannels] = useState<AgentChannel[]>(
-    record?.channels ?? (mode === "create" ? ["voice", "chat"] : []),
-  );
-  const toggleChannel = (c: AgentChannel, on: boolean) => {
-    setChannels((cs) => on ? Array.from(new Set([...cs, c])) : cs.filter((x) => x !== c));
-  };
-  const hasVoice = channels.includes("voice");
-  const hasChat = channels.includes("chat");
 
   // Settings (voice agents): speech + telephony config.
   const [settings, setSettings] = useState<AgentSettings>(record?.settings ?? { primaryLang: "en-IN" });
@@ -101,7 +91,7 @@ export function AgentBuilder({ mode, record, selectedVersion }: { mode: "create"
     // derive a fresh id from the name so a template's id is never reused.
     id: (mode === "edit" ? record?.id : undefined) ?? (slug(name) || "agent"),
     name: name.trim(),
-    channels,
+    type,
     status,
     tools,
     inputVars,
@@ -112,18 +102,12 @@ export function AgentBuilder({ mode, record, selectedVersion }: { mode: "create"
     dispositions: record?.dispositions,
   });
 
-  const channelsSummary = channels.length === 0
-    ? "No channels enabled"
-    : channels.length === 1
-      ? (channels[0] === "voice" ? "Voice" : "Chat") + " agent"
-      : "Voice + chat agent";
-
   const createAgent = () => {
     toast.success(`${name.trim() || "Agent"} created`, {
-      description: `${channelsSummary} with ${tools.length} tool${tools.length === 1 ? "" : "s"}.`,
+      description: `${type === "voice" ? "Voice" : "Chat"} agent with ${tools.length} tool${tools.length === 1 ? "" : "s"}.`,
     });
-    // After a successful create, surface the test-call flow if voice is enabled.
-    if (hasVoice) setTestOpen(true);
+    // After a successful create, surface the test-call flow (voice only) instead of leaving.
+    if (type === "voice") setTestOpen(true);
     else close();
   };
 
@@ -201,7 +185,7 @@ export function AgentBuilder({ mode, record, selectedVersion }: { mode: "create"
         <section className="flex min-h-0 flex-1 flex-col overflow-y-auto px-8 py-8">
           <div className="mx-auto w-full max-w-3xl space-y-5">
             {section === "settings" ? (
-              <SettingsPane channels={channels} onToggleChannel={toggleChannel} settings={settings} onChange={patchSettings} />
+              <SettingsPane type={type} settings={settings} onChange={patchSettings} />
             ) : (
              <>
 
@@ -211,21 +195,11 @@ export function AgentBuilder({ mode, record, selectedVersion }: { mode: "create"
               <Input value={name} onChange={(e) => setName(slug(e.target.value))} placeholder="e.g. pi_concierge" className="h-9 font-mono text-sm" />
               <p className="text-[11px] text-muted-foreground">Lowercase, no spaces.</p>
             </Field>
-            <Field label="Channels">
-              {channels.length === 0 ? (
-                <p className="text-[12px] text-muted-foreground">
-                  No channels enabled yet. Open <span className="font-medium text-foreground">Settings</span> to enable Voice or Chat.
-                </p>
-              ) : (
-                <div className="flex flex-wrap items-center gap-2">
-                  {channels.map((c) => (
-                    <span key={c} className="inline-flex items-center gap-2 rounded-lg border border-border bg-secondary/40 px-3 py-1.5 text-[12.5px]">
-                      {c === "voice" ? <Phone className="h-3.5 w-3.5 text-ai" /> : <MessageCircle className="h-3.5 w-3.5 text-success" />}
-                      {c === "voice" ? "Voice" : "Chat"}
-                    </span>
-                  ))}
-                </div>
-              )}
+            <Field label="Type">
+              <span className="inline-flex items-center gap-2 rounded-lg border border-border bg-secondary/40 px-3 py-2 text-[13px]">
+                {type === "voice" ? <Phone className="h-3.5 w-3.5 text-ai" /> : <MessageCircle className="h-3.5 w-3.5 text-success" />}
+                {type === "voice" ? "Voice agent" : "Chat agent"}
+              </span>
             </Field>
           </Card>
 
@@ -359,10 +333,7 @@ export function AgentBuilder({ mode, record, selectedVersion }: { mode: "create"
         {testOpen && (
           <TestAgentPanel
             agentName={name.trim() || record?.name || "agent"}
-            // If an agent is enabled for both channels, prefer voice for the
-            // test flow (phone-call sim is richer). Dual-channel testing could
-            // later surface a channel picker inside the panel.
-            type={hasVoice ? "voice" : "chat"}
+            type={type}
             inputVars={inputVars}
             settings={settings}
             onClose={closeTest}
@@ -534,19 +505,11 @@ function OptionList<T extends string>({
 /* Settings pane: language + voice + telephony               */
 /* --------------------------------------------------------- */
 
-function SettingsPane({
-  channels, onToggleChannel, settings, onChange,
-}: {
-  channels: AgentChannel[];
-  onToggleChannel: (c: AgentChannel, on: boolean) => void;
-  settings: AgentSettings;
-  onChange: (p: Partial<AgentSettings>) => void;
-}) {
+function SettingsPane({ type, settings, onChange }: { type: AgentType; settings: AgentSettings; onChange: (p: Partial<AgentSettings>) => void }) {
   const [provider, setProvider] = useState<TtsProvider | "all">("all");
   const [showAll, setShowAll] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  const hasVoice = channels.includes("voice");
-  const hasChat = channels.includes("chat");
+  const isVoice = type === "voice";
 
   const langPool = voicesForLang(settings.primaryLang);
   const filtered = provider === "all" ? langPool : langPool.filter((v) => v.provider === provider);
@@ -554,33 +517,8 @@ function SettingsPane({
 
   return (
     <>
-      {/* Channels — the toggles that gate which sections below render. */}
-      <Card title="Channels" desc="Enable the channels this agent should run on. Each enabled channel reveals its own settings below.">
-        <div className="space-y-2">
-          <ChannelToggle
-            channel="voice"
-            label="Voice"
-            desc="Agent places and takes phone calls. Reveals speech, voice, phone number, and call-control settings."
-            on={hasVoice}
-            onChange={(on) => onToggleChannel("voice", on)}
-          />
-          <ChannelToggle
-            channel="chat"
-            label="Chat"
-            desc="Agent replies on WhatsApp and chat. Reveals reply-length settings."
-            on={hasChat}
-            onChange={(on) => onToggleChannel("chat", on)}
-          />
-          {channels.length === 0 && (
-            <p className="rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-[12px] text-warning">
-              Enable at least one channel to use this agent anywhere.
-            </p>
-          )}
-        </div>
-      </Card>
-
       {/* Language */}
-      <Card title="Language" desc={hasVoice ? "Set the primary language the assistant speaks." : "Set the primary language the assistant replies in."}>
+      <Card title="Language" desc={isVoice ? "Set the primary language the assistant speaks." : "Set the primary language the assistant replies in."}>
         <Field label="Primary language" required>
           <Select value={settings.primaryLang ?? "en-IN"} onValueChange={(v) => onChange({ primaryLang: v })}>
             <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
@@ -591,7 +529,7 @@ function SettingsPane({
         </Field>
       </Card>
 
-      {hasVoice && (
+      {isVoice && (
       <>
       {/* Voice */}
       <Card title="Set up voice" desc="Pick the assistant's voice. The list is filtered to your primary language.">
@@ -687,9 +625,7 @@ function SettingsPane({
       </>
       )}
 
-      {/* Advanced configuration (collapsed by default). Renders a voice section
-          and/or a chat section depending on which channels are enabled. */}
-      {(hasVoice || hasChat) && (
+      {/* Advanced configuration (collapsed by default) */}
       <div className="rounded-xl border border-border">
         <button
           type="button"
@@ -701,11 +637,7 @@ function SettingsPane({
           <div className="flex-1">
             <div className="text-[14px] font-semibold">Advanced configuration</div>
             <div className="text-[12px] text-muted-foreground">
-              {hasVoice && hasChat
-                ? "Voice: speaking pace, interruptions, call limits, inactivity. Chat: reply length."
-                : hasVoice
-                  ? "Fine-tune speaking pace, interruptions, call limits, and inactivity handling."
-                  : "Fine-tune how long the assistant's replies run."}
+              {isVoice ? "Fine-tune speaking pace, interruptions, call limits, and inactivity handling." : "Fine-tune how long the assistant's replies run."}
             </div>
           </div>
           <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", advancedOpen && "rotate-180")} />
@@ -713,7 +645,7 @@ function SettingsPane({
 
         {advancedOpen && (
           <div className="space-y-5 border-t border-border p-4">
-            {hasVoice && (
+            {isVoice ? (
               <>
                 {/* Speech rate */}
                 <div>
@@ -791,10 +723,9 @@ function SettingsPane({
                   </div>
                 </div>
               </>
-            )}
-            {hasChat && (
+            ) : (
               /* Reply length (chat) */
-              <div className={cn(hasVoice && "border-t border-border pt-5")}>
+              <div>
                 <div className="text-[14px] font-semibold">Reply length</div>
                 <div className="mb-2.5 text-[12.5px] text-muted-foreground">How long the assistant's written replies run.</div>
                 <OptionList<ReplyLength>
@@ -811,49 +742,7 @@ function SettingsPane({
           </div>
         )}
       </div>
-      )}
     </>
-  );
-}
-
-/**
- * One row in the Settings pane's Channels card. Switch-style toggle that
- * enables or disables a channel for the agent.
- */
-function ChannelToggle({
-  channel, label, desc, on, onChange,
-}: { channel: AgentChannel; label: string; desc: string; on: boolean; onChange: (on: boolean) => void }) {
-  const Icon = channel === "voice" ? Phone : MessageCircle;
-  const tone = channel === "voice" ? "text-ai" : "text-success";
-  return (
-    <button
-      type="button"
-      onClick={() => onChange(!on)}
-      className={cn(
-        "flex w-full items-center gap-3 rounded-xl border p-3 text-left transition-colors",
-        on ? "border-foreground/20 bg-accent/40" : "border-border bg-card hover:border-foreground/20 hover:bg-accent/30",
-      )}
-      aria-pressed={on}
-    >
-      <span className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent", tone)}>
-        <Icon className="h-4 w-4" />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block text-sm font-semibold">{label}</span>
-        <span className="block text-[12px] text-muted-foreground">{desc}</span>
-      </span>
-      <span className={cn(
-        "flex h-5 w-9 shrink-0 items-center rounded-full border transition-colors",
-        on ? "border-success bg-success/90 justify-end" : "border-muted-foreground/40 bg-muted justify-start",
-      )}>
-        <span className={cn(
-          "mx-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-background shadow-sm",
-          on ? "text-success" : "text-muted-foreground",
-        )}>
-          {on && <Check className="h-3 w-3" />}
-        </span>
-      </span>
-    </button>
   );
 }
 

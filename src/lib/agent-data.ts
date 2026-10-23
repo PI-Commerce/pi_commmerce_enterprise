@@ -4,16 +4,7 @@
  */
 import { getTool } from "./tool-registry";
 
-/**
- * Channels an agent is enabled for. An agent can run on one channel ("voice"
- * or "chat") or both. Channel determines which node pickers surface it
- * (voiceAgents / chatAgents), which Settings subsections render in the builder,
- * and which channel chips show on the list page and builder header.
- */
-export type AgentChannel = "voice" | "chat";
-/** Alias kept for callers that still think in terms of "primary type". */
-export type AgentType = AgentChannel;
-
+export type AgentType = "voice" | "chat";
 export type PostCallVar = {
   id: string;
   name: string;
@@ -27,8 +18,7 @@ export type InputVar = { id: string; name: string };
 export type AgentRecord = {
   id: string;
   name: string;
-  /** Channels this agent is enabled for. Must be non-empty. */
-  channels: AgentChannel[];
+  type: AgentType;
   status: "live" | "draft" | "paused";
   tools: string[];
   /** Input variables bound per run, referenced in the prompt with {{ }}. */
@@ -41,11 +31,6 @@ export type AgentRecord = {
   /** Legacy: disposition enum read by the workflow canvas AI Chat node config. */
   dispositions?: string[];
 };
-
-/** Primary channel for compatibility surfaces that still expect a single type. */
-export function primaryChannel(a: AgentRecord): AgentChannel {
-  return a.channels[0] ?? "chat";
-}
 
 export type SpeechRate = "slow" | "natural" | "fast";
 export type Interruption = "sensitive" | "balanced" | "strict";
@@ -76,7 +61,7 @@ export const AGENT_RECORDS: Record<string, AgentRecord> = {
   a_concierge: {
     id: "a_concierge",
     name: "pi_concierge",
-    channels: ["chat"],
+    type: "chat",
     status: "live",
     tools: ["send_whatsapp", "order_lookup", "knowledge_lookup"],
     settings: { primaryLang: "en-IN", replyLength: "balanced" },
@@ -92,7 +77,7 @@ export const AGENT_RECORDS: Record<string, AgentRecord> = {
   a_voice_react: {
     id: "a_voice_react",
     name: "reactivation_voice",
-    channels: ["voice"],
+    type: "voice",
     status: "live",
     tools: ["place_call", "crm_query", "order_lookup"],
     inputVars: [
@@ -112,7 +97,7 @@ export const AGENT_RECORDS: Record<string, AgentRecord> = {
   a_kyc: {
     id: "a_kyc",
     name: "kyc_helper",
-    channels: ["chat"],
+    type: "chat",
     status: "live",
     tools: ["knowledge_lookup", "customer_context"],
     settings: { primaryLang: "en-IN", replyLength: "concise" },
@@ -127,7 +112,7 @@ export const AGENT_RECORDS: Record<string, AgentRecord> = {
   a_pricing: {
     id: "a_pricing",
     name: "pricing_qa",
-    channels: ["chat"],
+    type: "chat",
     status: "draft",
     tools: ["knowledge_lookup"],
     settings: { primaryLang: "en-IN", replyLength: "detailed" },
@@ -141,7 +126,7 @@ export const AGENT_RECORDS: Record<string, AgentRecord> = {
   a_winback: {
     id: "a_winback",
     name: "winback_voice",
-    channels: ["voice"],
+    type: "voice",
     status: "paused",
     tools: ["place_call", "crm_query", "refund_initiate"],
     inputVars: [
@@ -159,7 +144,7 @@ export const AGENT_RECORDS: Record<string, AgentRecord> = {
   a_support: {
     id: "a_support",
     name: "l1_support",
-    channels: ["chat"],
+    type: "chat",
     status: "live",
     tools: ["send_whatsapp", "order_lookup", "refund_initiate", "knowledge_lookup"],
     settings: { primaryLang: "en-IN", replyLength: "balanced" },
@@ -176,7 +161,7 @@ export const AGENT_RECORDS: Record<string, AgentRecord> = {
   a_offers: {
     id: "a_offers",
     name: "festive_offers",
-    channels: ["chat"],
+    type: "chat",
     status: "live",
     tools: ["knowledge_lookup", "order_lookup"],
     settings: { primaryLang: "en-IN", replyLength: "balanced" },
@@ -186,32 +171,6 @@ export const AGENT_RECORDS: Record<string, AgentRecord> = {
       "## Festive offer\nFlat 10% cashback on recharges above 500, capped at 100 per user.\n\n## How to claim\n1. Recharge above 500 from the Paytm app.\n2. Cashback lands within 24 hours.",
     postCall: [
       { id: "p1", name: "offer_outcome", prompt: "Did the customer claim the festive offer?", values: ["claimed", "interested", "declined"] },
-    ],
-  },
-  // Demo agent enabled for BOTH channels. Shows the dual-chip layout on the
-  // list page and the dual-section Settings pane in the builder.
-  a_premier: {
-    id: "a_premier",
-    name: "premier_support",
-    channels: ["voice", "chat"],
-    status: "live",
-    tools: ["crm_query", "send_whatsapp", "knowledge_lookup"],
-    settings: {
-      primaryLang: "en-IN",
-      replyLength: "balanced",
-      speechRate: "natural",
-      interruption: "balanced",
-      maxCallDuration: 10,
-      inactivityTimeout: 20,
-      nudgeMessage: "Are you still there?",
-    },
-    masterPrompt:
-      "# Role\nYou are **Premier Support**, the dedicated agent for high-value Paytm customers. Reachable on WhatsApp and voice.\n\n## Goals\n- Resolve the issue on first contact, warmly.\n- When the customer is on a call, keep it conversational; when on chat, keep replies short.\n\n## Tools\nUse {{crm_query}} to pull their profile and recent orders, {{knowledge_lookup}} for policy answers, and {{send_whatsapp}} to send confirmations.",
-    knowledgeBase:
-      "## Service tier\nPremier customers get priority routing, courtesy refunds up to 2,000, and a dedicated callback slot.\n\n## Escalation\nAnything above the courtesy threshold goes to a human agent.",
-    postCall: [
-      { id: "pr1", name: "resolution_status", prompt: "Was the issue resolved?", values: ["resolved", "pending", "escalated"] },
-      { id: "pr2", name: "satisfaction", prompt: "How did the customer sound at the end?", values: ["satisfied", "neutral", "frustrated"] },
     ],
   },
 };
@@ -235,12 +194,7 @@ export type AgentTemplate = {
   record: AgentRecord;
 };
 
-/**
- * Starter templates. Flat list; each template's `record.channels` says which
- * channels it comes pre-wired for. The create modal renders them as cards
- * with channel chips so the user can filter visually.
- */
-const AGENT_TEMPLATES_BY_CHANNEL: Record<AgentChannel, AgentTemplate[]> = {
+export const AGENT_TEMPLATES: Record<AgentType, AgentTemplate[]> = {
   voice: [
     {
       id: "t_loan_collection",
@@ -249,7 +203,7 @@ const AGENT_TEMPLATES_BY_CHANNEL: Record<AgentChannel, AgentTemplate[]> = {
       record: {
         id: "t_loan_collection",
         name: "loan_collection",
-        channels: ["voice"],
+        type: "voice",
         status: "draft",
         tools: ["customer_context", "send_whatsapp"],
         inputVars: [
@@ -274,7 +228,7 @@ const AGENT_TEMPLATES_BY_CHANNEL: Record<AgentChannel, AgentTemplate[]> = {
       record: {
         id: "t_lead_qualification",
         name: "lead_qualification",
-        channels: ["voice"],
+        type: "voice",
         status: "draft",
         tools: ["crm_query"],
         inputVars: [
@@ -300,7 +254,7 @@ const AGENT_TEMPLATES_BY_CHANNEL: Record<AgentChannel, AgentTemplate[]> = {
       record: {
         id: "t_customer_support",
         name: "customer_support",
-        channels: ["chat"],
+        type: "chat",
         status: "draft",
         tools: ["order_lookup", "knowledge_lookup", "send_whatsapp"],
         settings: { primaryLang: "en-IN", replyLength: "balanced" },
@@ -320,7 +274,7 @@ const AGENT_TEMPLATES_BY_CHANNEL: Record<AgentChannel, AgentTemplate[]> = {
       record: {
         id: "t_order_tracking",
         name: "order_tracking",
-        channels: ["chat"],
+        type: "chat",
         status: "draft",
         tools: ["order_lookup"],
         inputVars: [{ id: "ot1", name: "order_id" }],
@@ -337,14 +291,8 @@ const AGENT_TEMPLATES_BY_CHANNEL: Record<AgentChannel, AgentTemplate[]> = {
   ],
 };
 
-/** Flat view of templates. Each template declares its channels on `record.channels`. */
-export const AGENT_TEMPLATES: AgentTemplate[] = [
-  ...AGENT_TEMPLATES_BY_CHANNEL.voice,
-  ...AGENT_TEMPLATES_BY_CHANNEL.chat,
-];
-
-export function getAgentTemplate(id: string): AgentTemplate | undefined {
-  return AGENT_TEMPLATES.find((t) => t.id === id);
+export function getAgentTemplate(type: AgentType, id: string): AgentTemplate | undefined {
+  return AGENT_TEMPLATES[type].find((t) => t.id === id);
 }
 
 /* --------------------------------------------------------------------- */
@@ -533,12 +481,12 @@ export function resolveAgent(nameOrId?: string): AgentRecord | undefined {
 }
 
 export function voiceAgents(): AgentRecord[] {
-  return Object.values(AGENT_RECORDS).filter((a) => a.channels.includes("voice"));
+  return Object.values(AGENT_RECORDS).filter((a) => a.type === "voice");
 }
 
-/** Chat-enabled agents, consumed by the workflow canvas AI Chat node config. */
+/** Legacy: chat-type agents, consumed by the workflow canvas AI Chat node config. */
 export function chatAgents(): AgentRecord[] {
-  return Object.values(AGENT_RECORDS).filter((a) => a.channels.includes("chat"));
+  return Object.values(AGENT_RECORDS).filter((a) => a.type === "chat");
 }
 
 /** Output variables an agent's tools expose downstream (e.g. `order_lookup.delivered_status`). */
