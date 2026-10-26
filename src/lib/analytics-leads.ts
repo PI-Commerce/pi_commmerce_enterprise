@@ -23,6 +23,41 @@ export type LeadStatus =
   /** SMS/RCS: the wait window closed without a delivery receipt. */
   | "no_dlr";
 
+/**
+ * Journey status for the Campaign Lead report (PICOM-6134). Answers the
+ * overall "where is this lead in the workflow?" question, distinct from the
+ * per-node node_status that answers "what happened at the current node?".
+ *
+ *   not_started - payload not shape-checked yet (we never see this in mock data).
+ *   entered     - queued, has not moved past Start.
+ *   in_progress - somewhere in the DAG.
+ *   failed      - hit a terminal failure.
+ *   completed   - reached End by whichever path.
+ *
+ * After failed or completed the lead will not run again.
+ */
+export type JourneyStatus =
+  | "not_started"
+  | "entered"
+  | "in_progress"
+  | "failed"
+  | "completed";
+
+/**
+ * Derive journey_status from the lead's current node kind and local status.
+ * Mirrors the recommendation in PICOM-6134; dev may adopt or substitute.
+ */
+export function deriveJourneyStatus(
+  nodeKind: SankeyNodeKind,
+  status: LeadStatus | undefined,
+): JourneyStatus {
+  if (nodeKind === "start") return "entered";
+  if (nodeKind === "end") return "completed";
+  if (status === "failed" || status === "dropped") return "failed";
+  if (status === "completed" || status === "converted") return "completed";
+  return "in_progress";
+}
+
 export type Lead = {
   id: string;
   name: string;
@@ -224,6 +259,79 @@ export function generateLeads(run: RunRow, total = 3990): Lead[] {
     });
   }
   return leads;
+}
+
+/**
+ * Campaign Lead report CSV (PICOM-6134). Fourteen columns, prod names kept
+ * name for name, with campaign + run metadata, journey_status and
+ * entered_at / exited_at added.
+ *
+ * Expects the caller to pass campaign + run context since Lead objects
+ * carry only node-level info. node_kind is used to derive journey_status.
+ */
+export function campaignLeadsToCsv(
+  leads: Lead[],
+  ctx: {
+    campaignId: string;
+    campaignName: string;
+    campaignVersion: string;
+    runId: string;
+    runType: "Always-on" | "Time-Scoped";
+    runStartedAt: string;
+    nodeKindById: Map<string, SankeyNodeKind>;
+  },
+): string {
+  const head = [
+    "phone",
+    "lead_id",
+    "campaign_id",
+    "campaign_name",
+    "campaign_version",
+    "run_id",
+    "run_type",
+    "run_started_at",
+    "journey_status",
+    "entered_at",
+    "exited_at",
+    "current_node_label",
+    "node_status",
+    "last_updated",
+  ];
+  const rows = leads.map((l) => {
+    const kind = ctx.nodeKindById.get(l.stageNodeId);
+    const journey = kind ? deriveJourneyStatus(kind, l.status) : "in_progress";
+    const enteredAt = `${l.updatedDate}T09:00:00+05:30`;
+    const exitedAt = journey === "failed" || journey === "completed"
+      ? `${l.updatedDate}T18:00:00+05:30`
+      : "";
+    return [
+      phoneCsvCell(l.phone),
+      l.id,
+      ctx.campaignId,
+      ctx.campaignName,
+      ctx.campaignVersion,
+      ctx.runId,
+      ctx.runType,
+      ctx.runStartedAt,
+      journey,
+      enteredAt,
+      exitedAt,
+      l.stageLabel,
+      l.status ?? "",
+      l.updatedAt,
+    ];
+  });
+  return [head, ...rows]
+    .map((r) =>
+      r
+        .map((v) => {
+          const s = String(v ?? "");
+          if (/^="[^"\n]*"$/.test(s)) return s;
+          return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+        })
+        .join(","),
+    )
+    .join("\n");
 }
 
 export function leadsToCsv(leads: Lead[]): string {

@@ -63,9 +63,12 @@ import {
 import {
   generateLeads,
   leadsToCsv,
+  campaignLeadsToCsv,
+  deriveJourneyStatus,
   downloadCsv,
   stageLabelFor,
   type Lead,
+  type JourneyStatus,
 } from "@/lib/analytics-leads";
 import { FreeformCanvas } from "@/components/workflow/FreeformCanvas";
 import { getFreeformWorkflow, type FreeformNodeConfig } from "@/lib/freeform-types";
@@ -193,6 +196,23 @@ const STATUS_TONE: Record<string, string> = {
   dropped: "text-rose-600 bg-rose-500/10",
   pending: "text-muted-foreground bg-secondary",
 };
+
+/** Journey Status pill tone (PICOM-6134 Campaign Lead report). */
+const JOURNEY_TONE: Record<JourneyStatus, string> = {
+  not_started: "text-muted-foreground bg-secondary",
+  entered: "text-muted-foreground bg-secondary",
+  in_progress: "text-amber-700 bg-amber-500/10",
+  failed: "text-rose-600 bg-rose-500/10",
+  completed: "text-emerald-600 bg-emerald-500/10",
+};
+
+const JOURNEY_STATUS_OPTIONS: { value: JourneyStatus; label: string }[] = [
+  { value: "not_started", label: "Not started" },
+  { value: "entered",     label: "Entered" },
+  { value: "in_progress", label: "In progress" },
+  { value: "failed",      label: "Failed" },
+  { value: "completed",   label: "Completed" },
+];
 
 // Ads remains out of scope for v1. WhatsApp, Voice and SMS are live; each
 // declares the asset that identifies it (the thing an "asset-mode" scope is
@@ -574,7 +594,15 @@ function CampaignAnalytics({
         </div>
       </div>
 
-      <LeadsTable run={run} />
+      <LeadsTable
+        run={run}
+        campaignContext={{
+          campaignId: campaign.id,
+          campaignName: campaign.name,
+          campaignVersion: runVersionLabel(campaign, campaign.runs.indexOf(run)),
+          runType: run.runType === "always-on" ? "Always-on" : "Time-Scoped",
+        }}
+      />
 
       <NodeDrawer
         node={openNode}
@@ -648,6 +676,7 @@ function LeadsTable({
   hideStage = false,
   dateRange,
   channelForExport,
+  campaignContext,
 }: {
   run: RunRow;
   restrictToNodeIds?: string[];
@@ -657,11 +686,26 @@ function LeadsTable({
    *  the 90-day cap and the 10 lac async threshold. */
   dateRange?: DateRange;
   channelForExport?: ReportChannel;
+  /** When present, the table renders the Campaign Lead report columns
+   *  (phone, lead_id, journey_status, current_node, node_status, entered_at,
+   *  last_updated) and the CSV button emits the PICOM-6134 14-column spec. */
+  campaignContext?: {
+    campaignId: string;
+    campaignName: string;
+    campaignVersion: string;
+    runType: "Always-on" | "Time-Scoped";
+  };
 }) {
+  const isCampaignView = !!campaignContext;
   const [exportMode, setExportMode] = useState<ExportDialogMode>(null);
   const dayCount = rangeDays(dateRange);
   const rangeStart = dateRange?.from ? fmtDate(dateRange.from, "yyyy-MM-dd") : "";
   const rangeEnd = dateRange?.to ? fmtDate(dateRange.to, "yyyy-MM-dd") : "";
+
+  const nodeKindById = useMemo(
+    () => new Map(run.sankey.nodes.map((n) => [n.id, n.kind] as const)),
+    [run],
+  );
 
   const handleExportClick = () => {
     if (channelForExport && dateRange?.from && dateRange?.to) {
@@ -673,6 +717,18 @@ function LeadsTable({
         setExportMode("large");
         return;
       }
+    }
+    if (isCampaignView && campaignContext) {
+      downloadCsv(
+        `${run.id || "run"}_campaign_leads.csv`,
+        campaignLeadsToCsv(filtered, {
+          ...campaignContext,
+          runId: run.id,
+          runStartedAt: run.startedAt,
+          nodeKindById,
+        }),
+      );
+      return;
     }
     downloadCsv(`${run.id || "run"}_leads.csv`, leadsToCsv(filtered));
   };
@@ -687,13 +743,19 @@ function LeadsTable({
 
   const [stageSel, setStageSel] = useState<string[]>([]);
   const [statusSel, setStatusSel] = useState<string[]>([]);
+  const [journeySel, setJourneySel] = useState<JourneyStatus[]>([]);
   const [q, setQ] = useState("");
   const [pageSize, setPageSize] = useState<number>(25);
   const [page, setPage] = useState<number>(1);
 
   useEffect(() => {
     setPage(1);
-  }, [stageSel, statusSel, q, pageSize, run.id, restrictToNodeIds]);
+  }, [stageSel, statusSel, journeySel, q, pageSize, run.id, restrictToNodeIds]);
+
+  const journeyFor = (l: Lead): JourneyStatus => {
+    const kind = nodeKindById.get(l.stageNodeId);
+    return kind ? deriveJourneyStatus(kind, l.status) : "in_progress";
+  };
 
   // Two filter groups that narrow each other (bidirectional), mirroring the
   // Channel-analytics pattern: Group A = Node Stage, Group B = Status. Since a
@@ -704,6 +766,8 @@ function LeadsTable({
     stageSel.length === 0 || stageSel.includes(l.stageNodeId);
   const passStatus = (l: Lead) =>
     statusSel.length === 0 || (!!l.status && statusSel.includes(l.status));
+  const passJourney = (l: Lead) =>
+    journeySel.length === 0 || journeySel.includes(journeyFor(l));
 
   // Node identity prefers the per-kind serial + description (the live builder's
   // scheme, e.g. `whatsapp_2 • Renewal`), falling back to the legacy positional
@@ -740,26 +804,31 @@ function LeadsTable({
       scoped.filter((l) => {
         if (!passStage(l)) return false;
         if (!passStatus(l)) return false;
+        if (!passJourney(l)) return false;
         if (q) {
           const s = q.toLowerCase();
-          const hay = [
-            l.id,
-            l.name,
-            l.phone,
-            l.email,
-            l.stageLabel,
-            l.status ?? "",
-            l.channel ?? "",
-            l.updatedDate,
-          ]
-            .join(" ")
-            .toLowerCase();
+          const hay = isCampaignView
+            ? [l.id, l.phone, l.stageLabel, l.status ?? "", journeyFor(l)]
+                .join(" ")
+                .toLowerCase()
+            : [
+                l.id,
+                l.name,
+                l.phone,
+                l.email,
+                l.stageLabel,
+                l.status ?? "",
+                l.channel ?? "",
+                l.updatedDate,
+              ]
+                .join(" ")
+                .toLowerCase();
           if (!hay.includes(s)) return false;
         }
         return true;
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [scoped, stageSel, statusSel, q],
+    [scoped, stageSel, statusSel, journeySel, q, isCampaignView],
   );
 
   const isVoice =
@@ -796,12 +865,23 @@ function LeadsTable({
               />
             </div>
           )}
+          {isCampaignView && (
+            <div className="w-[170px]">
+              <MultiSelect
+                options={JOURNEY_STATUS_OPTIONS}
+                value={journeySel}
+                onChange={(v) => setJourneySel(v as JourneyStatus[])}
+                allLabel="All journey statuses"
+                triggerClassName="h-8 capitalize"
+              />
+            </div>
+          )}
           <div className="w-[160px]">
             <MultiSelect
               options={statusOptions}
               value={statusSel}
               onChange={setStatusSel}
-              allLabel="All statuses"
+              allLabel={isCampaignView ? "All node statuses" : "All statuses"}
               triggerClassName="h-8 capitalize"
             />
           </div>
@@ -829,17 +909,31 @@ function LeadsTable({
         <table className="w-full text-sm">
           <thead className="sticky top-0 bg-card text-[11px] uppercase tracking-wider text-muted-foreground">
             <tr className="border-b border-border">
-              <th className="px-4 py-2 text-left font-medium">Lead ID</th>
-              <th className="px-4 py-2 text-left font-medium">Name</th>
-              <th className="px-4 py-2 text-left font-medium">Phone</th>
-              {!hideStage && (
-                <th className="px-4 py-2 text-left font-medium">Node Stage</th>
+              {isCampaignView ? (
+                <>
+                  <th className="px-4 py-2 text-left font-medium">Phone</th>
+                  <th className="px-4 py-2 text-left font-medium">Lead ID</th>
+                  <th className="px-4 py-2 text-left font-medium">Journey Status</th>
+                  <th className="px-4 py-2 text-left font-medium">Current Node</th>
+                  <th className="px-4 py-2 text-left font-medium">Node Status</th>
+                  <th className="px-4 py-2 text-left font-medium">Entered At</th>
+                  <th className="px-4 py-2 text-right font-medium">Last Updated</th>
+                </>
+              ) : (
+                <>
+                  <th className="px-4 py-2 text-left font-medium">Lead ID</th>
+                  <th className="px-4 py-2 text-left font-medium">Name</th>
+                  <th className="px-4 py-2 text-left font-medium">Phone</th>
+                  {!hideStage && (
+                    <th className="px-4 py-2 text-left font-medium">Node Stage</th>
+                  )}
+                  <th className="px-4 py-2 text-left font-medium">Status</th>
+                  {isVoice && (
+                    <th className="px-4 py-2 text-right font-medium">Duration</th>
+                  )}
+                  <th className="px-4 py-2 text-right font-medium">Last Updated</th>
+                </>
               )}
-              <th className="px-4 py-2 text-left font-medium">Status</th>
-              {isVoice && (
-                <th className="px-4 py-2 text-right font-medium">Duration</th>
-              )}
-              <th className="px-4 py-2 text-right font-medium">Last Updated</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
@@ -849,6 +943,7 @@ function LeadsTable({
                 l={l}
                 showDuration={!!isVoice}
                 hideStage={hideStage}
+                campaignView={isCampaignView ? { journey: journeyFor(l) } : undefined}
               />
             ))}
             {filtered.length === 0 && (
@@ -926,11 +1021,39 @@ function LeadRow({
   l,
   showDuration,
   hideStage,
+  campaignView,
 }: {
   l: Lead;
   showDuration: boolean;
   hideStage?: boolean;
+  campaignView?: { journey: JourneyStatus };
 }) {
+  if (campaignView) {
+    const journey = campaignView.journey;
+    return (
+      <tr className="hover:bg-secondary/40">
+        <td className="px-4 py-2.5 font-mono text-[12px] text-muted-foreground">{l.phone}</td>
+        <td className="px-4 py-2.5 font-mono text-[12px]">{l.id}</td>
+        <td className="px-4 py-2.5">
+          <span className={cn("rounded-md px-2 py-0.5 text-[10.5px] font-medium capitalize", JOURNEY_TONE[journey])}>
+            {journey.replace(/_/g, " ")}
+          </span>
+        </td>
+        <td className="px-4 py-2.5 text-[12px]">{l.stageLabel}</td>
+        <td className="px-4 py-2.5">
+          {l.status ? (
+            <span className={cn("rounded-md px-2 py-0.5 text-[10.5px] font-medium capitalize", STATUS_TONE[l.status] ?? STATUS_TONE.pending)}>
+              {l.status}
+            </span>
+          ) : (
+            <span className="text-muted-foreground">—</span>
+          )}
+        </td>
+        <td className="px-4 py-2.5 font-mono text-[12px] text-muted-foreground">{l.updatedDate}</td>
+        <td className="px-4 py-2.5 text-right font-mono text-[12px] text-muted-foreground">{l.updatedAt}</td>
+      </tr>
+    );
+  }
   return (
     <tr className="hover:bg-secondary/40">
       <td className="px-4 py-2.5 font-mono text-[12px]">{l.id}</td>
