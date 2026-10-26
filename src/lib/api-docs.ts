@@ -259,6 +259,77 @@ const RCS_REQUEST = `curl -X POST '${BASE_URL}/v1/messages/rcs/send' \\
         ]
       }'`;
 
+/* ---------------- WhatsApp Freeform (session window) send ---------------- */
+
+const WA_FREEFORM_HEADERS: Param[] = [
+  { name: "Content-Type",     type: "string", required: true,  description: "application/json" },
+  { name: "X-API-Key",        type: "string", required: true,  description: "Your API key. The key is scoped to a WABA + phone number at issue time." },
+  { name: "Idempotency-Key",  type: "string", required: false, description: "Optional. Same key + same body returns the same message_id. Same key + different body returns 409. Honoured 24 hours." },
+];
+
+const WA_FREEFORM_BODY: Param[] = [
+  { name: "wabaNumber",        type: "string", required: true,  description: "Business WhatsApp number, digits only (no leading +). Must match the API key's bound WABA." },
+  { name: "to",                type: "string", required: true,  description: "Customer MSISDN, digits only (no leading +). India: 91 followed by 10 digits starting 6 to 9." },
+  { name: "type",              type: "string", required: true,  description: 'One of "Text", "Image", "Video", "Audio", "File", "Document", "Button", "List", "UrlCta". Any other value is rejected.' },
+  { name: "message_id_client", type: "string", required: false, description: "Your tracking ID. Max 64 chars. Echoed on every DLR event for this message." },
+  { name: "metadata",          type: "object", required: false, description: "Free-form object, max 4 KB. Echoed on every DLR event. Never sent to the customer." },
+  { name: "<type-specific>",   type: "object", required: true,  description: 'The content block matching "type". One of: text, image, video, audio, file, interactive. See per-type samples below.' },
+];
+
+const WA_FREEFORM_REQUEST = `curl -X POST '${BASE_URL}/v1/messages/whatsapp/freeform/send' \\
+  -H 'Content-Type: application/json' \\
+  -H 'X-API-Key: pk_YOUR_API_KEY' \\
+  -d '{
+        "wabaNumber": "918031149607",
+        "to":         "919914516053",
+        "type":       "Text",
+        "text": { "body": "Hello! How can we help today?" }
+      }'
+
+# Image with public HTTPS URL
+curl -X POST '${BASE_URL}/v1/messages/whatsapp/freeform/send' \\
+  -H 'Content-Type: application/json' \\
+  -H 'X-API-Key: pk_YOUR_API_KEY' \\
+  -d '{
+        "wabaNumber": "918031149607",
+        "to":         "919914516053",
+        "type":       "Image",
+        "image":      { "mediaURL": "https://cdn.example.com/pack.jpg", "caption": "Your package" }
+      }'
+
+# Interactive button
+curl -X POST '${BASE_URL}/v1/messages/whatsapp/freeform/send' \\
+  -H 'Content-Type: application/json' \\
+  -H 'X-API-Key: pk_YOUR_API_KEY' \\
+  -d '{
+        "wabaNumber": "918031149607",
+        "to":         "919914516053",
+        "type":       "Button",
+        "interactive": {
+          "type": "button",
+          "body": { "text": "Would you like a callback?" },
+          "action": { "buttons": [
+            { "type": "reply", "reply": { "id": "cb_yes", "title": "Yes" } },
+            { "type": "reply", "reply": { "id": "cb_no",  "title": "No"  } }
+          ]}
+        }
+      }'`;
+
+const WA_FREEFORM_OK = `{
+  "message_id": "wa_msg_01J9X4T7QK2M8N",
+  "wabaNumber": "918031149607",
+  "to":         "919914516053",
+  "status":     "ACCEPTED",
+  "created_at": "2026-10-26T18:12:04+05:30"
+}`;
+
+const WA_FREEFORM_ERROR = `{
+  "success": false,
+  "code":    "WINDOW_CLOSED",
+  "message": "24-hour customer service window is closed for this pair.",
+  "hint":    "Use the Send WhatsApp Template API for business-initiated outreach."
+}`;
+
 /* ------------------ SMS Template registry (single endpoint, array body) ------------------ */
 
 const SMS_TEMPLATE_REGISTER_HEADERS: Param[] = [
@@ -369,6 +440,34 @@ export const ENDPOINTS: Endpoint[] = [
     notes: [
       'Variables use positional keys ("1", "2", ...) matching the template\'s variable positions.',
       "Sends are counted in Channel Analytics > WhatsApp exactly like any other send.",
+    ],
+  },
+  {
+    id: "channel-whatsapp-freeform",
+    method: "POST",
+    path: "/v1/messages/whatsapp/freeform/send",
+    title: "Send WhatsApp Freeform",
+    short: "Send a non-templated WhatsApp message inside the 24-hour session window.",
+    description:
+      "Sends a single type-discriminated message to a customer whose 24-hour session window is open. Supports text, media (image / video / audio / file / document via public HTTPS URL) and interactive bodies (button, list, URL CTA). Templates stay on Send WhatsApp Template; a template type on this endpoint is rejected 403. Delivery lifecycle (sent, delivered, read, failed) lands on your registered WhatsApp Delivery Status channel webhook, keyed by the message_id returned here.",
+    auth: AUTH_LINE,
+    headers: WA_FREEFORM_HEADERS,
+    pathParams: [],
+    bodyRoot: { type: "object", fields: WA_FREEFORM_BODY },
+    requestExample: WA_FREEFORM_REQUEST,
+    responseOkExample: WA_FREEFORM_OK,
+    responseErrorExample: WA_FREEFORM_ERROR,
+    rateLimits: [
+      "20 sends per second per API key",
+      "50 sends per second per WABA",
+      "4 MB body per call",
+    ],
+    notes: [
+      '202 ACCEPTED means the message is queued, not delivered. Terminal delivery arrives on the WhatsApp Delivery Status channel webhook, keyed by message_id.',
+      'Media attachments are supplied as a public HTTPS mediaURL only. No hosted-key or Meta media-ID passthrough in v1.',
+      'The 24-hour session window is tracked server-side off the last customer-initiated inbound on the (wabaNumber, to) pair. A closed window returns 422 WINDOW_CLOSED with a hint at the template send path. Nothing is queued.',
+      'Freeform sends attribute to origin=api in WhatsApp Analytics and are selectable via the source filter.',
+      'Validation errors come back as a single 422 with error.fields[] listing every bad field in one response. Numeric error codes are not used on this endpoint; every error carries a stable uppercase string code (WINDOW_CLOSED, WABA_NOT_BOUND, MEDIA_REF_UNSUPPORTED, INVALID_INTERACTIVE_BODY, TEMPLATE_FORBIDDEN, VALIDATION_FAILED, IDEMPOTENCY_CONFLICT, RATE_LIMITED).',
     ],
   },
   {
