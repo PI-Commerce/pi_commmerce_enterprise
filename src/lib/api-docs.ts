@@ -458,11 +458,11 @@ export const ENDPOINTS: Endpoint[] = [
     responseOkExample: WA_FREEFORM_OK,
     responseErrorExample: WA_FREEFORM_ERROR,
     rateLimits: [
-      "20 sends per second per API key",
-      "50 sends per second per WABA",
+      "80 messages per second per client",
       "4 MB body per call",
     ],
     notes: [
+      '80 msg/s per client lines up with the industry baseline: Meta WhatsApp Cloud API standard tier is 80 msg/s per phone number (scales to 250 and 1,000 with quality rating), and Twilio Programmable Messaging for WhatsApp defaults to 80 msg/s per sender. Pi matches that default so the middleware does not become the bottleneck below the vendor cap. Higher ceilings on request.',
       '202 ACCEPTED means the message is queued, not delivered. Terminal delivery arrives on the WhatsApp Delivery Status channel webhook, keyed by message_id.',
       'Media attachments are supplied as a public HTTPS mediaURL only. No hosted-key or Meta media-ID passthrough in v1.',
       'The 24-hour session window is tracked server-side off the last customer-initiated inbound on the (wabaNumber, to) pair. A closed window returns 422 WINDOW_CLOSED with a hint at the template send path. Nothing is queued.',
