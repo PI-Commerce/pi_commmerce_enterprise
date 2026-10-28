@@ -9,6 +9,9 @@ import {
   GitBranch,
   Plus,
   X,
+  Package,
+  Layers,
+  Clock,
   type LucideIcon,
 } from "lucide-react";
 import type { FreeformNodeKind } from "@/lib/freeform-types";
@@ -34,6 +37,8 @@ const MSG_ICONS: Partial<Record<FreeformNodeKind, LucideIcon>> = {
   video: Video,
   document: FileText,
   list: ListIcon,
+  product: Package,
+  product_list: Layers,
 };
 
 const MESSAGE_KINDS: FreeformNodeKind[] = [
@@ -43,6 +48,10 @@ const MESSAGE_KINDS: FreeformNodeKind[] = [
   "document",
   "list",
 ];
+
+/** Catalog message types. Both bind to this WABA's linked catalog; the single
+ *  product kind picks a retailer_id, the list kind picks a product set. */
+const CATALOG_KINDS: FreeformNodeKind[] = ["product", "product_list"];
 
 export function FreeformNodePalette({
   onAdd,
@@ -103,6 +112,27 @@ export function FreeformNodePalette({
             </div>
             <div className="px-1 py-1">
               <p className="px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/80">
+                Catalog
+              </p>
+              {CATALOG_KINDS.map((k) => {
+                const Icon = MSG_ICONS[k]!;
+                return (
+                  <button
+                    key={k}
+                    onClick={() => {
+                      onAdd({ kind: "freeform", freeform: k });
+                      setOpen(false);
+                    }}
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px] hover:bg-accent"
+                  >
+                    <Icon className="h-3.5 w-3.5 text-muted-foreground" />
+                    {FREEFORM_NODE_LABELS[k]}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="px-1 py-1">
+              <p className="px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/80">
                 Logic Nodes
               </p>
               <button
@@ -124,6 +154,16 @@ export function FreeformNodePalette({
               >
                 <GitBranch className="h-3.5 w-3.5 text-muted-foreground" />
                 Conditional
+              </button>
+              <button
+                onClick={() => {
+                  onAdd({ kind: "freeform", freeform: "delay" });
+                  setOpen(false);
+                }}
+                className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px] hover:bg-accent"
+              >
+                <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+                Delay
               </button>
             </div>
           </div>

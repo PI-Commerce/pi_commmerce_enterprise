@@ -94,6 +94,9 @@ const FREEFORM_DEFAULTS: Record<
   video: { config: {} },
   document: { config: {} },
   list: { config: { rows: [] } },
+  product: { config: {} },
+  product_list: { config: {} },
+  delay: { config: { delayValue: 1, delayUnit: "hours" } },
 };
 
 let nodeCounter = 100;

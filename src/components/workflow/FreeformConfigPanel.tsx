@@ -36,6 +36,19 @@ import {
   validateFreeformNode,
 } from "@/lib/freeform-types";
 import type { FreeformNodeData } from "./FreeformNodes";
+import {
+  SEED_PRODUCTS,
+  SEED_SETS,
+  formatPrice,
+  productsBySet,
+} from "@/lib/catalog-seed";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 /**
  * Freeform config panel. Layout mirrors the campaign builder's ConfigPanel:
@@ -290,9 +303,70 @@ function KindFields({
       );
     case "list":
       return <ListFields config={config} onConfigChange={onConfigChange} />;
+    case "product":
+      return <ProductFields config={config} onConfigChange={onConfigChange} />;
+    case "product_list":
+      return <ProductListFields config={config} onConfigChange={onConfigChange} />;
+    case "delay":
+      return <DelayFields config={config} onConfigChange={onConfigChange} />;
     default:
       return null;
   }
+}
+
+/** Delay. Pure wait  -  no WhatsApp send happens. Takes a positive integer
+ *  value + a unit (minutes / hours / days). Advances to the next node after
+ *  the wait elapses. */
+function DelayFields({
+  config,
+  onConfigChange,
+}: {
+  config: FreeformNodeConfig;
+  onConfigChange: (p: Partial<FreeformNodeConfig>) => void;
+}) {
+  return (
+    <Section title="Wait">
+      <div className="grid grid-cols-[1fr_140px] gap-2">
+        <div>
+          <Label className="text-[12px]">Value</Label>
+          <Input
+            type="number"
+            min={1}
+            value={config.delayValue ?? ""}
+            onChange={(e) =>
+              onConfigChange({ delayValue: Number(e.target.value) || undefined })
+            }
+            placeholder="e.g. 2"
+            className="h-9"
+          />
+        </div>
+        <div>
+          <Label className="text-[12px]">Unit</Label>
+          <Select
+            value={config.delayUnit ?? "hours"}
+            onValueChange={(v) =>
+              onConfigChange({
+                delayUnit: v as NonNullable<FreeformNodeConfig["delayUnit"]>,
+              })
+            }
+          >
+            <SelectTrigger className="h-9">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="minutes">Minutes</SelectItem>
+              <SelectItem value="hours">Hours</SelectItem>
+              <SelectItem value="days">Days</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      <p className="mt-2 text-[11.5px] text-muted-foreground">
+        No message is sent. The lead sits at this step and advances to the next
+        node once the wait elapses.
+      </p>
+    </Section>
+  );
 }
 
 function TextFields({
@@ -523,6 +597,182 @@ function ListFields({
         </div>
       </div>
     </Section>
+  );
+}
+
+/* --------------------------- Commerce (SPM / MPM) --------------------------- */
+
+/** Single Product Message. Picks one catalog item by retailer_id and shows an
+ *  optional body text above the product card in-chat. The catalog itself is
+ *  scoped to the WABA linked to this workflow — see Channels → WhatsApp →
+ *  Catalog tab for the item pool. */
+function ProductFields({
+  config,
+  onConfigChange,
+}: {
+  config: FreeformNodeConfig;
+  onConfigChange: (p: Partial<FreeformNodeConfig>) => void;
+}) {
+  const picked = SEED_PRODUCTS.find(
+    (p) => p.retailerId === config.productRetailerId,
+  );
+  return (
+    <>
+      <Section title="Catalog item">
+        <Field label="Item" required>
+          <Select
+            value={config.productRetailerId ?? ""}
+            onValueChange={(v) => onConfigChange({ productRetailerId: v })}
+          >
+            <SelectTrigger className="h-9">
+              <SelectValue placeholder="Pick an item from the catalog" />
+            </SelectTrigger>
+            <SelectContent>
+              {SEED_PRODUCTS.map((p) => (
+                <SelectItem key={p.id} value={p.retailerId}>
+                  {p.name} — {p.retailerId}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+
+        {picked && (
+          <div className="flex gap-2.5 rounded-md border border-border bg-background p-2.5">
+            <div className="h-14 w-14 shrink-0 overflow-hidden rounded border border-border bg-muted">
+              <img
+                src={picked.imageUrl}
+                alt=""
+                className="h-full w-full object-cover"
+              />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="line-clamp-1 text-[12.5px] font-medium">
+                {picked.name}
+              </p>
+              <p className="font-mono text-[10.5px] text-muted-foreground">
+                {picked.retailerId}
+              </p>
+              <p className="mt-0.5 text-[12px] font-semibold">
+                {formatPrice(picked.salePrice ?? picked.price, picked.currency)}
+              </p>
+            </div>
+          </div>
+        )}
+
+        <CharField
+          label="Body text"
+          value={config.body ?? ""}
+          onChange={(v) => onConfigChange({ body: v })}
+          placeholder="Optional text shown above the product card"
+          max={META_LIMITS.textBody}
+          multiline
+          rows={3}
+        />
+      </Section>
+    </>
+  );
+}
+
+/** Multi-Product Message. Picks a product set (up to 30 items) and sends it as
+ *  a scrollable carousel. Body is required; header + footer are optional. */
+function ProductListFields({
+  config,
+  onConfigChange,
+}: {
+  config: FreeformNodeConfig;
+  onConfigChange: (p: Partial<FreeformNodeConfig>) => void;
+}) {
+  const picked = SEED_SETS.find((s) => s.id === config.productSetId);
+  const items = picked ? productsBySet(SEED_PRODUCTS, picked.id) : [];
+  const overCap = items.length > 30;
+
+  return (
+    <>
+      <Section title="Product set">
+        <Field label="Set" required>
+          <Select
+            value={config.productSetId ?? ""}
+            onValueChange={(v) => onConfigChange({ productSetId: v })}
+          >
+            <SelectTrigger className="h-9">
+              <SelectValue placeholder="Pick a set to send" />
+            </SelectTrigger>
+            <SelectContent>
+              {SEED_SETS.map((s) => (
+                <SelectItem key={s.id} value={s.id}>
+                  {s.name} ({productsBySet(SEED_PRODUCTS, s.id).length} items)
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+
+        {picked && (
+          <div className="rounded-md border border-border bg-background p-2.5">
+            <div className="flex items-center justify-between">
+              <p className="line-clamp-1 text-[12.5px] font-medium">
+                {picked.name}
+              </p>
+              <span
+                className={cn(
+                  "shrink-0 text-[10.5px]",
+                  overCap ? "text-destructive" : "text-muted-foreground",
+                )}
+              >
+                {items.length} / 30 items
+              </span>
+            </div>
+            <div className="mt-1.5 flex -space-x-1.5">
+              {items.slice(0, 8).map((p) => (
+                <div
+                  key={p.id}
+                  className="h-6 w-6 overflow-hidden rounded border border-background bg-muted"
+                >
+                  <img
+                    src={p.imageUrl}
+                    alt=""
+                    className="h-full w-full object-cover"
+                  />
+                </div>
+              ))}
+              {items.length > 8 && (
+                <div className="flex h-6 w-6 items-center justify-center rounded border border-background bg-secondary text-[9.5px] text-muted-foreground">
+                  +{items.length - 8}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </Section>
+
+      <Section title="Message">
+        <CharField
+          label="Header"
+          value={config.header ?? ""}
+          onChange={(v) => onConfigChange({ header: v })}
+          placeholder="Optional short header"
+          max={META_LIMITS.listHeader}
+        />
+        <CharField
+          label="Body"
+          required
+          value={config.body ?? ""}
+          onChange={(v) => onConfigChange({ body: v })}
+          placeholder="Required message body"
+          max={META_LIMITS.listBody}
+          multiline
+          rows={3}
+        />
+        <CharField
+          label="Footer"
+          value={config.footer ?? ""}
+          onChange={(v) => onConfigChange({ footer: v })}
+          placeholder="Optional footer"
+          max={META_LIMITS.listFooter}
+        />
+      </Section>
+    </>
   );
 }
 

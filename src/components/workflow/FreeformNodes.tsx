@@ -7,6 +7,9 @@ import {
   Video,
   FileText,
   List as ListIcon,
+  Package,
+  Layers,
+  Clock,
   AlertCircle,
   ExternalLink,
   type LucideIcon,
@@ -17,6 +20,12 @@ import type {
   FreeformNodeConfig,
 } from "@/lib/freeform-types";
 import { FREEFORM_NODE_LABELS } from "@/lib/freeform-types";
+import {
+  SEED_PRODUCTS,
+  SEED_SETS,
+  formatPrice,
+  productsBySet,
+} from "@/lib/catalog-seed";
 
 /**
  * Freeform Workflow node. Visual style mirrors the campaign builder's
@@ -45,6 +54,9 @@ const ICONS: Record<FreeformNodeKind, LucideIcon> = {
   video: Video,
   document: FileText,
   list: ListIcon,
+  product: Package,
+  product_list: Layers,
+  delay: Clock,
 };
 
 /** Tone matches campaign NODE_GROUPS: message kinds render as `action` (green). */
@@ -244,6 +256,98 @@ function NodeBody({ data }: { data: FreeformNodeData }) {
           )}
         </div>
       );
+
+    case "product": {
+      const p = cfg.productRetailerId
+        ? SEED_PRODUCTS.find((x) => x.retailerId === cfg.productRetailerId)
+        : undefined;
+      return (
+        <div className="space-y-2 border-t border-border/60 px-3 py-2.5 text-[12px]">
+          {cfg.body ? (
+            <p className="text-foreground/90 line-clamp-2">{cfg.body}</p>
+          ) : null}
+          {p ? (
+            <div className="flex gap-2 rounded-md border border-border bg-background p-2">
+              <div className="h-12 w-12 shrink-0 overflow-hidden rounded border border-border bg-muted">
+                <img src={p.imageUrl} alt="" className="h-full w-full object-cover" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="line-clamp-1 text-[12px] font-medium">{p.name}</p>
+                <p className="font-mono text-[10.5px] text-muted-foreground">{p.retailerId}</p>
+                <p className="mt-0.5 text-[11.5px] font-semibold">
+                  {formatPrice(p.salePrice ?? p.price, p.currency)}
+                </p>
+              </div>
+            </div>
+          ) : (
+            <Placeholder>Pick a catalog item…</Placeholder>
+          )}
+        </div>
+      );
+    }
+
+    case "delay": {
+      const v = cfg.delayValue;
+      const u = cfg.delayUnit;
+      return (
+        <div className="space-y-1 border-t border-border/60 px-3 py-2.5 text-[12px]">
+          {v && u ? (
+            <p className="font-mono text-[12.5px] font-medium text-foreground">
+              Wait {v} {u}
+            </p>
+          ) : (
+            <Placeholder>Set wait duration…</Placeholder>
+          )}
+          <p className="text-[10.5px] text-muted-foreground">
+            No message sent. Advances to next node after the wait.
+          </p>
+        </div>
+      );
+    }
+
+    case "product_list": {
+      const s = cfg.productSetId
+        ? SEED_SETS.find((x) => x.id === cfg.productSetId)
+        : undefined;
+      const items = s ? productsBySet(SEED_PRODUCTS, s.id) : [];
+      return (
+        <div className="space-y-2 border-t border-border/60 px-3 py-2.5 text-[12px]">
+          {cfg.header && (
+            <p className="text-[11px] font-semibold text-foreground/80">{cfg.header}</p>
+          )}
+          {cfg.body ? (
+            <p className="text-foreground/90 line-clamp-3">{cfg.body}</p>
+          ) : (
+            <Placeholder>Body required</Placeholder>
+          )}
+          {cfg.footer && (
+            <p className="text-[10.5px] text-muted-foreground">{cfg.footer}</p>
+          )}
+          {s ? (
+            <div className="rounded-md border border-border bg-background p-2">
+              <div className="flex items-center justify-between">
+                <p className="line-clamp-1 text-[12px] font-medium">{s.name}</p>
+                <span className="shrink-0 text-[10.5px] text-muted-foreground">{items.length} items</span>
+              </div>
+              <div className="mt-1.5 flex -space-x-1.5">
+                {items.slice(0, 6).map((p) => (
+                  <div key={p.id} className="h-6 w-6 overflow-hidden rounded border border-background bg-muted">
+                    <img src={p.imageUrl} alt="" className="h-full w-full object-cover" />
+                  </div>
+                ))}
+                {items.length > 6 && (
+                  <div className="flex h-6 w-6 items-center justify-center rounded border border-background bg-secondary text-[10px] text-muted-foreground">
+                    +{items.length - 6}
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <Placeholder>Pick a product set…</Placeholder>
+          )}
+        </div>
+      );
+    }
 
     default:
       return null;

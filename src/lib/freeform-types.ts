@@ -29,7 +29,10 @@ export type FreeformNodeKind =
   | "image"
   | "video"
   | "document"
-  | "list";
+  | "list"
+  | "product"
+  | "product_list"
+  | "delay";
 
 export const FREEFORM_NODE_LABELS: Record<FreeformNodeKind, string> = {
   start: "Start",
@@ -39,6 +42,9 @@ export const FREEFORM_NODE_LABELS: Record<FreeformNodeKind, string> = {
   video: "Video",
   document: "Document",
   list: "List",
+  product: "Send product",
+  product_list: "Send product list",
+  delay: "Delay",
 };
 
 /** Serial prefix  -  matches the campaign-builder convention (text_1, list_2). */
@@ -50,6 +56,9 @@ export const FREEFORM_SERIAL_PREFIX: Record<FreeformNodeKind, string> = {
   video: "video",
   document: "document",
   list: "list",
+  product: "product",
+  product_list: "product_list",
+  delay: "delay",
 };
 
 /* --------------------------------- Buttons --------------------------------- */
@@ -110,6 +119,19 @@ export type FreeformNodeConfig = {
 
   // Optional Buttons block  -  Text and all media nodes may attach one.
   buttonsBlock?: ButtonsBlock;
+
+  // Catalog message types (interactive type `product` and `product_list`).
+  // Both message types reuse `body` / `header` / `footer` from the list fields
+  // above because Meta's interactive spec maps SPM `body.text` and MPM
+  // `body.text`, `header.text`, `footer.text` to the same shape.
+  productRetailerId?: string; // SPM — picks a single catalog item by retailer_id
+  productSetId?: string;      // MPM — picks a product set (list of items)
+
+  // Delay (pure control flow, no message out). The runtime pauses the lead's
+  // position in the workflow for `delayValue` of `delayUnit` before firing the
+  // next downstream node. Not a message, so no WhatsApp send happens.
+  delayValue?: number;
+  delayUnit?: "minutes" | "hours" | "days";
 };
 
 /** Serialised graph  -  plain JSON so the store round-trips without ReactFlow types. */
@@ -541,6 +563,42 @@ export function validateFreeformNode(
           };
       }
       return { valid: true };
+    case "product":
+      if (!c.productRetailerId?.trim())
+        return { valid: false, error: "Pick a catalog item" };
+      if ((c.body?.length ?? 0) > META_LIMITS.textBody)
+        return {
+          valid: false,
+          error: `Body exceeds ${META_LIMITS.textBody} chars`,
+        };
+      return { valid: true };
+    case "product_list":
+      if (!c.productSetId?.trim())
+        return { valid: false, error: "Pick a product set" };
+      if (!c.body?.trim())
+        return { valid: false, error: "Body is required" };
+      if (c.body.length > META_LIMITS.listBody)
+        return {
+          valid: false,
+          error: `Body exceeds ${META_LIMITS.listBody} chars`,
+        };
+      if ((c.header?.length ?? 0) > META_LIMITS.listHeader)
+        return {
+          valid: false,
+          error: `Header exceeds ${META_LIMITS.listHeader} chars`,
+        };
+      if ((c.footer?.length ?? 0) > META_LIMITS.listFooter)
+        return {
+          valid: false,
+          error: `Footer exceeds ${META_LIMITS.listFooter} chars`,
+        };
+      return { valid: true };
+    case "delay":
+      if (!c.delayValue || c.delayValue <= 0)
+        return { valid: false, error: "Delay must be greater than 0" };
+      if (!c.delayUnit)
+        return { valid: false, error: "Pick a delay unit" };
+      return { valid: true };
   }
 }
 
@@ -554,6 +612,14 @@ export function validateFreeformNode(
  *  - Text / Media with CTA URL  > `<serial>.opened`  (bool)
  *  - List  > `<serial>.selected` (value = row title)
  *  - Any message node  > `<serial>.replied`  (bool, timeout gates)
+ *
+ *  - Catalog SPM / MPM  -  Meta does NOT emit a per-tap event. The only signal
+ *    is a `cart`-shape inbound (webhook event `order`) when the buyer sends
+ *    their cart back. So catalog nodes expose:
+ *      `<serial>.replied`      (bool  -  any inbound text / cart)
+ *      `<serial>.ordered`      (bool  -  true when inbound is an order webhook)
+ *      `<serial>.order_items`  (array of {retailer_id, quantity, item_price, currency})
+ *      `<serial>.order_total`  (number  -  sum of item_price * quantity)
  *
  * API node outputs come from the tool schema and are handled by the campaign's
  * own `deriveNodeOutcomeVariables` (which our canvas composes with these).
@@ -579,13 +645,21 @@ export function deriveFreeformOutcomes(
       kind !== "image" &&
       kind !== "video" &&
       kind !== "document" &&
-      kind !== "list"
+      kind !== "list" &&
+      kind !== "product" &&
+      kind !== "product_list"
     )
       continue;
     const source = serial || title || kind;
     push(`${serial}.replied`, source);
     if (kind === "list") {
       if (config?.rows?.length) push(`${serial}.selected`, source);
+    } else if (kind === "product" || kind === "product_list") {
+      // Meta webhook `order` fires when the buyer sends a cart back. Items
+      // are an array even from an SPM (buyer can bump quantity in-cart).
+      push(`${serial}.ordered`, source);
+      push(`${serial}.order_items`, source);
+      push(`${serial}.order_total`, source);
     } else if (
       config?.buttonsBlock?.mode === "quick_reply" &&
       config.buttonsBlock.buttons.length
@@ -697,6 +771,14 @@ export function getFreeformPlaceholders(
             sink,
           );
         }
+        break;
+      case "product":
+        scanText(cfg?.body, { ...loc, part: "body" }, sink);
+        break;
+      case "product_list":
+        scanText(cfg?.header, { ...loc, part: "header" }, sink);
+        scanText(cfg?.body, { ...loc, part: "body" }, sink);
+        scanText(cfg?.footer, { ...loc, part: "footer" }, sink);
         break;
     }
   }
