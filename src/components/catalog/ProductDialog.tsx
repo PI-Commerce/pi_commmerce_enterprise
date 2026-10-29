@@ -107,7 +107,7 @@ export function ProductDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[920px]">
+      <DialogContent className="flex max-h-[90vh] max-w-[920px] flex-col">
         <DialogHeader>
           <DialogTitle>{mode === "create" ? "New product" : `Edit ${initial?.name}`}</DialogTitle>
           <DialogDescription>
@@ -115,7 +115,7 @@ export function ProductDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid grid-cols-[1fr_280px] gap-6">
+        <div className="grid min-h-0 flex-1 grid-cols-[1fr_280px] gap-6 overflow-y-auto pr-1">
           {/* Form */}
           <div className="space-y-4">
             <section>

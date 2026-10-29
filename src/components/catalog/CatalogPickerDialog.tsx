@@ -56,7 +56,7 @@ export function CatalogPickerDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[560px]">
+      <DialogContent className="max-h-[90vh] max-w-[560px] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{currentCatalogId ? "Change catalog" : "Link a catalog"}</DialogTitle>
           <DialogDescription>

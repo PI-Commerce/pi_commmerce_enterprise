@@ -554,12 +554,12 @@ function CreateSetDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[860px]">
+      <DialogContent className="flex max-h-[90vh] max-w-[860px] flex-col">
         <DialogHeader>
           <DialogTitle>New set</DialogTitle>
           <DialogDescription>Up to 30 items. A set is Meta's grouping entity and is what an MPM carries.</DialogDescription>
         </DialogHeader>
-        <div className="grid grid-cols-[320px_1fr] gap-6">
+        <div className="grid min-h-0 flex-1 grid-cols-[320px_1fr] gap-6 overflow-y-auto pr-1">
           <div className="space-y-3">
             <div><Label className="text-[12px]">Name</Label><Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Festive Picks 2026" /></div>
             <div><Label className="text-[12px]">Description</Label><Textarea rows={4} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Internal note." /></div>
@@ -607,7 +607,7 @@ function SetDetailDialog({
   const items = setRecord ? productsBySet(SEED_PRODUCTS, setRecord.id) : [];
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[720px]">
+      <DialogContent className="max-h-[90vh] max-w-[720px] overflow-y-auto">
         {setRecord && (
           <>
             <DialogHeader>
