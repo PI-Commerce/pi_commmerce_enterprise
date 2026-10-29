@@ -264,9 +264,12 @@ export function FreeformCanvas({
         );
         if (unwired) {
           const isRow = unwired.id.startsWith("row_");
-          const error = isRow
-            ? `Row '${unwired.label}' isn't connected`
-            : `Button '${unwired.label}' isn't connected`;
+          const isCart = unwired.id === "cart_sent";
+          const error = isCart
+            ? "'Cart sent' branch isn't connected"
+            : isRow
+              ? `Row '${unwired.label}' isn't connected`
+              : `Button '${unwired.label}' isn't connected`;
           const data = n.data as { valid?: boolean; error?: string };
           if (data.valid === false && data.error === error) return n;
           changed = true;

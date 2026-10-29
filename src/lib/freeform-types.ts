@@ -479,6 +479,15 @@ export function getBranchOutputs(
       out.push({ id: `btn_${b.id}`, label: b.label || "URL" });
     }
   }
+  // Catalog message types expose a single named branch, "Cart sent", that
+  // fires when Meta's `order` webhook comes back. The shell's default source
+  // handle covers everything else (plain text reply, timeout). Per-product
+  // routing lives on a downstream Conditional node branching on `order_items`
+  // and `order_total`  -  since a cart can contain many SKUs, per-SKU branches
+  // on this node would need parallel fan-out which freeform doesn't model.
+  if (kind === "product" || kind === "product_list") {
+    out.push({ id: "cart_sent", label: "Cart sent" });
+  }
   return out;
 }
 

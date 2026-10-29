@@ -282,6 +282,7 @@ function NodeBody({ data }: { data: FreeformNodeData }) {
           ) : (
             <Placeholder>Pick a catalog item…</Placeholder>
           )}
+          <CartSentChip />
         </div>
       );
     }
@@ -345,6 +346,7 @@ function NodeBody({ data }: { data: FreeformNodeData }) {
           ) : (
             <Placeholder>Pick a product set…</Placeholder>
           )}
+          <CartSentChip />
         </div>
       );
     }
@@ -415,6 +417,27 @@ function MediaThumb({
       <span className="min-w-0 flex-1 truncate">
         {cfg.mediaFileName || cfg.mediaUrl}
       </span>
+    </div>
+  );
+}
+
+/** Shared chip rendered inside SPM and MPM node bodies. Carries its own
+ *  source handle (id = `cart_sent`) so authors can draw an edge from the
+ *  explicit "Cart sent" branch to any downstream node. The shell's default
+ *  source handle stays live and covers the catch-all (plain text reply, no
+ *  cart, or timeout). */
+function CartSentChip() {
+  return (
+    <div className="pt-1">
+      <div className="relative flex items-center justify-center gap-1.5 rounded-md border border-success/40 bg-success/10 px-2.5 py-1.5 text-[11.5px] font-medium text-success">
+        <span>Cart sent</span>
+        <Handle
+          id="cart_sent"
+          type="source"
+          position={Position.Right}
+          className="!h-2 !w-2 !border-2 !border-background !bg-success"
+        />
+      </div>
     </div>
   );
 }

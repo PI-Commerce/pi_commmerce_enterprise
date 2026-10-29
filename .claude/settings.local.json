@@ -26,7 +26,14 @@
       "Bash(node -e \"const p=require\\('./package.json'\\);console.log\\(JSON.stringify\\(p.scripts,null,2\\)\\)\")",
       "Bash(npm run *)",
       "Bash(curl -s -o /dev/null http://localhost:5173)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(cat /tmp/picom-7038.json | head -20)",
+      "mcp__bf7a2b4f-ee8e-4879-ac85-6bc029cea4cc__getJiraIssue",
+      "Bash(curl -sS -u mayan.kansal@paytm.com:ATATT3xFfGF0VytHVW_FYuMRXvbwCqpoug6cfRglbV9G_9UBnC02vW9KY1yCrXl9i2qEhtDHd6fZSxtdwRp62y8H3sWFgo2xDkAfyoCxvyVyFUX-2mArJokYDq2LBZSn7yk8WbBGcKt9u4cpPqoz9SnS1R_XHtGcOUPRTJAeZ3jZatLG_ADD00Q=FDDD786A -H 'Accept: application/json' 'https://mypaytm.atlassian.net/rest/api/2/issue/PICOM-5356?fields=summary,status,issuetype,updated,issuelinks,subtasks,description' -w '\\\\nHTTP:%{http_code}\\\\n' -o /tmp/picom5356.json)",
+      "Read(//tmp/**)",
+      "Bash(curl -sS -u mayan.kansal@paytm.com:ATATT3xFfGF0VytHVW_FYuMRXvbwCqpoug6cfRglbV9G_9UBnC02vW9KY1yCrXl9i2qEhtDHd6fZSxtdwRp62y8H3sWFgo2xDkAfyoCxvyVyFUX-2mArJokYDq2LBZSn7yk8WbBGcKt9u4cpPqoz9SnS1R_XHtGcOUPRTJAeZ3jZatLG_ADD00Q=FDDD786A -H 'Accept: application/json' 'https://mypaytm.atlassian.net/rest/api/2/issue/PICOM-6505?fields=summary,status,issuetype,updated,parent' -o /tmp/picom6505.json -w 'HTTP:%{http_code}\\\\n')",
+      "Bash(curl -sS -u mayan.kansal@paytm.com:ATATT3xFfGF0VytHVW_FYuMRXvbwCqpoug6cfRglbV9G_9UBnC02vW9KY1yCrXl9i2qEhtDHd6fZSxtdwRp62y8H3sWFgo2xDkAfyoCxvyVyFUX-2mArJokYDq2LBZSn7yk8WbBGcKt9u4cpPqoz9SnS1R_XHtGcOUPRTJAeZ3jZatLG_ADD00Q=FDDD786A -H 'Accept: application/json' --data-urlencode 'jql=parent = PICOM-5356 ORDER BY created ASC' --data-urlencode fields=summary,status,issuetype,updated -G https://mypaytm.atlassian.net/rest/api/3/search/jql)",
+      "Bash(curl -sS -u mayan.kansal@paytm.com:ATATT3xFfGF0VytHVW_FYuMRXvbwCqpoug6cfRglbV9G_9UBnC02vW9KY1yCrXl9i2qEhtDHd6fZSxtdwRp62y8H3sWFgo2xDkAfyoCxvyVyFUX-2mArJokYDq2LBZSn7yk8WbBGcKt9u4cpPqoz9SnS1R_XHtGcOUPRTJAeZ3jZatLG_ADD00Q=FDDD786A -H 'Accept: application/json' 'https://mypaytm.atlassian.net/rest/api/2/issue/PICOM-6505?fields=description')"
     ]
   }
 }
