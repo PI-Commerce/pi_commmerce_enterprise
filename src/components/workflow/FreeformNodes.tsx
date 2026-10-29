@@ -282,7 +282,7 @@ function NodeBody({ data }: { data: FreeformNodeData }) {
           ) : (
             <Placeholder>Pick a catalog item…</Placeholder>
           )}
-          <CartSentChip />
+          <CatalogBranchChips />
         </div>
       );
     }
@@ -346,7 +346,7 @@ function NodeBody({ data }: { data: FreeformNodeData }) {
           ) : (
             <Placeholder>Pick a product set…</Placeholder>
           )}
-          <CartSentChip />
+          <CatalogBranchChips />
         </div>
       );
     }
@@ -421,14 +421,15 @@ function MediaThumb({
   );
 }
 
-/** Shared chip rendered inside SPM and MPM node bodies. Carries its own
- *  source handle (id = `cart_sent`) so authors can draw an edge from the
- *  explicit "Cart sent" branch to any downstream node. The shell's default
- *  source handle stays live and covers the catch-all (plain text reply, no
- *  cart, or timeout). */
-function CartSentChip() {
+/** Two chips rendered inside SPM and MPM node bodies, each with its own
+ *  source handle. "Cart sent" (green) fires on the Meta order webhook;
+ *  "Text reply received" (muted) fires on any inbound text that is not a
+ *  cart. Both are wiring-mandatory. Shell default source handle is hidden
+ *  for catalog nodes (hasBodyBranches = true below) so authors see every
+ *  branch explicitly. */
+function CatalogBranchChips() {
   return (
-    <div className="pt-1">
+    <div className="space-y-1.5 pt-1">
       <div className="relative flex items-center justify-center gap-1.5 rounded-md border border-success/40 bg-success/10 px-2.5 py-1.5 text-[11.5px] font-medium text-success">
         <span>Cart sent</span>
         <Handle
@@ -436,6 +437,15 @@ function CartSentChip() {
           type="source"
           position={Position.Right}
           className="!h-2 !w-2 !border-2 !border-background !bg-success"
+        />
+      </div>
+      <div className="relative flex items-center justify-center gap-1.5 rounded-md border border-border bg-secondary/60 px-2.5 py-1.5 text-[11.5px] font-medium text-muted-foreground">
+        <span>Text reply received</span>
+        <Handle
+          id="text_reply_received"
+          type="source"
+          position={Position.Right}
+          className="!h-2 !w-2 !border-2 !border-background !bg-muted-foreground/60"
         />
       </div>
     </div>
@@ -488,6 +498,9 @@ function hasBodyBranches(data: FreeformNodeData): boolean {
   const cfg = data.config;
   if (!cfg) return false;
   if (data.kind === "list" && (cfg.rows?.length ?? 0) > 0) return true;
+  // Catalog nodes always render the two explicit branch chips (Cart sent,
+  // Text reply received) so the shell default source handle must stay hidden.
+  if (data.kind === "product" || data.kind === "product_list") return true;
   if (cfg.buttonsBlock?.mode === "quick_reply")
     return cfg.buttonsBlock.buttons.length > 0;
   if (cfg.buttonsBlock?.mode === "cta_url") return true;
