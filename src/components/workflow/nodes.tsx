@@ -1,8 +1,9 @@
+import { createContext, useContext } from "react";
 import { Handle, Position, type NodeProps } from "reactflow";
 import {
   Play, Square, Users, GitBranch, Split,
-  Phone, MessageCircle, MessageSquare,
-  Clock, Megaphone, AlertCircle, CheckCircle2, Loader2, Sparkles, FlaskConical, Webhook,
+  Phone, MessageCircle, MessageSquare, MessageSquareText, Inbox, Headset,
+  Clock, Megaphone, AlertCircle, CheckCircle2, Loader2, Sparkles, FlaskConical, Webhook, Flag, Workflow, Eye, UserPlus, Wrench,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -11,18 +12,36 @@ import { NODE_GROUPS } from "@/lib/campaign-types";
 
 export type { WorkflowNodeData } from "@/lib/campaign-types";
 
+/**
+ * Optional context: when the campaign builder wants to expose a Preview action
+ * on `whatsappFreeform` node cards (an eye icon in the top-right), it wraps the
+ * canvas with this provider. If unset the eye is hidden. Analytics views use
+ * their own wrapper node (`CampaignFlowView`) so they don't rely on this.
+ */
+export const FreeformNodePreviewContext = createContext<
+  ((data: WorkflowNodeData) => void) | null
+>(null);
+
 const ICONS: Record<NodeKind, LucideIcon> = {
   start: Play,
   end: Square,
+  inboundTrigger: Inbox,
   audience: Users,
-  apiToolCall: Webhook,
+  apiToolCall: Wrench,
   conditional: GitBranch,
   abSplit: Split,
   delay: Clock,
   voiceCall: Phone,
   whatsapp: MessageCircle,
+  whatsappFreeform: Workflow,
   sms: MessageSquare,
+  rcs: MessageSquareText,
+  agentSession: Headset,
+  assignHuman: UserPlus,
+  webhook: Webhook,
+  aiTransform: Sparkles,
   adsCampaign: Megaphone,
+  needsReview: Flag,
 };
 
 const GROUP_TONE: Record<string, string> = {
@@ -43,6 +62,12 @@ export function WorkflowNode({ data, selected }: NodeProps<WorkflowNodeData>) {
   const success = data.runState === "success";
   const failed = data.runState === "failed";
   const isTerminal = data.kind === "start" || data.kind === "end";
+  // An inbound graph's ends. `inboundTrigger` is where every arrival begins, so
+  // nothing can precede it; `agentSession` is where routing stops, because a
+  // Session is a leaf — one agent, one stage, one transcript — and a second
+  // handoff on the same path would have nowhere to live.
+  const noTarget = data.kind === "inboundTrigger";
+  const noSource = data.kind === "agentSession";
   const outputs = data.outputs ?? [];
   const multiOut = outputs.length > 0;
   const abTest = data.abTest;
@@ -106,7 +131,13 @@ export function WorkflowNode({ data, selected }: NodeProps<WorkflowNodeData>) {
         </div>
       )}
 
-      <Handle type="target" position={Position.Left} className="!h-2 !w-2 !border-2 !border-background !bg-muted-foreground/50" />
+      {data.kind === "whatsappFreeform" && (
+        <FreeformNodePreviewButton data={data} />
+      )}
+
+      {!noTarget && (
+        <Handle type="target" position={Position.Left} className="!h-2 !w-2 !border-2 !border-background !bg-muted-foreground/50" />
+      )}
 
       <div className="flex items-start gap-2.5 p-3">
         <div className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-lg", tone)}>
@@ -182,12 +213,35 @@ export function WorkflowNode({ data, selected }: NodeProps<WorkflowNodeData>) {
             </div>
           ))}
         </div>
-      ) : (
+      ) : noSource ? null : (
         <Handle type="source" position={Position.Right} className="!h-2 !w-2 !border-2 !border-background !bg-muted-foreground/50" />
       )}
     </div>
   );
 }
 
+
+/**
+ * Small eye button anchored to the top-right of a WhatsApp Freeform Workflow
+ * node card. Reads the (optional) preview handler from context and hides
+ * itself when unset. Sits above the abTest badge slot when abTest is unused.
+ */
+function FreeformNodePreviewButton({ data }: { data: WorkflowNodeData }) {
+  const onPreview = useContext(FreeformNodePreviewContext);
+  if (!onPreview) return null;
+  return (
+    <button
+      onClick={(e) => {
+        e.stopPropagation();
+        onPreview(data);
+      }}
+      className="pointer-events-auto absolute right-2 top-2 z-10 grid h-6 w-6 place-items-center rounded-md border border-border bg-background/95 text-muted-foreground shadow-sm hover:bg-accent hover:text-foreground"
+      title="Preview freeform workflow"
+      type="button"
+    >
+      <Eye className="h-3 w-3" />
+    </button>
+  );
+}
 
 export const nodeTypes = { workflow: WorkflowNode };

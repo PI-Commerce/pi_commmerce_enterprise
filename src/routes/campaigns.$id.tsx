@@ -5,6 +5,7 @@ import { WorkflowCanvas } from "@/components/workflow/WorkflowCanvas";
 import { BuilderTopBar } from "@/components/workflow/BuilderTopBar";
 import type { CampaignStatus } from "@/lib/campaign-types";
 import { EXAMPLE_CAMPAIGNS } from "@/lib/campaign-examples";
+import { getCampaignCopy } from "@/lib/campaign-templates";
 import { VERSION_HISTORY, makeVersion, type CampaignVersion } from "@/lib/campaign-versions";
 import {
   AlertDialog,
@@ -38,14 +39,17 @@ function CampaignBuilder() {
   const navigate = useNavigate();
   const isNew = id === "new";
   const example = EXAMPLE_CAMPAIGNS[id];
+  // A tenant copy forked from a template opens as a normal draft — its name comes
+  // from the template and it always starts Incomplete (unbound resources).
+  const copy = getCampaignCopy(id);
 
   const [name, setName] = useState(
     isNew
       ? (seedName?.trim() || "Untitled campaign")
-      : example?.name ?? "Dormant Trader Reactivation",
+      : copy?.name ?? example?.name ?? "Dormant Trader Reactivation",
   );
   const [status, setStatus] = useState<CampaignStatus>(
-    isNew ? "draft" : example?.status ?? "draft",
+    isNew ? "draft" : copy?.status ?? example?.status ?? "draft",
   );
   const [dirty, setDirty] = useState(false);
   const [validCount, setValidCount] = useState(0);

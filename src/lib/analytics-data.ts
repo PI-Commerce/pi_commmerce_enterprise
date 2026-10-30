@@ -5,11 +5,21 @@
  */
 import { EXAMPLE_CAMPAIGNS, type ExampleCampaign } from "./campaign-examples";
 import type { NodeKind, PresetConfig } from "./campaign-types";
-import { resolveWaTemplate } from "./wa-outputs";
+import { resolveWaTemplate, waTimeoutLabel, DEFAULT_WA_TIMEOUT_HOURS } from "./wa-outputs";
 import { languageLabel } from "./waba-templates";
 import { resolveAgent } from "./agent-data";
+import { resolveSmsTemplate } from "./sms-store";
+import { templateSegments } from "./sms-templates";
+import { getTool } from "./tool-registry";
 
-export type ChannelKind = "whatsapp" | "voice" | "sms" | "ads";
+/** Compact per-tool summary used by the apiToolCall analytics snapshot. */
+function getToolSummary(handle: string): { method?: string; outputCount: number } | null {
+  const t = getTool(handle);
+  if (!t) return null;
+  return { method: t.method, outputCount: t.outputs.length };
+}
+
+export type ChannelKind = "whatsapp" | "voice" | "sms" | "rcs" | "ads";
 
 export type SankeyNodeKind =
   | "start"
@@ -17,12 +27,17 @@ export type SankeyNodeKind =
   | "apiToolCall"
   | "abSplit"
   | "whatsapp"
+  | "whatsappFreeform"
   | "voice"
   | "sms"
+  | "rcs"
   | "ads"
   | "conditional"
   | "delay"
-  | "end";
+  | "aiTransform"
+  | "end"
+  // Human Escalation (terminal): counts as a distinct exit lane in analytics.
+  | "needsReview";
 
 export type SankeyNode = {
   id: string;
@@ -93,12 +108,26 @@ const KIND_TO_SANKEY: Record<NodeKind, SankeyNodeKind> = {
   delay: "delay",
   voiceCall: "voice",
   whatsapp: "whatsapp",
+  whatsappFreeform: "whatsappFreeform",
   sms: "sms",
+  rcs: "rcs",
   adsCampaign: "ads",
   // API Tool Call is its own node in analytics: a data/processing step that every
   // lead flows through. It shows Common Metrics + a Configuration Snapshot, but
   // has no channel funnel of its own.
   apiToolCall: "apiToolCall",
+  /* Same column as a tool call: both are "we called something out", which is the only
+     distinction the funnel draws. */
+  webhook: "apiToolCall",
+  // Inbound-only kinds — they never appear in a campaign graph, so they never
+  // reach the Sankey. Mapped to structural pass-throughs to keep the map total.
+  inboundTrigger: "start",
+  agentSession: "end",
+  /* Maps onto the campaign funnel's human-escalation column: both are "a person now
+     owns this", which is the only distinction the Sankey draws. */
+  assignHuman: "needsReview",
+  aiTransform: "aiTransform",
+  needsReview: "needsReview",
 };
 
 const PASS_RATE: Record<SankeyNodeKind, number> = {
@@ -108,11 +137,19 @@ const PASS_RATE: Record<SankeyNodeKind, number> = {
   conditional: 1,
   abSplit: 1,
   delay: 1,
+  aiTransform: 1,
   end: 1,
   voice: 0.72,
   whatsapp: 0.82,
+  // Freeform sessions are opened only after the lead engaged with a WhatsApp
+  // Template (either replied or tapped a button), so the drop-off from
+  // freeform-entry to freeform-exit is moderate: most complete, some time out,
+  // a few fail. Slightly higher retention than the send-first Template node.
+  whatsappFreeform: 0.86,
   sms: 0.9,
+  rcs: 0.88,
   ads: 0.95,
+  needsReview: 1, // terminal — all leads that reach it are counted as flagged.
 };
 
 /** Stable string hash for deterministic per-node variance. */
@@ -158,6 +195,78 @@ function waHandleBaseWeight(handle: string): number {
     return 1.7;
   if (handle === "reply_received") return 0.8;
   if (handle.startsWith("btn_")) return 1.1;
+  return 1;
+}
+
+/**
+ * Delivery-outcome rates for SMS — the single source of truth for how SMS
+ * traffic splits. Consumed by the Sankey weighting below, by the node drawer's
+ * metric tiles and by the SMS channel view (via `smsOutcomeTotals`), so those
+ * three surfaces cannot drift apart. Lives here, in the lowest layer, so the
+ * dependency only ever points upward.
+ */
+export const SMS_DELIVERY_RATES = { delivered: 0.94, failed: 0.04 } as const;
+
+/**
+ * Semantic base weight for an SMS delivery handle. SMS delivery is overwhelmingly
+ * successful, so the generic triangular fallback (which would hand `delivered`
+ * only ~50% of traffic) reads as broken.
+ */
+function smsHandleBaseWeight(handle: string): number {
+  if (handle === "delivered") return SMS_DELIVERY_RATES.delivered * 100;
+  if (handle === "failed") return SMS_DELIVERY_RATES.failed * 100;
+  if (handle === "no_dlr")
+    return (1 - SMS_DELIVERY_RATES.delivered - SMS_DELIVERY_RATES.failed) * 100;
+  return 1;
+}
+
+/**
+ * Delivery-outcome rates for RCS — the single source of truth for how RCS
+ * traffic splits, mirroring {@link SMS_DELIVERY_RATES}. Consumed by the Sankey
+ * weighting below, the node drawer tiles and the RCS channel view (via
+ * `rcsOutcomeTotals`), so those surfaces never drift apart.
+ *
+ * `delivered` counts every message that reached an RCS-capable handset;
+ * `clicked` (tapping any suggestion button) is a sub-slice of it, so the three
+ * terminal states delivered / failed / timeout are what sum to Sent. `failed`
+ * folds in not-reachable (handset isn't RCS-capable) — the branch an SMS
+ * fallback is wired off downstream.
+ */
+export const RCS_DELIVERY_RATES = {
+  delivered: 0.88,
+  read: 0.62,
+  clicked: 0.11,
+  failed: 0.1,
+  timeout: 0.02,
+} as const;
+
+/**
+ * Semantic base weight for an RCS output handle. The node's sibling handles are
+ * one branch per button plus the fixed delivered / failed / timeout outcomes —
+ * a lead leaves via exactly one. A lead that clicks a button exits through
+ * `btn_N`, so the `delivered` handle carries only the delivered-but-no-click
+ * remainder (delivered − clicked). Weights are relative (normalised by the
+ * caller), so they need not sum to 100.
+ */
+function rcsHandleBaseWeight(handle: string): number {
+  if (handle.startsWith("btn_")) return 5.5;
+  if (handle === "delivered")
+    return (RCS_DELIVERY_RATES.delivered - RCS_DELIVERY_RATES.clicked) * 100;
+  if (handle === "failed") return RCS_DELIVERY_RATES.failed * 100;
+  if (handle === "timeout") return RCS_DELIVERY_RATES.timeout * 100;
+  return 1;
+}
+
+/**
+ * Semantic base weight for a WhatsApp Freeform Workflow outcome handle. The
+ * three exits are `completed` / `timed_out` / `failed` (see `freeformOutputs`
+ * in wa-outputs). Most sessions complete since the lead already opted in by
+ * replying to the Template; timeouts are common on longer flows, failures rare.
+ */
+function ffHandleBaseWeight(handle: string): number {
+  if (handle === "completed") return 7.5;
+  if (handle === "timed_out") return 2.0;
+  if (handle === "failed") return 0.5;
   return 1;
 }
 
@@ -237,11 +346,21 @@ function deriveRun(
     // WhatsApp outcomes split by semantic weight (session/reply/button) with a
     // deterministic per-(run,node,handle) wobble; conditional branches keep the
     // top-to-bottom triangular weighting; A/B and single-output split evenly.
+    const baseWeight =
+      kind === "whatsapp"
+        ? waHandleBaseWeight
+        : kind === "sms"
+          ? smsHandleBaseWeight
+          : kind === "rcs"
+            ? rcsHandleBaseWeight
+            : kind === "whatsappFreeform"
+              ? ffHandleBaseWeight
+              : null;
     const waWeights =
-      kind === "whatsapp" && !equal
+      baseWeight && !equal
         ? handleIds.map(
             (h) =>
-              waHandleBaseWeight(h) *
+              baseWeight(h) *
               (1 + ((hashStr(runId + ":" + id + ":" + h) % 17) - 8) / 100),
           )
         : null;
@@ -448,6 +567,10 @@ export function nodeConfigSnapshot(node: SankeyNode): NodeConfigField[] {
           out.push({ label: "Template", value: dash(c.waTemplate) });
         }
       }
+      out.push({
+        label: "Response Timeout",
+        value: waTimeoutLabel(c.waTimeoutHours ?? DEFAULT_WA_TIMEOUT_HOURS),
+      });
       return out;
     }
     case "voice": {
@@ -468,26 +591,78 @@ export function nodeConfigSnapshot(node: SankeyNode): NodeConfigField[] {
       if (c.timezone) out.push({ label: "Timezone", value: dash(c.timezone) });
       return out;
     }
-    case "apiToolCall":
-      return [
-        { label: "API Tool", value: dash(c.apiTool) },
-        { label: "Inputs Mapped", value: String(c.apiInputMap?.length ?? 0) },
+    case "apiToolCall": {
+      // The v1 API Tool node surfaces the picked tool + how many campaign
+      // slots it exposed. When the tool has a saved test response, the drawer
+      // hints at the response shape so the analytics reader can see what
+      // downstream nodes are consuming.
+      const t = c.apiTool ? getToolSummary(c.apiTool) : null;
+      const rows: { label: string; value: string }[] = [
+        { label: "Tool", value: dash(c.apiTool) },
       ];
-    case "sms":
-      return [
-        { label: "Sender ID", value: dash(c.senderId) },
-        { label: "Message Type", value: dash(c.smsType) },
+      if (t?.method) rows.push({ label: "Method", value: t.method });
+      rows.push({ label: "Inputs Mapped", value: String(c.apiInputMap?.length ?? 0) });
+      if (t?.outputCount != null) rows.push({ label: "Outputs", value: String(t.outputCount) });
+      return rows;
+    }
+    case "aiTransform": {
+      // v1 AI Transformation is always Custom AI Action, so the drawer surfaces
+      // just the per-transform name → output variable. Type is implicit.
+      const list = c.transforms ?? [];
+      if (list.length === 0) return [{ label: "Transformations", value: "—" }];
+      return list.map((t, i) => ({
+        label: `#${i + 1} ${t.label?.trim() || "AI Action"}`,
+        value: `→ ${t.output || "?"}`,
+      }));
+    }
+    case "sms": {
+      // The DLT template is the node's real identity — sender and category are
+      // properties of it, so lead with the template and show the segment count.
+      const t = resolveSmsTemplate(c.smsTemplateId);
+      const out = [
+        { label: "Template", value: t?.name ?? dash(c.smsTemplateId) },
+        { label: "Template ID", value: dash(c.smsTemplateId) },
+        { label: "Sender ID", value: dash(t?.senderId ?? c.senderId) },
+        { label: "Category", value: dash(t?.category ?? c.smsCategory) },
       ];
-    case "delay":
+      if (t) {
+        const seg = templateSegments(t);
+        out.push({
+          label: "Segments",
+          value: `${seg.segments} · ${seg.encoding}`,
+        });
+      }
+      out.push({ label: "Variables Mapped", value: String(c.smsVarMap?.length ?? 0) });
+      if (c.smsDlrWindow) out.push({ label: "DLR Wait Window", value: c.smsDlrWindow });
+      return out;
+    }
+    case "delay": {
+      // Delay v2 has two modes. Dynamic delay keeps the target variable +
+      // parsing format visible in the drawer so the reader sees exactly which
+      // upstream field drives the wait and how it will be parsed; the
+      // fallback duration is surfaced too so it's obvious what happens when
+      // the variable is missing/unparseable at runtime.
+      if (c.delayMode === "variable") {
+        const fallback = c.delayFallbackValue != null
+          ? `${c.delayFallbackValue} ${c.delayFallbackUnit ?? ""}`.trim()
+          : "—";
+        return [
+          { label: "Mode", value: "Dynamic delay" },
+          { label: "Variable", value: dash(c.delayVariable) },
+          { label: "Format", value: dash(c.delayVariableFormat) },
+          { label: "Fallback", value: fallback },
+        ];
+      }
       return [
+        { label: "Mode", value: "Static delay" },
         {
           label: "Duration",
-          value:
-            c.delayValue != null
-              ? `${c.delayValue} ${c.delayUnit ?? ""}`.trim()
-              : "—",
+          value: c.delayValue != null
+            ? `${c.delayValue} ${c.delayUnit ?? ""}`.trim()
+            : "—",
         },
       ];
+    }
     case "abSplit": {
       const variants = c.splitVariants ?? c.abVariants ?? [];
       return [

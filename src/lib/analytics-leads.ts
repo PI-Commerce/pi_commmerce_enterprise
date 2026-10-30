@@ -19,7 +19,9 @@ export type LeadStatus =
   | "completed"
   | "failed"
   | "dropped"
-  | "pending";
+  | "pending"
+  /** SMS/RCS: the wait window closed without a delivery receipt. */
+  | "no_dlr";
 
 export type Lead = {
   id: string;
@@ -107,17 +109,30 @@ const STATUS_BY_KIND: Record<SankeyNodeKind, LeadStatus[]> = {
   // Aligned to the Meta delivery callback set (clicked/replied are interaction
   // events, not delivery statuses, so they're excluded here).
   whatsapp: ["sent", "delivered", "read", "failed"],
+  // Freeform Workflow lifecycle: the lead is either inside an active session,
+  // finished it (completed), let it time out, or hit an error mid-session.
+  whatsappFreeform: ["running", "completed", "failed"],
   // Dev team's current voice-call lifecycle statuses.
   voice: ["pending", "running", "completed", "failed"],
-  sms: ["delivered", "failed"],
+  // Aligned to the SMS node's three delivery outcomes, plus the transient
+  // `sent` state a lead occupies while the DLR window is still open.
+  sms: ["sent", "delivered", "failed", "no_dlr"],
+  // RCS: the node's delivery outcomes — delivered / read (RCS read receipt) /
+  // failed (folds in handsets that aren't RCS-capable) / timeout.
+  rcs: ["delivered", "read", "failed", "no_dlr"],
   ads: ["clicked", "delivered"],
+  aiTransform: [],
   end: [],
+  // Terminal — a lead sitting on this node "just moves forward" analytically,
+  // even though semantically it's been flagged for human review.
+  needsReview: [],
 };
 
 const CHANNEL_BY_KIND: Partial<Record<SankeyNodeKind, ChannelKind>> = {
   whatsapp: "whatsapp",
   voice: "voice",
   sms: "sms",
+  rcs: "rcs",
   ads: "ads",
 };
 
@@ -224,7 +239,7 @@ export function leadsToCsv(leads: Lead[]): string {
   const rows = leads.map((l) => [
     l.id,
     l.name,
-    l.phone,
+    phoneCsvCell(l.phone),
     l.email,
     l.stageLabel,
     l.channel ?? "",
@@ -239,6 +254,8 @@ export function leadsToCsv(leads: Lead[]): string {
       r
         .map((v) => {
           const s = String(v ?? "");
+          // Preserve pre-formatted CSV literals like ="+91..." from phoneCsvCell.
+          if (/^="[^"\n]*"$/.test(s)) return s;
           return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
         })
         .join(","),
@@ -246,8 +263,22 @@ export function leadsToCsv(leads: Lead[]): string {
     .join("\n");
 }
 
+/**
+ * Wraps phone-like values as ="+91..." so Excel does not strip the leading `+`
+ * or interpret the value as scientific notation. Google Sheets handles this too.
+ * Use this at the call site for any column that carries an MSISDN.
+ */
+export function phoneCsvCell(v: unknown): string {
+  const s = String(v ?? "").trim();
+  if (!s) return "";
+  // Escape any existing double quotes, then wrap.
+  return `="${s.replace(/"/g, '""')}"`;
+}
+
 export function downloadCsv(filename: string, csv: string) {
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  // Prepend UTF-8 BOM so Excel opens non-Latin characters correctly.
+  const BOM = "﻿";
+  const blob = new Blob([BOM + csv], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;

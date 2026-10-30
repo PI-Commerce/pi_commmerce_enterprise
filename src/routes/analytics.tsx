@@ -3,6 +3,9 @@ import { createFileRoute } from "@tanstack/react-router";
 import type { EChartsOption } from "echarts";
 import { AppShell, PageHeader } from "@/components/app/AppShell";
 import { PageTabs } from "@/components/app/Tabs";
+import { InboundAnalytics } from "@/components/analytics/InboundAnalytics";
+import { InboxAnalytics } from "@/components/analytics/InboxAnalytics";
+import { AgentAnalytics } from "@/components/analytics/AgentAnalytics";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -31,6 +34,8 @@ import {
   Download,
   Search,
   MessageCircle,
+  MessageSquare,
+  MessageSquareText,
   Phone,
   ExternalLink,
 } from "lucide-react";
@@ -44,6 +49,8 @@ import {
 import type { DateRange } from "react-day-picker";
 import { CampaignFlowView } from "@/components/analytics/CampaignFlowView";
 import { VoiceChannelView } from "@/components/analytics/VoiceChannelView";
+import { SmsChannelView } from "@/components/analytics/SmsChannelView";
+import { RcsChannelView } from "@/components/analytics/RcsChannelView";
 import {
   CAMPAIGNS,
   NODE_METRICS,
@@ -63,22 +70,82 @@ import {
   stageLabelFor,
   type Lead,
 } from "@/lib/analytics-leads";
+import { FreeformCanvas } from "@/components/workflow/FreeformCanvas";
+import { getFreeformWorkflow, type FreeformNodeConfig } from "@/lib/freeform-types";
+import { X as CloseIcon, Minimize2 } from "lucide-react";
 import { resolveWaTemplate, isBranchableButton } from "@/lib/wa-outputs";
+import { resolveSmsTemplate } from "@/lib/sms-store";
+import { smsOutcomeTotals } from "@/lib/analytics-sms";
+import { resolveRcsTemplate } from "@/lib/rcs-store";
+import { rcsOutcomeTotals } from "@/lib/analytics-rcs";
 import { resolveAgent } from "@/lib/agent-data";
 import type { WaTemplate } from "@/lib/waba-templates";
+import {
+  SEED_BROADCASTS,
+  type BroadcastChannel,
+} from "@/lib/broadcasts-seed";
 import { cn } from "@/lib/utils";
+import { ExportDialog, type ExportDialogMode } from "@/components/analytics/ExportDialog";
+import {
+  LARGE_EXPORT_MIN_RANGE_DAYS,
+  MAX_RANGE_DAYS,
+  type ReportChannel,
+} from "@/lib/reports";
+import { format as fmtDate } from "date-fns";
 
 export const Route = createFileRoute("/analytics")({
   component: Analytics,
   head: () => ({ meta: [{ title: "Analytics · Pi Commerce Enterprise" }] }),
 });
 
-type Tab = "campaign" | "channel";
+type Tab = "campaign" | "inbound" | "inbox" | "agent" | "channel";
+
+type Section = "outbound" | "inbound" | "assist";
+
+/**
+ * Analytics, grouped by who is doing the work.
+ *
+ * Each section is named for the unit of work it measures, so the three read as
+ * peers. "Agent assist" was neither: it named a capability rather than a thing,
+ * and it is a real industry term for AI prompting a person mid-conversation —
+ * which this section does not show, because the inbox does not do it.
+ *
+ * `Agent` sits under Inbound because that is where an agent owns a conversation
+ * end to end; its outbound use is a node inside a campaign and is already measured
+ * by that campaign's funnel. It is a judgement call — the agent view itself still
+ * shows both directions, so nothing is lost, only made less discoverable from the
+ * campaign side.
+ */
+const SECTIONS: { id: Section; label: string; tabs: { id: Tab; label: string }[] }[] = [
+  {
+    id: "outbound",
+    label: "Outbound campaigns",
+    tabs: [
+      { id: "campaign", label: "Campaigns" },
+      { id: "channel", label: "Channel delivery" },
+    ],
+  },
+  {
+    id: "inbound",
+    label: "Inbound sessions",
+    tabs: [
+      { id: "inbound", label: "Overview" },
+      { id: "agent", label: "AI agents" },
+    ],
+  },
+  { id: "assist", label: "Team inbox", tabs: [{ id: "inbox", label: "Inbox" }] },
+];
+
+function sectionOf(tab: Tab): Section {
+  return SECTIONS.find((s) => s.tabs.some((t) => t.id === tab))?.id ?? "outbound";
+}
 
 const CHANNEL_CTA_LABEL: Record<ChannelKind, string> = {
   whatsapp: "View Detailed WhatsApp Analytics",
-  voice: "View Detailed Voice Analytics",
+  // Voice lands on the Agent tab, not Channel — hence the different noun.
+  voice: "View Agent Analytics",
   sms: "View Detailed SMS Analytics",
+  rcs: "View Detailed RCS Analytics",
   ads: "View Detailed Ads Analytics",
 };
 
@@ -111,6 +178,7 @@ const CHANNEL_COLORS: Record<ChannelKind, string> = {
   whatsapp: "#22c55e",
   voice: "#a78bfa",
   sms: "#f59e0b",
+  rcs: "#6366f1",
   ads: "#06b6d4",
 };
 const NODE_COLOR: Record<SankeyNodeKind, string> = {
@@ -119,25 +187,35 @@ const NODE_COLOR: Record<SankeyNodeKind, string> = {
   apiToolCall: "#0ea5e9",
   abSplit: "#64748b",
   whatsapp: "#22c55e",
+  // Freeform workflow renders in the same WhatsApp green family but a shade
+  // darker so the two WhatsApp-kind nodes remain distinguishable on the graph.
+  whatsappFreeform: "#15803d",
   voice: "#a78bfa",
   sms: "#f59e0b",
+  rcs: "#6366f1",
   ads: "#06b6d4",
   conditional: "#64748b",
   delay: "#94a3b8",
+  aiTransform: "#a855f7",
   end: "#f59e0b",
+  needsReview: "#f97316",
 };
 const NODE_TYPE_LABEL: Record<SankeyNodeKind, string> = {
   start: "Start",
   audience: "Audience",
-  apiToolCall: "API Tool Call",
+  apiToolCall: "Tool",
   abSplit: "A/B Split",
-  whatsapp: "WhatsApp",
+  whatsapp: "WhatsApp Template",
+  whatsappFreeform: "WhatsApp Freeform Workflow",
   voice: "Voice Call",
   sms: "SMS",
+  rcs: "RCS",
   ads: "Ads Campaign",
   conditional: "Conditional Branch",
   delay: "Delay",
+  aiTransform: "AI Transformation",
   end: "End",
+  needsReview: "Human Escalation",
 };
 const STATUS_TONE: Record<string, string> = {
   sent: "text-sky-600 bg-sky-500/10",
@@ -153,8 +231,11 @@ const STATUS_TONE: Record<string, string> = {
   pending: "text-muted-foreground bg-secondary",
 };
 
-// SMS and Ads channels are out of scope for v1 — only the live channels
-// (WhatsApp / Voice) are exposed in Channel analytics.
+// Ads remains out of scope for v1. WhatsApp, Voice and SMS are live; each
+// declares the asset that identifies it (the thing an "asset-mode" scope is
+// built around) — a WhatsApp/DLT template, or a voice agent.
+// NOTE: the Agent tab shows the same voice agent's inbound half; this tab stays
+// transport-side — what was sent and whether it arrived.
 const CHANNEL_TABS: {
   kind: ChannelKind;
   label: string;
@@ -168,6 +249,8 @@ const CHANNEL_TABS: {
     assetLabel: "Template",
   },
   { kind: "voice", label: "Voice", icon: Phone, assetLabel: "Voice Agent" },
+  { kind: "sms", label: "SMS", icon: MessageSquare, assetLabel: "Template" },
+  { kind: "rcs", label: "RCS", icon: MessageSquareText, assetLabel: "Template" },
 ];
 
 /* ───────────── Channel selection state (lifted, supports deep-link) ─────────────
@@ -180,7 +263,7 @@ const CHANNEL_TABS: {
  *               channel kind within that one run.
  */
 
-type ChannelMode = "asset" | "campaign";
+type ChannelMode = "asset" | "campaign" | "broadcast";
 
 type ChannelSelection = {
   kind: ChannelKind;
@@ -195,13 +278,13 @@ type ChannelSelection = {
   campaignId?: string;
   versionId?: string;
   runId?: string;
+  /** Broadcast-mode: single broadcast id. */
+  broadcastId?: string;
 };
 
-/** Pre-select the "most recent" asset for asset-mode landing:
- *   • Voice  → the voice agent used by the latest run that contains a voice node.
- *   • WhatsApp → the template with the highest Sent (= node entered) volume in
- *                the latest run that contains a whatsapp node.
- *  Both resolve deterministically from the dev fixtures.
+/** Pre-select the "most recent" asset for asset-mode landing: the template with
+ *  the highest Sent (= node entered) volume in the latest run that contains a
+ *  whatsapp node. Resolves deterministically from the dev fixtures.
  */
 function pickDefaultAsset(kind: ChannelKind): string | undefined {
   if (kind === "voice") {
@@ -217,13 +300,22 @@ function pickDefaultAsset(kind: ChannelKind): string | undefined {
     }
     return undefined;
   }
-  if (kind === "whatsapp") {
+  // WhatsApp, SMS and RCS all land on their highest-volume template in the first
+  // run that uses one; only the registry they resolve against differs.
+  if (kind === "whatsapp" || kind === "sms" || kind === "rcs") {
     for (const c of CAMPAIGNS) {
       for (const r of c.runs) {
         const byTpl = new Map<string, number>();
         for (const n of r.sankey.nodes) {
-          if (n.kind !== "whatsapp" || n.config?.waMode === "freeform") continue;
-          const tpl = resolveWaTemplate(n.config?.waTemplate);
+          if (n.kind !== kind) continue;
+          const tpl =
+            kind === "sms"
+              ? resolveSmsTemplate(n.config?.smsTemplateId)
+              : kind === "rcs"
+                ? resolveRcsTemplate(n.config?.rcsTemplateId)
+                : n.config?.waMode === "freeform"
+                  ? undefined
+                  : resolveWaTemplate(n.config?.waTemplate);
           if (!tpl) continue;
           byTpl.set(tpl.id, (byTpl.get(tpl.id) ?? 0) + n.entered);
         }
@@ -278,6 +370,7 @@ function Analytics() {
   const [channelSel, setChannelSel] = useState<ChannelSelection>(() =>
     defaultChannelSelection("whatsapp"),
   );
+  const [agentId, setAgentId] = useState<string>();
   const [dateRange, setDateRange] = useState<DateRange | undefined>(() =>
     defaultDateRange(7),
   );
@@ -285,13 +378,25 @@ function Analytics() {
   /** Drawer CTA → Channel tab. Deep-links into Campaign-mode pinned to the same
    *  C/V/R the user just inspected, so the channel view aggregates ALL nodes of
    *  that kind inside that one run (the natural "what is the channel doing in
-   *  this run" question). */
+   *  this run" question).
+   *
+   *  A voice node is the exception: what it does is agent behaviour, not
+   *  transport, so it lands on the Agent tab scoped to the node's agent. That
+   *  drops the run pin — the Agent tab rolls up every node the agent touches —
+   *  which is the correct trade, since the question a voice node raises ("is
+   *  this agent any good?") is not answerable inside one run. */
   function goToChannel(opts: {
     kind: ChannelKind;
     campaignId: string;
     runId: string;
-    nodeId: string;
+    node: SankeyNode;
   }) {
+    if (opts.kind === "voice") {
+      const agent = resolveAgent(opts.node.config?.agent);
+      if (agent) setAgentId(agent.id);
+      setTab("agent");
+      return;
+    }
     const campaign = CAMPAIGNS.find((c) => c.id === opts.campaignId);
     const runIdx = campaign?.runs.findIndex((r) => r.id === opts.runId) ?? -1;
     setChannelSel({
@@ -309,23 +414,52 @@ function Analytics() {
     <AppShell>
       <PageHeader
         title="Analytics"
-        description="Campaign, and node-level performance across your workspace."
+        description="Campaigns reaching out, sessions answering, and the conversations a person had to finish."
       />
-      <PageTabs<Tab>
-        value={tab}
-        onChange={setTab}
-        tabs={[
-          { id: "campaign", label: "Campaign" },
-          { id: "channel", label: "Channel" },
-        ]}
+      {/* Three sections, by who is doing the work: the platform reaching out, the
+          platform answering, and a person being handed something the automation
+          could not finish. Five flat tabs made Channel and Agent look like peers of
+          Campaign and Inbound when they are lenses on them. */}
+      <PageTabs<Section>
+        value={sectionOf(tab)}
+        onChange={(sec) => setTab(SECTIONS.find((x) => x.id === sec)!.tabs[0].id)}
+        tabs={SECTIONS.map((x) => ({ id: x.id, label: x.label }))}
       />
-      {tab === "campaign" ? (
+
+      {/* Only where there is something to switch between. A lone sub-tab is a
+          control that implies a choice nobody has. */}
+      {SECTIONS.find((x) => x.id === sectionOf(tab))!.tabs.length > 1 && (
+        <div className="mb-4 flex items-center gap-1">
+          {SECTIONS.find((x) => x.id === sectionOf(tab))!.tabs.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              className={cn(
+                "rounded-md px-2.5 py-1 text-[12px] font-medium transition-colors",
+                tab === t.id
+                  ? "bg-secondary text-foreground"
+                  : "text-muted-foreground hover:bg-accent hover:text-foreground",
+              )}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {tab === "campaign" && (
         <CampaignAnalytics
           goToChannel={goToChannel}
           dateRange={dateRange}
           onDateRangeChange={setDateRange}
         />
-      ) : (
+      )}
+      {tab === "inbound" && <InboundAnalytics />}
+      {tab === "inbox" && <InboxAnalytics />}
+      {tab === "agent" && (
+        <AgentAnalytics agentId={agentId} onAgentChange={setAgentId} />
+      )}
+      {tab === "channel" && (
         <ChannelAnalytics
           selection={channelSel}
           onSelectionChange={setChannelSel}
@@ -357,7 +491,7 @@ function CampaignAnalytics({
     kind: ChannelKind;
     campaignId: string;
     runId: string;
-    nodeId: string;
+    node: SankeyNode;
   }) => void;
   dateRange: DateRange | undefined;
   onDateRangeChange: (r: DateRange | undefined) => void;
@@ -390,11 +524,15 @@ function CampaignAnalytics({
     visibleRuns[0] ??
     campaign.runs[0];
   const [openNode, setOpenNode] = useState<SankeyNode | null>(null);
+  // The Sankey node currently being drilled into as an expanded freeform
+  // workflow overlay. `null` = campaign canvas is showing normally.
+  const [expandedFreeform, setExpandedFreeform] =
+    useState<SankeyNode | null>(null);
 
   return (
     <>
       <div className="mb-4 flex flex-wrap items-end gap-2">
-        <FilterField label="Campaign">
+        <FilterField label="Workflow">
           <Select
             value={campaignId}
             onValueChange={(v) => {
@@ -405,7 +543,7 @@ function CampaignAnalytics({
             }}
           >
             <SelectTrigger className="h-9 w-[280px] text-xs">
-              <SelectValue placeholder="Campaign" />
+              <SelectValue placeholder="Workflow" />
             </SelectTrigger>
             <SelectContent>
               {CAMPAIGNS.map((c) => (
@@ -499,7 +637,7 @@ function CampaignAnalytics({
       <div className="mt-4 rounded-xl border border-border bg-card">
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <div>
-            <h3 className="text-sm font-semibold">Campaign Flow</h3>
+            <h3 className="text-sm font-semibold">Workflow</h3>
             <p className="text-[11px] text-muted-foreground">
               Each node shows Entered, Exited and Drop-off %. Click a node for
               details.
@@ -507,7 +645,11 @@ function CampaignAnalytics({
           </div>
         </div>
         <div className="h-[520px]">
-          <CampaignFlowView run={run} onNodeClick={(n) => setOpenNode(n)} />
+          <CampaignFlowView
+            run={run}
+            onNodeClick={(n) => setOpenNode(n)}
+            onExpandFreeform={(n) => setExpandedFreeform(n)}
+          />
         </div>
       </div>
 
@@ -518,15 +660,27 @@ function CampaignAnalytics({
         run={run}
         onClose={() => setOpenNode(null)}
         onOpenChannelAnalytics={(n) => {
+          // Freeform nodes are a WhatsApp thing but not a ChannelKind, so route
+          // them to the WhatsApp channel view. Everything else uses its own kind.
+          const kind: ChannelKind =
+            n.kind === "whatsappFreeform" ? "whatsapp" : (n.kind as ChannelKind);
           goToChannel({
-            kind: n.kind as ChannelKind,
+            kind,
             campaignId,
             runId: run.id,
-            nodeId: n.id,
+            node: n,
           });
           setOpenNode(null);
         }}
       />
+
+      {expandedFreeform && (
+        <FreeformExpansionOverlay
+          node={expandedFreeform}
+          run={run}
+          onClose={() => setExpandedFreeform(null)}
+        />
+      )}
     </>
   );
 }
@@ -571,12 +725,36 @@ function LeadsTable({
   restrictToNodeIds,
   title = "Lead Analytics",
   hideStage = false,
+  dateRange,
+  channelForExport,
 }: {
   run: RunRow;
   restrictToNodeIds?: string[];
   title?: string;
   hideStage?: boolean;
+  /** When provided together with channelForExport, the CSV button gates on
+   *  the 90-day cap and the 10 lac async threshold. */
+  dateRange?: DateRange;
+  channelForExport?: ReportChannel;
 }) {
+  const [exportMode, setExportMode] = useState<ExportDialogMode>(null);
+  const dayCount = rangeDays(dateRange);
+  const rangeStart = dateRange?.from ? fmtDate(dateRange.from, "yyyy-MM-dd") : "";
+  const rangeEnd = dateRange?.to ? fmtDate(dateRange.to, "yyyy-MM-dd") : "";
+
+  const handleExportClick = () => {
+    if (channelForExport && dateRange?.from && dateRange?.to) {
+      if (dayCount > MAX_RANGE_DAYS) {
+        setExportMode("blocked");
+        return;
+      }
+      if (dayCount >= LARGE_EXPORT_MIN_RANGE_DAYS) {
+        setExportMode("large");
+        return;
+      }
+    }
+    downloadCsv(`${run.id || "run"}_leads.csv`, leadsToCsv(filtered));
+  };
   const allLeads = useMemo(() => generateLeads(run, run.kpi.validLeads), [run]);
   const scoped = useMemo(
     () =>
@@ -710,14 +888,22 @@ function LeadsTable({
             variant="outline"
             size="sm"
             className="h-8 gap-1.5 text-xs"
-            onClick={() =>
-              downloadCsv(`${run.id || "run"}_leads.csv`, leadsToCsv(filtered))
-            }
+            onClick={handleExportClick}
           >
             <Download className="h-3.5 w-3.5" /> CSV
           </Button>
         </div>
       </div>
+      {channelForExport && (
+        <ExportDialog
+          mode={exportMode}
+          channel={channelForExport}
+          startDate={rangeStart}
+          endDate={rangeEnd}
+          rangeDays={dayCount}
+          onClose={() => setExportMode(null)}
+        />
+      )}
       <div className="max-h-[480px] overflow-auto">
         <table className="w-full text-sm">
           <thead className="sticky top-0 bg-card text-[11px] uppercase tracking-wider text-muted-foreground">
@@ -897,11 +1083,36 @@ function buildNodeMetrics(
       { label: "Failed", value: failed.toLocaleString() },
     ];
   }
-  if (k === "whatsapp" || k === "sms" || k === "ads") {
+  if (k === "sms") {
+    // Derived from THIS node's volume (like Voice above), not the workspace-wide
+    // NODE_METRICS totals — otherwise every SMS node in every run would report
+    // the same numbers. Uses the shared delivery rates so these tiles, the
+    // channel view and the Sankey never disagree.
+    const sent = node.entered;
+    const { delivered, failed, noDlr } = smsOutcomeTotals(sent);
+    return [
+      { label: "Sent", value: sent.toLocaleString() },
+      { label: "Delivered", value: delivered.toLocaleString() },
+      { label: "Failed", value: failed.toLocaleString() },
+      { label: "Timeout", value: noDlr.toLocaleString() },
+    ];
+  }
+  if (k === "rcs") {
+    // Derived from THIS node's volume via the shared RCS delivery rates, so the
+    // tiles, the RCS channel view and the Sankey stay in agreement.
+    const sent = node.entered;
+    const { delivered, read, failed } = rcsOutcomeTotals(sent);
+    return [
+      { label: "Sent", value: sent.toLocaleString() },
+      { label: "Delivered", value: delivered.toLocaleString() },
+      { label: "Read", value: read.toLocaleString() },
+      { label: "Failed", value: failed.toLocaleString() },
+    ];
+  }
+  if (k === "whatsapp" || k === "ads") {
     const m = NODE_METRICS[k as ChannelKind] ?? [];
     const keep: Record<string, string[]> = {
       whatsapp: ["Sent", "Delivered", "Read", "Clicked", "Replied"],
-      sms: ["Sent", "Delivered", "Failed"],
       ads: ["Impressions", "Clicks", "Leads"],
     };
     return m
@@ -921,6 +1132,183 @@ function buildNodeMetrics(
   return [];
 }
 
+/**
+ * Full-screen overlay showing the freeform workflow's own graph on top of the
+ * campaign canvas. Everything underneath dims via the black scrim. The graph
+ * itself renders via `FreeformCanvas` in `previewOnly` mode (no dragging, no
+ * palette, no click-to-open-config panel). Internal edges are decorated with
+ * lead-count labels sourced from the freeform's own seeded metrics, weighted
+ * against the parent freeform node's total entries so the numbers add up.
+ */
+function FreeformExpansionOverlay({
+  node,
+  run,
+  onClose,
+}: {
+  node: SankeyNode;
+  run: RunRow;
+  onClose: () => void;
+}) {
+  // Look up the referenced workflow by id from the campaign node config so the
+  // overlay always mirrors what the campaign author actually selected.
+  const workflowId = (node.config?.ffWorkflowId as string | undefined) ?? "";
+  const workflow = useMemo(() => getFreeformWorkflow(workflowId), [workflowId]);
+  // Enter/exit counts on the parent freeform node in the campaign flow.
+  const entered = node.entered;
+
+  /**
+   * Percentage-annotated copy of the workflow graph. Every button / list row /
+   * conditional branch label gets ` · N%` appended so it reads exactly like the
+   * campaign-flow output labels (`Complete purchase · 24%`). Percentages are
+   * relative to the source node's total outflow, derived by propagating leads
+   * top-down with a small per-hop drop-off, then normalising against the
+   * source's total.
+   */
+  const nodesWithPct = useMemo(() => {
+    if (!workflow) return undefined;
+    // ---- 1. Propagate leads through the graph. Same as before. ----
+    const outs = new Map<string, string[]>();
+    for (const e of workflow.edges) {
+      const arr = outs.get(e.source) ?? [];
+      arr.push(e.id);
+      outs.set(e.source, arr);
+    }
+    const seed = `${run.id}:${node.id}`;
+    const perEdge = new Map<string, number>();
+    const inflow = new Map<string, number>();
+    inflow.set("start", entered);
+    for (const rec of workflow.nodes) {
+      const src = rec.id;
+      const incoming = inflow.get(src) ?? 0;
+      const arr = outs.get(src) ?? [];
+      if (arr.length === 0) continue;
+      const dropWobble = ((hashSeed(seed + ":" + src) % 5) + 2) / 100;
+      const passed = Math.round(incoming * (1 - dropWobble));
+      const per = Math.max(0, Math.round(passed / arr.length));
+      for (const eid of arr) {
+        perEdge.set(eid, per);
+        const e = workflow.edges.find((x) => x.id === eid)!;
+        inflow.set(e.target, (inflow.get(e.target) ?? 0) + per);
+      }
+    }
+    // ---- 2. Map each source-handle (button / row id) to its share-% of the
+    //         source node's outflow. ----
+    const handlePct = new Map<string, number>();
+    for (const [srcNodeId, edgeIds] of outs.entries()) {
+      const total = edgeIds.reduce((s, id) => s + (perEdge.get(id) ?? 0), 0);
+      if (total === 0) continue;
+      for (const eid of edgeIds) {
+        const edge = workflow.edges.find((x) => x.id === eid)!;
+        const c = perEdge.get(eid) ?? 0;
+        const pct = Math.round((c / total) * 100);
+        // Buttons use handle id `btn_<id>`, list rows use `row_<id>`. Store the
+        // raw button/row id (drop the prefix) since that's what's on cfg.
+        if (edge.sourceHandle?.startsWith("btn_")) {
+          handlePct.set(`${srcNodeId}:btn:${edge.sourceHandle.slice(4)}`, pct);
+        } else if (edge.sourceHandle?.startsWith("row_")) {
+          handlePct.set(`${srcNodeId}:row:${edge.sourceHandle.slice(4)}`, pct);
+        }
+      }
+    }
+    // ---- 3. Return a copy of the nodes with labels decorated. ----
+    return workflow.nodes.map((n) => {
+      const cfg = (n.data.config as FreeformNodeConfig | undefined) ?? undefined;
+      if (!cfg) return n;
+      let nextCfg: FreeformNodeConfig = cfg;
+      // List rows.
+      if (cfg.rows?.length) {
+        nextCfg = {
+          ...nextCfg,
+          rows: cfg.rows.map((r) => {
+            const pct = handlePct.get(`${n.id}:row:${r.id}`);
+            return pct !== undefined ? { ...r, title: `${r.title} · ${pct}%` } : r;
+          }),
+        };
+      }
+      // Buttons.
+      if (cfg.buttonsBlock?.mode === "quick_reply") {
+        nextCfg = {
+          ...nextCfg,
+          buttonsBlock: {
+            mode: "quick_reply",
+            buttons: cfg.buttonsBlock.buttons.map((b) => {
+              const pct = handlePct.get(`${n.id}:btn:${b.id}`);
+              return pct !== undefined ? { ...b, label: `${b.label} · ${pct}%` } : b;
+            }),
+          },
+        };
+      } else if (cfg.buttonsBlock?.mode === "cta_url") {
+        const b = cfg.buttonsBlock.button;
+        const pct = handlePct.get(`${n.id}:btn:${b.id}`);
+        if (pct !== undefined) {
+          nextCfg = {
+            ...nextCfg,
+            buttonsBlock: {
+              mode: "cta_url",
+              button: { ...b, label: `${b.label} · ${pct}%` },
+            },
+          };
+        }
+      }
+      return { ...n, data: { ...n.data, config: nextCfg } };
+    });
+  }, [workflow, entered, run.id, node.id]);
+
+  return (
+    <div className="fixed inset-0 z-[70] flex flex-col bg-black/60 backdrop-blur-sm">
+      {/* Header bar */}
+      <div className="flex items-center justify-between border-b border-white/10 bg-background/95 px-5 py-3 shadow-lg">
+        <div className="min-w-0">
+          <p className="text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Freeform Workflow · Expanded view
+          </p>
+          <h2 className="mt-0.5 truncate text-sm font-semibold">
+            {workflow?.name ?? "Workflow"}
+            <span className="ml-2 font-normal text-muted-foreground">
+              {entered.toLocaleString()} leads entered
+            </span>
+          </h2>
+        </div>
+        <button
+          onClick={onClose}
+          className="inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-1 text-[11.5px] font-medium hover:bg-accent"
+        >
+          <Minimize2 className="h-3 w-3" />
+          Collapse
+          <CloseIcon className="h-3 w-3 opacity-60" />
+        </button>
+      </div>
+
+      {/* Dashed group container with the workflow's graph */}
+      <div className="relative flex-1 p-6">
+        <div className="relative h-full w-full overflow-hidden rounded-2xl border-2 border-dashed border-foreground/25 bg-background/70">
+          {workflow ? (
+            <FreeformCanvas
+              initialNodes={nodesWithPct ?? workflow.nodes}
+              initialEdges={workflow.edges}
+              previewOnly
+            />
+          ) : (
+            <div className="grid h-full place-items-center text-[13px] text-muted-foreground">
+              Workflow no longer exists. Nothing to display.
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Cheap deterministic string hash for the overlay's per-node variance. */
+function hashSeed(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return Math.abs(h);
+}
+
 function NodeDrawer({
   node,
   run,
@@ -935,6 +1323,7 @@ function NodeDrawer({
   const open = !!node;
   const kind = node?.kind;
   const isChannel = !!kind && CHANNEL_KINDS.has(kind);
+  const isFreeform = kind === "whatsappFreeform";
   const isTerminal = kind === "start" || kind === "end";
   const config = node && !isTerminal ? nodeConfigSnapshot(node) : [];
   const dropPct =
@@ -966,10 +1355,14 @@ function NodeDrawer({
     });
   }, [node, kind, run]);
 
-  // Outcome distribution for WhatsApp nodes that expose ≥2 handles (button
-  // templates, or Type-1 nodes with the split toggle on). Grouped by handle.
+  // Outcome distribution for WhatsApp Template nodes that expose ≥2 handles
+  // (button templates, or Type-1 nodes with the split toggle on) AND for
+  // WhatsApp Freeform Workflow nodes (Success / Timeout / Failed). Grouped by
+  // handle. Both share the same list surface downstream — the section title
+  // adapts to the node kind.
   const waOutcomeDist = useMemo(() => {
-    if (!node || kind !== "whatsapp") return [];
+    if (!node) return [];
+    if (kind !== "whatsapp" && kind !== "whatsappFreeform") return [];
     const out = run.sankey.edges.filter((e) => e.source === node.id);
     const byHandle = new Map<
       string,
@@ -982,14 +1375,20 @@ function NodeDrawer({
       const label =
         e.handleLabel ??
         (h === "no_response"
-          ? "No response"
+          ? "Timeout"
           : h === "session_expired"
             ? "Session expired"
             : h === "reply_received"
-              ? "Replied"
-              : h === "advance" || h === "__advance__"
-                ? "Continue"
-                : h);
+              ? "Text Reply Received"
+              : h === "completed"
+                ? "Success"
+                : h === "timed_out"
+                  ? "Timeout"
+                  : h === "failed"
+                    ? "Failed"
+                    : h === "advance" || h === "__advance__"
+                      ? "Continue"
+                      : h);
       if (prev) prev.value += e.value;
       else
         byHandle.set(h, {
@@ -1018,12 +1417,14 @@ function NodeDrawer({
           <SheetDescription className="text-[11px]">
             {kind ? NODE_TYPE_LABEL[kind] : ""} node
           </SheetDescription>
-          {isChannel && node && (
+          {(isChannel || isFreeform) && node && (
             <button
               onClick={() => onOpenChannelAnalytics(node)}
               className="mt-2 inline-flex items-center gap-1.5 self-start rounded-md border border-border bg-secondary/50 px-2.5 py-1 text-[11px] font-medium text-foreground hover:bg-secondary"
             >
-              {CHANNEL_CTA_LABEL[kind as ChannelKind]}
+              {isFreeform
+                ? "View detailed WhatsApp analytics"
+                : CHANNEL_CTA_LABEL[kind as ChannelKind]}
               <ExternalLink className="h-3 w-3" />
             </button>
           )}
@@ -1186,14 +1587,36 @@ function MiniFunnel({
   //    only in the KPI tiles, never in the funnel (it's a terminal failure
   //    state, not a stage on the success path). Pending is derived as
   //    base − (running + completed + failed).
+  //  • sms: funnel = Sent→Delivered only. Failed and Timeout are mutually
+  //    exclusive TERMINAL states, not stages below Delivered — funnelling them
+  //    would imply a failed message had first been delivered.
   let linear: { label: string; value: number }[] = metrics;
   let outcomes: { label: string; value: number }[] = [];
   let readBase = 0;
+  let outcomeTitle = "Conversions from Read messages";
+  let outcomeBase = "Read";
   if (kind === "whatsapp") {
     const OUTCOME_LABELS = ["Clicked", "Replied"];
     linear = metrics.filter((m) => !OUTCOME_LABELS.includes(m.label));
     outcomes = metrics.filter((m) => OUTCOME_LABELS.includes(m.label));
     readBase = linear.find((m) => m.label === "Read")?.value ?? 0;
+  } else if (kind === "sms") {
+    const OUTCOME_LABELS = ["Failed", "Timeout"];
+    linear = metrics.filter((m) => !OUTCOME_LABELS.includes(m.label));
+    outcomes = metrics.filter((m) => OUTCOME_LABELS.includes(m.label));
+    readBase = linear.find((m) => m.label === "Sent")?.value ?? 0;
+    outcomeTitle = "Non-delivery outcomes";
+    outcomeBase = "Sent";
+  } else if (kind === "rcs") {
+    // Funnel = Sent→Delivered→Read; Failed (which folds in not-reachable) is a
+    // terminal non-delivery outcome, so it renders beside the funnel, not
+    // stacked under Delivered.
+    const OUTCOME_LABELS = ["Failed"];
+    linear = metrics.filter((m) => !OUTCOME_LABELS.includes(m.label));
+    outcomes = metrics.filter((m) => OUTCOME_LABELS.includes(m.label));
+    readBase = linear.find((m) => m.label === "Sent")?.value ?? 0;
+    outcomeTitle = "Non-delivery outcomes";
+    outcomeBase = "Sent";
   } else if (kind === "voice") {
     const get = (l: string) => metrics.find((m) => m.label === l)?.value ?? 0;
     const totalBase = get("Total Base");
@@ -1253,7 +1676,7 @@ function MiniFunnel({
       {outcomes.length > 0 && (
         <div className="mt-2 border-t border-border/60 pt-2">
           <p className="mb-1.5 px-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-            Conversions from Read messages
+            {outcomeTitle}
           </p>
           <div className="grid grid-cols-2 gap-2 px-1" data-mini-conversions>
             {outcomes.map((m) => {
@@ -1265,7 +1688,7 @@ function MiniFunnel({
                       {m.label}
                     </span>
                     <span className="text-[9px] text-muted-foreground">
-                      {pct}% of Read
+                      {pct}% of {outcomeBase}
                     </span>
                   </div>
                   <p className="mt-0.5 text-sm font-semibold tabular-nums">
@@ -1331,15 +1754,19 @@ type Ref = { campaignId: string; runId: string; nodeId: string };
 
 const CHANNEL_KPI_LABELS: Record<ChannelKind, string[]> = {
   whatsapp: ["Sent", "Delivered", "Read", "Clicked", "Replied"],
-  // Voice renders via VoiceChannelView, not ChannelDetail; kept only for completeness.
+  // voice/sms/ads are not selectable channel tabs; the keys exist because
+  // ChannelKind demands them.
   voice: ["Total Base", "Running", "Completed", "Failed"],
   sms: ["Sent", "Delivered", "Failed"],
+  // RCS renders via RcsChannelView; kept for completeness.
+  rcs: ["Sent", "Delivered", "Read", "Failed"],
   ads: ["Impressions", "Clicks", "Total Leads"],
 };
 const CHANNEL_TREND_LABELS: Record<ChannelKind, string[]> = {
   whatsapp: ["Sent", "Delivered", "Read"],
   voice: ["Completed", "Failed"],
   sms: ["Sent", "Delivered"],
+  rcs: ["Sent", "Delivered", "Read"],
   ads: ["Impressions", "Clicks", "Total Leads"],
 };
 
@@ -1379,6 +1806,15 @@ function deriveChannelValues(
         Sent: sent,
         Delivered: Math.round(sent * 0.969),
         Failed: Math.round(sent * 0.031),
+      };
+    }
+    case "rcs": {
+      const sent = entered;
+      return {
+        Sent: sent,
+        Delivered: Math.round(sent * 0.88),
+        Read: Math.round(sent * 0.62),
+        Failed: Math.round(sent * 0.1),
       };
     }
     case "ads": {
@@ -1421,19 +1857,25 @@ function ChannelAnalytics({
     return refs;
   }, [kind]);
 
-  // refKey → the template the node sends (WhatsApp only; freeform → none).
+  // refKey → the template the node sends. WhatsApp resolves against the Meta
+  // template registry (freeform sends have none); SMS against the DLT registry.
+  // Both reduce to `{id, name}` so the asset picker treats them identically.
   const templateByRefKey = useMemo(() => {
-    const map = new Map<string, WaTemplate>();
-    if (kind !== "whatsapp") return map;
+    const map = new Map<string, { id: string; name: string }>();
+    if (kind !== "whatsapp" && kind !== "sms" && kind !== "rcs") return map;
     for (const c of CAMPAIGNS) {
       for (const r of c.runs) {
         for (const n of r.sankey.nodes) {
-          if (n.kind !== "whatsapp") continue;
+          if (n.kind !== kind) continue;
           const tpl =
-            n.config?.waMode === "freeform"
-              ? undefined
-              : resolveWaTemplate(n.config?.waTemplate);
-          if (tpl) map.set(`${c.id}|${r.id}|${n.id}`, tpl);
+            kind === "sms"
+              ? resolveSmsTemplate(n.config?.smsTemplateId)
+              : kind === "rcs"
+                ? resolveRcsTemplate(n.config?.rcsTemplateId)
+                : n.config?.waMode === "freeform"
+                  ? undefined
+                  : resolveWaTemplate(n.config?.waTemplate);
+          if (tpl) map.set(`${c.id}|${r.id}|${n.id}`, { id: tpl.id, name: tpl.name });
         }
       }
     }
@@ -1467,7 +1909,7 @@ function ChannelAnalytics({
       }
       return [...m.values()];
     }
-    if (kind === "whatsapp") {
+    if (kind === "whatsapp" || kind === "sms" || kind === "rcs") {
       const m = new Map<string, { id: string; label: string }>();
       for (const r of allRefs) {
         const t = templateByRefKey.get(`${r.campaignId}|${r.runId}|${r.nodeId}`);
@@ -1482,14 +1924,27 @@ function ChannelAnalytics({
   const refAssetId = (r: Ref): string | undefined => {
     const k = `${r.campaignId}|${r.runId}|${r.nodeId}`;
     if (kind === "voice") return agentByRefKey.get(k)?.id;
-    if (kind === "whatsapp") return templateByRefKey.get(k)?.id;
+    if (kind === "whatsapp" || kind === "sms" || kind === "rcs")
+      return templateByRefKey.get(k)?.id;
     return undefined;
   };
 
+  // A broadcast is a template send, so "View by Broadcast" reuses "View by
+  // Template" analytics under the hood: resolve the picked broadcast to its
+  // underlying template id, and let asset-mode plumbing render everything.
+  const broadcastResolvedAssetId = useMemo(() => {
+    if (mode !== "broadcast" || !selection.broadcastId) return undefined;
+    const b = SEED_BROADCASTS.find((x) => x.id === selection.broadcastId);
+    return b?.templateId;
+  }, [mode, selection.broadcastId]);
+
+  const effectiveAssetId = mode === "broadcast" ? broadcastResolvedAssetId : selection.assetId;
+  const effectiveModeIsAsset = mode === "asset" || mode === "broadcast";
+
   // ── Mode-driven resolved refs ──────────────────────────────────────────────
   const selectedRefs = useMemo(() => {
-    if (mode === "asset") {
-      const assetId = selection.assetId;
+    if (effectiveModeIsAsset) {
+      const assetId = effectiveAssetId;
       const excludedCampaigns = new Set(selection.excludedCampaignIds ?? []);
       const excludedRuns = new Set(selection.excludedRunIds ?? []);
       return allRefs.filter((r) => {
@@ -1505,7 +1960,7 @@ function ChannelAnalytics({
         r.campaignId === selection.campaignId && r.runId === selection.runId,
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, selection, allRefs, kind]);
+  }, [mode, selection, allRefs, kind, effectiveAssetId]);
 
   // Campaign-mode option lists (single-select cascade).
   const campaignChoices = useMemo(() => {
@@ -1528,28 +1983,6 @@ function ChannelAnalytics({
     });
   }, [selection.campaignId, selection.versionId]);
 
-  // Asset-mode: list of (campaign, run) pairs touching the picked asset, for
-  // the "Narrow campaigns" nested-tree filter.
-  const assetCampaignTree = useMemo(() => {
-    if (mode !== "asset" || !selection.assetId)
-      return [] as { campaign: CampaignAnalyticsData; runs: RunRow[] }[];
-    const byCampaign = new Map<string, Set<string>>();
-    for (const r of allRefs) {
-      if (refAssetId(r) !== selection.assetId) continue;
-      let s = byCampaign.get(r.campaignId);
-      if (!s) {
-        s = new Set();
-        byCampaign.set(r.campaignId, s);
-      }
-      s.add(r.runId);
-    }
-    return CAMPAIGNS.filter((c) => byCampaign.has(c.id)).map((c) => ({
-      campaign: c,
-      runs: c.runs.filter((r) => byCampaign.get(c.id)!.has(r.id)),
-    }));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, selection.assetId, allRefs, kind]);
-
   // Date range visibility:
   //  • asset-mode → always shown (date is the primary control)
   //  • campaign-mode → shown only if the pinned run is always-on
@@ -1560,61 +1993,48 @@ function ChannelAnalytics({
         )
       : undefined;
   const showDateRange =
-    mode === "asset" ||
+    effectiveModeIsAsset ||
     (mode === "campaign" && pinnedRun?.runType === "always-on");
 
-  // Default the date window to "last 7 days" the first time we enter Asset-mode.
+  // Default the date window to "last 7 days" the first time we enter Asset-mode
+  // (or Broadcast, which reuses asset-mode plumbing).
   useEffect(() => {
-    if (mode === "asset" && !dateRange) onDateRangeChange(defaultDateRange(7));
+    if (effectiveModeIsAsset && !dateRange) onDateRangeChange(defaultDateRange(7));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode]);
 
-  // Helpers for Asset-mode nested-tree toggles.
-  const excludedCampaigns = new Set(selection.excludedCampaignIds ?? []);
-  const excludedRuns = new Set(selection.excludedRunIds ?? []);
-  const toggleCampaign = (cid: string) => {
-    const next = new Set(excludedCampaigns);
-    if (next.has(cid)) next.delete(cid);
-    else next.add(cid);
-    onSelectionChange({
-      ...selection,
-      excludedCampaignIds: [...next],
-    });
-  };
-  const toggleRun = (rid: string) => {
-    const next = new Set(excludedRuns);
-    if (next.has(rid)) next.delete(rid);
-    else next.add(rid);
-    onSelectionChange({ ...selection, excludedRunIds: [...next] });
-  };
-
   return (
     <>
-      {/* Channel sub-tabs */}
-      <div className="mb-4 flex items-center gap-1 rounded-lg border border-border bg-card p-1">
-        {CHANNEL_TABS.map((c) => {
-          const Icon = c.icon;
-          const active = c.kind === kind;
-          return (
-            <button
-              key={c.kind}
-              onClick={() => onSelectionChange(defaultChannelSelection(c.kind))}
-              className={cn(
-                "flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
-                active
-                  ? "bg-secondary text-foreground"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              <Icon
-                className="h-3.5 w-3.5"
-                style={{ color: active ? CHANNEL_COLORS[c.kind] : undefined }}
-              />
-              {c.label}
-            </button>
-          );
-        })}
-      </div>
+      {/* Channel sub-tabs. A one-item picker is just a label, so it only renders
+          once there is a second channel to switch to. */}
+      {CHANNEL_TABS.length > 1 && (
+        <div className="mb-4 flex items-center gap-1 rounded-lg border border-border bg-card p-1">
+          {CHANNEL_TABS.map((c) => {
+            const Icon = c.icon;
+            const active = c.kind === kind;
+            return (
+              <button
+                key={c.kind}
+                onClick={() =>
+                  onSelectionChange(defaultChannelSelection(c.kind))
+                }
+                className={cn(
+                  "flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
+                  active
+                    ? "bg-secondary text-foreground"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <Icon
+                  className="h-3.5 w-3.5"
+                  style={{ color: active ? CHANNEL_COLORS[c.kind] : undefined }}
+                />
+                {c.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Mode dropdown sits inline left of the filters — reading flows
           left-to-right: pick mode → narrow within mode. Dropdown (not pill)
@@ -1629,6 +2049,11 @@ function ChannelAnalytics({
                 const assetId =
                   selection.assetId ?? pickDefaultAsset(kind) ?? "";
                 onSelectionChange({ kind, mode: "asset", assetId });
+              } else if (m === "broadcast") {
+                // Broadcast mode is only meaningful for messaging channels
+                // (WA / SMS / RCS). Pick the first broadcast on this channel.
+                const first = SEED_BROADCASTS.find((b) => b.channel === (kind as BroadcastChannel));
+                onSelectionChange({ kind, mode: "broadcast", broadcastId: first?.id });
               } else {
                 const t = pickDefaultCampaignTriple(kind);
                 onSelectionChange({ kind, mode: "campaign", ...t });
@@ -1640,13 +2065,47 @@ function ChannelAnalytics({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="asset">{tabMeta.assetLabel}</SelectItem>
-              <SelectItem value="campaign">Campaign run</SelectItem>
+              <SelectItem value="campaign">Workflow run</SelectItem>
+              {/* Broadcast mode: only for messaging channels. Voice broadcasts
+                  aren't in scope yet. */}
+              {kind !== "voice" && (
+                <SelectItem value="broadcast">Broadcast</SelectItem>
+              )}
             </SelectContent>
           </Select>
         </FilterField>
 
         {/* Mode-driven filter row */}
-        {mode === "asset" ? (
+        {mode === "broadcast" ? (
+          <div className="flex flex-1 flex-col gap-2 sm:flex-row sm:items-end">
+            <FilterField label="Broadcast" className="sm:w-[360px]">
+              <Select
+                value={selection.broadcastId ?? ""}
+                onValueChange={(v) =>
+                  onSelectionChange({
+                    kind,
+                    mode: "broadcast",
+                    broadcastId: v,
+                  })
+                }
+              >
+                <SelectTrigger className="h-9 w-full text-xs">
+                  <SelectValue placeholder="Pick a broadcast" />
+                </SelectTrigger>
+                <SelectContent>
+                  {SEED_BROADCASTS.filter((b) => b.channel === (kind as BroadcastChannel)).map((b) => (
+                    <SelectItem key={b.id} value={b.id}>
+                      <span className="flex items-center gap-2">
+                        <span className="font-medium">{b.name}</span>
+                        <span className="font-mono text-muted-foreground">{b.assetName}</span>
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </FilterField>
+          </div>
+        ) : mode === "asset" ? (
           <div className="flex flex-1 flex-col gap-2 sm:flex-row sm:items-end">
             <FilterField label={tabMeta.assetLabel} className="sm:w-[280px]">
               <Select
@@ -1677,15 +2136,6 @@ function ChannelAnalytics({
                 onChange={onDateRangeChange}
                 align="start"
                 className="w-full"
-              />
-            </FilterField>
-            <FilterField label="Narrow campaigns (optional)" className="sm:w-[300px]">
-              <CampaignTreeFilter
-                tree={assetCampaignTree}
-                excludedCampaigns={excludedCampaigns}
-                excludedRuns={excludedRuns}
-                onToggleCampaign={toggleCampaign}
-                onToggleRun={toggleRun}
               />
             </FilterField>
           </div>
@@ -1810,7 +2260,34 @@ function ChannelAnalytics({
           return (
             <VoiceChannelView
               refs={vrefs}
-              agentExplicitlyOne={mode === "asset" && !!selection.assetId}
+              agentExplicitlyOne={effectiveModeIsAsset && !!effectiveAssetId}
+            />
+          );
+        })()
+      ) : kind === "sms" ? (
+        (() => {
+          const srefs = selectedRefs.map((ref) => {
+            const run = CAMPAIGNS.find(
+              (c) => c.id === ref.campaignId,
+            )!.runs.find((r) => r.id === ref.runId)!;
+            const node = run.sankey.nodes.find((n) => n.id === ref.nodeId)!;
+            return { run, node };
+          });
+          return <SmsChannelView refs={srefs} />;
+        })()
+      ) : kind === "rcs" ? (
+        (() => {
+          const rrefs = selectedRefs.map((ref) => {
+            const run = CAMPAIGNS.find(
+              (c) => c.id === ref.campaignId,
+            )!.runs.find((r) => r.id === ref.runId)!;
+            const node = run.sankey.nodes.find((n) => n.id === ref.nodeId)!;
+            return { run, node };
+          });
+          return (
+            <RcsChannelView
+              refs={rrefs}
+              templateLevel={effectiveModeIsAsset && !!effectiveAssetId}
             />
           );
         })()
@@ -1818,91 +2295,6 @@ function ChannelAnalytics({
         <ChannelDetail kind={kind} refs={selectedRefs} dateRange={dateRange} />
       )}
     </>
-  );
-}
-
-/** Asset-mode optional narrower: a popover that lists every (campaign → its
- *  runs) touched by the selected asset. Default = nothing excluded (all in
- *  scope). Top-level checkbox deselects a whole campaign; expand a campaign to
- *  deselect individual runs. */
-function CampaignTreeFilter({
-  tree,
-  excludedCampaigns,
-  excludedRuns,
-  onToggleCampaign,
-  onToggleRun,
-}: {
-  tree: { campaign: CampaignAnalyticsData; runs: RunRow[] }[];
-  excludedCampaigns: Set<string>;
-  excludedRuns: Set<string>;
-  onToggleCampaign: (id: string) => void;
-  onToggleRun: (id: string) => void;
-}) {
-  const totalRuns = tree.reduce((s, t) => s + t.runs.length, 0);
-  const activeCampaigns = tree.filter(
-    (t) => !excludedCampaigns.has(t.campaign.id),
-  ).length;
-  const activeRuns = tree.reduce((s, t) => {
-    if (excludedCampaigns.has(t.campaign.id)) return s;
-    return s + t.runs.filter((r) => !excludedRuns.has(r.id)).length;
-  }, 0);
-  const allOn = activeCampaigns === tree.length && activeRuns === totalRuns;
-  const display = allOn
-    ? `All ${tree.length} campaign${tree.length === 1 ? "" : "s"}`
-    : `${activeCampaigns}/${tree.length} campaigns · ${activeRuns}/${totalRuns} runs`;
-  return (
-    <details className="group relative">
-      <summary className="flex h-9 w-full cursor-pointer list-none items-center justify-between rounded-md border border-input bg-transparent px-3 py-2 text-xs shadow-sm">
-        <span className="truncate">{display}</span>
-        <span className="ml-2 text-muted-foreground">▾</span>
-      </summary>
-      <div className="absolute z-50 mt-1 max-h-[320px] w-[300px] overflow-auto rounded-md border border-border bg-popover p-2 shadow-md">
-        {tree.length === 0 ? (
-          <p className="px-2 py-3 text-center text-xs text-muted-foreground">
-            No campaigns
-          </p>
-        ) : (
-          tree.map(({ campaign, runs }) => {
-            const cExcluded = excludedCampaigns.has(campaign.id);
-            return (
-              <div key={campaign.id} className="mb-1">
-                <label className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent">
-                  <input
-                    type="checkbox"
-                    checked={!cExcluded}
-                    onChange={() => onToggleCampaign(campaign.id)}
-                  />
-                  <span className="truncate font-medium">{campaign.name}</span>
-                </label>
-                {!cExcluded && (
-                  <div className="ml-6 border-l border-border pl-2">
-                    {runs.map((r) => {
-                      const idx = campaign.runs.indexOf(r);
-                      const version = runVersionLabel(campaign, idx);
-                      return (
-                        <label
-                          key={r.id}
-                          className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1 text-[11px] hover:bg-accent"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={!excludedRuns.has(r.id)}
-                            onChange={() => onToggleRun(r.id)}
-                          />
-                          <span className="truncate text-muted-foreground">
-                            {version} · {r.name} · {r.code}
-                          </span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            );
-          })
-        )}
-      </div>
-    </details>
   );
 }
 
@@ -2355,9 +2747,12 @@ function ChannelDetail({
             restrictToNodeIds={logsNodeIds}
             title={logTitle}
             hideStage={kind === "whatsapp"}
+            dateRange={dateRange}
+            channelForExport={kind === "ads" ? undefined : (kind as ReportChannel)}
           />
         </>
       )}
     </>
   );
 }
+

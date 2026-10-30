@@ -8,16 +8,48 @@ import { Label } from "@/components/ui/label";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Play, Webhook, Lock, Zap, Upload, Clock, Infinity as InfinityIcon } from "lucide-react";
+import {
+  Play, Webhook, Lock, Zap, Upload, Clock, Infinity as InfinityIcon,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CSV_LIBRARY, makeCsvAsset, type CsvAsset } from "@/lib/data-library";
+import {
+  ConnectionAudienceStep, type ConnectionAudienceValue,
+} from "@/components/connections/ConnectionAudienceStep";
+import {
+  getConnections, rememberBindings, campaignFields,
+} from "@/lib/connections";
 
 // v1 run model (PRD change-log E1–E7):
 //   Run Type → Audience Source. Trigger Mode is no longer a separate field.
-//   • Time-Scoped = mandatory Start + End window; audience from CSV or API.
-//   • Always-on   = no window; audience from API only.
+//   • Time-Scoped = mandatory Start + End window.
+//   • Always-on   = no window.
+//
+// The three sources are the three directions a person can arrive from, and they
+// are not variants of each other:
+//   CSV        — you hand us the file.
+//   Connection — we go and read it out of your CRM.
+//   API payload— your engagement tool posts people to us as they qualify.
+//
+// Scope decides which are on offer, because the first two are us *going and
+// looking*, and looking happens at a time: a file is read once, a CRM is read on a
+// cadence, and either way something has to bound when. Only the third has no such
+// need — the deciding is on their side, and their journey posts each person the
+// moment it qualifies them. So an always-on run is API payload and nothing else.
+//
+// Which engagement tool posts (CleverTap / WebEngage / MoEngage / …) is *not* asked
+// here. Every one of them posts to the same endpoint in the same shape; the tool
+// changes only the personalisation-token syntax of the sample body we hand back.
+// Since the endpoint carries the run id and can't exist until the run does, the
+// body — and therefore the tool choice — belongs to the endpoint-discovery screen
+// shown after the run is created, not to this pre-creation form. See campaigns.index.
+//
+// Only Connection asks anything about field names. In the other two the payload
+// is already authored by the client, so there is nothing for us to reconcile; for
+// API payload we generate the body from the campaign's own fields, which makes the
+// keys match by construction. See the header of `@/lib/connections`.
 export type RunType = "time-scoped" | "always-on";
-export type AudienceSource = "csv" | "api";
+export type AudienceSource = "csv" | "connection" | "api";
 /** Retained for back-compat with run rows / toasts — derived from audienceSource. */
 export type TriggerMode = "manual" | "api";
 
@@ -39,6 +71,9 @@ export type CreateRunPayload = {
   endAt?: string;
   /** Present when audienceSource === "csv": the chosen file name. */
   csvName?: string;
+  /** Present when audienceSource === "connection": which system feeds this run. */
+  connectionId?: string;
+  connectionLabel?: string;
 };
 
 const CAMPAIGNS: CampaignOption[] = [
@@ -84,6 +119,7 @@ export function CreateRunDialog({
   const [runType, setRunType] = useState<RunType>("time-scoped");
   const [audienceSource, setAudienceSource] = useState<AudienceSource>("csv");
   const [csvId, setCsvId] = useState<string>("");
+  const [connectionValue, setConnectionValue] = useState<ConnectionAudienceValue | null>(null);
   const [localCsvs, setLocalCsvs] = useState<CsvAsset[]>([]);
   const [startAt, setStartAt] = useState("");
   const [endAt, setEndAt] = useState("");
@@ -102,6 +138,7 @@ export function CreateRunDialog({
     setRunType("time-scoped");
     setAudienceSource("csv");
     setCsvId("");
+    setConnectionValue(null);
     setLocalCsvs([]);
     setStartAt("");
     setEndAt("");
@@ -119,10 +156,11 @@ export function CreateRunDialog({
     [catalog, selectedId],
   );
 
-  // Always-on runs are API-only — snap the audience source when the type flips.
+  // Always-on has no window, and both pull sources need one. Push is the only
+  // direction left, so on this scope the source is settled rather than asked.
   useEffect(() => {
-    if (runType === "always-on" && audienceSource !== "api") setAudienceSource("api");
-  }, [runType, audienceSource]);
+    if (runType === "always-on") setAudienceSource("api");
+  }, [runType]);
 
   // Library options = files uploaded this session (newest first) + the shared library.
   const csvOptions = useMemo<CsvAsset[]>(() => [...localCsvs, ...CSV_LIBRARY], [localCsvs]);
@@ -153,22 +191,45 @@ export function CreateRunDialog({
     runType !== "time-scoped" ||
     (!!startAt && !!endAt && new Date(endAt) > new Date(startAt));
 
-  const audienceOk = audienceSource === "api" || !!csvName;
+  const audienceOk =
+    audienceSource === "api" ||
+    (audienceSource === "csv" && !!csvName) ||
+    (audienceSource === "connection" && !!connectionValue?.ready);
 
   const canStart =
     !!selected && runName.trim().length > 0 && windowOk && audienceOk;
 
+  /** The campaign's own fields — not anything we learned about their system. */
+  const apiFields = useMemo(
+    () => (selected ? campaignFields(selected.id) : []),
+    [selected],
+  );
+
   const submit = () => {
     if (!canStart) return;
+    const conn =
+      audienceSource === "connection"
+        ? getConnections().find((c) => c.id === connectionValue!.connectionId)
+        : undefined;
+
+    // Anything the client resolved by hand this time is remembered on the
+    // connection, so the next campaign that declares the same field arrives
+    // pre-bound. Effort decays to zero without adding a mapping object.
+    if (conn && Object.keys(connectionValue!.overrides).length) {
+      rememberBindings(conn.id, connectionValue!.overrides);
+    }
+
     onStart({
       runName: runName.trim(),
       runType,
       audienceSource,
-      triggerMode: audienceSource === "api" ? "api" : "manual",
+      triggerMode: audienceSource === "csv" ? "manual" : "api",
       campaignId: selected!.id,
       startAt: runType === "time-scoped" ? startAt : undefined,
       endAt: runType === "time-scoped" ? endAt : undefined,
       csvName,
+      connectionId: conn?.id,
+      connectionLabel: conn?.label,
     });
     reset();
   };
@@ -239,14 +300,14 @@ export function CreateRunDialog({
                     <TypeCard
                       icon={Clock}
                       title="Time-Scoped"
-                      desc="Runs between a start and end time. Audience from CSV or API."
+                      desc="Runs between a start and end time. Everyone in the audience is reached inside the window."
                       active={runType === "time-scoped"}
                       onClick={() => setRunType("time-scoped")}
                     />
                     <TypeCard
                       icon={InfinityIcon}
                       title="Always-on"
-                      desc="No end date. Audience streamed via API trigger."
+                      desc="No end date. Your engagement tool posts each person as they qualify, and we reach them then."
                       active={runType === "always-on"}
                       onClick={() => setRunType("always-on")}
                     />
@@ -289,13 +350,23 @@ export function CreateRunDialog({
 
               {/* ──────────── 4. Audience source ──────────── */}
               <Section title="Audience Source">
+                {/* Always-on: API payload *is* the source — it's the only direction that
+                    survives the absence of a window, so there is nothing to pick. */}
                 {runType === "always-on" ? (
-                  <p className="flex items-center gap-1.5 rounded-md border border-input bg-muted/40 px-3 py-2 text-[12px] text-muted-foreground">
-                    <Lock className="h-3 w-3" /> Always-on runs are API-only. Audience is streamed via the trigger endpoint.
-                  </p>
+                  <div className="flex items-center gap-2 rounded-md border border-input bg-muted/40 px-3 py-2.5">
+                    <Webhook className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    <div className="space-y-0.5">
+                      <p className="text-[12px] font-medium text-foreground">API payload</p>
+                      <p className="text-[11px] leading-relaxed text-muted-foreground">
+                        Your engagement tool posts each person the moment it qualifies them.
+                        A CSV or a CRM read is us going and looking, and that needs a window —
+                        use Time-Scoped for those.
+                      </p>
+                    </div>
+                  </div>
                 ) : (
-                  <div className="grid grid-cols-2 rounded-md border border-input bg-background p-0.5">
-                    {(["csv", "api"] as AudienceSource[]).map((src) => (
+                  <div className="grid grid-cols-3 rounded-md border border-input bg-background p-0.5">
+                    {(["csv", "connection", "api"] as AudienceSource[]).map((src) => (
                       <button
                         key={src}
                         type="button"
@@ -307,7 +378,7 @@ export function CreateRunDialog({
                             : "text-muted-foreground hover:text-foreground",
                         )}
                       >
-                        {src === "csv" ? "CSV file" : "API payload"}
+                        {src === "csv" ? "CSV file" : src === "connection" ? "Connection" : "API payload"}
                       </button>
                     ))}
                   </div>
@@ -346,20 +417,57 @@ export function CreateRunDialog({
                   </div>
                 )}
 
-                {/* API: the trigger endpoint is unique per run, so it is revealed in a
-                    follow-up dialog right AFTER the run is created (and again on the
-                    run's row, E7). */}
+                {/* Connection: the audience is read from a system they already use.
+                    Roles and remembered bindings live on the connection, so most of
+                    this step resolves itself — see ConnectionAudienceStep. */}
+                {audienceSource === "connection" && (
+                  <ConnectionAudienceStep
+                    campaignId={selected.id}
+                    value={connectionValue}
+                    onChange={setConnectionValue}
+                  />
+                )}
+
+                {/* API: their tool posts to us. We don't ask what their attributes are
+                    called — we generate the body from this campaign's own field names in
+                    their token syntax, so a payload built from it binds on arrival. The
+                    endpoint carries the run id and so can only be shown once the run
+                    exists; it appears in a follow-up dialog and on the run's row (E7). */}
                 {audienceSource === "api" && (
-                  <div className="space-y-1.5 rounded-md border border-dashed border-border bg-muted/30 p-2.5">
-                    <Label className="flex items-center gap-1.5 text-xs">
-                      <Webhook className="h-3 w-3" /> Trigger API endpoint
-                    </Label>
-                    <p className="flex items-start gap-1.5 text-[11px] text-muted-foreground">
+                  <div className="space-y-2.5">
+                    <p className="text-[11px] leading-relaxed text-muted-foreground">
+                      Every engagement tool — CleverTap, WebEngage, MoEngage — posts to the
+                      same endpoint in the same shape. You'll pick your tool when you copy the
+                      body at the next step; it only sets the personalisation-token syntax.
+                    </p>
+
+                    {/* What the body will contain, before committing to it. The names come
+                        from the campaign's Audience node, so this is also the only place to
+                        notice a field is missing while it is still cheap to go fix it. */}
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Field names</Label>
+                      <div className="flex flex-wrap gap-1 rounded-md border border-input bg-muted/40 px-2.5 py-2">
+                        {apiFields.map((f) => (
+                          <span
+                            key={f.name}
+                            className="rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[11px]"
+                          >
+                            {f.name}
+                          </span>
+                        ))}
+                      </div>
+                      <p className="text-[11px] leading-relaxed text-muted-foreground">
+                        Defined in this campaign's Audience node. Post one flat JSON object per
+                        person using exactly these keys — because they are the campaign's own
+                        fields, nothing has to be mapped afterwards.
+                      </p>
+                    </div>
+
+                    <p className="flex items-start gap-1.5 text-[11px] leading-relaxed text-muted-foreground">
                       <Lock className="mt-0.5 h-3 w-3 shrink-0" />
-                      A unique trigger endpoint is generated when the run is created — you'll
-                      get a copyable link as soon as you create it (and again on the run's
-                      row). POST the flat-JSON payload defined in the Audience node to start
-                      streaming leads.
+                      The endpoint carries this run's ID, so it cannot exist until the run does.
+                      You'll get it with a sample request and the body to paste the moment you
+                      create the run, and again from the run's row.
                     </p>
                   </div>
                 )}

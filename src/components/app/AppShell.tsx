@@ -19,6 +19,14 @@ export function AppShell({
   );
 }
 
+/**
+ * The one size a page title is. Exported because detail pages build their own
+ * headers — they carry a back link, a mark and a meta row that {@link PageHeader}
+ * has no props for — and were each re-typing this string, which is how three
+ * headers ended up at two different sizes.
+ */
+export const PAGE_TITLE_CLASS = "text-[22px] font-semibold tracking-tight";
+
 export function PageHeader({
   title,
   description,
@@ -31,7 +39,7 @@ export function PageHeader({
   return (
     <div className="mb-6 flex items-start justify-between gap-4">
       <div className="min-w-0">
-        <h1 className="text-[22px] font-semibold tracking-tight">{title}</h1>
+        <h1 className={PAGE_TITLE_CLASS}>{title}</h1>
         {description && <p className="mt-1 text-sm text-muted-foreground">{description}</p>}
       </div>
       {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}

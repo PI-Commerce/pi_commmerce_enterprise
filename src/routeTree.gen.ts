@@ -10,31 +10,71 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as ReportsRouteImport } from './routes/reports'
+import { Route as MerchantsRouteImport } from './routes/merchants'
 import { Route as IntegrationsRouteImport } from './routes/integrations'
+import { Route as InboundRouteImport } from './routes/inbound'
+import { Route as DeveloperRouteImport } from './routes/developer'
 import { Route as ChannelsRouteImport } from './routes/channels'
 import { Route as CampaignsRouteImport } from './routes/campaigns'
+import { Route as BroadcastsRouteImport } from './routes/broadcasts'
 import { Route as AnalyticsRouteImport } from './routes/analytics'
 import { Route as AgentsRouteImport } from './routes/agents'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as IntegrationsIndexRouteImport } from './routes/integrations.index'
+import { Route as InboxIndexRouteImport } from './routes/inbox.index'
+import { Route as InboundIndexRouteImport } from './routes/inbound.index'
 import { Route as ChannelsIndexRouteImport } from './routes/channels.index'
 import { Route as CampaignsIndexRouteImport } from './routes/campaigns.index'
 import { Route as AgentsIndexRouteImport } from './routes/agents.index'
+import { Route as IntegrationsIdRouteImport } from './routes/integrations.$id'
+import { Route as InboxIdRouteImport } from './routes/inbox.$id'
+import { Route as InboundIdRouteImport } from './routes/inbound.$id'
 import { Route as ChannelsWhatsappRouteImport } from './routes/channels.whatsapp'
+import { Route as ChannelsSmsRouteImport } from './routes/channels.sms'
+import { Route as ChannelsRcsRouteImport } from './routes/channels.rcs'
 import { Route as CampaignsIdRouteImport } from './routes/campaigns.$id'
 import { Route as AgentsNewRouteImport } from './routes/agents.new'
 import { Route as AgentsIdRouteImport } from './routes/agents.$id'
+import { Route as CampaignsTemplatesIndexRouteImport } from './routes/campaigns.templates.index'
+import { Route as IntegrationsToolKeyRouteImport } from './routes/integrations.tool.$key'
+import { Route as IntegrationsMoengageSmsIdRouteImport } from './routes/integrations.moengage-sms.$id'
+import { Route as IntegrationsClevertapIdRouteImport } from './routes/integrations.clevertap.$id'
+import { Route as IntegrationsClevertapSmsIdRouteImport } from './routes/integrations.clevertap-sms.$id'
 import { Route as CampaignsVersionsIdRouteImport } from './routes/campaigns.versions.$id'
+import { Route as CampaignsTemplatesIdRouteImport } from './routes/campaigns.templates.$id'
 import { Route as AgentsToolsNewRouteImport } from './routes/agents.tools.new'
+import { Route as AgentsBuilderIdRouteImport } from './routes/agents.builder.$id'
+import { Route as ChannelsWhatsappFreeformIdRouteImport } from './routes/channels.whatsapp_.freeform.$id'
 
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ReportsRoute = ReportsRouteImport.update({
+  id: '/reports',
+  path: '/reports',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MerchantsRoute = MerchantsRouteImport.update({
+  id: '/merchants',
+  path: '/merchants',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IntegrationsRoute = IntegrationsRouteImport.update({
   id: '/integrations',
   path: '/integrations',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const InboundRoute = InboundRouteImport.update({
+  id: '/inbound',
+  path: '/inbound',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DeveloperRoute = DeveloperRouteImport.update({
+  id: '/developer',
+  path: '/developer',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ChannelsRoute = ChannelsRouteImport.update({
@@ -45,6 +85,11 @@ const ChannelsRoute = ChannelsRouteImport.update({
 const CampaignsRoute = CampaignsRouteImport.update({
   id: '/campaigns',
   path: '/campaigns',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BroadcastsRoute = BroadcastsRouteImport.update({
+  id: '/broadcasts',
+  path: '/broadcasts',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AnalyticsRoute = AnalyticsRouteImport.update({
@@ -67,6 +112,16 @@ const IntegrationsIndexRoute = IntegrationsIndexRouteImport.update({
   path: '/',
   getParentRoute: () => IntegrationsRoute,
 } as any)
+const InboxIndexRoute = InboxIndexRouteImport.update({
+  id: '/inbox/',
+  path: '/inbox/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const InboundIndexRoute = InboundIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => InboundRoute,
+} as any)
 const ChannelsIndexRoute = ChannelsIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -82,9 +137,34 @@ const AgentsIndexRoute = AgentsIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AgentsRoute,
 } as any)
+const IntegrationsIdRoute = IntegrationsIdRouteImport.update({
+  id: '/$id',
+  path: '/$id',
+  getParentRoute: () => IntegrationsRoute,
+} as any)
+const InboxIdRoute = InboxIdRouteImport.update({
+  id: '/inbox/$id',
+  path: '/inbox/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const InboundIdRoute = InboundIdRouteImport.update({
+  id: '/$id',
+  path: '/$id',
+  getParentRoute: () => InboundRoute,
+} as any)
 const ChannelsWhatsappRoute = ChannelsWhatsappRouteImport.update({
   id: '/whatsapp',
   path: '/whatsapp',
+  getParentRoute: () => ChannelsRoute,
+} as any)
+const ChannelsSmsRoute = ChannelsSmsRouteImport.update({
+  id: '/sms',
+  path: '/sms',
+  getParentRoute: () => ChannelsRoute,
+} as any)
+const ChannelsRcsRoute = ChannelsRcsRouteImport.update({
+  id: '/rcs',
+  path: '/rcs',
   getParentRoute: () => ChannelsRoute,
 } as any)
 const CampaignsIdRoute = CampaignsIdRouteImport.update({
@@ -102,9 +182,41 @@ const AgentsIdRoute = AgentsIdRouteImport.update({
   path: '/$id',
   getParentRoute: () => AgentsRoute,
 } as any)
+const CampaignsTemplatesIndexRoute = CampaignsTemplatesIndexRouteImport.update({
+  id: '/templates/',
+  path: '/templates/',
+  getParentRoute: () => CampaignsRoute,
+} as any)
+const IntegrationsToolKeyRoute = IntegrationsToolKeyRouteImport.update({
+  id: '/tool/$key',
+  path: '/tool/$key',
+  getParentRoute: () => IntegrationsRoute,
+} as any)
+const IntegrationsMoengageSmsIdRoute =
+  IntegrationsMoengageSmsIdRouteImport.update({
+    id: '/moengage-sms/$id',
+    path: '/moengage-sms/$id',
+    getParentRoute: () => IntegrationsRoute,
+  } as any)
+const IntegrationsClevertapIdRoute = IntegrationsClevertapIdRouteImport.update({
+  id: '/clevertap/$id',
+  path: '/clevertap/$id',
+  getParentRoute: () => IntegrationsRoute,
+} as any)
+const IntegrationsClevertapSmsIdRoute =
+  IntegrationsClevertapSmsIdRouteImport.update({
+    id: '/clevertap-sms/$id',
+    path: '/clevertap-sms/$id',
+    getParentRoute: () => IntegrationsRoute,
+  } as any)
 const CampaignsVersionsIdRoute = CampaignsVersionsIdRouteImport.update({
   id: '/versions/$id',
   path: '/versions/$id',
+  getParentRoute: () => CampaignsRoute,
+} as any)
+const CampaignsTemplatesIdRoute = CampaignsTemplatesIdRouteImport.update({
+  id: '/templates/$id',
+  path: '/templates/$id',
   getParentRoute: () => CampaignsRoute,
 } as any)
 const AgentsToolsNewRoute = AgentsToolsNewRouteImport.update({
@@ -112,60 +224,130 @@ const AgentsToolsNewRoute = AgentsToolsNewRouteImport.update({
   path: '/tools/new',
   getParentRoute: () => AgentsRoute,
 } as any)
+const AgentsBuilderIdRoute = AgentsBuilderIdRouteImport.update({
+  id: '/builder/$id',
+  path: '/builder/$id',
+  getParentRoute: () => AgentsRoute,
+} as any)
+const ChannelsWhatsappFreeformIdRoute =
+  ChannelsWhatsappFreeformIdRouteImport.update({
+    id: '/whatsapp_/freeform/$id',
+    path: '/whatsapp/freeform/$id',
+    getParentRoute: () => ChannelsRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/agents': typeof AgentsRouteWithChildren
   '/analytics': typeof AnalyticsRoute
+  '/broadcasts': typeof BroadcastsRoute
   '/campaigns': typeof CampaignsRouteWithChildren
   '/channels': typeof ChannelsRouteWithChildren
+  '/developer': typeof DeveloperRoute
+  '/inbound': typeof InboundRouteWithChildren
   '/integrations': typeof IntegrationsRouteWithChildren
+  '/merchants': typeof MerchantsRoute
+  '/reports': typeof ReportsRoute
   '/settings': typeof SettingsRoute
   '/agents/$id': typeof AgentsIdRoute
   '/agents/new': typeof AgentsNewRoute
   '/campaigns/$id': typeof CampaignsIdRoute
+  '/channels/rcs': typeof ChannelsRcsRoute
+  '/channels/sms': typeof ChannelsSmsRoute
   '/channels/whatsapp': typeof ChannelsWhatsappRoute
+  '/inbound/$id': typeof InboundIdRoute
+  '/inbox/$id': typeof InboxIdRoute
+  '/integrations/$id': typeof IntegrationsIdRoute
   '/agents/': typeof AgentsIndexRoute
   '/campaigns/': typeof CampaignsIndexRoute
   '/channels/': typeof ChannelsIndexRoute
+  '/inbound/': typeof InboundIndexRoute
+  '/inbox/': typeof InboxIndexRoute
   '/integrations/': typeof IntegrationsIndexRoute
+  '/agents/builder/$id': typeof AgentsBuilderIdRoute
   '/agents/tools/new': typeof AgentsToolsNewRoute
+  '/campaigns/templates/$id': typeof CampaignsTemplatesIdRoute
   '/campaigns/versions/$id': typeof CampaignsVersionsIdRoute
+  '/integrations/clevertap-sms/$id': typeof IntegrationsClevertapSmsIdRoute
+  '/integrations/clevertap/$id': typeof IntegrationsClevertapIdRoute
+  '/integrations/moengage-sms/$id': typeof IntegrationsMoengageSmsIdRoute
+  '/integrations/tool/$key': typeof IntegrationsToolKeyRoute
+  '/campaigns/templates/': typeof CampaignsTemplatesIndexRoute
+  '/channels/whatsapp/freeform/$id': typeof ChannelsWhatsappFreeformIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/analytics': typeof AnalyticsRoute
+  '/broadcasts': typeof BroadcastsRoute
+  '/developer': typeof DeveloperRoute
+  '/merchants': typeof MerchantsRoute
+  '/reports': typeof ReportsRoute
   '/settings': typeof SettingsRoute
   '/agents/$id': typeof AgentsIdRoute
   '/agents/new': typeof AgentsNewRoute
   '/campaigns/$id': typeof CampaignsIdRoute
+  '/channels/rcs': typeof ChannelsRcsRoute
+  '/channels/sms': typeof ChannelsSmsRoute
   '/channels/whatsapp': typeof ChannelsWhatsappRoute
+  '/inbound/$id': typeof InboundIdRoute
+  '/inbox/$id': typeof InboxIdRoute
+  '/integrations/$id': typeof IntegrationsIdRoute
   '/agents': typeof AgentsIndexRoute
   '/campaigns': typeof CampaignsIndexRoute
   '/channels': typeof ChannelsIndexRoute
+  '/inbound': typeof InboundIndexRoute
+  '/inbox': typeof InboxIndexRoute
   '/integrations': typeof IntegrationsIndexRoute
+  '/agents/builder/$id': typeof AgentsBuilderIdRoute
   '/agents/tools/new': typeof AgentsToolsNewRoute
+  '/campaigns/templates/$id': typeof CampaignsTemplatesIdRoute
   '/campaigns/versions/$id': typeof CampaignsVersionsIdRoute
+  '/integrations/clevertap-sms/$id': typeof IntegrationsClevertapSmsIdRoute
+  '/integrations/clevertap/$id': typeof IntegrationsClevertapIdRoute
+  '/integrations/moengage-sms/$id': typeof IntegrationsMoengageSmsIdRoute
+  '/integrations/tool/$key': typeof IntegrationsToolKeyRoute
+  '/campaigns/templates': typeof CampaignsTemplatesIndexRoute
+  '/channels/whatsapp/freeform/$id': typeof ChannelsWhatsappFreeformIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/agents': typeof AgentsRouteWithChildren
   '/analytics': typeof AnalyticsRoute
+  '/broadcasts': typeof BroadcastsRoute
   '/campaigns': typeof CampaignsRouteWithChildren
   '/channels': typeof ChannelsRouteWithChildren
+  '/developer': typeof DeveloperRoute
+  '/inbound': typeof InboundRouteWithChildren
   '/integrations': typeof IntegrationsRouteWithChildren
+  '/merchants': typeof MerchantsRoute
+  '/reports': typeof ReportsRoute
   '/settings': typeof SettingsRoute
   '/agents/$id': typeof AgentsIdRoute
   '/agents/new': typeof AgentsNewRoute
   '/campaigns/$id': typeof CampaignsIdRoute
+  '/channels/rcs': typeof ChannelsRcsRoute
+  '/channels/sms': typeof ChannelsSmsRoute
   '/channels/whatsapp': typeof ChannelsWhatsappRoute
+  '/inbound/$id': typeof InboundIdRoute
+  '/inbox/$id': typeof InboxIdRoute
+  '/integrations/$id': typeof IntegrationsIdRoute
   '/agents/': typeof AgentsIndexRoute
   '/campaigns/': typeof CampaignsIndexRoute
   '/channels/': typeof ChannelsIndexRoute
+  '/inbound/': typeof InboundIndexRoute
+  '/inbox/': typeof InboxIndexRoute
   '/integrations/': typeof IntegrationsIndexRoute
+  '/agents/builder/$id': typeof AgentsBuilderIdRoute
   '/agents/tools/new': typeof AgentsToolsNewRoute
+  '/campaigns/templates/$id': typeof CampaignsTemplatesIdRoute
   '/campaigns/versions/$id': typeof CampaignsVersionsIdRoute
+  '/integrations/clevertap-sms/$id': typeof IntegrationsClevertapSmsIdRoute
+  '/integrations/clevertap/$id': typeof IntegrationsClevertapIdRoute
+  '/integrations/moengage-sms/$id': typeof IntegrationsMoengageSmsIdRoute
+  '/integrations/tool/$key': typeof IntegrationsToolKeyRoute
+  '/campaigns/templates/': typeof CampaignsTemplatesIndexRoute
+  '/channels/whatsapp_/freeform/$id': typeof ChannelsWhatsappFreeformIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -173,64 +355,130 @@ export interface FileRouteTypes {
     | '/'
     | '/agents'
     | '/analytics'
+    | '/broadcasts'
     | '/campaigns'
     | '/channels'
+    | '/developer'
+    | '/inbound'
     | '/integrations'
+    | '/merchants'
+    | '/reports'
     | '/settings'
     | '/agents/$id'
     | '/agents/new'
     | '/campaigns/$id'
+    | '/channels/rcs'
+    | '/channels/sms'
     | '/channels/whatsapp'
+    | '/inbound/$id'
+    | '/inbox/$id'
+    | '/integrations/$id'
     | '/agents/'
     | '/campaigns/'
     | '/channels/'
+    | '/inbound/'
+    | '/inbox/'
     | '/integrations/'
+    | '/agents/builder/$id'
     | '/agents/tools/new'
+    | '/campaigns/templates/$id'
     | '/campaigns/versions/$id'
+    | '/integrations/clevertap-sms/$id'
+    | '/integrations/clevertap/$id'
+    | '/integrations/moengage-sms/$id'
+    | '/integrations/tool/$key'
+    | '/campaigns/templates/'
+    | '/channels/whatsapp/freeform/$id'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/analytics'
+    | '/broadcasts'
+    | '/developer'
+    | '/merchants'
+    | '/reports'
     | '/settings'
     | '/agents/$id'
     | '/agents/new'
     | '/campaigns/$id'
+    | '/channels/rcs'
+    | '/channels/sms'
     | '/channels/whatsapp'
+    | '/inbound/$id'
+    | '/inbox/$id'
+    | '/integrations/$id'
     | '/agents'
     | '/campaigns'
     | '/channels'
+    | '/inbound'
+    | '/inbox'
     | '/integrations'
+    | '/agents/builder/$id'
     | '/agents/tools/new'
+    | '/campaigns/templates/$id'
     | '/campaigns/versions/$id'
+    | '/integrations/clevertap-sms/$id'
+    | '/integrations/clevertap/$id'
+    | '/integrations/moengage-sms/$id'
+    | '/integrations/tool/$key'
+    | '/campaigns/templates'
+    | '/channels/whatsapp/freeform/$id'
   id:
     | '__root__'
     | '/'
     | '/agents'
     | '/analytics'
+    | '/broadcasts'
     | '/campaigns'
     | '/channels'
+    | '/developer'
+    | '/inbound'
     | '/integrations'
+    | '/merchants'
+    | '/reports'
     | '/settings'
     | '/agents/$id'
     | '/agents/new'
     | '/campaigns/$id'
+    | '/channels/rcs'
+    | '/channels/sms'
     | '/channels/whatsapp'
+    | '/inbound/$id'
+    | '/inbox/$id'
+    | '/integrations/$id'
     | '/agents/'
     | '/campaigns/'
     | '/channels/'
+    | '/inbound/'
+    | '/inbox/'
     | '/integrations/'
+    | '/agents/builder/$id'
     | '/agents/tools/new'
+    | '/campaigns/templates/$id'
     | '/campaigns/versions/$id'
+    | '/integrations/clevertap-sms/$id'
+    | '/integrations/clevertap/$id'
+    | '/integrations/moengage-sms/$id'
+    | '/integrations/tool/$key'
+    | '/campaigns/templates/'
+    | '/channels/whatsapp_/freeform/$id'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AgentsRoute: typeof AgentsRouteWithChildren
   AnalyticsRoute: typeof AnalyticsRoute
+  BroadcastsRoute: typeof BroadcastsRoute
   CampaignsRoute: typeof CampaignsRouteWithChildren
   ChannelsRoute: typeof ChannelsRouteWithChildren
+  DeveloperRoute: typeof DeveloperRoute
+  InboundRoute: typeof InboundRouteWithChildren
   IntegrationsRoute: typeof IntegrationsRouteWithChildren
+  MerchantsRoute: typeof MerchantsRoute
+  ReportsRoute: typeof ReportsRoute
   SettingsRoute: typeof SettingsRoute
+  InboxIdRoute: typeof InboxIdRoute
+  InboxIndexRoute: typeof InboxIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -242,11 +490,39 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/reports': {
+      id: '/reports'
+      path: '/reports'
+      fullPath: '/reports'
+      preLoaderRoute: typeof ReportsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/merchants': {
+      id: '/merchants'
+      path: '/merchants'
+      fullPath: '/merchants'
+      preLoaderRoute: typeof MerchantsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/integrations': {
       id: '/integrations'
       path: '/integrations'
       fullPath: '/integrations'
       preLoaderRoute: typeof IntegrationsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/inbound': {
+      id: '/inbound'
+      path: '/inbound'
+      fullPath: '/inbound'
+      preLoaderRoute: typeof InboundRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/developer': {
+      id: '/developer'
+      path: '/developer'
+      fullPath: '/developer'
+      preLoaderRoute: typeof DeveloperRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/channels': {
@@ -261,6 +537,13 @@ declare module '@tanstack/react-router' {
       path: '/campaigns'
       fullPath: '/campaigns'
       preLoaderRoute: typeof CampaignsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/broadcasts': {
+      id: '/broadcasts'
+      path: '/broadcasts'
+      fullPath: '/broadcasts'
+      preLoaderRoute: typeof BroadcastsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/analytics': {
@@ -291,6 +574,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IntegrationsIndexRouteImport
       parentRoute: typeof IntegrationsRoute
     }
+    '/inbox/': {
+      id: '/inbox/'
+      path: '/inbox'
+      fullPath: '/inbox/'
+      preLoaderRoute: typeof InboxIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/inbound/': {
+      id: '/inbound/'
+      path: '/'
+      fullPath: '/inbound/'
+      preLoaderRoute: typeof InboundIndexRouteImport
+      parentRoute: typeof InboundRoute
+    }
     '/channels/': {
       id: '/channels/'
       path: '/'
@@ -312,11 +609,46 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AgentsIndexRouteImport
       parentRoute: typeof AgentsRoute
     }
+    '/integrations/$id': {
+      id: '/integrations/$id'
+      path: '/$id'
+      fullPath: '/integrations/$id'
+      preLoaderRoute: typeof IntegrationsIdRouteImport
+      parentRoute: typeof IntegrationsRoute
+    }
+    '/inbox/$id': {
+      id: '/inbox/$id'
+      path: '/inbox/$id'
+      fullPath: '/inbox/$id'
+      preLoaderRoute: typeof InboxIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/inbound/$id': {
+      id: '/inbound/$id'
+      path: '/$id'
+      fullPath: '/inbound/$id'
+      preLoaderRoute: typeof InboundIdRouteImport
+      parentRoute: typeof InboundRoute
+    }
     '/channels/whatsapp': {
       id: '/channels/whatsapp'
       path: '/whatsapp'
       fullPath: '/channels/whatsapp'
       preLoaderRoute: typeof ChannelsWhatsappRouteImport
+      parentRoute: typeof ChannelsRoute
+    }
+    '/channels/sms': {
+      id: '/channels/sms'
+      path: '/sms'
+      fullPath: '/channels/sms'
+      preLoaderRoute: typeof ChannelsSmsRouteImport
+      parentRoute: typeof ChannelsRoute
+    }
+    '/channels/rcs': {
+      id: '/channels/rcs'
+      path: '/rcs'
+      fullPath: '/channels/rcs'
+      preLoaderRoute: typeof ChannelsRcsRouteImport
       parentRoute: typeof ChannelsRoute
     }
     '/campaigns/$id': {
@@ -340,11 +672,53 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AgentsIdRouteImport
       parentRoute: typeof AgentsRoute
     }
+    '/campaigns/templates/': {
+      id: '/campaigns/templates/'
+      path: '/templates'
+      fullPath: '/campaigns/templates/'
+      preLoaderRoute: typeof CampaignsTemplatesIndexRouteImport
+      parentRoute: typeof CampaignsRoute
+    }
+    '/integrations/tool/$key': {
+      id: '/integrations/tool/$key'
+      path: '/tool/$key'
+      fullPath: '/integrations/tool/$key'
+      preLoaderRoute: typeof IntegrationsToolKeyRouteImport
+      parentRoute: typeof IntegrationsRoute
+    }
+    '/integrations/moengage-sms/$id': {
+      id: '/integrations/moengage-sms/$id'
+      path: '/moengage-sms/$id'
+      fullPath: '/integrations/moengage-sms/$id'
+      preLoaderRoute: typeof IntegrationsMoengageSmsIdRouteImport
+      parentRoute: typeof IntegrationsRoute
+    }
+    '/integrations/clevertap/$id': {
+      id: '/integrations/clevertap/$id'
+      path: '/clevertap/$id'
+      fullPath: '/integrations/clevertap/$id'
+      preLoaderRoute: typeof IntegrationsClevertapIdRouteImport
+      parentRoute: typeof IntegrationsRoute
+    }
+    '/integrations/clevertap-sms/$id': {
+      id: '/integrations/clevertap-sms/$id'
+      path: '/clevertap-sms/$id'
+      fullPath: '/integrations/clevertap-sms/$id'
+      preLoaderRoute: typeof IntegrationsClevertapSmsIdRouteImport
+      parentRoute: typeof IntegrationsRoute
+    }
     '/campaigns/versions/$id': {
       id: '/campaigns/versions/$id'
       path: '/versions/$id'
       fullPath: '/campaigns/versions/$id'
       preLoaderRoute: typeof CampaignsVersionsIdRouteImport
+      parentRoute: typeof CampaignsRoute
+    }
+    '/campaigns/templates/$id': {
+      id: '/campaigns/templates/$id'
+      path: '/templates/$id'
+      fullPath: '/campaigns/templates/$id'
+      preLoaderRoute: typeof CampaignsTemplatesIdRouteImport
       parentRoute: typeof CampaignsRoute
     }
     '/agents/tools/new': {
@@ -354,6 +728,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AgentsToolsNewRouteImport
       parentRoute: typeof AgentsRoute
     }
+    '/agents/builder/$id': {
+      id: '/agents/builder/$id'
+      path: '/builder/$id'
+      fullPath: '/agents/builder/$id'
+      preLoaderRoute: typeof AgentsBuilderIdRouteImport
+      parentRoute: typeof AgentsRoute
+    }
+    '/channels/whatsapp_/freeform/$id': {
+      id: '/channels/whatsapp_/freeform/$id'
+      path: '/whatsapp/freeform/$id'
+      fullPath: '/channels/whatsapp/freeform/$id'
+      preLoaderRoute: typeof ChannelsWhatsappFreeformIdRouteImport
+      parentRoute: typeof ChannelsRoute
+    }
   }
 }
 
@@ -361,6 +749,7 @@ interface AgentsRouteChildren {
   AgentsIdRoute: typeof AgentsIdRoute
   AgentsNewRoute: typeof AgentsNewRoute
   AgentsIndexRoute: typeof AgentsIndexRoute
+  AgentsBuilderIdRoute: typeof AgentsBuilderIdRoute
   AgentsToolsNewRoute: typeof AgentsToolsNewRoute
 }
 
@@ -368,6 +757,7 @@ const AgentsRouteChildren: AgentsRouteChildren = {
   AgentsIdRoute: AgentsIdRoute,
   AgentsNewRoute: AgentsNewRoute,
   AgentsIndexRoute: AgentsIndexRoute,
+  AgentsBuilderIdRoute: AgentsBuilderIdRoute,
   AgentsToolsNewRoute: AgentsToolsNewRoute,
 }
 
@@ -377,13 +767,17 @@ const AgentsRouteWithChildren =
 interface CampaignsRouteChildren {
   CampaignsIdRoute: typeof CampaignsIdRoute
   CampaignsIndexRoute: typeof CampaignsIndexRoute
+  CampaignsTemplatesIdRoute: typeof CampaignsTemplatesIdRoute
   CampaignsVersionsIdRoute: typeof CampaignsVersionsIdRoute
+  CampaignsTemplatesIndexRoute: typeof CampaignsTemplatesIndexRoute
 }
 
 const CampaignsRouteChildren: CampaignsRouteChildren = {
   CampaignsIdRoute: CampaignsIdRoute,
   CampaignsIndexRoute: CampaignsIndexRoute,
+  CampaignsTemplatesIdRoute: CampaignsTemplatesIdRoute,
   CampaignsVersionsIdRoute: CampaignsVersionsIdRoute,
+  CampaignsTemplatesIndexRoute: CampaignsTemplatesIndexRoute,
 }
 
 const CampaignsRouteWithChildren = CampaignsRoute._addFileChildren(
@@ -391,25 +785,54 @@ const CampaignsRouteWithChildren = CampaignsRoute._addFileChildren(
 )
 
 interface ChannelsRouteChildren {
+  ChannelsRcsRoute: typeof ChannelsRcsRoute
+  ChannelsSmsRoute: typeof ChannelsSmsRoute
   ChannelsWhatsappRoute: typeof ChannelsWhatsappRoute
   ChannelsIndexRoute: typeof ChannelsIndexRoute
+  ChannelsWhatsappFreeformIdRoute: typeof ChannelsWhatsappFreeformIdRoute
 }
 
 const ChannelsRouteChildren: ChannelsRouteChildren = {
+  ChannelsRcsRoute: ChannelsRcsRoute,
+  ChannelsSmsRoute: ChannelsSmsRoute,
   ChannelsWhatsappRoute: ChannelsWhatsappRoute,
   ChannelsIndexRoute: ChannelsIndexRoute,
+  ChannelsWhatsappFreeformIdRoute: ChannelsWhatsappFreeformIdRoute,
 }
 
 const ChannelsRouteWithChildren = ChannelsRoute._addFileChildren(
   ChannelsRouteChildren,
 )
 
+interface InboundRouteChildren {
+  InboundIdRoute: typeof InboundIdRoute
+  InboundIndexRoute: typeof InboundIndexRoute
+}
+
+const InboundRouteChildren: InboundRouteChildren = {
+  InboundIdRoute: InboundIdRoute,
+  InboundIndexRoute: InboundIndexRoute,
+}
+
+const InboundRouteWithChildren =
+  InboundRoute._addFileChildren(InboundRouteChildren)
+
 interface IntegrationsRouteChildren {
+  IntegrationsIdRoute: typeof IntegrationsIdRoute
   IntegrationsIndexRoute: typeof IntegrationsIndexRoute
+  IntegrationsClevertapSmsIdRoute: typeof IntegrationsClevertapSmsIdRoute
+  IntegrationsClevertapIdRoute: typeof IntegrationsClevertapIdRoute
+  IntegrationsMoengageSmsIdRoute: typeof IntegrationsMoengageSmsIdRoute
+  IntegrationsToolKeyRoute: typeof IntegrationsToolKeyRoute
 }
 
 const IntegrationsRouteChildren: IntegrationsRouteChildren = {
+  IntegrationsIdRoute: IntegrationsIdRoute,
   IntegrationsIndexRoute: IntegrationsIndexRoute,
+  IntegrationsClevertapSmsIdRoute: IntegrationsClevertapSmsIdRoute,
+  IntegrationsClevertapIdRoute: IntegrationsClevertapIdRoute,
+  IntegrationsMoengageSmsIdRoute: IntegrationsMoengageSmsIdRoute,
+  IntegrationsToolKeyRoute: IntegrationsToolKeyRoute,
 }
 
 const IntegrationsRouteWithChildren = IntegrationsRoute._addFileChildren(
@@ -420,10 +843,17 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AgentsRoute: AgentsRouteWithChildren,
   AnalyticsRoute: AnalyticsRoute,
+  BroadcastsRoute: BroadcastsRoute,
   CampaignsRoute: CampaignsRouteWithChildren,
   ChannelsRoute: ChannelsRouteWithChildren,
+  DeveloperRoute: DeveloperRoute,
+  InboundRoute: InboundRouteWithChildren,
   IntegrationsRoute: IntegrationsRouteWithChildren,
+  MerchantsRoute: MerchantsRoute,
+  ReportsRoute: ReportsRoute,
   SettingsRoute: SettingsRoute,
+  InboxIdRoute: InboxIdRoute,
+  InboxIndexRoute: InboxIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

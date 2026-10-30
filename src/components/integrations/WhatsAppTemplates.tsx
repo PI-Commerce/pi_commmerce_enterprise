@@ -4,7 +4,9 @@ import {
   Smile, X, Trash2, Pencil, UploadCloud, Phone, Reply, Workflow, ExternalLink, Check,
   Signal, Wifi, BatteryFull, ChevronLeft, ChevronRight, AlertCircle,
   Bold, Italic, Strikethrough, Code, Info, List, ArrowUp, ArrowDown, ChevronDown, Copy,
+  ClipboardList, MoreHorizontal, CopyPlus, Terminal, Send as SendIcon,
 } from "lucide-react";
+import { CtTemplateSetupDialog } from "@/components/clevertap/CtTemplateSetupDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -14,16 +16,19 @@ import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
 } from "@/components/ui/select";
 import {
-  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
+import { GetCurlDialog } from "@/components/integrations/GetCurlDialog";
+import { waToCurlTemplate } from "@/lib/template-send";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import type { ConnectedWaba } from "@/lib/waba-onboarding";
 import { useRegion } from "@/lib/region";
+import { useTemplates, saveTemplate, removeTemplate } from "@/lib/template-store";
 import {
-  SEED_TEMPLATES, TEMPLATE_CATEGORIES, TEMPLATE_BUTTON_TYPES, BUTTON_TYPE_LABELS,
+  TEMPLATE_CATEGORIES, TEMPLATE_BUTTON_TYPES, BUTTON_TYPE_LABELS,
   MEDIA_HINTS, languageLabel, fillVariables, variableCount,
   MAX_TEMPLATE_BUTTONS, cappedButtonTypes, buttonRuleErrors, buttonFieldErrors, duplicateButtonIndexes,
   bodyEdgeVariable, bodyTooManyVariables,
@@ -75,7 +80,9 @@ const EMOJIS = [
  * primitives) rather than Paytm's blue UI. Mock only — nothing is sent to Meta.
  */
 export function WhatsAppTemplates({ waba }: { waba: ConnectedWaba }) {
-  const [templates, setTemplates] = useState<WaTemplate[]>(SEED_TEMPLATES);
+  // Templates live in a shared store, not here: the campaign builder picks from the
+  // same list and can author into it. See `@/lib/template-store`.
+  const templates = useTemplates();
   const [editing, setEditing] = useState<WaTemplate | null>(null);
   const [creating, setCreating] = useState(false);
 
@@ -83,26 +90,43 @@ export function WhatsAppTemplates({ waba }: { waba: ConnectedWaba }) {
   const openEdit = (t: WaTemplate) => { setEditing(t); setCreating(true); };
   const close = () => { setCreating(false); setEditing(null); };
 
-  const save = (t: WaTemplate) => {
-    setTemplates((prev) => {
-      const i = prev.findIndex((x) => x.id === t.id);
-      if (i === -1) return [t, ...prev];
-      const next = [...prev]; next[i] = t; return next;
-    });
-    close();
+  if (creating) {
+    return (
+      <TemplateForm
+        waba={waba}
+        initial={editing}
+        onCancel={close}
+        onSave={(t) => { saveTemplate(t); close(); }}
+      />
+    );
+  }
+  const clone = (t: WaTemplate) => {
+    const copy: WaTemplate = {
+      ...t,
+      id: String(Date.now()),
+      name: `${t.name}_copy`,
+      status: "Draft",
+      createdAt: formatToday(),
+    };
+    saveTemplate(copy);
+    toast.success(`Cloned as ${copy.name}`);
   };
 
-  if (creating) {
-    return <TemplateForm waba={waba} initial={editing} onCancel={close} onSave={save} />;
-  }
   return (
     <TemplateList
       templates={templates}
       onCreate={openCreate}
       onEdit={openEdit}
-      onDelete={(id) => setTemplates((prev) => prev.filter((t) => t.id !== id))}
+      onClone={clone}
+      onDelete={removeTemplate}
     />
   );
+}
+
+/** "6 Aug 2026" style date for freshly cloned templates. */
+function formatToday(): string {
+  const d = new Date();
+  return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
 }
 
 /* ================================ List view ================================ */
@@ -115,16 +139,21 @@ function parseCreated(s: string): Date {
   return new Date(Number(y), Math.max(0, MONTHS.indexOf(mon)), Number(d));
 }
 
-function TemplateList({ templates, onCreate, onEdit, onDelete }: {
+function TemplateList({ templates, onCreate, onEdit, onClone, onDelete }: {
   templates: WaTemplate[];
   onCreate: () => void;
   onEdit: (t: WaTemplate) => void;
+  onClone: (t: WaTemplate) => void;
   onDelete: (id: string) => void;
 }) {
   const [q, setQ] = useState("");
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
   const [page, setPage] = useState(1);
+  // FR-5. Offered per row rather than as a page-level action because the values a
+  // client has to retype into CleverTap are all specific to one template.
+  const [ctSetup, setCtSetup] = useState<WaTemplate | null>(null);
+  const [curlFor, setCurlFor] = useState<WaTemplate | null>(null);
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -180,7 +209,7 @@ function TemplateList({ templates, onCreate, onEdit, onDelete }: {
       <div className="mt-4 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-border">
         <div className="grid shrink-0 grid-cols-[1.4fr_1.6fr_1fr_1fr_0.9fr_auto] items-center gap-3 border-b border-border bg-secondary/40 px-4 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
           <span>ID</span><span>Name</span><span>Create date</span><span>Category</span><span>Status</span>
-          <span className="w-16 text-right">Action</span>
+          <span className="w-24 text-right">Action</span>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto">
         {filtered.length === 0 ? (
@@ -205,25 +234,59 @@ function TemplateList({ templates, onCreate, onEdit, onDelete }: {
               <span className="text-muted-foreground">{t.createdAt}</span>
               <span><CategoryTag category={t.category} /></span>
               <span><StatusTag status={t.status} /></span>
-              <span className="flex w-16 items-center justify-end gap-1">
-                <span
-                  role="button"
-                  tabIndex={0}
-                  onClick={(e) => { e.stopPropagation(); onEdit(t); }}
-                  className="grid h-7 w-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                  aria-label="Edit"
-                >
-                  <Pencil className="h-3.5 w-3.5" />
-                </span>
-                <span
-                  role="button"
-                  tabIndex={0}
-                  onClick={(e) => { e.stopPropagation(); onDelete(t.id); }}
-                  className="grid h-7 w-7 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-                  aria-label="Delete"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </span>
+              <span className="flex w-16 items-center justify-end" onClick={(e) => e.stopPropagation()}>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      aria-label="More actions"
+                      className="grid h-7 w-7 place-items-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground"
+                    >
+                      <MoreHorizontal className="h-4 w-4" />
+                    </span>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-40">
+                    <DropdownMenuItem onSelect={() => onEdit(t)}>
+                      <Pencil className="mr-2 h-3.5 w-3.5" /> Edit
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => onClone(t)}>
+                      <CopyPlus className="mr-2 h-3.5 w-3.5" /> Clone
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => setCurlFor(t)}>
+                      <Terminal className="mr-2 h-3.5 w-3.5" /> Get Curl
+                    </DropdownMenuItem>
+                    {/* Only approved templates can be resolved by CleverTap, so offering
+                        setup instructions for a pending one would document a send that
+                        is guaranteed to fail. */}
+                    <DropdownMenuItem disabled={t.status !== "Approved"} onSelect={() => setCtSetup(t)}>
+                      <ClipboardList className="mr-2 h-3.5 w-3.5" /> CleverTap setup
+                    </DropdownMenuItem>
+                    {/* Send broadcast: deep-links to /broadcasts with the create
+                        modal pre-opened and this template pre-selected. Only
+                        Approved templates can be broadcast (WA rejects the send
+                        otherwise). */}
+                    <DropdownMenuItem
+                      disabled={t.status !== "Approved"}
+                      onSelect={() => {
+                        window.open(
+                          `/broadcasts?channel=whatsapp&templateId=${encodeURIComponent(t.id)}`,
+                          "_blank",
+                          "noopener,noreferrer",
+                        );
+                      }}
+                    >
+                      <SendIcon className="mr-2 h-3.5 w-3.5" /> Send broadcast
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onSelect={() => onDelete(t.id)}
+                      className="text-destructive focus:text-destructive"
+                    >
+                      <Trash2 className="mr-2 h-3.5 w-3.5" /> Delete
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </span>
             </button>
           ))
@@ -260,6 +323,17 @@ function TemplateList({ templates, onCreate, onEdit, onDelete }: {
         )}
       </div>
       </div>
+
+      <CtTemplateSetupDialog
+        template={ctSetup}
+        onOpenChange={(v) => { if (!v) setCtSetup(null); }}
+      />
+
+      <GetCurlDialog
+        template={curlFor ? waToCurlTemplate(curlFor) : null}
+        open={!!curlFor}
+        onOpenChange={(open) => { if (!open) setCurlFor(null); }}
+      />
     </div>
   );
 }
@@ -319,7 +393,13 @@ function todayLabel(): string {
   return `${String(d.getDate()).padStart(2, "0")} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
 }
 
-function TemplateForm({ waba, initial, onCancel, onSave }: {
+/**
+ * The full-page create/edit surface. Exported because the campaign builder opens the
+ * very same form over the canvas — a template authored mid-flow should be authored
+ * against the same rules and the same preview as one authored from the manager, not
+ * a reduced copy that quietly permits something Meta will reject.
+ */
+export function TemplateForm({ waba, initial, onCancel, onSave }: {
   waba: ConnectedWaba;
   initial: WaTemplate | null;
   onCancel: () => void;

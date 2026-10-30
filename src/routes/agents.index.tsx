@@ -3,12 +3,14 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { AppShell, PageHeader } from "@/components/app/AppShell";
 import { PageTabs } from "@/components/app/Tabs";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Wrench, Search } from "lucide-react";
+import { Wrench, Search, Plus, MessageCircle, Phone } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { TOOLS, TYPE_LABEL, STATUS_LABEL, type ToolType } from "@/lib/tool-registry";
+import { TOOLS, STATUS_LABEL } from "@/lib/tool-registry";
+import { useAgents } from "@/lib/agent-data";
 
 export const Route = createFileRoute("/agents/")({
   component: Agents,
@@ -28,6 +30,7 @@ type Tab = "builder" | "tools";
 function Agents() {
   const search = Route.useSearch();
   const [tab, setTab] = useState<Tab>(search.tab === "tools" ? "tools" : "builder");
+  const agents = useAgents();
 
   return (
     <AppShell>
@@ -40,7 +43,7 @@ function Agents() {
         value={tab}
         onChange={setTab}
         tabs={[
-          { id: "builder", label: "Builder", count: INITIAL_AGENTS.length },
+          { id: "builder", label: "Builder", count: agents.length },
           { id: "tools", label: "Tools", count: TOOLS.length },
         ]}
       />
@@ -51,28 +54,17 @@ function Agents() {
   );
 }
 
-type AgentType = "chat" | "voice";
-type AgentStatus = "live" | "draft" | "paused" | "archived";
+type AgentStatus = "live" | "draft" | "paused";
 
-type Agent = { id: string; name: string; type: AgentType; status: AgentStatus; campaignNames: string[]; convs: string };
-
-const INITIAL_AGENTS: Agent[] = [
-  { id: "a_concierge", name: "Pi Concierge", type: "chat", status: "live", convs: "12.4K", campaignNames: ["New Trader Onboarding", "Dormant Trader Reactivation", "KYC Drop-off Recovery", "High-Value Win-Back", "Festive Cashback Push"] },
-  { id: "a_voice_react", name: "Reactivation Voice", type: "voice", status: "live", convs: "3.1K", campaignNames: ["Dormant Trader Reactivation", "High-Value Win-Back"] },
-  { id: "a_kyc", name: "KYC Helper", type: "chat", status: "live", convs: "9.0K", campaignNames: ["KYC Drop-off Recovery", "New Trader Onboarding", "Dormant Trader Reactivation"] },
-  { id: "a_pricing", name: "Pricing Q&A", type: "chat", status: "draft", convs: "—", campaignNames: [] },
-  { id: "a_winback", name: "Win-back Voice", type: "voice", status: "paused", convs: "412", campaignNames: ["High-Value Win-Back"] },
-  { id: "a_support", name: "L1 Support", type: "chat", status: "live", convs: "21.7K", campaignNames: ["New Trader Onboarding", "KYC Drop-off Recovery", "Festive Cashback Push", "Dormant Trader Reactivation"] },
-];
-
-const AGENT_STATUSES: AgentStatus[] = ["live", "draft", "paused", "archived"];
+const AGENT_STATUSES: AgentStatus[] = ["live", "draft", "paused"];
 
 function Builder() {
   const navigate = useNavigate();
+  const agents = useAgents();
   const [query, setQuery] = useState("");
   const [fStatus, setFStatus] = useState<"all" | AgentStatus>("all");
 
-  const filtered = INITIAL_AGENTS.filter((a) => {
+  const filtered = agents.filter((a) => {
     if (fStatus !== "all" && a.status !== fStatus) return false;
     if (query && !a.name.toLowerCase().includes(query.toLowerCase())) return false;
     return true;
@@ -96,6 +88,13 @@ function Builder() {
           onChange={(v) => setFStatus(v as typeof fStatus)}
           options={[{ value: "all", label: "All statuses" }, ...AGENT_STATUSES.map((s) => ({ value: s, label: cap(s) }))]}
         />
+        <Button
+          size="sm"
+          className="ml-auto h-8 gap-1.5 px-3 text-xs"
+          onClick={() => navigate({ to: "/agents/builder/$id", params: { id: "new" }, search: { type: "chat" } })}
+        >
+          <Plus className="h-3.5 w-3.5" /> New agent
+        </Button>
       </div>
 
       {filtered.length === 0 ? (
@@ -108,6 +107,7 @@ function Builder() {
             <thead>
               <tr className="border-b border-border bg-secondary/30 text-[11px] uppercase tracking-wider text-muted-foreground">
                 <th className="px-4 py-2.5 text-left font-medium">Agent name</th>
+                <th className="px-4 py-2.5 text-left font-medium">Type</th>
                 <th className="px-4 py-2.5 text-left font-medium">Status</th>
               </tr>
             </thead>
@@ -115,11 +115,17 @@ function Builder() {
               {filtered.map((a) => (
                 <tr
                   key={a.id}
-                  onClick={() => navigate({ to: "/agents/$id", params: { id: a.id } })}
+                  onClick={() => navigate({ to: "/agents/builder/$id", params: { id: a.id }, search: {} })}
                   className="cursor-pointer transition-colors hover:bg-accent/30"
                 >
                   <td className="px-4 py-3">
-                    <p className="font-medium">{a.name}</p>
+                    <p className="font-mono text-[13px] font-medium">{a.name}</p>
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className="inline-flex items-center gap-1.5 text-[12px] capitalize text-muted-foreground">
+                      {a.type === "voice" ? <Phone className="h-3.5 w-3.5" /> : <MessageCircle className="h-3.5 w-3.5" />}
+                      {a.type}
+                    </span>
                   </td>
                   <td className="px-4 py-3">
                     <StatusTag status={a.status} />
@@ -150,10 +156,8 @@ function StatusTag({ status }: { status: AgentStatus }) {
 function Tools() {
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
-  const [fType, setFType] = useState<"all" | ToolType>("all");
 
   const filtered = TOOLS.filter((t) => {
-    if (fType !== "all" && t.type !== fType) return false;
     if (query && !t.handle.toLowerCase().includes(query.toLowerCase())) return false;
     return true;
   });
@@ -170,16 +174,15 @@ function Tools() {
             className="h-8 pl-8 text-xs"
           />
         </div>
-        <FilterSelect
-          label="Type"
-          value={fType}
-          onChange={(v) => setFType(v as typeof fType)}
-          options={[
-            { value: "all", label: "All" },
-            { value: "http", label: "HTTP API" },
-            { value: "mcp", label: "MCP" },
-          ]}
-        />
+        <div className="ml-auto">
+          <Button
+            size="sm"
+            className="h-8 gap-1.5 text-xs"
+            onClick={() => navigate({ to: "/agents/tools/new", search: {} })}
+          >
+            <Plus className="h-3.5 w-3.5" /> New tool
+          </Button>
+        </div>
       </div>
 
       {filtered.length === 0 ? (
@@ -192,7 +195,7 @@ function Tools() {
             <thead>
               <tr className="border-b border-border bg-secondary/30 text-[11px] uppercase tracking-wider text-muted-foreground">
                 <th className="px-4 py-2.5 text-left font-medium">Tool</th>
-                <th className="px-4 py-2.5 text-left font-medium">Type</th>
+                <th className="px-4 py-2.5 text-left font-medium">Method</th>
                 <th className="px-4 py-2.5 text-left font-medium">Status</th>
                 <th className="px-4 py-2.5 text-left font-medium">Created</th>
                 <th className="px-4 py-2.5 text-left font-medium">Updated</th>
@@ -214,11 +217,8 @@ function Tools() {
                     </div>
                   </td>
                   <td className="px-4 py-3">
-                    <span className={cn(
-                      "inline-flex items-center rounded-md border px-1.5 py-0.5 text-[11px] font-medium",
-                      t.type === "mcp" ? "border-ai/30 bg-ai/10 text-ai" : "border-border bg-secondary/40 text-muted-foreground",
-                    )}>
-                      {TYPE_LABEL[t.type]}
+                    <span className="inline-flex items-center rounded-md border border-border bg-secondary/40 px-1.5 py-0.5 font-mono text-[11px] font-medium text-muted-foreground">
+                      {t.method ?? "—"}
                     </span>
                   </td>
                   <td className="px-4 py-3">
