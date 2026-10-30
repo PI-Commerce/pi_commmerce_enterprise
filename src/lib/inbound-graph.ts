@@ -49,6 +49,18 @@ export type ArrivalTraits = {
   hasReferral: boolean;
   withinHours: boolean;
   text?: string;
+  /** Webhook arrivals only — the event name the payload carried. */
+  event?: string;
+  /**
+   * Which named source the arrival came through, as the trigger's output id
+   * (`ad:<source_id>` or `link:<marker>`).
+   *
+   * Simulated alongside the rest so the dead-edge check knows a per-ad or per-QR
+   * branch is reachable. Without it every one of those outputs would be reported
+   * unreachable the moment it was wired, which trains an author to ignore the
+   * one warning that catches real mistakes.
+   */
+  source?: string;
 };
 
 /**
@@ -56,7 +68,8 @@ export type ArrivalTraits = {
  *
  * Channel-aware on purpose: a phone call has no ad referral and no message text,
  * so offering `trigger.referral_ad` on a voice entry point would let an author
- * write a branch that can never be taken.
+ * write a branch that can never be taken. {@link triggerVariables} narrows this
+ * further by the configured trigger kind, for the same reason one level down.
  */
 export const TRIGGER_VARIABLES: Record<
   InboundChannel,
@@ -72,10 +85,87 @@ export const TRIGGER_VARIABLES: Record<
     { key: "trigger.within_hours", source: "Inbound Trigger" },
     { key: "trigger.phone", source: "Inbound Trigger" },
   ],
+  /* A webhook arrival has no message and no call, so the channel-shaped variables are
+     absent. What it does have is the event that fired it and the payload it carried —
+     `trigger.payload` standing in for the body a branch can read a field out of. */
+  webhook: [
+    { key: "trigger.event", source: "Inbound Trigger" },
+    { key: "trigger.payload", source: "Inbound Trigger" },
+    { key: "trigger.within_hours", source: "Inbound Trigger" },
+    { key: "trigger.phone", source: "Inbound Trigger" },
+  ],
 };
 
+/**
+ * Published whenever an entry point accepts more than one kind.
+ *
+ * An entry point taking ads, QR scans and plain messages hands the agent a
+ * conversation with no idea which of those happened — and that is exactly the
+ * context it should open with. One variable fixes it.
+ */
+export const ENTRY_KIND_VARIABLE = { key: "trigger.entry_kind", source: "Inbound Trigger" };
+
+/** Extra variables a trigger publishes because of *how* it fired. */
+const KIND_VARIABLES: Record<string, { key: string; source: string }[]> = {
+  keyword: [{ key: "trigger.matched_keyword", source: "Inbound Trigger" }],
+  /* Every one of these is a field Meta actually sends on `referral`. `ctwa_clid` is
+     the click id, and it is the only one that closes the loop back to ad spend —
+     published deliberately, because it is the field that gets dropped at integration
+     time and missed six months later when somebody asks why CTWA ROAS is unmeasurable. */
+  ctwa_ad: [
+    { key: "trigger.referral_ad", source: "Inbound Trigger" },
+    { key: "trigger.ad_id", source: "Inbound Trigger" },
+    { key: "trigger.ad_headline", source: "Inbound Trigger" },
+    { key: "trigger.source_type", source: "Inbound Trigger" },
+    { key: "trigger.ctwa_clid", source: "Inbound Trigger" },
+  ],
+  /* One variable, because one is all there is. Meta sends nothing about a QR
+     scan, so the only thing we know is the marker we planted ourselves. */
+  qr_link: [{ key: "trigger.link_token", source: "Inbound Trigger" }],
+  webhook: [{ key: "trigger.event", source: "Inbound Trigger" }],
+};
+
+/**
+ * What a trigger actually publishes, given its channel and its configured kind.
+ *
+ * The channel sets the floor — a phone number, business hours — and the kind adds
+ * what only that arrival carries. An "any message" trigger does not publish a matched
+ * keyword, so a branch testing one can never be taken, and the picker should not
+ * offer it in the first place.
+ */
+export function triggerVariables(
+  channel: InboundChannel,
+  kind?: string | string[],
+  outputs?: { name: string }[],
+): { key: string; source: string }[] {
+  const base = TRIGGER_VARIABLES[channel] ?? [];
+  /* The union across every accepted kind, plus `entry_kind` once there is more than
+     one — because a variable only some arrivals populate is worse than an absent one
+     unless the graph can tell which arrival it got. */
+  const kinds = Array.isArray(kind) ? kind : kind ? [kind] : [];
+  const extra = [
+    ...kinds.flatMap((k) => KIND_VARIABLES[k] ?? []),
+    ...(kinds.length > 1 ? [ENTRY_KIND_VARIABLE] : []),
+  ];
+  /* The author's own payload mappings are published like any other trigger variable.
+     They are last because they are the ones that change as the graph is edited. */
+  const mapped = (outputs ?? [])
+    .filter((o) => o.name.trim())
+    .map((o) => ({ key: `trigger.${o.name.trim()}`, source: "Inbound Trigger" }));
+  const out: { key: string; source: string }[] = [];
+  const seen = new Set<string>();
+  for (const v of [...base, ...extra, ...mapped]) {
+    if (seen.has(v.key)) continue;
+    seen.add(v.key);
+    out.push(v);
+  }
+  return out;
+}
+
 /** Kinds that end routing when reached. */
-const TERMINAL_KINDS = new Set<NodeKind>(["agentSession", "end"]);
+/* `assignHuman` ends routing too: once a person holds the conversation the
+   journey has nothing further to do. */
+const TERMINAL_KINDS = new Set<NodeKind>(["agentSession", "assignHuman", "end"]);
 
 export function isRoutingTerminal(kind: NodeKind): boolean {
   return TERMINAL_KINDS.has(kind);
@@ -92,6 +182,13 @@ function varBag(t: ArrivalTraits): Record<string, string | undefined> {
     "trigger.referral_ad": t.hasReferral ? "ad_referral" : undefined,
     "trigger.message_text": t.text,
     "trigger.within_hours": t.withinHours ? "true" : "false",
+    "trigger.event": t.event,
+    /* Not a published variable — the resolver's own channel for which named
+       source fired. Branching on it is done by wiring the trigger's output, not
+       by writing a condition against it. */
+    "trigger.source": t.source,
+    // Presence again: a branch tests that a payload arrived, never its contents.
+    "trigger.payload": "{}",
   };
 }
 
@@ -190,6 +287,13 @@ function exitHandle(
     return "default";
   }
   if (kind === "apiToolCall") return "success";
+  /* The trigger leaves by the named source that fired, falling through to the
+     always-present default — the same first-match-wins shape as a conditional,
+     because that is what an author already understands from the canvas. */
+  if (kind === "inboundTrigger" && outputs?.length) {
+    const wanted = bag["trigger.source"];
+    return outputs.find((o) => o.id === wanted)?.id ?? "default";
+  }
   // Anything else with named ports leaves through its first one.
   return outputs?.length ? outputs[0].id : null;
 }
@@ -249,30 +353,52 @@ export function describeRoute(graph: InboundGraph, path?: string[]): string {
  * coverage and dead-branch analysis be *proved* against the real resolver rather
  * than inferred from the shape of the config.
  */
+/**
+ * Every arrival worth simulating, for the dead-edge check.
+ *
+ * Free-text traits are drawn from the graph itself rather than enumerated: the only
+ * message bodies and event names worth testing are the ones some branch actually
+ * tests for, plus the absent case. Miss that and a branch keying on a value the
+ * simulation never produces is reported unreachable when it is simply specific —
+ * which is exactly what happened to the first webhook graph, whose `trigger.event`
+ * branch was flagged dead because nothing here had ever heard of events.
+ */
 export function traitSpace(graph: InboundGraph): ArrivalTraits[] {
   const texts = new Set<string | undefined>([undefined]);
+  const events = new Set<string | undefined>([undefined]);
   for (const n of graph.nodes) {
     if (n.data.kind !== "conditional") continue;
     for (const b of n.data.config?.branches ?? []) {
       for (const c of branchConditions(b)) {
         if (c.variable === "trigger.message_text" && c.value) texts.add(c.value);
+        if (c.variable === "trigger.event" && c.value) events.add(c.value);
       }
     }
   }
+  /* Every named source the trigger declares, plus "none of them" — which is what
+     makes both a per-source branch and the default reachable in the simulation. */
+  const trigger = graph.nodes.find((n) => n.data.kind === "inboundTrigger");
+  const sources: (string | undefined)[] = [
+    undefined,
+    ...(trigger?.data.outputs ?? []).filter((o) => o.id !== "default").map((o) => o.id),
+  ];
+
   const out: ArrivalTraits[] = [];
   for (const hasReferral of [true, false])
     for (const withinHours of [true, false])
-      for (const text of texts) out.push({ hasReferral, withinHours, text });
+      for (const text of texts)
+        for (const event of events)
+          for (const source of sources)
+            out.push({ hasReferral, withinHours, text, event, source });
   return out;
 }
 
 /**
  * Edges no arrival can ever traverse.
  *
- * This is the generalisation of the old rule list's shadowing check, and it
- * matters more here, not less: on a canvas the branch order that causes the
- * shadowing is hidden inside a conditional's config panel, so an unreachable
- * path is invisible unless the canvas says so.
+ * Removed when inbound lost its conditionals and restored with them: on a canvas
+ * the branch order that shadows a path is hidden inside a conditional's config
+ * panel, so an unreachable path is invisible unless the canvas says so.
  *
  * Edges leaving an unreachable node are excluded — reporting the whole dead tail
  * would bury the one edge the author actually needs to fix.

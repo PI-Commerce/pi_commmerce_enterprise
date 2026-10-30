@@ -38,6 +38,7 @@ import { Route as AgentsNewRouteImport } from './routes/agents.new'
 import { Route as AgentsIdRouteImport } from './routes/agents.$id'
 import { Route as CampaignsTemplatesIndexRouteImport } from './routes/campaigns.templates.index'
 import { Route as IntegrationsToolKeyRouteImport } from './routes/integrations.tool.$key'
+import { Route as IntegrationsMoengageSmsIdRouteImport } from './routes/integrations.moengage-sms.$id'
 import { Route as IntegrationsClevertapIdRouteImport } from './routes/integrations.clevertap.$id'
 import { Route as IntegrationsClevertapSmsIdRouteImport } from './routes/integrations.clevertap-sms.$id'
 import { Route as CampaignsVersionsIdRouteImport } from './routes/campaigns.versions.$id'
@@ -191,6 +192,12 @@ const IntegrationsToolKeyRoute = IntegrationsToolKeyRouteImport.update({
   path: '/tool/$key',
   getParentRoute: () => IntegrationsRoute,
 } as any)
+const IntegrationsMoengageSmsIdRoute =
+  IntegrationsMoengageSmsIdRouteImport.update({
+    id: '/moengage-sms/$id',
+    path: '/moengage-sms/$id',
+    getParentRoute: () => IntegrationsRoute,
+  } as any)
 const IntegrationsClevertapIdRoute = IntegrationsClevertapIdRouteImport.update({
   id: '/clevertap/$id',
   path: '/clevertap/$id',
@@ -263,6 +270,7 @@ export interface FileRoutesByFullPath {
   '/campaigns/versions/$id': typeof CampaignsVersionsIdRoute
   '/integrations/clevertap-sms/$id': typeof IntegrationsClevertapSmsIdRoute
   '/integrations/clevertap/$id': typeof IntegrationsClevertapIdRoute
+  '/integrations/moengage-sms/$id': typeof IntegrationsMoengageSmsIdRoute
   '/integrations/tool/$key': typeof IntegrationsToolKeyRoute
   '/campaigns/templates/': typeof CampaignsTemplatesIndexRoute
   '/channels/whatsapp/freeform/$id': typeof ChannelsWhatsappFreeformIdRoute
@@ -296,6 +304,7 @@ export interface FileRoutesByTo {
   '/campaigns/versions/$id': typeof CampaignsVersionsIdRoute
   '/integrations/clevertap-sms/$id': typeof IntegrationsClevertapSmsIdRoute
   '/integrations/clevertap/$id': typeof IntegrationsClevertapIdRoute
+  '/integrations/moengage-sms/$id': typeof IntegrationsMoengageSmsIdRoute
   '/integrations/tool/$key': typeof IntegrationsToolKeyRoute
   '/campaigns/templates': typeof CampaignsTemplatesIndexRoute
   '/channels/whatsapp/freeform/$id': typeof ChannelsWhatsappFreeformIdRoute
@@ -335,6 +344,7 @@ export interface FileRoutesById {
   '/campaigns/versions/$id': typeof CampaignsVersionsIdRoute
   '/integrations/clevertap-sms/$id': typeof IntegrationsClevertapSmsIdRoute
   '/integrations/clevertap/$id': typeof IntegrationsClevertapIdRoute
+  '/integrations/moengage-sms/$id': typeof IntegrationsMoengageSmsIdRoute
   '/integrations/tool/$key': typeof IntegrationsToolKeyRoute
   '/campaigns/templates/': typeof CampaignsTemplatesIndexRoute
   '/channels/whatsapp_/freeform/$id': typeof ChannelsWhatsappFreeformIdRoute
@@ -375,6 +385,7 @@ export interface FileRouteTypes {
     | '/campaigns/versions/$id'
     | '/integrations/clevertap-sms/$id'
     | '/integrations/clevertap/$id'
+    | '/integrations/moengage-sms/$id'
     | '/integrations/tool/$key'
     | '/campaigns/templates/'
     | '/channels/whatsapp/freeform/$id'
@@ -408,6 +419,7 @@ export interface FileRouteTypes {
     | '/campaigns/versions/$id'
     | '/integrations/clevertap-sms/$id'
     | '/integrations/clevertap/$id'
+    | '/integrations/moengage-sms/$id'
     | '/integrations/tool/$key'
     | '/campaigns/templates'
     | '/channels/whatsapp/freeform/$id'
@@ -446,6 +458,7 @@ export interface FileRouteTypes {
     | '/campaigns/versions/$id'
     | '/integrations/clevertap-sms/$id'
     | '/integrations/clevertap/$id'
+    | '/integrations/moengage-sms/$id'
     | '/integrations/tool/$key'
     | '/campaigns/templates/'
     | '/channels/whatsapp_/freeform/$id'
@@ -673,6 +686,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IntegrationsToolKeyRouteImport
       parentRoute: typeof IntegrationsRoute
     }
+    '/integrations/moengage-sms/$id': {
+      id: '/integrations/moengage-sms/$id'
+      path: '/moengage-sms/$id'
+      fullPath: '/integrations/moengage-sms/$id'
+      preLoaderRoute: typeof IntegrationsMoengageSmsIdRouteImport
+      parentRoute: typeof IntegrationsRoute
+    }
     '/integrations/clevertap/$id': {
       id: '/integrations/clevertap/$id'
       path: '/clevertap/$id'
@@ -802,6 +822,7 @@ interface IntegrationsRouteChildren {
   IntegrationsIndexRoute: typeof IntegrationsIndexRoute
   IntegrationsClevertapSmsIdRoute: typeof IntegrationsClevertapSmsIdRoute
   IntegrationsClevertapIdRoute: typeof IntegrationsClevertapIdRoute
+  IntegrationsMoengageSmsIdRoute: typeof IntegrationsMoengageSmsIdRoute
   IntegrationsToolKeyRoute: typeof IntegrationsToolKeyRoute
 }
 
@@ -810,6 +831,7 @@ const IntegrationsRouteChildren: IntegrationsRouteChildren = {
   IntegrationsIndexRoute: IntegrationsIndexRoute,
   IntegrationsClevertapSmsIdRoute: IntegrationsClevertapSmsIdRoute,
   IntegrationsClevertapIdRoute: IntegrationsClevertapIdRoute,
+  IntegrationsMoengageSmsIdRoute: IntegrationsMoengageSmsIdRoute,
   IntegrationsToolKeyRoute: IntegrationsToolKeyRoute,
 }
 

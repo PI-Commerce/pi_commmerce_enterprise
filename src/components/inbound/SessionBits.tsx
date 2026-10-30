@@ -7,44 +7,73 @@ import { cn } from "@/lib/utils";
 import {
   STAGE_LABEL,
   STAGE_INFO,
+  STATUS_LABEL,
+  STATUS_INFO,
+  STATUS_TONE,
   fmtPct,
   type SessionMetrics,
   type SessionStage,
+  type SessionStatus,
+  type InboundChannel,
 } from "@/lib/inbound";
-import { Info } from "lucide-react";
+import { Info, Phone, MessageCircle, Webhook } from "lucide-react";
 
-/** Tone per terminal stage. `unrouted` is deliberately an error tone — it is a
- *  routing gap on our side, not a customer outcome. */
-const STAGE_TONE: Record<SessionStage, string> = {
-  active: "border-ai/30 bg-ai/10 text-ai",
-  resolved: "border-success/30 bg-success/10 text-success",
-  handed_off: "border-warning/30 bg-warning/10 text-warning",
-  abandoned: "border-muted-foreground/30 bg-muted text-muted-foreground",
-  expired: "border-muted-foreground/30 bg-muted text-muted-foreground",
-  no_response: "border-muted-foreground/30 bg-muted text-muted-foreground",
-  unrouted: "border-destructive/30 bg-destructive/10 text-destructive",
-};
 
-export function StageTag({ stage, className }: { stage: SessionStage; className?: string }) {
+/**
+ * The glyph for a channel, in one place.
+ *
+ * It was branched inline at three call sites as `voice ? Phone : MessageCircle`,
+ * which quietly made every non-voice channel look like WhatsApp — so the moment a
+ * webhook entry point existed it arrived wearing a chat bubble.
+ */
+export function ChannelIcon({ channel, className }: { channel: InboundChannel; className?: string }) {
+  const Icon = channel === "voice" ? Phone : channel === "webhook" ? Webhook : MessageCircle;
+  return <Icon className={cn("h-3.5 w-3.5 shrink-0", className)} />;
+}
+
+/** Status pill — now the only state axis the sessions table shows. */
+export function StatusTag({ status, className }: { status: SessionStatus; className?: string }) {
   return (
     <span
-      title={STAGE_INFO[stage]}
+      title={STATUS_INFO[status]}
       className={cn(
         "inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium",
-        STAGE_TONE[stage],
+        STATUS_TONE[status],
         className,
       )}
     >
       <span
         className={cn(
           "h-1.5 w-1.5 rounded-full",
-          stage === "active" ? "bg-current animate-pulse" : "bg-current opacity-60",
+          status === "open" ? "bg-current animate-pulse" : "bg-current opacity-60",
         )}
       />
-      {STAGE_LABEL[stage]}
+      {STATUS_LABEL[status]}
     </span>
   );
 }
+
+/** The tags a session carries, truncated — a row is not where you read all of them. */
+export function TagList({ tags, max = 2 }: { tags: readonly string[]; max?: number }) {
+  if (tags.length === 0) return <span className="text-[11.5px] text-muted-foreground">—</span>;
+  const shown = tags.slice(0, max);
+  return (
+    <span className="flex flex-wrap items-center gap-1">
+      {shown.map((t) => (
+        <span
+          key={t}
+          className="rounded border border-border bg-secondary px-1.5 py-px text-[10.5px] text-muted-foreground"
+        >
+          {t}
+        </span>
+      ))}
+      {tags.length > max && (
+        <span className="text-[10.5px] text-muted-foreground">+{tags.length - max}</span>
+      )}
+    </span>
+  );
+}
+
 
 export function MetricCard({
   label,
@@ -91,11 +120,22 @@ export function MetricCard({
  * small outcomes are visually indistinguishable at these widths.
  */
 export function OutcomeBars({ m }: { m: SessionMetrics }) {
+  /* Every ended outcome and nothing else, so the bars sum to `engagedEnded`
+     exactly. Handed off is deliberately absent: a conversation in a person's hands
+     has not ended, and it was counted here while the denominator excluded it —
+     which is the quiet kind of wrong, because the shares still looked plausible
+     and were all simply too big.
+
+     Resolved splits by who finished it. A resolution a person completed is still a
+     resolution and still not containment, and one bar covering both hides the gap
+     between this panel and the containment figure above it. */
   const outcomes = [
-    { label: "Resolved", value: m.resolved, cls: "bg-success" },
-    { label: "Handed off", value: m.handedOff, cls: "bg-warning" },
-    { label: "Abandoned", value: m.abandoned, cls: "bg-muted-foreground/50" },
-    { label: "Expired", value: m.expired, cls: "bg-muted-foreground/30" },
+    { label: "Resolved by agent", value: m.resolvedByAgent, cls: "bg-success" },
+    { label: "Resolved by a person", value: m.resolvedByPerson, cls: "bg-success/50" },
+    /* Dropped split by cause rather than one bar, because "the customer went
+       quiet" and "we replaced the session ourselves" are not the same news. */
+    { label: "Dropped · customer went quiet", value: m.dropped - m.superseded, cls: "bg-muted-foreground/50" },
+    { label: "Dropped · superseded", value: m.superseded, cls: "bg-ai/40" },
   ];
   const total = Math.max(1, m.engagedEnded);
 
@@ -137,8 +177,9 @@ export function OutcomeSplit({ m }: { m: SessionMetrics }) {
         </p>
       </div>
       <p className="mb-4 text-[11px] leading-snug text-muted-foreground">
-        Only sessions that engaged and finished. In-flight and unrouted arrivals have no
-        outcome yet, so counting them here would understate every share.
+        Only sessions that reached an agent and ended. In-flight conversations and
+        arrivals nothing handled have no outcome yet, so counting them here would
+        understate every share.
       </p>
       <OutcomeBars m={m} />
     </div>
@@ -200,12 +241,12 @@ export function SessionFunnel({ m }: { m: SessionMetrics }) {
         <OutcomeBars m={m} />
       </div>
 
-      {m.unrouted > 0 && (
+      {m.notRouted > 0 && (
         <div className="mt-4 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2.5">
           <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" />
           <p className="text-[11.5px] leading-snug text-muted-foreground">
             <span className="font-medium text-destructive">
-              {m.unrouted.toLocaleString()} unrouted
+              {m.notRouted.toLocaleString()} not routed
             </span>{" "}
             — the graph has a path that reaches no agent. These contacts were never
             answered. This is a routing gap, not a customer outcome.

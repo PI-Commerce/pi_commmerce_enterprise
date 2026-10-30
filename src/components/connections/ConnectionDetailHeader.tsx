@@ -54,8 +54,12 @@ export function ConnectionDetailHeader({
         <ArrowLeft className="h-3.5 w-3.5" /> All connections
       </Link>
 
-      <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
-        <div className="flex min-w-0 items-start gap-3">
+      <div className="mb-6 flex items-start justify-between gap-4">
+        {/* `flex-1` so the title block shrinks to share the row rather than claiming its
+            intrinsic width and pushing the aside onto a line of its own. It used to wrap,
+            which was invisible only while the description was capped at a narrow measure
+            — once the description ran full width, the actions fell below it. */}
+        <div className="flex min-w-0 flex-1 items-start gap-3">
           {mark && (
             <span
               className={cn(
@@ -75,7 +79,7 @@ export function ConnectionDetailHeader({
               <div className="mt-1.5 flex flex-wrap items-center gap-2">{meta}</div>
             )}
             {description && (
-              <p className="mt-1.5 max-w-2xl text-[12.5px] leading-relaxed text-muted-foreground">
+              <p className="mt-1.5 text-[12.5px] leading-relaxed text-muted-foreground">
                 {description}
               </p>
             )}

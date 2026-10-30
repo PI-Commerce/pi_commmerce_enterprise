@@ -202,6 +202,13 @@ export function AgentBuilderCanvas({ record, isNew }: { record: AgentRecord; isN
       masterPrompt: hubNode!.data.masterPrompt ?? "",
       knowledgeBase: kbNode?.data.knowledgeBase ?? "",
       postCall: hubNode!.data.postCall ?? [],
+      /* Carried through rather than rebuilt from the canvas: this builder has
+         no editor for either yet. Defaulting them here would silently wipe an
+         agent's dispositions the first time somebody renamed it, and every
+         inbound journey branching on those dispositions would lose its
+         outputs. */
+      dispositions: record.dispositions,
+      attributes: record.attributes,
       evalPrompt: hubNode!.data.evalPrompt,
       modelConfigId: modelNode?.data.modelConfigId,
     };
@@ -212,7 +219,7 @@ export function AgentBuilderCanvas({ record, isNew }: { record: AgentRecord; isN
     setDirty(false);
     toast.success(isNew ? "Agent created" : "Changes saved", { description: trimmed });
     navigate({ to: "/agents" });
-  }, [nodes, record.id, isNew, navigate]);
+  }, [nodes, record, isNew, navigate]);
 
   // ── Unsaved-changes guard (same toast pattern as the campaign builder) ──────
   const { status: blockStatus, proceed, reset } = useBlocker({

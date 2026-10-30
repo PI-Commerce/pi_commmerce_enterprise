@@ -4,8 +4,11 @@
  * Four channel tabs (WhatsApp / SMS / RCS / Voice), each rendering the lead's
  * messages for that channel with:
  *
- *  - `[Campaign Name] · Run [id]` dividers between runs (the campaign name has
- *    its leading `Category · ` prefix stripped since the category was noise).
+ *  - Thread dividers separating each campaign run from each inbound session.
+ *    Campaign runs read `[Campaign Name] · Run [id]` (the leading `Category · `
+ *    prefix is stripped since the category was noise); inbound sessions read
+ *    `Inbound · [Entry point]` in the accent colour with the session id, so the
+ *    two origins are never mistaken for each other in a mixed thread.
  *  - WhatsApp / SMS / RCS bubbles (out = right, in = left) with channel tint.
  *    Outbound bubbles carry a small DLR footer (Sent / Delivered / Read /
  *    Failed / No DLR). Outbound template messages render as a full template
@@ -18,16 +21,23 @@
  */
 
 import { useMemo, useState } from "react";
+import { toast } from "sonner";
+import { Composer } from "./Composer";
+import { CURRENT_OPERATOR_ID, operator } from "@/lib/inbound";
+import {
+  assignSession, useAssignees, useEscalationOverrides, resolveAssignee, resolveEscalation,
+} from "@/lib/inbox-store";
 import { cn } from "@/lib/utils";
 import {
   Check, CheckCheck, ChevronDown, ChevronRight, CircleAlert, CircleDashed, CircleDot,
   ExternalLink, FileText, MessageCircle, MessageSquare, MessageSquareText,
-  Phone, PhoneCall, PhoneMissed, Reply, Sparkles, Video,
+  Phone, PhoneCall, PhoneMissed, Reply, Sparkles, Video, ArrowDownLeft, Megaphone,
 } from "lucide-react";
 import {
   formatIso,
   type LeadRecord, type LeadChatMessage, type LeadVoiceCall, type LeadVoiceAttempt,
   type LeadMessage, type LeadChannel, type MessageDeliveryStatus, type WaTemplatePreview,
+  type MessageOrigin,
 } from "@/lib/leads-data";
 
 /* ------------------------------ Public API ------------------------------ */
@@ -63,6 +73,36 @@ export function Conversations({ lead }: { lead: LeadRecord }) {
     return best;
   }, [buckets]);
 
+  /* The window is measured from the customer's last *inbound* message, which is
+     the boundary WhatsApp itself enforces — not from the last activity on the
+     thread, which would keep the window alive on our own outbound messages and
+     let the composer promise a send the provider will reject. */
+  /* The composer also needs who holds it, and that has to be the resolved value
+     — a claim made a moment ago must change what the notice says. */
+  const escalations = useEscalationOverrides();
+  const assignees = useAssignees();
+
+  const composerState = useMemo(() => {
+    const lastInbound = [...buckets.wa]
+      .reverse()
+      /* Everything in the wa bucket is a chat message — voice is bucketed by
+         `channel` before this runs — but narrow on the field rather than on
+         that assumption, so a new message type cannot silently slip through. */
+      .find((m): m is LeadChatMessage => "direction" in m && m.direction === "in");
+    const hoursSinceInbound = lastInbound
+      ? (Date.now() - new Date(lastInbound.at).getTime()) / 3_600_000
+      : undefined;
+    const assigneeId = resolveAssignee(assignees, lead.inbound?.sessionId, lead.inbound?.assigneeId);
+    return {
+      hoursSinceInbound,
+      ownedByHuman: !!assigneeId,
+      assigneeName:
+        assigneeId && assigneeId !== CURRENT_OPERATOR_ID
+          ? operator(assigneeId)?.name
+          : undefined,
+    };
+  }, [buckets.wa, lead.inbound?.sessionId, lead.inbound?.assigneeId, assignees]);
+
   const [tab, setTab] = useState<LeadChannel>(defaultTab);
   // If the lead changes, reset to the new lead's default tab.
   useMemoLastLead(lead.id, () => setTab(defaultTab));
@@ -78,6 +118,32 @@ export function Conversations({ lead }: { lead: LeadRecord }) {
       <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
         <ChannelBody channel={tab} messages={buckets[tab]} />
       </div>
+
+      {/* WhatsApp only. The other tabs are a record of what was sent, not a
+          place to answer from: SMS and RCS have no inbound thread to reply
+          into here, and a voice call is not something you type back to. */}
+      {tab === "wa" && (
+        <Composer
+          state={composerState}
+          onSend={(text, mode) => {
+            /* The send path and the delivery receipt are still simulated. The
+               ownership transfer is not: this used to raise a toast reading
+               "Assigned to you" while writing nothing, which is worse than no
+               composer — it looked like it had worked. */
+            if (lead.inbound) {
+              assignSession(
+                lead.inbound.sessionId,
+                CURRENT_OPERATOR_ID,
+                resolveEscalation(escalations, lead.inbound.sessionId, lead.inbound.escalation),
+              );
+            }
+            toast.success(
+              mode === "template" ? "Template sent" : "Reply sent",
+              { description: `Assigned to you · ${text.slice(0, 48)}${text.length > 48 ? "…" : ""}` },
+            );
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -162,6 +228,9 @@ function ChannelBody({
   channel: LeadChannel;
   messages: LeadMessage[];
 }) {
+  // Hook before any early return — an empty channel must not change the hook
+  // order, or React unmounts the tab's state on the first message that arrives.
+  const runs = useMemo(() => groupByRun(messages), [messages]);
   if (messages.length === 0) {
     return (
       <div className="grid h-full place-items-center text-[13px] text-muted-foreground">
@@ -169,12 +238,11 @@ function ChannelBody({
       </div>
     );
   }
-  const runs = useMemo(() => groupByRun(messages), [messages]);
   return (
     <div className="space-y-6">
       {runs.map((r) => (
         <div key={r.key} className="space-y-2">
-          <RunDivider label={r.label} />
+          <RunDivider label={r.label} origin={r.origin} sessionId={r.sessionId} />
           <div className="space-y-2">
             {r.items.map((m) => (
               <MessageRow key={m.id} msg={m} channel={channel} />
@@ -495,7 +563,7 @@ const OUTCOME_LABEL: Record<LeadVoiceCall["outcome"], string> = {
 function buildVoiceInsights(call: LeadVoiceCall): { label: string; value: string }[] {
   const rng = seedFromId(call.id);
   const p = (arr: string[]) => arr[Math.floor(rng() * arr.length)];
-  const campaign = call.campaignName.toLowerCase();
+  const campaign = call.origin === "campaign" ? call.campaignName.toLowerCase() : "inbound";
   const dispositions = campaign.includes("handoff")
     ? ["Resolved", "Escalated", "Follow-up"]
     : campaign.includes("winback") || campaign.includes("cart") || campaign.includes("activation")
@@ -513,7 +581,7 @@ function buildVoiceInsights(call: LeadVoiceCall): { label: string; value: string
 function buildVoiceSummary(call: LeadVoiceCall): string {
   const rng = seedFromId(call.id + "-summary");
   const p = (arr: string[]) => arr[Math.floor(rng() * arr.length)];
-  const campaign = call.campaignName.toLowerCase();
+  const campaign = call.origin === "campaign" ? call.campaignName.toLowerCase() : "inbound";
   if (campaign.includes("cart")) return p([
     "Customer confirmed intent to complete the pending cart but wanted a discount before checkout.",
     "Agent shared the 10% coupon and walked through checkout; customer will finish tonight.",
@@ -582,32 +650,88 @@ function runLabel(runId: string): string {
   return runId.startsWith("r_") ? `Run ${runId.slice(2)}` : runId;
 }
 
-type RunGroup = { key: string; label: string; items: LeadMessage[]; firstAt: number };
+type RunGroup = {
+  key: string;
+  label: string;
+  origin: MessageOrigin;
+  /** Inbound only — the session these turns belong to, for the deep link back. */
+  sessionId?: string;
+  items: LeadMessage[];
+  firstAt: number;
+};
 
+/**
+ * Bucket a lead's messages into threads.
+ *
+ * A thread is one campaign run, or one inbound session — never a mix. Grouping
+ * by origin as well as id is what lets the divider say which kind it is: "we
+ * sent this as part of a campaign" and "they contacted us" are different events
+ * an operator must not confuse, even when they sit minutes apart on one lead.
+ */
 function groupByRun(messages: LeadMessage[]): RunGroup[] {
-  const buckets = new Map<string, { label: string; items: LeadMessage[]; firstAt: number }>();
+  const buckets = new Map<string, Omit<RunGroup, "key">>();
   for (const m of messages) {
-    const key = `${m.campaignId}::${m.runId}`;
-    const label = `${stripCategory(m.campaignName)} · ${runLabel(m.runId)}`;
+    const key =
+      m.origin === "inbound"
+        ? `inbound::${m.sessionId}`
+        : `campaign::${m.campaignId}::${m.runId}`;
+    const label =
+      m.origin === "inbound"
+        ? m.entryPointName
+        : `${stripCategory(m.campaignName)} · ${runLabel(m.runId)}`;
     const existing = buckets.get(key);
     if (existing) {
       existing.items.push(m);
       existing.firstAt = Math.min(existing.firstAt, Date.parse(m.at));
     } else {
-      buckets.set(key, { label, items: [m], firstAt: Date.parse(m.at) });
+      buckets.set(key, {
+        label,
+        origin: m.origin,
+        sessionId: m.origin === "inbound" ? m.sessionId : undefined,
+        items: [m],
+        firstAt: Date.parse(m.at),
+      });
     }
   }
   return Array.from(buckets.entries())
-    .map(([key, v]) => ({ key, label: v.label, items: v.items, firstAt: v.firstAt }))
+    .map(([key, v]) => ({ key, ...v }))
     .sort((a, b) => a.firstAt - b.firstAt);
 }
 
-function RunDivider({ label }: { label: string }) {
+/**
+ * Thread divider. Campaign threads stay in the muted register they always had;
+ * inbound threads get the accent rule, an arrow glyph pointing inward, and the
+ * session id — so a glance down the thread tells you who started each exchange
+ * without reading a word of it.
+ */
+function RunDivider({
+  label, origin, sessionId,
+}: {
+  label: string;
+  origin: MessageOrigin;
+  sessionId?: string;
+}) {
+  const inbound = origin === "inbound";
   return (
-    <div className="flex items-center gap-2 px-1 py-1 text-[10.5px] uppercase tracking-wider text-muted-foreground">
-      <span className="h-px flex-1 bg-border" />
-      <span>{label}</span>
-      <span className="h-px flex-1 bg-border" />
+    <div
+      className={cn(
+        "flex items-center gap-2 px-1 py-1 text-[10.5px] uppercase tracking-wider",
+        inbound ? "text-ai" : "text-muted-foreground",
+      )}
+    >
+      <span className={cn("h-px flex-1", inbound ? "bg-ai/30" : "bg-border")} />
+      <span className="flex items-center gap-1.5">
+        {inbound ? (
+          <ArrowDownLeft className="h-3 w-3" />
+        ) : (
+          <Megaphone className="h-3 w-3" />
+        )}
+        <span>{inbound ? `Inbound · ${label}` : label}</span>
+        {sessionId && (
+          <span className="font-mono text-[10px] normal-case text-ai/70">{sessionId}</span>
+        )}
+      </span>
+      <span className={cn("h-px flex-1", inbound ? "bg-ai/30" : "bg-border")} />
     </div>
   );
 }

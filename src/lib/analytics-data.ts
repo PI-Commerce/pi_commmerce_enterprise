@@ -116,10 +116,16 @@ const KIND_TO_SANKEY: Record<NodeKind, SankeyNodeKind> = {
   // lead flows through. It shows Common Metrics + a Configuration Snapshot, but
   // has no channel funnel of its own.
   apiToolCall: "apiToolCall",
+  /* Same column as a tool call: both are "we called something out", which is the only
+     distinction the funnel draws. */
+  webhook: "apiToolCall",
   // Inbound-only kinds — they never appear in a campaign graph, so they never
   // reach the Sankey. Mapped to structural pass-throughs to keep the map total.
   inboundTrigger: "start",
   agentSession: "end",
+  /* Maps onto the campaign funnel's human-escalation column: both are "a person now
+     owns this", which is the only distinction the Sankey draws. */
+  assignHuman: "needsReview",
   aiTransform: "aiTransform",
   needsReview: "needsReview",
 };

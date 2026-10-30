@@ -29,29 +29,30 @@ import { languageLabel } from "@/lib/waba-templates";
 /* ──────────────────────────────── Connector ──────────────────────────────── */
 
 /**
- * Draft → Validated → Live is a record of what CT has actually done, not a
- * workflow the client advances. Nothing on the panel can move a connector to
- * Validated; only a real validation payload from CT does that. That is the point —
- * a client who has finished their side and sees Draft learns that CT never called,
- * which is a different problem from CT calling and being rejected.
+ * Draft → Live is a record of what CleverTap has actually done, not a workflow the
+ * client advances. Nothing on the panel moves a connector to Live; only real traffic
+ * does. A client who has finished their side and still sees Draft learns that
+ * CleverTap never called, which is the useful fact.
+ *
+ * There was a third state, Validated, sitting between the two on the strength of
+ * CleverTap's setup check. It is gone: every lane now reads Draft → Live with Disabled
+ * as a flag over the top, so one state vocabulary covers WhatsApp, CleverTap SMS and
+ * MoEngage SMS rather than one lane having a state the others cannot reach.
  */
-export type CtConnectorState = "draft" | "validated" | "live";
+export type CtConnectorState = "draft" | "live";
 
 export const CT_STATE_LABEL: Record<CtConnectorState, string> = {
   draft: "Draft",
-  validated: "Validated",
   live: "Live",
 };
 
 export const CT_STATE_INFO: Record<CtConnectorState, string> = {
-  draft: "Created here, but CleverTap has never called it.",
-  validated: "CleverTap's setup check succeeded. No real message yet.",
-  live: "At least one real message has been processed.",
+  draft: "Able to accept traffic. CleverTap has never called it.",
+  live: "Configured and sending.",
 };
 
 export const CT_STATE_TONE: Record<CtConnectorState, string> = {
   draft: "border-border bg-secondary text-muted-foreground",
-  validated: "border-warning/30 bg-warning/10 text-warning",
   live: "border-success/30 bg-success/10 text-success",
 };
 

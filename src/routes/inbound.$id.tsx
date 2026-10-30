@@ -1,9 +1,12 @@
 /**
- * An entry point *is* its canvas — the same shape as `/campaigns/$id`, which is
- * also the builder rather than a summary page. There is no separate detail view:
- * routing is the thing you author here, and the numbers it produces live where
- * every other aggregate does (Analytics → Inbound, filtered to this entry point)
- * alongside the session list on `/inbound`.
+ * An entry point *is* its editor — there is no separate detail view. What it does
+ * is authored here; the numbers it produces live where every other aggregate does
+ * (Analytics → Inbound, filtered to this entry point) alongside the session list
+ * on `/inbound`.
+ *
+ * The editor is a canvas. An inbound entry point carries a journey — look
+ * something up, branch on the answer, split traffic, hand to an agent — and the
+ * shape of that is the thing being authored. See `InboundBuilderCanvas`.
  */
 import { useState } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
@@ -15,14 +18,18 @@ import { getEntryPoints, newEntryPointId, type EntryPoint, type InboundChannel }
 export const Route = createFileRoute("/inbound/$id")({
   component: InboundBuilderRoute,
   // Channel is fixed at creation: it decides which signals the trigger publishes
-  // and which agents can answer, so it is chosen before the canvas opens rather
-  // than being switchable underneath an already-authored graph.
+  // and which agents can answer, so it is chosen before the editor opens rather
+  // than being switchable underneath an already-configured entry point.
   validateSearch: (s: Record<string, unknown>): { channel?: InboundChannel } => ({
-    channel: s.channel === "voice" ? "voice" : s.channel === "whatsapp" ? "whatsapp" : undefined,
+    channel:
+      s.channel === "voice" ? "voice"
+      : s.channel === "webhook" ? "webhook"
+      : s.channel === "whatsapp" ? "whatsapp"
+      : undefined,
   }),
   head: ({ params }) => ({
     meta: [
-      { title: `${params.id === "new" ? "New entry point" : "Edit routing"} · Pi Commerce Enterprise` },
+      { title: `${params.id === "new" ? "New entry point" : "Edit entry point"} · Pi Commerce Enterprise` },
       { name: "description", content: "Author how an inbound arrival is routed to an agent." },
     ],
   }),
@@ -34,10 +41,10 @@ function InboundBuilderRoute() {
   const navigate = useNavigate();
   const isNew = id === "new";
 
-  // Resolved once at mount; live edits then belong to ReactFlow state. `null` means
-  // an id was given but no such entry point exists — say so rather than opening a
-  // blank canvas, which would look like the routing had been wiped and would write
-  // an empty graph over the id on the next save.
+  // Resolved once at mount; live edits then belong to the form's own state. `null`
+  // means an id was given but no such entry point exists — say so rather than
+  // opening a blank form, which would look like the routing had been wiped and
+  // would write an empty graph over the id on the next save.
   const [ep] = useState<EntryPoint | null>(() => {
     if (!isNew) return getEntryPoints().find((e) => e.id === id) ?? null;
     const ch: InboundChannel = channel ?? "whatsapp";
@@ -46,14 +53,27 @@ function InboundBuilderRoute() {
       name: "",
       description: "",
       channel: ch,
-      address: "",
+      addresses: [],
       status: "draft",
       // A blank entry point is just the arrival. Everything after it is authored.
       graph: {
         nodes: [{
           id: "trigger",
           position: { x: 0, y: 0 },
-          data: { kind: "inboundTrigger", title: "Inbound Trigger", serial: "trigger_1", locked: true, valid: true },
+          data: {
+            kind: "inboundTrigger",
+            title: "Inbound Trigger",
+            serial: "trigger_1",
+            locked: true,
+            valid: true,
+            /* The channel travels onto the trigger so its config panel can offer only
+               the kinds this channel produces — without it the panel falls back to
+               WhatsApp and a voice entry point is offered keyword matching. */
+            config: {
+              channel: ch,
+              triggerKind: ch === "webhook" ? "webhook" : "any_message",
+            },
+          },
         }],
         edges: [],
       },

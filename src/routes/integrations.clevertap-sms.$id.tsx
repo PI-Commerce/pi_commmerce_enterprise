@@ -2,28 +2,31 @@
  * One CleverTap SMS connection.
  *
  * Built to the same principle as the WhatsApp connector page — a surface whose job is
- * to be transcribed into someone else's form — but what gets transcribed is different
- * enough to change the layout. There the client copies nine discrete values. Here they
- * copy one recipe, and the panel that holds it does most of the work.
+ * to be transcribed into someone else's form.
  *
- * Three panels, read top to bottom in the order the client needs them: the credentials
- * CleverTap's form asks for first, the recipe that goes into it, and the callback URL
- * that comes back the other way.
+ * It briefly carried a payload-recipe panel: a JSON block to paste into a Parameters
+ * field. CleverTap's Generic SMS provider form has no such field — it takes a nickname,
+ * a callback URL it generates itself, a request type, an HTTP endpoint, and
+ * Authentication and Headers tabs — so the panel described a step that does not exist
+ * and a value with nowhere to go.
+ *
+ * Two panels, read top to bottom in the order the client needs them: the credentials
+ * their form asks for first, and the callback URL that comes back the other way.
  *
  * Nothing here can move the connection to Live, and for a plainer reason than
  * on the WhatsApp page: Live means real traffic has come through, and no button can
  * manufacture that.
  */
 import { useState } from "react";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { AppShell } from "@/components/app/AppShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { CopyRow } from "@/components/clevertap/CopyRow";
-import { SmsRecipePanel } from "@/components/clevertap/SmsRecipePanel";
+import { CopyRow, DetailRow } from "@/components/clevertap/CopyRow";
 import { Panel } from "@/components/connections/Panel";
 import { ConnectionDetailHeader } from "@/components/connections/ConnectionDetailHeader";
+import { ConnectionActions } from "@/components/connections/ConnectionActions";
 import { ArrowLeft, RefreshCw, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -49,6 +52,7 @@ import {
   reportingHealth,
   smsSendEndpoint,
   updateSmsConnection,
+  removeSmsConnection,
   useSmsConnection,
   type SmsConnection,
 } from "@/lib/clevertap-sms";
@@ -61,9 +65,9 @@ export const Route = createFileRoute("/integrations/clevertap-sms/$id")({
 
 function SmsConnectionDetail() {
   const { id } = Route.useParams();
+  const navigate = useNavigate();
   const c = useSmsConnection(id);
 
-  const [header, setHeader] = useState<string | null>(null);
   const [rotated, setRotated] = useState<string | null>(null);
 
   if (!c) {
@@ -82,10 +86,6 @@ function SmsConnectionDetail() {
     );
   }
 
-  /* The selected header defaults to the first one this connection covers, and is held
-     as null until chosen so that a header being removed from the connection cannot
-     leave the recipe pointing at one it no longer carries. */
-  const activeHeader = header && c.headers.includes(header) ? header : c.headers[0];
   const health = reportingHealth(c);
 
   const rotate = () => {
@@ -141,28 +141,48 @@ function SmsConnectionDetail() {
         description={
           <>
             {SMS_STATE_INFO[c.state]} CleverTap builds the campaign and substitutes the
-            recipient, body and identifiers into the recipe below; we deliver each message
-            and post the receipt back. The audience and the personalisation stay on their
-            side.
+            recipient and identifiers per message; we deliver each one and post the receipt
+            back. The audience and personalisation stay on their side.
           </>
+        }
+        aside={
+          <ConnectionActions
+            enabled={c.enabled}
+            name={c.headers.join(", ")}
+            vendor={CT_TARGET.name}
+            noun={"connection"}
+            onToggle={(next) => {
+              updateSmsConnection(c.id, { enabled: next });
+              toast.success(next ? "Enabled" : "Disabled", {
+                description: next
+                  ? "Sends are accepted again."
+                  : "New sends are rejected; already-accepted messages still report back.",
+              });
+            }}
+            onDelete={() => {
+              removeSmsConnection(c.id);
+              toast.success("Deleted", { description: "Remove the provider entry on their side too." });
+              navigate({ to: "/integrations" });
+            }}
+          />
         }
       />
 
       {/* FR-10: a Draft connection looks like it is waiting for a button here, and it is
-          not. Nothing on this page starts anything — the recipe has to reach their
+          not. Nothing on this page starts anything — the values have to reach their
           provider form, and that is the whole of the remaining work. */}
       {c.state === "draft" && (
         <div className="mb-5 flex items-start gap-3 rounded-xl border border-warning/30 bg-warning/5 px-4 py-3.5">
           <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
           <div className="min-w-0">
-            <div className="text-[13px] font-medium">Nothing has come through yet</div>
+            <div className="text-[13px] font-medium">Waiting on CleverTap</div>
             <p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">
               Add the provider in CleverTap under{" "}
               <span className="font-medium text-foreground">
                 Settings → Engage → Channels → SMS → Add Provider
               </span>
               , choose <span className="font-medium text-foreground">Other (Generic)</span>,
-              and paste the recipe below. There is no setup check to pass — this moves to
+              and enter the values below. There is no setup check to pass — this moves to
               Live when a real message arrives.
             </p>
           </div>
@@ -182,8 +202,8 @@ function SmsConnectionDetail() {
               All {c.messagesSeen.toLocaleString()} messages so far arrived without a{" "}
               <span className="font-mono">$$MessageID</span> value, so no callback could be
               attributed and CleverTap's report will show zero delivered against a fully
-              delivered campaign. The recipe on their provider form is missing that
-              mapping — replace it with the one below.
+              delivered campaign. Their provider configuration is not passing it — check
+              the message-id mapping on their provider form.
             </p>
           </div>
         </div>
@@ -197,18 +217,18 @@ function SmsConnectionDetail() {
               {(c.messagesSeen - c.messagesWithMessageId).toLocaleString()} of{" "}
               {c.messagesSeen.toLocaleString()} arrived without a{" "}
               <span className="font-mono">$$MessageID</span>. That points at one of several
-              CleverTap providers on this connection carrying an older recipe — the
-              campaigns it runs will report zero while the others report correctly.
+              CleverTap providers on this connection configured differently — the campaigns
+              it runs will report zero while the others report correctly.
             </p>
           </div>
         </div>
       )}
 
-      <div className="min-w-0 max-w-4xl space-y-5">
+      <div className="min-w-0 space-y-5">
         {/* ─────────────────── What their form asks for first ─────────────────── */}
         <Panel
           title="Paste into CleverTap"
-          caption="Their provider form, field for field. The recipe goes in the Parameters field and has a panel of its own below."
+          caption="Their provider form, field for field. Credentials go under its Authentication tab."
         >
           <div className="divide-y divide-border">
             <CopyRow label="HTTP endpoint" value={smsSendEndpoint()} />
@@ -221,19 +241,12 @@ function SmsConnectionDetail() {
               copyable={false}
               note="Their form also offers GET. It cannot carry a batch and puts recipient numbers in the query string, so it is not supported here."
             />
-            <CopyRow
-              label="Authentication"
-              value="Basic"
-              copyable={false}
-              note="Their form also offers OAuth 2.0, available on request. A failed OAuth token stops the whole SMS channel and retries only every 120 seconds, so Basic is what we issue by default."
-            />
+            {/* Basic only, as on the WhatsApp lane. Their form offers OAuth 2.0 as well,
+                but we do not issue it — so naming it here advertised a choice this page
+                cannot make and that the credentials below do not match. */}
+            <CopyRow label="Authentication" value="Basic" copyable={false} />
             <CopyRow label="Username" value={c.username} />
             <PasswordRow connection={c} onRotate={rotate} />
-            {/* Batch key name and records per batch are not here, though their form asks
-                for them in this order. Both are properties of the recipe rather than of
-                the connection — the key is the recipe's array key, and whether it is
-                filled in at all is what turns batching on — so they are listed in the
-                next panel, beside the block they describe. */}
             <CopyRow
               label="Sender IDs covered"
               value={c.headers.join(", ")}
@@ -243,9 +256,6 @@ function SmsConnectionDetail() {
             />
           </div>
         </Panel>
-
-        {/* ────────────────────────────── The recipe ────────────────────────────── */}
-        <SmsRecipePanel connection={c} header={activeHeader} onHeaderChange={setHeader} />
 
         {/* ──────────────────────────── The way back ────────────────────────────── */}
         <CallbackPanel connection={c} />
@@ -318,34 +328,34 @@ function PasswordRow({
   onRotate: () => void;
 }) {
   return (
-    <div className="flex items-start gap-3 border-l-2 border-warning/60 py-2 pl-2.5">
-      <div className="w-[168px] shrink-0 pt-0.5">
-        <p className="text-[11.5px] font-medium leading-tight">Password</p>
-      </div>
-      <div className="min-w-0 flex-1">
-        <p className="text-[12px] leading-relaxed text-muted-foreground">
-          Shown once, when it was issued.
-        </p>
-        <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
-          {connection.rotation ? (
-            <>
-              Rotating — the previous password stays valid until{" "}
-              <span className="font-medium text-foreground">{connection.rotation.until}</span>.
-            </>
-          ) : (
-            <>Rotate to issue a new one. The old one keeps working for {SMS_DEFAULT_GRACE_DAYS} days.</>
-          )}
-        </p>
-      </div>
-      <Button
-        variant="outline"
-        size="sm"
-        className="h-6 shrink-0 gap-1 px-2 text-[10.5px]"
-        onClick={onRotate}
-      >
-        <RefreshCw className="h-2.5 w-2.5" /> Rotate
-      </Button>
-    </div>
+    <DetailRow
+      label="Password"
+      critical
+      action={
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-6 shrink-0 gap-1 px-2 text-[10.5px]"
+          onClick={onRotate}
+        >
+          <RefreshCw className="h-2.5 w-2.5" /> Rotate
+        </Button>
+      }
+    >
+      <p className="text-[12px] leading-relaxed text-muted-foreground">
+        Shown once, when it was issued.
+      </p>
+      <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
+        {connection.rotation ? (
+          <>
+            Rotating — the previous password stays valid until{" "}
+            <span className="font-medium text-foreground">{connection.rotation.until}</span>.
+          </>
+        ) : (
+          <>Rotate to issue a new one. The old one keeps working for {SMS_DEFAULT_GRACE_DAYS} days.</>
+        )}
+      </p>
+    </DetailRow>
   );
 }
 

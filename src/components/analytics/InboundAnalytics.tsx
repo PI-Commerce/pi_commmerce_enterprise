@@ -87,28 +87,43 @@ export function InboundAnalytics() {
         </p>
       </div>
 
-      {/* Handoff and Abandon are deliberately absent: both are counts over
-          `engagedEnded`, which the outcome split below already draws. */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-6">
+      {/* Re-centred for the first cut. With one trigger and one agent there is
+          no routing graph left to lose arrivals in, so "did it reach an agent"
+          is nearly always yes and makes a poor headline. What varies now is what
+          happened inside the conversation: did the agent hold it, how often did
+          a person have to step in, and how often did a new trigger take it over.
+
+          Abandon stays off the strip — it is a share of `engagedEnded`, which
+          the outcome split below already draws in full. */}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-7">
         <MetricCard label="Sessions" value={m.received.toLocaleString()} />
         <MetricCard
-          label="Active now"
-          value={m.active.toLocaleString()}
-          hint="In flight — no outcome yet, so excluded from every rate below."
-        />
-        <MetricCard
-          label="Unrouted"
-          value={m.unrouted.toLocaleString()}
-          tone={m.unrouted > 0 ? "bad" : "default"}
-          hint="Reached no agent. A routing gap, not a customer outcome."
+          label="In flight"
+          value={m.inFlight.toLocaleString()}
+          hint="No outcome yet, so excluded from every rate below. Counts conversations still with the agent and those now with a person."
         />
         <MetricCard
           label="Containment"
           value={fmtPct(m.containmentRate)}
           tone={m.containmentRate >= 0.6 ? "good" : "warn"}
-          hint="Resolved ÷ engaged sessions that ended."
+          hint="Resolved with no human ÷ engaged sessions that ended. The headline."
         />
-        <MetricCard label="Median handle" value={fmtDuration(m.medianHandleMs)} />
+        <MetricCard
+          label="Handoff"
+          value={fmtPct(m.handoffRate)}
+          hint="Share that reached a person. The other side of containment — read them together."
+        />
+        <MetricCard
+          label="Override"
+          value={fmtPct(m.overrideRate)}
+          tone={m.overrideRate >= 0.08 ? "warn" : "default"}
+          hint="Closed because a new trigger arrived mid-conversation. A high rate means triggers overlap, not that customers changed their minds."
+        />
+        <MetricCard
+          label="Opted out"
+          value={m.optedOut.toLocaleString()}
+          hint="Stopped before the agent. Not a routing gap — the check that has to run first."
+        />
         <MetricCard
           label="Median turns"
           value={m.medianTurns ? m.medianTurns.toLocaleString() : "—"}
@@ -144,7 +159,7 @@ function VolumeByDay({ sessions }: { sessions: Session[] }) {
       const key = `${d.getDate()}/${d.getMonth() + 1}`;
       const cur = byDay.get(key) ?? { total: 0, unrouted: 0 };
       cur.total += 1;
-      if (s.stage === "unrouted") cur.unrouted += 1;
+      if (s.stage === "not_handled") cur.unrouted += 1;
       byDay.set(key, cur);
     }
     const keys = [...byDay.keys()].sort((a, b) => {
@@ -183,7 +198,7 @@ function VolumeByDay({ sessions }: { sessions: Session[] }) {
           barMaxWidth: 18,
         },
         {
-          name: "Unrouted",
+          name: "Not routed",
           type: "bar",
           stack: "v",
           data: keys.map((k) => byDay.get(k)!.unrouted),
@@ -201,7 +216,7 @@ function VolumeByDay({ sessions }: { sessions: Session[] }) {
         <p className="text-[11px] text-muted-foreground">Last 14 days</p>
       </div>
       <p className="mb-3 text-[11px] leading-snug text-muted-foreground">
-        Inbound has no send schedule — volume is demand, not something you set. Unrouted
+        Inbound has no send schedule — volume is demand, not something you set. Not-routed
         stacked on top shows demand you did not answer.
       </p>
       <EChart option={opt} style={{ height: 220 }} />
@@ -245,11 +260,10 @@ function ArrivalComparison({ sessions }: { sessions: Session[] }) {
             <tr className="border-b border-border bg-secondary/30 text-[11px] uppercase tracking-wider text-muted-foreground">
               <th className="px-5 py-2 text-left font-medium">Arrival type</th>
               <th className="px-3 py-2 text-right font-medium">Sessions</th>
-              <th className="px-3 py-2 text-right font-medium">Unrouted</th>
+              <th className="px-3 py-2 text-right font-medium">Not routed</th>
               <th className="px-3 py-2 text-right font-medium">Containment</th>
               <th className="px-3 py-2 text-right font-medium">Median TTFR</th>
-              <th className="px-3 py-2 text-right font-medium">Total cost</th>
-              <th className="px-5 py-2 text-right font-medium">Cost / res.</th>
+              <th className="px-5 py-2 text-right font-medium">Total cost</th>
             </tr>
           </thead>
           <tbody>
@@ -265,11 +279,11 @@ function ArrivalComparison({ sessions }: { sessions: Session[] }) {
                 <td
                   className={cn(
                     "px-3 py-2.5 text-right tabular-nums",
-                    m.unrouted > 0 ? "text-destructive" : "text-muted-foreground",
+                    m.notRouted > 0 ? "text-destructive" : "text-muted-foreground",
                   )}
                 >
-                  {m.unrouted > 0
-                    ? `${m.unrouted} (${fmtPct(m.unrouted / Math.max(1, m.received))})`
+                  {m.notRouted > 0
+                    ? `${m.notRouted} (${fmtPct(m.notRouted / Math.max(1, m.received))})`
                     : "0"}
                 </td>
                 <td
@@ -285,10 +299,7 @@ function ArrivalComparison({ sessions }: { sessions: Session[] }) {
                 <td className="px-3 py-2.5 text-right tabular-nums">
                   {fmtMs(m.medianFirstResponseMs)}
                 </td>
-                <td className="px-3 py-2.5 text-right tabular-nums">{fmtUsd(m.totalCost)}</td>
-                <td className="px-5 py-2.5 text-right tabular-nums">
-                  {m.resolved === 0 ? "—" : fmtUsd(m.costPerResolution, 3)}
-                </td>
+                <td className="px-5 py-2.5 text-right tabular-nums">{fmtUsd(m.totalCost)}</td>
               </tr>
             ))}
           </tbody>

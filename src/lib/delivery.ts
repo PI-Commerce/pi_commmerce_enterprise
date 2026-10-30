@@ -73,8 +73,10 @@ export const DELIVERY_LANES: DeliveryLane[] = [
   {
     platform: "moengage",
     channels: [
+      /* MoEngage's custom connectors are SMS-only — there is no WhatsApp contract to
+         implement, so this cell is not "not built yet" like the WebEngage ones. */
       { channel: "whatsapp", live: false },
-      { channel: "sms", live: false },
+      { channel: "sms", live: true },
     ],
   },
 ];
@@ -97,7 +99,7 @@ export function liveLanes(): { platform: PushTarget["key"]; channel: DeliveryCha
 }
 
 /**
- * The one vendor a carry connector can currently belong to, resolved once.
+ * The vendors a carry connector can currently belong to, resolved once.
  *
  * Read from the shared registry rather than restated, because it already drifted:
  * the connector row used to hand-code `#e8492f` while `PUSH_TARGETS` said `#F04E5E`,
@@ -106,3 +108,6 @@ export function liveLanes(): { platform: PushTarget["key"]; channel: DeliveryCha
  * page need the mark, and the second re-deriving it is how the first drift happened.
  */
 export const CT_TARGET = pushTarget("clevertap");
+
+/** The other vendor a carry connector can belong to, resolved from the same registry. */
+export const MOE_TARGET = pushTarget("moengage");

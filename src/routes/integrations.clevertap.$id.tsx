@@ -27,7 +27,7 @@
  * different problem from CT calling and being rejected.
  */
 import { useState } from "react";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { AppShell } from "@/components/app/AppShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -40,9 +40,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { CopyRow } from "@/components/clevertap/CopyRow";
+import { CopyRow, DetailRow } from "@/components/clevertap/CopyRow";
 import { Panel } from "@/components/connections/Panel";
 import { ConnectionDetailHeader } from "@/components/connections/ConnectionDetailHeader";
+import { ConnectionActions } from "@/components/connections/ConnectionActions";
 import { ArrowLeft, RefreshCw, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -59,6 +60,7 @@ import {
   maskCallbackUrl,
   newPassword,
   updateCtConnector,
+  removeCtConnector,
   useCtConnector,
   type CtConnector,
 } from "@/lib/clevertap";
@@ -71,6 +73,7 @@ export const Route = createFileRoute("/integrations/clevertap/$id")({
 
 function CtConnectorDetail() {
   const { id } = Route.useParams();
+  const navigate = useNavigate();
   const c = useCtConnector(id);
   const [rotated, setRotated] = useState<string | null>(null);
 
@@ -130,18 +133,17 @@ function CtConnectorDetail() {
                 Disabled
               </span>
             )}
-            {/* FR-1 and FR-3 both ask for this, and it sits next to the pill because it
-                is the pill it qualifies — Validated and Live are both records of a check
-                having passed, and neither says when. It is the page's only answer to
-                "did my setup work, and is that still true", which is the question a
+            {/* Sits next to the pill because it is the pill it qualifies — Live says
+                traffic has come through, and this says when it last did. It is the
+                page's only answer to "is that still true", which is the question a
                 client asks before they suspect us of anything.
 
                 Absent on Draft rather than reading "Never". Draft means CleverTap has
                 never called, the banner below says exactly that, and a second rendering
                 of the same absence reads as a second finding. */}
-            {c.lastValidationAt && (
+            {c.lastMessageAt && (
               <span className="text-[12px] text-muted-foreground">
-                Last validated {c.lastValidationAt}
+                Last message {c.lastMessageAt}
               </span>
             )}
             <span className="text-[12px] text-muted-foreground">
@@ -156,6 +158,27 @@ function CtConnectorDetail() {
             personalisation all stay on their side.
           </>
         }
+        aside={
+          <ConnectionActions
+            enabled={c.enabled}
+            name={formatWaba(c.wabaNumber)}
+            vendor={CT_TARGET.name}
+            noun={"connector"}
+            onToggle={(next) => {
+              updateCtConnector(c.id, { enabled: next });
+              toast.success(next ? "Enabled" : "Disabled", {
+                description: next
+                  ? "Sends are accepted again."
+                  : "New sends are rejected; already-accepted messages still report back.",
+              });
+            }}
+            onDelete={() => {
+              removeCtConnector(c.id);
+              toast.success("Deleted", { description: "Remove the provider entry on their side too." });
+              navigate({ to: "/integrations" });
+            }}
+          />
+        }
       />
 
       {/* FR-3: nothing here can move a connector out of Draft, so the one state that
@@ -166,15 +189,15 @@ function CtConnectorDetail() {
           <div className="min-w-0">
             <div className="text-[13px] font-medium">Waiting on CleverTap</div>
             <p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">
-              Saving the values below on their provider screen triggers their setup check,
-              which is what moves this to Validated. There is nothing to press here.
+              Paste the values below onto their provider screen and save it. This moves to
+              Live on the first message that comes through — there is nothing to press here.
             </p>
           </div>
         </div>
       )}
 
       {/* ═══════════════ Setup, then the settings it implies ════════════════ */}
-      <div className="min-w-0 max-w-4xl space-y-5">
+      <div className="min-w-0 space-y-5">
         <Panel
           title="Paste into CleverTap"
           caption="Their provider screen, field for field, in the same order. The provider nickname is the number itself."
@@ -283,34 +306,34 @@ function PasswordRow({
   onRotate: () => void;
 }) {
   return (
-    <div className="flex items-start gap-3 border-l-2 border-warning/60 py-2 pl-2.5">
-      <div className="w-[168px] shrink-0 pt-0.5">
-        <p className="text-[11.5px] font-medium leading-tight">Password</p>
-      </div>
-      <div className="min-w-0 flex-1">
-        <p className="text-[12px] leading-relaxed text-muted-foreground">
-          Shown once, when it was issued.
-        </p>
-        <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
-          {connector.rotation ? (
-            <>
-              Rotating — the previous password stays valid until{" "}
-              <span className="font-medium text-foreground">{connector.rotation.until}</span>.
-            </>
-          ) : (
-            <>Rotate to issue a new one. The old one keeps working for {CT_DEFAULT_GRACE_DAYS} days.</>
-          )}
-        </p>
-      </div>
-      <Button
-        variant="outline"
-        size="sm"
-        className="h-6 shrink-0 gap-1 px-2 text-[10.5px]"
-        onClick={onRotate}
-      >
-        <RefreshCw className="h-2.5 w-2.5" /> Rotate
-      </Button>
-    </div>
+    <DetailRow
+      label="Password"
+      critical
+      action={
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-6 shrink-0 gap-1 px-2 text-[10.5px]"
+          onClick={onRotate}
+        >
+          <RefreshCw className="h-2.5 w-2.5" /> Rotate
+        </Button>
+      }
+    >
+      <p className="text-[12px] leading-relaxed text-muted-foreground">
+        Shown once, when it was issued.
+      </p>
+      <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
+        {connector.rotation ? (
+          <>
+            Rotating — the previous password stays valid until{" "}
+            <span className="font-medium text-foreground">{connector.rotation.until}</span>.
+          </>
+        ) : (
+          <>Rotate to issue a new one. The old one keeps working for {CT_DEFAULT_GRACE_DAYS} days.</>
+        )}
+      </p>
+    </DetailRow>
   );
 }
 

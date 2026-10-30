@@ -77,6 +77,16 @@ import {
   useSmsConnections,
   type SmsConnection,
 } from "@/lib/clevertap-sms";
+import {
+  addMoeConnection,
+  canCreateMoeConnection,
+  authorizationHeaderValue,
+  moeSendEndpoint,
+  newMoeConnectionId,
+  useMoeConnections,
+  MOE_CONTENT_TYPE,
+  type MoeConnection,
+} from "@/lib/moengage-sms";
 
 /** Computed once: what is built is a fact about the codebase, not about a merchant. */
 const LANES = liveLanes();
@@ -94,7 +104,8 @@ const channelsOn = (p: string) => LANES.filter((l) => l.platform === p).map((l) 
  */
 type Issued =
   | { lane: "whatsapp"; connector: CtConnector }
-  | { lane: "sms"; connection: SmsConnection };
+  | { lane: "sms"; connection: SmsConnection }
+  | { lane: "moengage"; connection: MoeConnection };
 
 export function AddCtConnectorDialog({
   open,
@@ -115,6 +126,25 @@ export function AddCtConnectorDialog({
   const [issued, setIssued] = useState<Issued | null>(null);
 
   const target = pushTarget(platformKey);
+
+  /**
+   * The lane, as the rest of this dialog branches on it.
+   *
+   * `channel` stopped being enough once a second vendor shipped SMS: CleverTap SMS and
+   * MoEngage SMS are both `channel: "sms"` and are issued completely differently — one
+   * takes a disjoint subset of headers, the other takes all of them by default and is
+   * limited to one per workspace.
+   */
+  const laneKind: "whatsapp" | "sms" | "moengage" =
+    platformKey === "moengage" ? "moengage" : channel === "sms" ? "sms" : "whatsapp";
+
+  /* FR-6: one connection per MoEngage workspace, because MoEngage requires a distinct
+     domain per service provider and we have one. */
+  /* Subscribed for its side effect, not its value: `canCreateMoeConnection` reads the
+     store directly, so without this the guard would not re-evaluate when a connection
+     is created or deleted while the dialog is open. */
+  useMoeConnections();
+  const moeAvailable = canCreateMoeConnection();
 
   /**
    * One connector per number, per FR-1 — two on one number would each hold a valid
@@ -169,6 +199,12 @@ export function AddCtConnectorDialog({
     setPlatformKey(p);
     const options = channelsOn(p);
     if (!options.includes(channel)) setChannel(options[0]);
+    /* FR-6 defaults a MoEngage connection to every registered header, because one
+       provider carries all of them as senders — the subset is the exception. The
+       CleverTap lane keeps its empty default, where a header belongs to one
+       connection and pre-ticking would scope a credential nobody chose. */
+    setPickedHeaders(p === "moengage" ? DLT_HEADERS.map((h) => h.header) : []);
+    setHeadersTouched(false);
   };
 
   const toggleHeader = (h: string) =>
@@ -214,6 +250,34 @@ export function AddCtConnectorDialog({
     setIssued({ lane: "sms", connection });
   };
 
+  /**
+   * Headers are not checked for exclusivity here, unlike the CleverTap lane.
+   *
+   * A DLT header is registered to the *merchant*, not to a connector, and the same
+   * business legitimately sends under PICOMM from both CleverTap and MoEngage. The
+   * CleverTap rule is about two CleverTap credentials shadowing each other on one
+   * header; it says nothing about a different platform.
+   */
+  const createMoe = () => {
+    setHeadersTouched(true);
+    if (pickedHeaders.length === 0) return;
+    const id = newMoeConnectionId();
+    const connection: MoeConnection = {
+      id,
+      createdAt: today(),
+      state: "draft",
+      enabled: true,
+      workspace: "acme-india",
+      headers: DLT_HEADERS.filter((h) => pickedHeaders.includes(h.header)).map((h) => h.header),
+      username: `${id}_pub`,
+      password: newPassword(),
+      heldCallbacks: 0,
+      deadLetteredCallbacks: 0,
+    };
+    addMoeConnection(connection);
+    setIssued({ lane: "moengage", connection });
+  };
+
   const finish = () => {
     const done = issued;
     onOpenChange(false);
@@ -221,6 +285,8 @@ export function AddCtConnectorDialog({
     if (!done) return;
     if (done.lane === "whatsapp") {
       navigate({ to: "/integrations/clevertap/$id", params: { id: done.connector.id } });
+    } else if (done.lane === "moengage") {
+      navigate({ to: "/integrations/moengage-sms/$id", params: { id: done.connection.id } });
     } else {
       navigate({ to: "/integrations/clevertap-sms/$id", params: { id: done.connection.id } });
     }
@@ -248,7 +314,9 @@ export function AddCtConnectorDialog({
               <DialogTitle className="text-[15px]">
                 {issued.lane === "whatsapp"
                   ? `Connector for ${formatWaba(issued.connector.wabaNumber)}`
-                  : `Connection for ${issued.connection.headers.join(", ")}`}
+                  : issued.lane === "moengage"
+                    ? `MoEngage SMS · ${issued.connection.workspace}`
+                    : `Connection for ${issued.connection.headers.join(", ")}`}
               </DialogTitle>
               <DialogDescription className="text-[12.5px]">
                 {issued.lane === "whatsapp" ? (
@@ -256,11 +324,17 @@ export function AddCtConnectorDialog({
                     Paste these into CleverTap's WhatsApp provider screen. The rest of the
                     values are on the connector page.
                   </>
+                ) : issued.lane === "moengage" ? (
+                  <>
+                    Paste these into MoEngage under Settings → Channels → SMS → Sender
+                    Configuration. The body rows and the field mapping — the parts that
+                    decide whether reporting works — are on the connection page.
+                  </>
                 ) : (
                   <>
-                    Paste these into CleverTap's SMS provider screen. The payload recipe —
-                    the part that decides whether reporting works — is on the connection
-                    page.
+                    Paste these into CleverTap's SMS provider screen, under Settings →
+                    Engage → Channels → SMS → Add Provider. The rest of the values are on
+                    the connection page.
                   </>
                 )}
               </DialogDescription>
@@ -270,11 +344,13 @@ export function AddCtConnectorDialog({
               <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
               <p className="text-[11.5px] leading-snug text-muted-foreground">
                 <span className="font-medium text-foreground">
-                  The password is shown only now.
+                  {issued.lane === "moengage"
+                    ? "The Authorization header is shown only now."
+                    : "The password is shown only now."}
                 </span>{" "}
-                Copy it before closing. If you lose it, rotate it — a rotation keeps the old
-                password working for a grace period, so nothing breaks while you update
-                CleverTap.
+                Copy it before closing. If you lose it, rotate it — a rotation keeps the
+                old credential working for a grace period, so nothing breaks while you
+                update {issued.lane === "moengage" ? "MoEngage" : "CleverTap"}.
               </p>
             </div>
 
@@ -287,6 +363,23 @@ export function AddCtConnectorDialog({
                   <CopyRow
                     label="Template import endpoint"
                     value={ctTemplatesEndpoint(issued.connector.id)}
+                  />
+                </>
+              ) : issued.lane === "moengage" ? (
+                <>
+                  <CopyRow label="API URL" value={moeSendEndpoint()} />
+                  {/* A finished header value, not a username and a password. MoEngage's
+                      provider form has no Basic Authentication field — credentials go in
+                      its Headers section — so splitting these would leave the client to
+                      base64 them by hand, and a bad encoding is a 401 on every send that
+                      MoEngage reports as a failed campaign. */}
+                  <CopyRow label="Header · Authorization" value={authorizationHeaderValue(issued.connection) ?? ""} critical />
+                  <CopyRow label="Header · Content-Type" value={MOE_CONTENT_TYPE} />
+                  <CopyRow
+                    label="Senders covered"
+                    value={issued.connection.headers.join(", ")}
+                    copyable={false}
+                    note="Each becomes one sender under this single provider. MoEngage allows one provider per domain, so a second provider is not an option."
                   />
                 </>
               ) : (
@@ -312,7 +405,9 @@ export function AddCtConnectorDialog({
                       description:
                         issued.lane === "whatsapp"
                           ? "Save the provider in CleverTap to validate it."
-                          : "Copy the payload recipe next — CleverTap's form needs it to report anything.",
+                          : issued.lane === "moengage"
+                            ? "The body rows and field mapping are next — MoEngage reports nothing without them."
+                            : "The remaining values are on the connection page.",
                     },
                   );
                   finish();
@@ -374,9 +469,9 @@ export function AddCtConnectorDialog({
                 being discovered as greyed-out rows nobody can pick. The index table is
                 where the full matrix lives. */}
             <p className="rounded-md border border-border bg-secondary/40 px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
-              Only lanes we carry today are listed. WebEngage and MoEngage are on the
-              roadmap and will each need their own setup — the Connections table shows
-              where every lane stands.
+              Only lanes we carry today are listed. MoEngage carries SMS but not WhatsApp —
+              its custom connectors are SMS-only — and WebEngage is on the roadmap. The
+              Connections table shows where every lane stands.
             </p>
 
             <DialogFooter>
@@ -395,10 +490,17 @@ export function AddCtConnectorDialog({
                 {target.name} · {DELIVERY_CHANNEL_LABEL[channel]}
               </DialogTitle>
               <DialogDescription className="text-[12.5px]">
-                {channel === "whatsapp" ? (
+                {laneKind === "whatsapp" ? (
                   <>
                     One per WhatsApp number. CleverTap names the provider after the number,
                     so a number is all this needs — everything else is generated.
+                  </>
+                ) : laneKind === "moengage" ? (
+                  <>
+                    Which sender headers this provider carries. Every one becomes a sender
+                    under the single Pi Commerce provider in MoEngage, so the default is all
+                    of them — narrow it only if this workspace should not be able to send
+                    under a header you hold.
                   </>
                 ) : (
                   <>
@@ -410,7 +512,62 @@ export function AddCtConnectorDialog({
               </DialogDescription>
             </DialogHeader>
 
-            {channel === "sms" ? (
+            {laneKind === "moengage" ? (
+              <div className="py-1">
+                {!moeAvailable ? (
+                  /* FR-6: one connection per workspace, stated as the rule rather than as
+                     a validation failure — MoEngage requires a distinct domain per service
+                     provider, and Pi Commerce has one, so a second is not something that
+                     could be made to work by trying again. */
+                  <p className="rounded-lg border border-dashed border-warning/30 bg-warning/5 px-3 py-3 text-[11.5px] leading-snug text-muted-foreground">
+                    <span className="font-medium text-warning">
+                      This workspace already has a MoEngage connection.
+                    </span>{" "}
+                    MoEngage requires a distinct domain per service provider and shares one
+                    Delivery Tracking URL across every sender on it, so a second Pi Commerce
+                    provider cannot exist alongside the first. To cover another header, add
+                    a sender to the existing connection instead.
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    <Label className="text-[12px]">Sender IDs (DLT headers)</Label>
+                    <div className="divide-y divide-border overflow-hidden rounded-lg border border-border">
+                      {DLT_HEADERS.map((h) => (
+                        <label
+                          key={h.header}
+                          className="flex cursor-pointer items-start gap-2.5 px-3 py-2.5 hover:bg-accent/30"
+                        >
+                          <Checkbox
+                            className="mt-0.5"
+                            checked={pickedHeaders.includes(h.header)}
+                            onCheckedChange={() => toggleHeader(h.header)}
+                          />
+                          <div className="min-w-0">
+                            <div className="font-mono text-[12px]">{h.header}</div>
+                            <div className="text-[11px] leading-snug text-muted-foreground">
+                              {h.use}
+                            </div>
+                          </div>
+                        </label>
+                      ))}
+                    </div>
+                    {headersTouched && pickedHeaders.length === 0 && (
+                      <p className="text-[11px] text-destructive">
+                        Pick at least one. A connection covering no header would reject every
+                        request it received.
+                      </p>
+                    )}
+                    {/* Unlike the CleverTap lane, nothing is greyed out: a DLT header
+                        belongs to the merchant rather than to a connector, and the same
+                        business legitimately sends under it from both platforms. */}
+                    <p className="text-[11px] leading-snug text-muted-foreground">
+                      A header already used by a CleverTap connection can still be used
+                      here — the registration belongs to you, not to a platform.
+                    </p>
+                  </div>
+                )}
+              </div>
+            ) : laneKind === "sms" ? (
               <div className="py-1">
                 {freeHeaders.length === 0 ? (
                   /* Same shape as the WhatsApp exhaustion notice, and the same reason:
@@ -527,8 +684,20 @@ export function AddCtConnectorDialog({
               <Button
                 size="sm"
                 className="h-8 gap-1.5 text-xs"
-                disabled={channel === "sms" ? freeHeaders.length === 0 : free.length === 0}
-                onClick={channel === "sms" ? createSms : createWhatsapp}
+                disabled={
+                  laneKind === "moengage"
+                    ? !moeAvailable
+                    : laneKind === "sms"
+                      ? freeHeaders.length === 0
+                      : free.length === 0
+                }
+                onClick={
+                  laneKind === "moengage"
+                    ? createMoe
+                    : laneKind === "sms"
+                      ? createSms
+                      : createWhatsapp
+                }
               >
                 Generate credentials <ArrowRight className="h-3.5 w-3.5" />
               </Button>

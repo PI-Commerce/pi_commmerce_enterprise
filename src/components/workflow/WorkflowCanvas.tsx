@@ -76,6 +76,8 @@ const DEFAULT_NODE_DATA: Record<NodeKind, Partial<WorkflowNodeData>> = {
   // `NodeKind` union; the campaign palette never offers them (see NodePalette).
   inboundTrigger: { valid: true, locked: true },
   agentSession: { subtitle: "Hand to an agent", valid: false, error: "Select agent" },
+  assignHuman: { subtitle: "Needs a person", valid: true },
+  webhook: { subtitle: "Call out and wait", valid: false, error: "Add a URL" },
 };
 
 let nodeCounter = 100;

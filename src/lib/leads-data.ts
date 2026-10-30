@@ -16,6 +16,10 @@
  */
 
 /** A run status snapshot for a Lead's participation in a campaign. */
+import { contactAt } from "./contact-pool";
+import { SEED_ENTRY_POINTS, generateSessions, operator, type Session, type SessionStatus, type EscalationStatus } from "./inbound";
+import { resolveAgent } from "./agent-data";
+
 export type CampaignRunStatus = "running" | "completed" | "paused" | "failed" | "terminated";
 
 /** A single association: this lead flowed through this campaign's run. */
@@ -68,15 +72,53 @@ export type WaTemplatePreview = {
 };
 
 /** A regular chat-style message (WhatsApp / SMS / RCS). */
-export type LeadChatMessage = {
+/**
+ * Where a message came from. Campaign messages are something we initiated over a
+ * known audience; inbound messages are one person's session against an always-on
+ * entry point. They share a thread in the Inbox but are never the same thing, so
+ * every message carries its origin and the Inbox demarcates the two.
+ */
+export type MessageOrigin = "campaign" | "inbound";
+
+/** Attribution carried by every message: the campaign run, or the entry-point
+ *  session, that produced it. Discriminated by `origin`. */
+export type CampaignSource = {
+  origin: "campaign";
+  campaignId: string;
+  campaignName: string;
+  runId: string;
+};
+export type InboundSource = {
+  origin: "inbound";
+  /** Entry point the arrival landed on — see `inbound.ts`. */
+  entryPointId: string;
+  entryPointName: string;
+  /** The session this message belongs to (`s-voic-1030`, `s-wa_m-1073`, …). */
+  sessionId: string;
+  /** Agent that handled the session, when one did. */
+  agentName?: string;
+  /**
+   * The session's working state, carried onto the message so the Inbox can show it.
+   *
+   * These three live on `Session` in `inbound.ts`, and until they were copied here the
+   * Inbox could say which entry point a thread came from but not whether it was open,
+   * who held it, or what it was about — the three questions an inbox exists to answer.
+   */
+  status: SessionStatus;
+  /** Whether the agent marked this session for a person. */
+  escalation: EscalationStatus;
+  /** The agent's own word for how it ended. */
+  disposition?: string;
+  assigneeName?: string;
+};
+export type MessageSource = CampaignSource | InboundSource;
+
+export type LeadChatMessage = MessageSource & {
   id: string;
   channel: "wa" | "sms" | "rcs";
   direction: "in" | "out";
   at: string;                    // ISO
   body: string;
-  campaignId: string;
-  campaignName: string;
-  runId: string;
   /** Optional CTA label — renders as an inline chip on outbound messages. */
   linkLabel?: string;
   /** DLR state — outbound only. Inbound messages leave this unset. */
@@ -90,7 +132,7 @@ export type LeadChatMessage = {
 };
 
 /** A completed voice call with its inline transcript. */
-export type LeadVoiceCall = {
+export type LeadVoiceCall = MessageSource & {
   id: string;
   channel: "voice";
   kind: "call";
@@ -101,21 +143,17 @@ export type LeadVoiceCall = {
   agentName?: string;
   outcome: "completed" | "no_answer" | "busy" | "failed";
   transcript: { role: "agent" | "customer"; text: string; at: string }[];
-  campaignId: string;
-  campaignName: string;
-  runId: string;
+  /** Inbound only — outcome variables the handling agent extracted. */
+  sessionOutcome?: Record<string, string>;
 };
 
 /** A missed dial attempt — no transcript. Rendered as a thin system row. */
-export type LeadVoiceAttempt = {
+export type LeadVoiceAttempt = MessageSource & {
   id: string;
   channel: "voice";
   kind: "attempt";
   at: string;                    // ISO
   reason: "no_answer" | "busy" | "failed";
-  campaignId: string;
-  campaignName: string;
-  runId: string;
 };
 
 export type LeadMessage = LeadChatMessage | LeadVoiceCall | LeadVoiceAttempt;
@@ -133,6 +171,26 @@ export type LeadRecord = {
   humanEscalated: boolean;
   campaigns: LeadCampaignEntry[];
   messages: LeadMessage[];
+  /**
+   * Current inbound state, rolled up for the list rail.
+   *
+   * A lead can hold several sessions; the rail has room for one answer, and the one
+   * that matters is the newest — "is this person waiting on us right now". The open
+   * count rides along because one open thread among five closed ones is a different
+   * situation from one open thread outright.
+   */
+  inbound?: {
+    status: SessionStatus;
+    /** The session these facts describe — what an Inbox edit addresses. */
+    sessionId: string;
+    /** As the agent left it. An operator's change lives in `inbox-store`. */
+    escalation: EscalationStatus;
+    /** How the agent said it ended, when one handled it. */
+    disposition?: string;
+    assigneeId?: string;
+    assigneeName?: string;
+    openCount: number;
+  };
 };
 
 /* -------------------------------------------------------------------------- *
@@ -165,7 +223,14 @@ export function formatDateTime(iso: string): string {
  *  {@link formatDateTime} for hover titles. */
 export function relTime(iso: string): string {
   const days = Math.floor((Date.now() - Date.parse(iso)) / 86_400_000);
-  if (days <= 0) return "today";
+  /* Today gets a clock time, not the word "today". In a list sorted by recency the
+     top rows are all from today by definition, so the word distinguishes nothing —
+     the hour is the only part carrying information at that range. */
+  if (days <= 0) {
+    return new Date(iso).toLocaleTimeString("en-IN", {
+      hour: "numeric", minute: "2-digit", hour12: true,
+    });
+  }
   if (days === 1) return "1 day ago";
   if (days < 30) return `${days} days ago`;
   const months = Math.floor(days / 30);
@@ -209,18 +274,6 @@ export function scopeHasHitl(campaignIds: Iterable<string>): boolean {
 
 const HITL_CAMPAIGN_IDS = new Set(CAMPAIGN_CATALOG.filter((c) => c.hasHitl).map((c) => c.id));
 
-const FIRST_NAMES = [
-  "Aarav", "Vihaan", "Aditya", "Arjun", "Kabir", "Sai", "Ishaan", "Reyansh",
-  "Ananya", "Aadhya", "Diya", "Ira", "Kavya", "Meera", "Riya", "Sara",
-  "Rohan", "Neha", "Priya", "Rahul", "Sneha", "Vikram", "Anjali", "Karan",
-  "Nisha", "Pooja", "Ravi", "Shreya", "Tanya", "Yash", "Zara", "Aman",
-  "Divya", "Farhan", "Gauri", "Harsh", "Ishita", "Jai", "Kiran", "Lakshmi",
-];
-const LAST_NAMES = [
-  "Sharma", "Verma", "Gupta", "Iyer", "Nair", "Menon", "Reddy", "Rao",
-  "Patel", "Shah", "Mehta", "Kapoor", "Malhotra", "Chopra", "Bhat",
-  "Rangan", "Krishnan", "Bhargava", "Singhal", "Agarwal",
-];
 
 /* -------------------------------------------------------------------------- *
  *  Deterministic PRNG so the seed stays stable across renders
@@ -247,11 +300,6 @@ function isoDaysAgo(days: number, hour = 10, minute = 30): string {
   return d.toISOString();
 }
 
-function fakePhone(rng: () => number): string {
-  const rest = String(Math.floor(rng() * 1_000_000_000)).padStart(9, "0");
-  const first = String(6 + Math.floor(rng() * 4)); // 6/7/8/9
-  return `+91 ${first}${rest.slice(0, 4)} ${rest.slice(4, 8)}`;
-}
 
 /* -------------------------------------------------------------------------- *
  *  Message builders — one per channel
@@ -435,6 +483,7 @@ function buildMessages(
       template: waTemplate,
       deliveryStatus: waDlr.status,
       failureReason: waDlr.reason,
+      origin: "campaign",
       campaignId: c.campaignId,
       campaignName: c.campaignName,
       runId: c.runId,
@@ -453,6 +502,7 @@ function buildMessages(
         at: new Date(enteredMs + replyDelayMin * 60_000).toISOString(),
         body: asButtonTap ? buttonLabel! : inboundReplyFor(c.campaignName, rng),
         buttonReply: asButtonTap ? { buttonLabel: buttonLabel! } : undefined,
+        origin: "campaign",
         campaignId: c.campaignId,
         campaignName: c.campaignName,
         runId: c.runId,
@@ -469,6 +519,7 @@ function buildMessages(
         body: smsBodyFor(c.campaignName, firstName),
         deliveryStatus: smsDlr.status,
         failureReason: smsDlr.reason,
+        origin: "campaign",
         campaignId: c.campaignId,
         campaignName: c.campaignName,
         runId: c.runId,
@@ -485,6 +536,7 @@ function buildMessages(
         body: rcsBodyFor(c.campaignName, firstName),
         deliveryStatus: rcsDlr.status,
         failureReason: rcsDlr.reason,
+        origin: "campaign",
         campaignId: c.campaignId,
         campaignName: c.campaignName,
         runId: c.runId,
@@ -502,6 +554,7 @@ function buildMessages(
           kind: "attempt",
           at: new Date(firstDial).toISOString(),
           reason: missedRoll < 0.2 ? "no_answer" : "busy",
+          origin: "campaign",
           campaignId: c.campaignId,
           campaignName: c.campaignName,
           runId: c.runId,
@@ -516,6 +569,7 @@ function buildMessages(
           agentName: "Reactivation Voice",
           outcome: "completed",
           transcript: buildTranscript(c.campaignName, firstName, rng),
+          origin: "campaign",
           campaignId: c.campaignId,
           campaignName: c.campaignName,
           runId: c.runId,
@@ -532,6 +586,7 @@ function buildMessages(
           agentName: "Reactivation Voice",
           outcome: "completed",
           transcript: buildTranscript(c.campaignName, firstName, rng),
+          origin: "campaign",
           campaignId: c.campaignId,
           campaignName: c.campaignName,
           runId: c.runId,
@@ -576,29 +631,173 @@ function buildCampaignsFor(rng: () => number, createdDaysAgo: number): LeadCampa
   return entries.sort((a, b) => Date.parse(b.enteredAt) - Date.parse(a.enteredAt));
 }
 
+/* -------------------------------------------------------------------------- *
+ *  Inbound sessions → Inbox messages
+ *
+ *  A session is one person's conversation against an always-on entry point. The
+ *  Inbox is where conversations are read, so a session's turns belong here as
+ *  ordinary messages — tagged `origin: "inbound"` so the thread can demarcate
+ *  them from campaign sends, which we initiated rather than answered.
+ *
+ *  Sessions whose stage never produced a conversation (`unrouted`) are skipped:
+ *  nothing was said, so there is nothing to read.
+ * -------------------------------------------------------------------------- */
+
+/** Every seeded session, bucketed by the lead it belongs to. Computed once. */
+const SESSIONS_BY_LEAD: Map<string, Session[]> = (() => {
+  const map = new Map<string, Session[]>();
+  for (const ep of SEED_ENTRY_POINTS) {
+    // A slice of each entry point's pool keeps the Inbox readable — the full 240
+    // sessions per entry point would bury the campaign threads.
+    for (const sess of generateSessions(ep).slice(0, 40)) {
+      /* Never reached an agent, so there is no conversation to show in a thread. */
+      if (sess.stage === "not_handled") continue;
+      const list = map.get(sess.leadId);
+      if (list) list.push(sess);
+      else map.set(sess.leadId, [sess]);
+    }
+  }
+  return map;
+})();
+
+const EP_NAME = new Map(SEED_ENTRY_POINTS.map((e) => [e.id, e.name] as const));
+
+/** Agent display name for a session's handler, when one handled it. */
+function agentNameFor(id?: string): string | undefined {
+  return id ? resolveAgent(id)?.name : undefined;
+}
+
+/** Session turns → Inbox messages. Voice sessions collapse into one call card
+ *  (the transcript is the call); chat sessions expand to one bubble per turn. */
+function inboundMessagesFor(leadId: string): LeadMessage[] {
+  const sessions = SESSIONS_BY_LEAD.get(leadId) ?? [];
+  const out: LeadMessage[] = [];
+
+  for (const sess of sessions) {
+    const source: InboundSource = {
+      origin: "inbound",
+      entryPointId: sess.entryPointId,
+      entryPointName: EP_NAME.get(sess.entryPointId) ?? sess.entryPointId,
+      sessionId: sess.id,
+      agentName: agentNameFor(sess.agentId),
+      status: sess.status,
+      escalation: sess.escalation,
+      disposition: sess.disposition,
+      assigneeName: operator(sess.assigneeId)?.name,
+    };
+    const startMs = Date.parse(sess.startedAt);
+
+    if (sess.channel === "voice") {
+      out.push({
+        ...source,
+        id: `${sess.id}-call`,
+        channel: "voice",
+        kind: "call",
+        at: sess.startedAt,
+        duration: Math.round((sess.durationMs ?? 0) / 1000),
+        agentId: sess.agentId,
+        agentName: source.agentName,
+        outcome: sess.turnCount <= 1 ? "no_answer" : "completed",
+        // System turns are routing narration, not speech — they belong to the
+        // session's diagnostics, not to a transcript a human reads.
+        transcript: sess.transcript
+          .filter((t) => t.role !== "system")
+          .map((t) => ({
+            role: t.role as "agent" | "customer",
+            text: t.text,
+            at: new Date(startMs + t.at * 1000).toISOString(),
+          })),
+        sessionOutcome: Object.keys(sess.outcome).length ? sess.outcome : undefined,
+      });
+      continue;
+    }
+
+    for (const [n, turn] of sess.transcript.entries()) {
+      if (turn.role === "system") continue;
+      out.push({
+        ...source,
+        id: `${sess.id}-t${n}`,
+        channel: "wa",
+        direction: turn.role === "customer" ? "in" : "out",
+        at: new Date(startMs + turn.at * 1000).toISOString(),
+        body: turn.text,
+        // Inbound replies are session traffic, not a broadcast: there is no DLR
+        // to report, so the bubble renders without a delivery footer.
+        deliveryStatus: undefined,
+      });
+    }
+  }
+  return out;
+}
+
 function buildLead(i: number): LeadRecord {
   const rng = mulberry32(i + 91);
-  const firstName = pick(rng, FIRST_NAMES);
-  const lastName = pick(rng, LAST_NAMES);
+  // Identity comes from the shared pool, not a local name/phone roll: inbound
+  // sessions seed from the same pool, and `phone` is what joins them to a lead.
+  const contact = contactAt(i);
+  const [firstName, ...restName] = contact.name.split(" ");
+  const lastName = restName.join(" ");
   const createdDaysAgo = 5 + Math.floor(rng() * 300);
   const createdAt = isoDaysAgo(createdDaysAgo, 10, Math.floor(rng() * 59));
   const campaigns = buildCampaignsFor(rng, createdDaysAgo);
   const lastCampaign = campaigns[0];
   const lastInteractionAt = lastCampaign?.enteredAt ?? createdAt;
   const lastUpdatedAt = lastCampaign?.exitedAt ?? lastInteractionAt;
-  const messages = buildMessages(campaigns, firstName, rng);
+  const leadId = `l_${String(1000 + i)}`;
+  const mySessions = (SESSIONS_BY_LEAD.get(leadId) ?? [])
+    .slice()
+    .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+  /* The headline status is the most *actionable* one, not the newest.
+     Newest produced rows reading "Solved · 3 open", which is both true and useless:
+     an operator scanning the rail is asking "does this person need me", and the one
+     solved thread that happens to be most recent is not the answer. Open outranks
+     Pending outranks everything closed; the assignee and tags come from whichever
+     session set that status, so the three facts describe one thread. */
+  /* An escalation outranks an open thread. Open means a conversation is live;
+     "needs a human" means the agent has already decided it cannot finish this
+     one, which is the only row in the rail that is waiting on a person rather
+     than on time. */
+  const lead0 =
+    mySessions.find((x) => x.escalation === "needed") ??
+    mySessions.find((x) => x.status === "open") ??
+    mySessions.find((x) => x.status === "pending") ??
+    mySessions[0];
+  const openCount = mySessions.filter(
+    (x) => x.status === "open" || x.status === "pending",
+  ).length;
+  const inbound = lead0
+    ? {
+        status: lead0.status,
+        sessionId: lead0.id,
+        escalation: lead0.escalation,
+        disposition: lead0.disposition,
+        assigneeId: lead0.assigneeId,
+        assigneeName: operator(lead0.assigneeId)?.name,
+        openCount,
+      }
+    : undefined;
+  const campaignMessages = buildMessages(campaigns, firstName, rng);
+  const inboundMessages = inboundMessagesFor(leadId);
+  const messages = [...campaignMessages, ...inboundMessages].sort(
+    (a, b) => Date.parse(a.at) - Date.parse(b.at),
+  );
+  // An inbound session can be the most recent thing that happened to a lead.
+  const lastAt = messages.length
+    ? messages[messages.length - 1].at
+    : lastInteractionAt;
   return {
-    id: `l_${String(1000 + i)}`,
+    id: leadId,
     customerId: `cust_${String(100000 + i * 37)}`,
-    name: `${firstName} ${lastName}`,
-    phone: fakePhone(rng),
+    name: contact.name,
+    phone: contact.phone,
     email: `${firstName.toLowerCase()}.${lastName.toLowerCase()}${i}@example.com`,
     createdAt,
-    lastUpdatedAt,
-    lastInteractionAt,
+    lastUpdatedAt: lastAt > lastUpdatedAt ? lastAt : lastUpdatedAt,
+    lastInteractionAt: lastAt > lastInteractionAt ? lastAt : lastInteractionAt,
     humanEscalated: campaigns.some((c) => c.humanEscalated),
     campaigns,
     messages,
+    inbound,
   };
 }
 

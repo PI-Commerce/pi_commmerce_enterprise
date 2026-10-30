@@ -4,27 +4,17 @@
  * A sibling of `clevertap.ts` and deliberately not a variant of it, because Generic
  * SMS inverts Generic WhatsApp on the one point that decides the whole surface.
  *
- * Under Generic WhatsApp CleverTap defines the payload and we conform to it, so our
- * page holds nine fixed values to be retyped. Under Generic SMS *the client* defines
- * the payload: CleverTap's provider form asks for our endpoint, our credentials, and
- * then a payload template into which it substitutes a small set of replacement
- * tokens. It sends whatever the client typed. So the highest-leverage thing this
- * screen can produce is not a list of values — it is one recipe, correct by
- * construction, pasted whole.
+ * This file briefly modelled a payload recipe — a JSON block the client pastes into a
+ * Parameters field on CleverTap's provider form. That form has no Parameters field:
+ * it takes a nickname, a callback URL it generates, a request type, an HTTP endpoint,
+ * and Authentication and Headers tabs. The recipe, its validator and the batching
+ * constants went with the panel that showed them.
  *
- * Three consequences run through everything below.
- *
- * Only six tokens can vary per recipient — $$To, $$Body, $$TemplateID,
- * $$TemplateVariables, $$CampaignID and $$MessageID. Anything else our API needs is
- * a static value in the client's configuration, which is why the sender header is
- * baked into the recipe rather than being a request field — and why one recipe
- * serves exactly one header.
- *
- * $$MessageID is the whole of delivery reporting. CleverTap substitutes an opaque
- * string and we must return it verbatim on every callback. Omit it and the
- * integration sends perfectly and reports nothing — a campaign showing zero
+ * $$MessageID is still the whole of delivery reporting. CleverTap substitutes an
+ * opaque string and we must return it verbatim on every callback. If it never arrives,
+ * the integration sends perfectly and reports nothing — a campaign showing zero
  * delivered against a full send. That failure is silent on both sides, which is why
- * {@link reportingHealth} exists and why the recipe editor refuses to let it go.
+ * {@link reportingHealth} exists.
  *
  * There is no Validated state. Generic SMS defines no validation call, so nothing on
  * either side could ever move a connection there — unlike the WhatsApp connector,
@@ -44,8 +34,8 @@ export const SMS_STATE_LABEL: Record<SmsState, string> = {
 };
 
 export const SMS_STATE_INFO: Record<SmsState, string> = {
-  draft: "Created here, but no message has come through it.",
-  live: "At least one real message has been processed.",
+  draft: "Able to accept traffic. No message has come through yet.",
+  live: "Configured and sending.",
 };
 
 export const SMS_STATE_TONE: Record<SmsState, string> = {
@@ -129,14 +119,11 @@ export type SmsConnection = {
    *
    * Counted rather than derived from a flag because the interesting state is
    * partial: a client running two CleverTap providers against one connection can
-   * have $$MessageID in one recipe and not the other, and a boolean would report
-   * that as fine.
+   * have $$MessageID mapped on one provider and not the other, and a boolean would
+   * report that as fine.
    */
   messagesSeen: number;
   messagesWithMessageId: number;
-
-  /** Set only if the user edited the recipe. Absent means "whatever we generate". */
-  recipeOverride?: string;
 };
 
 export const SMS_DEFAULT_GRACE_DAYS = 7;
@@ -157,131 +144,7 @@ export function smsSendEndpoint(): string {
   return `${CT_HOST}/v1/messages/sms/send`;
 }
 
-/* ───────────────────────────────── Batching ─────────────────────────────────── */
 
-/**
- * The array key in the recipe. It is a value the client types into CleverTap's own
- * form — batch key name — so it has to be stated, not implied.
- *
- * Batching is settled entirely on that form and nowhere here: name this key and
- * CleverTap packs up to {@link SMS_BATCH_MAX} recipients into one request; leave it
- * blank and it sends the same block once per recipient. The recipe is identical
- * either way, because the send API takes a `recipients` array in both cases and a
- * batch of one is a valid batch.
- *
- * There was briefly a control on the panel offering the two modes. It produced no
- * difference in anything we emit — the only lever is a field on CleverTap's form we
- * cannot render — so it was removed rather than left implying otherwise. An earlier
- * version went further and varied the JSON, flattening the array away for the
- * non-batched case as the PRD sketches; that produced a body with no `recipients`
- * key, which the send API rejects. Do not reintroduce either on the strength of the
- * two modes sounding like they ought to differ here.
- */
-export const SMS_BATCH_KEY = "recipients";
-
-/**
- * Records per batch, and the one number in this file with a documented conflict
- * behind it.
- *
- * CleverTap's provider setup page says a single batch can hold 1,000 records; a
- * sample elsewhere in the same Generic SMS documentation says 100. Both cannot be
- * right. Our endpoint caps at 100 and rejects anything larger with an error naming
- * the limit, which is the safe side of the disagreement: a client configured at 100
- * works whichever figure is correct, and one configured at 1,000 against a 100 cap
- * loses 900 records per request with no error if we truncate instead of refusing.
- *
- * The ceiling is carried alongside because a client reading 100 here and 1,000 on
- * CleverTap's screen needs to know which one binds, and the answer is ours.
- */
-export const SMS_BATCH_MAX = 100;
-export const CT_BATCH_CEILING = 1000;
-
-/* ────────────────────────────────── Recipe ──────────────────────────────────── */
-
-/**
- * The whole product of this integration, in one string.
- *
- * Every client-specific value is filled in — the sender header, nothing left as
- * `<your sender id>` — because a recipe with a placeholder in it is a recipe that
- * gets pasted with the placeholder still in it. The tokens that remain are the ones
- * CleverTap substitutes at send time, and those are meant to survive the paste
- * literally.
- *
- * The keys are the send API's and not ours to choose: `template_id`, `sender_id`,
- * `recipients[].to`. Two of them are asks on that API rather than fields it takes
- * today — `recipients[].message_id`, without which delivery reporting cannot exist at
- * all, and `campaign_id`, which is the only link back from a CleverTap campaign to
- * the run it produces. Both are in the block anyway, because a recipe that omits them
- * is a recipe that has to be repasted later, and repasting is the step clients skip.
- *
- * `variables` holds a token where a direct caller would put an object of named values.
- * CleverTap has one opaque $$TemplateVariables and no way to emit our key names, so
- * the API resolves the names from `template_id` against the DLT mirror. That is why
- * this file models no templates: the mapping belongs where the registry already is.
- *
- * There is no `body` key. The API has no field for a pre-rendered message, so $$Body
- * has nowhere to go — tracked in `docs/clevertap-sms-api-asks.md` rather than papered
- * over with a field the endpoint would ignore.
- */
-export function smsRecipe(opts: { header: string }): string {
-  const envelope = {
-    template_id: "$$TemplateID",
-    sender_id: opts.header,
-    campaign_id: "$$CampaignID",
-  };
-  const record = {
-    to: "$$To",
-    message_id: "$$MessageID",
-    variables: "$$TemplateVariables",
-  };
-
-  return JSON.stringify({ ...envelope, [SMS_BATCH_KEY]: [record] }, null, 2);
-}
-
-/**
- * What is wrong with an edited recipe, in the client's terms.
- *
- * CleverTap's form accepts an invalid recipe without complaint and fails at send
- * time, so this is the last point at which the mistake is cheap. Each message names
- * the missing token *and* what happens without it, because not every one of these
- * failures looks like a failure — a recipe missing $$MessageID sends perfectly and
- * reports nothing, which is the case a client would never think to check.
- *
- * Checked against the raw text rather than the parsed object on purpose. A token can
- * legitimately sit inside a string, as part of one, or as a key's value at any depth,
- * and walking the tree to find it would reject shapes that work. `sender_id` is the
- * one exception and is matched with its key, because unlike the tokens it is an
- * ordinary string that could plausibly appear anywhere.
- */
-export function recipeError(raw: string): string | null {
-  const v = raw.trim();
-  if (!v) return "There is nothing here. CleverTap needs a payload structure to send.";
-
-  try {
-    JSON.parse(v);
-  } catch {
-    return "This is not valid JSON. CleverTap's form will save it anyway and every send will fail.";
-  }
-
-  if (!v.includes("$$To")) {
-    return "$$To is missing. CleverTap has nowhere to put the recipient's number, so nothing will reach anyone.";
-  }
-  if (!v.includes("$$MessageID")) {
-    return "$$MessageID is missing. Messages will send and deliver, and CleverTap's report will show zero of everything — permanently.";
-  }
-  if (!v.includes("$$TemplateID")) {
-    return "$$TemplateID is missing. Indian traffic has to name a registered DLT template, so every send would be rejected at the operator.";
-  }
-  if (!/"sender_id"\s*:\s*"[A-Z0-9]{3,11}"/.test(v)) {
-    return "sender_id is missing or is not a header. CleverTap has no token for it — it is a static value in this block — so a recipe without one sends from nothing.";
-  }
-  return null;
-}
-
-/** The recipe as it stands: the client's edit if there is one, ours otherwise. */
-export function effectiveRecipe(c: SmsConnection, opts: { header: string }): string {
-  return c.recipeOverride ?? smsRecipe({ header: opts.header });
-}
 
 /* ─────────────────────────── Reporting health (FR-7) ────────────────────────── */
 

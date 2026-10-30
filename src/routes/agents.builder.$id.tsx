@@ -37,6 +37,15 @@ function AgentBuilderRoute() {
       type: type ?? "chat",
       status: "draft",
       tools: [],
+      /* A blank agent has no dispositions yet; an entry point that routes to it
+         has nothing to escalate on until somebody names them. */
+      dispositions: [],
+      /* Name and phone are what every agent needs to open a conversation at
+         all, so a blank one starts with them rather than with nothing. */
+      attributes: [
+        { id: "at1", name: "name", type: "String", required: true },
+        { id: "at2", name: "phone", type: "String", required: true },
+      ],
       masterPrompt: "",
       knowledgeBase: "",
       postCall: [],

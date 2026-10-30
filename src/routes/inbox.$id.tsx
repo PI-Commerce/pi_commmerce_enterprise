@@ -24,14 +24,14 @@ import { cn } from "@/lib/utils";
 import {
   LEAD_RECORDS, formatIso, formatDate, formatDateTime,
   type LeadRecord, type CampaignRunStatus, type LeadMessage, type LeadChatMessage, type LeadVoiceCall, type LeadVoiceAttempt, type LeadChannel,
-  type MessageDeliveryStatus, type WaTemplatePreview,
+  type MessageDeliveryStatus, type WaTemplatePreview, type MessageOrigin,
 } from "@/lib/leads-data";
 import {
   ArrowLeft, User, Phone, Mail, Calendar,
   Check, CheckCheck, CircleAlert, CircleDashed, CircleDot,
   ExternalLink, FileText, Reply, Sparkles, Video,
   MessageCircle, MessageSquare, MessageSquareText,
-  Megaphone, Flag, ChevronDown, ChevronRight, PhoneMissed, PhoneCall,
+  Megaphone, Flag, ChevronDown, ChevronRight, PhoneMissed, PhoneCall, ArrowDownLeft,
 } from "lucide-react";
 
 export const Route = createFileRoute("/inbox/$id")({
@@ -267,17 +267,29 @@ function ConversationsTab({ lead }: { lead: LeadRecord }) {
   const active = byChannel[channel];
   const filtered = useMemo(() => {
     return active.filter((m) => {
-      if (campaignFilter !== "all" && m.campaignId !== campaignFilter) return false;
+      // "inbound" is a pseudo-campaign in this dropdown: it selects everything
+      // that arrived through an entry point rather than any one campaign run.
+      if (campaignFilter === "inbound") {
+        if (m.origin !== "inbound") return false;
+      } else if (campaignFilter !== "all") {
+        if (m.origin !== "campaign" || m.campaignId !== campaignFilter) return false;
+      }
       if (!withinWin(m.at, dateWin)) return false;
       return true;
     });
   }, [active, campaignFilter, dateWin]);
 
-  // Campaign dropdown lists only campaigns that ever touched this channel.
+  // Source dropdown: the campaigns that ever touched this channel, plus a
+  // single Inbound entry when any session on this channel produced messages.
   const channelCampaigns = useMemo(() => {
     const seen = new Map<string, string>();
-    for (const m of active) if (!seen.has(m.campaignId)) seen.set(m.campaignId, m.campaignName);
-    return Array.from(seen.entries()).map(([id, name]) => ({ id, name }));
+    let hasInbound = false;
+    for (const m of active) {
+      if (m.origin === "inbound") { hasInbound = true; continue; }
+      if (!seen.has(m.campaignId)) seen.set(m.campaignId, m.campaignName);
+    }
+    const out = Array.from(seen.entries()).map(([id, name]) => ({ id, name }));
+    return hasInbound ? [{ id: "inbound", name: "Inbound sessions" }, ...out] : out;
   }, [active]);
 
   return (
@@ -405,7 +417,7 @@ function ChannelBody({
     <div className="max-h-[640px] space-y-4 overflow-y-auto px-4 py-4 lg:px-8">
       {runs.map((r) => (
         <div key={r.key} className="space-y-2">
-          <RunDivider label={r.label} />
+          <RunDivider label={r.label} origin={r.origin} sessionId={r.sessionId} />
           <div className="space-y-2">
             {r.items.map((m) => {
               if (m.channel === "voice") {
@@ -421,42 +433,75 @@ function ChannelBody({
   );
 }
 
-function groupByRun(messages: LeadMessage[]): { key: string; label: string; items: LeadMessage[] }[] {
-  const buckets = new Map<string, { label: string; items: LeadMessage[]; firstAt: number }>();
+type Thread = {
+  key: string;
+  label: string;
+  origin: MessageOrigin;
+  sessionId?: string;
+  items: LeadMessage[];
+};
+
+/** One thread per campaign run and per inbound session — never a mix, so the
+ *  divider can state which of the two an exchange was. */
+function groupByRun(messages: LeadMessage[]): Thread[] {
+  const buckets = new Map<string, Omit<Thread, "key"> & { firstAt: number }>();
   for (const m of messages) {
-    const key = `${m.campaignId}::${m.runId}`;
+    const key =
+      m.origin === "inbound"
+        ? `inbound::${m.sessionId}`
+        : `campaign::${m.campaignId}::${m.runId}`;
     const existing = buckets.get(key);
     if (existing) {
       existing.items.push(m);
       existing.firstAt = Math.min(existing.firstAt, Date.parse(m.at));
     } else {
-      const runName = anyRunName(m);
       buckets.set(key, {
-        label: `${m.campaignName} · ${runName}`,
+        label: m.origin === "inbound" ? m.entryPointName : `${m.campaignName} · ${anyRunName(m)}`,
+        origin: m.origin,
+        sessionId: m.origin === "inbound" ? m.sessionId : undefined,
         items: [m],
         firstAt: Date.parse(m.at),
       });
     }
   }
   return Array.from(buckets.entries())
-    .map(([key, v]) => ({ key, label: v.label, items: v.items, firstAt: v.firstAt }))
+    .map(([key, v]) => ({ key, ...v }))
     .sort((a, b) => a.firstAt - b.firstAt)
-    .map(({ key, label, items }) => ({ key, label, items }));
+    .map(({ firstAt: _f, ...rest }) => rest);
 }
 
-function anyRunName(m: LeadMessage): string {
-  // The unified message shape carries campaignName but not runName — we
-  // recover a short label from the runId for the divider.
+/** Short run label recovered from the runId — messages carry no run name. */
+function anyRunName(m: Extract<LeadMessage, { origin: "campaign" }>): string {
   const runId = m.runId;
   return runId.startsWith("r_") ? `Run ${runId.slice(2)}` : runId;
 }
 
-function RunDivider({ label }: { label: string }) {
+/** Campaign threads keep the muted rule; inbound threads take the accent rule
+ *  and an inward arrow, so origin is legible without reading the label. */
+function RunDivider({
+  label, origin, sessionId,
+}: {
+  label: string;
+  origin: MessageOrigin;
+  sessionId?: string;
+}) {
+  const inbound = origin === "inbound";
   return (
-    <div className="flex items-center gap-2 px-1 py-1 text-[10.5px] uppercase tracking-wider text-muted-foreground">
-      <span className="h-px flex-1 bg-border" />
-      <span>{label}</span>
-      <span className="h-px flex-1 bg-border" />
+    <div
+      className={cn(
+        "flex items-center gap-2 px-1 py-1 text-[10.5px] uppercase tracking-wider",
+        inbound ? "text-ai" : "text-muted-foreground",
+      )}
+    >
+      <span className={cn("h-px flex-1", inbound ? "bg-ai/30" : "bg-border")} />
+      <span className="flex items-center gap-1.5">
+        {inbound ? <ArrowDownLeft className="h-3 w-3" /> : <Megaphone className="h-3 w-3" />}
+        <span>{inbound ? `Inbound · ${label}` : label}</span>
+        {sessionId && (
+          <span className="font-mono text-[10px] normal-case text-ai/70">{sessionId}</span>
+        )}
+      </span>
+      <span className={cn("h-px flex-1", inbound ? "bg-ai/30" : "bg-border")} />
     </div>
   );
 }
@@ -743,7 +788,7 @@ function IdCell({ label, value }: { label: string; value: string }) {
 function buildVoiceInsights(call: LeadVoiceCall): { label: string; value: string }[] {
   const rng = seedFromId(call.id);
   const p = (arr: string[]) => arr[Math.floor(rng() * arr.length)];
-  const campaign = call.campaignName.toLowerCase();
+  const campaign = call.origin === "campaign" ? call.campaignName.toLowerCase() : "inbound";
   const dispositions = campaign.includes("handoff")
     ? ["Resolved", "Escalated", "Follow-up"]
     : campaign.includes("winback") || campaign.includes("cart") || campaign.includes("activation")
@@ -760,7 +805,7 @@ function buildVoiceInsights(call: LeadVoiceCall): { label: string; value: string
 function buildVoiceSummary(call: LeadVoiceCall): string {
   const rng = seedFromId(call.id + "-summary");
   const p = (arr: string[]) => arr[Math.floor(rng() * arr.length)];
-  const campaign = call.campaignName.toLowerCase();
+  const campaign = call.origin === "campaign" ? call.campaignName.toLowerCase() : "inbound";
   if (campaign.includes("cart")) return p([
     "Customer confirmed intent to complete the pending cart but wanted a discount before checkout.",
     "Agent shared the 10% coupon and walked through checkout; customer will finish tonight.",

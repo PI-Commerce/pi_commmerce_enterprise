@@ -2,7 +2,7 @@ import { useState } from "react";
 import {
   Users, GitBranch, Split, Phone, MessageCircle,
   MessageSquare, MessageSquareText, Clock, Megaphone, Plus, X, Webhook,
-  Headset, Sparkles, Flag, Workflow, Square,
+  Headset, Sparkles, Flag, Workflow, Square, UserPlus, Wrench,
   type LucideIcon,
 } from "lucide-react";
 import type { NodeKind } from "@/lib/campaign-types";
@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 
 const ICONS: Partial<Record<NodeKind, LucideIcon>> = {
   audience: Users,
-  apiToolCall: Webhook,
+  apiToolCall: Wrench,
   conditional: GitBranch,
   abSplit: Split,
   delay: Clock,
@@ -21,6 +21,8 @@ const ICONS: Partial<Record<NodeKind, LucideIcon>> = {
   sms: MessageSquare,
   rcs: MessageSquareText,
   agentSession: Headset,
+  assignHuman: UserPlus,
+  webhook: Webhook,
   aiTransform: Sparkles,
   adsCampaign: Megaphone,
   needsReview: Flag,
@@ -32,23 +34,32 @@ export type PaletteSection = { label: string; nodes: NodeKind[] };
 // Audience is omitted: every canvas already ships with exactly one (non-deletable)
 // Audience node as the single contact entry point, so it's never addable here.
 export const CAMPAIGN_SECTIONS: PaletteSection[] = [
-  { label: "Data Nodes", nodes: ["apiToolCall"] },
+  { label: "Data Nodes", nodes: ["apiToolCall", "webhook"] },
   { label: "Logic Nodes", nodes: ["conditional", "abSplit", "delay"] },
   { label: "AI Nodes", nodes: ["aiTransform"] },
   { label: "Action Nodes", nodes: ["voiceCall", "whatsapp", "whatsappFreeform", "sms", "rcs", "needsReview"] },
   { label: "Ads Nodes", nodes: ["adsCampaign"] },
 ];
 
+
 /**
- * Inbound entry-point graphs route ONE arrival, so the outbound-only primitives
- * are absent: there is no Audience to fan out over, hence no A/B split, and the
- * channel is already fixed by the number the contact dialled or messaged.
+ * Inbound journeys: the orchestration around a conversation, not the conversation.
+ *
+ * The earlier cut removed all of this on the argument that a DAG cannot express a
+ * loop and an inbound conversation is one. That argument was about the wrong
+ * thing. The *conversation* loops, and it still does — inside the agent node,
+ * which owns it turn by turn. The *journey* around it does not: look something up,
+ * branch on what came back, split traffic between two agents, end. That is a DAG,
+ * and it is worth drawing.
+ *
+ * What stays absent is anything that would need the journey itself to loop.
  */
 export const INBOUND_SECTIONS: PaletteSection[] = [
   { label: "Data Nodes", nodes: ["apiToolCall"] },
   { label: "AI Nodes", nodes: ["aiTransform"] },
-  { label: "Logic Nodes", nodes: ["conditional", "delay"] },
-  { label: "Routing", nodes: ["agentSession", "end"] },
+  { label: "Logic Nodes", nodes: ["conditional", "abSplit"] },
+  { label: "Conversation", nodes: ["whatsappFreeform", "agentSession"] },
+  { label: "Routing", nodes: ["assignHuman", "end"] },
 ];
 
 // Out of scope for v1: cannot be added to new campaigns (disabled in palette),

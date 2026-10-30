@@ -3,7 +3,7 @@ import { Handle, Position, type NodeProps } from "reactflow";
 import {
   Play, Square, Users, GitBranch, Split,
   Phone, MessageCircle, MessageSquare, MessageSquareText, Inbox, Headset,
-  Clock, Megaphone, AlertCircle, CheckCircle2, Loader2, Sparkles, FlaskConical, Webhook, Flag, Workflow, Eye,
+  Clock, Megaphone, AlertCircle, CheckCircle2, Loader2, Sparkles, FlaskConical, Webhook, Flag, Workflow, Eye, UserPlus, Wrench,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -27,7 +27,7 @@ const ICONS: Record<NodeKind, LucideIcon> = {
   end: Square,
   inboundTrigger: Inbox,
   audience: Users,
-  apiToolCall: Webhook,
+  apiToolCall: Wrench,
   conditional: GitBranch,
   abSplit: Split,
   delay: Clock,
@@ -37,6 +37,8 @@ const ICONS: Record<NodeKind, LucideIcon> = {
   sms: MessageSquare,
   rcs: MessageSquareText,
   agentSession: Headset,
+  assignHuman: UserPlus,
+  webhook: Webhook,
   aiTransform: Sparkles,
   adsCampaign: Megaphone,
   needsReview: Flag,

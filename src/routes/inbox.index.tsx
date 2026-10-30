@@ -10,7 +10,8 @@
  *  - Cards on the left: Lead ID + Phone + last-interaction timestamp + a small
  *    channel badge for the channel of that last interaction.
  *  - Sort: last interaction descending (most recent at top). Not configurable.
- *  - Search: id or phone only (no name — leads may not have one).
+ *  - Search: name, id or phone. Name was excluded while leads had none; they all
+ *    carry one now, and it is what anyone actually types.
  *  - Filter icon: popover with Created At (window), Last Interaction (window),
  *    and Campaign multi-select. Same primitives as the old table's filter bar.
  *  - Top-of-page card on the right: Lead ID + Phone + Created + Last
@@ -18,12 +19,21 @@
  *  - Empty state: when no lead matches the filters or the store is empty.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { AppShell } from "@/components/app/AppShell";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import {
+  STATUS_LABEL, STATUS_TONE, STATUS_INFO, CURRENT_OPERATOR_ID, operator,
+  ESCALATION_LABEL, ESCALATION_INFO, ESCALATION_TONE,
+  type EscalationStatus, type SessionStatus,
+} from "@/lib/inbound";
+import {
+  useEscalationOverrides, setSessionEscalation, resolveEscalation,
+  useAssignees, resolveAssignee, assignSession,
+} from "@/lib/inbox-store";
 import {
   LEAD_RECORDS, formatDate, formatDateTime, relTime,
   CAMPAIGN_CATALOG,
@@ -31,7 +41,7 @@ import {
 } from "@/lib/leads-data";
 import {
   Search, Filter, X, MessageCircle, MessageSquare, MessageSquareText, Phone,
-  ChevronDown, Check, Calendar,
+  ChevronDown, Check, Calendar, UserRoundCheck,
 } from "lucide-react";
 import {
   Popover, PopoverContent, PopoverTrigger,
@@ -40,6 +50,11 @@ import { Conversations } from "@/components/inbox/Conversations";
 
 export const Route = createFileRoute("/inbox/")({
   component: InboxPage,
+  // `?lead=l_1004` preselects a lead. Used by Inbound's session summary to hand
+  // off to the conversation, which lives here rather than in the session sheet.
+  validateSearch: (raw: Record<string, unknown>): { lead?: string } => ({
+    lead: typeof raw.lead === "string" ? raw.lead : undefined,
+  }),
   head: () => ({ meta: [{ title: "Inbox · Pi Commerce Enterprise" }] }),
 });
 
@@ -94,6 +109,20 @@ function lastChannelOf(lead: LeadRecord): LeadChannel | undefined {
 
 function InboxPage() {
   // -------------------- filters --------------------
+  /* Read once at the top and passed down: the rail, the ordering and the header
+     all have to agree about one session's escalation, and three independent
+     reads is how they stop agreeing. */
+  const escalations = useEscalationOverrides();
+  const assignees = useAssignees();
+
+  /* Both axes resolved in one place and passed down. The rail groups by assignee
+     and sorts by escalation, so a second read that disagrees puts a row in one
+     group and sorts it as though it were in another. */
+  const assigneeOf = useCallback(
+    (l: LeadRecord) => resolveAssignee(assignees, l.inbound?.sessionId, l.inbound?.assigneeId),
+    [assignees],
+  );
+
   const [search, setSearch] = useState("");
   const [campaigns, setCampaigns] = useState<Set<string>>(new Set());
   const [createdWin, setCreatedWin] = useState<DateWindow>("all");
@@ -104,9 +133,10 @@ function InboxPage() {
     const q = search.trim().toLowerCase();
     const rows = LEAD_RECORDS.filter((l) => {
       if (q) {
+        const nameMatch = l.name.toLowerCase().includes(q);
         const idMatch = l.id.toLowerCase().includes(q);
         const phoneMatch = l.phone.replace(/\s+/g, "").toLowerCase().includes(q.replace(/\s+/g, ""));
-        if (!idMatch && !phoneMatch) return false;
+        if (!nameMatch && !idMatch && !phoneMatch) return false;
       }
       if (campaigns.size > 0) {
         const has = l.campaigns.some((c) => campaigns.has(c.campaignId));
@@ -116,21 +146,78 @@ function InboxPage() {
       if (!withinWindow(l.lastInteractionAt, interactedWin)) return false;
       return true;
     });
-    // Sort by last interaction descending — the WhatsApp-web convention.
+    /* Recency descending within a bucket, not across the whole list. Straight
+       recency is the messaging-app convention and it is the wrong one here: an
+       operator opening a queue is not browsing a chat history, they are asking what
+       is theirs and what is unanswered. Bucketing answers that; recency orders it. */
     rows.sort((a, b) => b.lastInteractionAt.localeCompare(a.lastInteractionAt));
     return rows;
   }, [search, campaigns, createdWin, interactedWin]);
 
+  /**
+   * The rail, as an operator reads it: mine, then unowned, then everyone else's.
+   *
+   * Three buckets rather than the two asked for, because "assigned to someone else"
+   * and "assigned to nobody" are opposite situations wearing the same absence. Work
+   * with no owner is the queue's actual backlog — it is the thing an operator can
+   * pick up — so burying it among other people's threads would hide the only group
+   * they can act on beyond their own.
+   *
+   * Closed threads stay in their owner's bucket rather than forming a fourth. They
+   * are history, and history belongs with the person it happened to.
+   */
+  const buckets = useMemo(() => {
+    const me = CURRENT_OPERATOR_ID;
+    /* "Needs a person" sorts above everything, including Open. An open thread is
+       waiting on time; a marked one is waiting on a person, and a person is
+       exactly who is reading this rail. */
+    const rank = (l: LeadRecord) => {
+      if (l.inbound
+          && resolveEscalation(escalations, l.inbound.sessionId, l.inbound.escalation) === "needed")
+        return -1;
+      const st = l.inbound?.status;
+      return st === "open" ? 0 : st === "pending" ? 1 : st === "expired" ? 2 : 3;
+    };
+    const order = (rows: LeadRecord[]) =>
+      rows.slice().sort((a, b) => rank(a) - rank(b) ||
+        b.lastInteractionAt.localeCompare(a.lastInteractionAt));
+
+    const mine: LeadRecord[] = [], unassigned: LeadRecord[] = [], others: LeadRecord[] = [];
+    for (const l of filtered) {
+      const who = assigneeOf(l);
+      if (who === me) mine.push(l);
+      else if (!who) unassigned.push(l);
+      else others.push(l);
+    }
+    return [
+      { key: "mine", label: "Assigned to you", rows: order(mine) },
+      { key: "unassigned", label: "Unassigned", rows: order(unassigned) },
+      { key: "others", label: "Assigned to others", rows: order(others) },
+    ].filter((g) => g.rows.length > 0);
+  }, [filtered, escalations, assigneeOf]);
+
   // -------------------- selection --------------------
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const { lead: leadParam } = Route.useSearch();
+  const [selectedId, setSelectedId] = useState<string | null>(leadParam ?? null);
+  // A ?lead= param wins once, on arrival. Tracked so that navigating in with the
+  // same param twice still re-selects, but a later manual pick isn't overridden.
+  const honouredParam = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (leadParam && honouredParam.current !== leadParam) {
+      honouredParam.current = leadParam;
+      setSelectedId(leadParam);
+    }
+  }, [leadParam]);
   // Auto-select the top lead whenever the filtered list changes and either the
   // current selection is no longer in the list or there's nothing selected yet.
   useEffect(() => {
     if (filtered.length === 0) { setSelectedId(null); return; }
     if (!selectedId || !filtered.some((l) => l.id === selectedId)) {
-      setSelectedId(filtered[0].id);
+      /* The top of the rail, which is bucket order — not `filtered[0]`, which is
+         whatever happened to be most recent and may sit three groups down. */
+      setSelectedId(buckets[0]?.rows[0]?.id ?? filtered[0].id);
     }
-  }, [filtered, selectedId]);
+  }, [filtered, buckets, selectedId]);
 
   const selected = useMemo(
     () => filtered.find((l) => l.id === selectedId) ?? null,
@@ -170,13 +257,29 @@ function InboxPage() {
                 }}
               />
             ) : (
-              filtered.map((l) => (
-                <ChatListCard
-                  key={l.id}
-                  lead={l}
-                  selected={l.id === selectedId}
-                  onSelect={() => setSelectedId(l.id)}
-                />
+              buckets.map((g) => (
+                <div key={g.key}>
+                  <div className="sticky top-0 z-10 flex items-baseline justify-between gap-2 border-b border-border/60 bg-background/95 px-3 py-1.5 backdrop-blur">
+                    <span className="text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      {g.label}
+                    </span>
+                    <span className="text-[10.5px] text-muted-foreground">{g.rows.length}</span>
+                  </div>
+                  {g.rows.map((l) => (
+                    <ChatListCard
+                      key={l.id}
+                      lead={l}
+                      escalation={
+                        l.inbound
+                          ? resolveEscalation(escalations, l.inbound.sessionId, l.inbound.escalation)
+                          : "none"
+                      }
+                      assigneeId={assigneeOf(l)}
+                      selected={l.id === selectedId}
+                      onSelect={() => setSelectedId(l.id)}
+                    />
+                  ))}
+                </div>
               ))
             )}
           </div>
@@ -189,7 +292,11 @@ function InboxPage() {
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
           {selected ? (
             <>
-              <LeadHeaderCard lead={selected} />
+              <LeadHeaderCard
+                lead={selected}
+                escalations={escalations}
+                assigneeId={assigneeOf(selected)}
+              />
               <div className="min-h-0 flex-1">
                 <Conversations lead={selected} />
               </div>
@@ -230,7 +337,7 @@ function TopFilters({
           <Input
             value={search}
             onChange={(e) => onSearchChange(e.target.value)}
-            placeholder="Search by Lead ID or phone"
+            placeholder="Search by name, lead ID or phone"
             className="h-8 pl-8 text-[12.5px]"
           />
         </div>
@@ -375,9 +482,12 @@ function CampaignMultiPicker({
 /* --------------------------- Chat-list card --------------------------- */
 
 function ChatListCard({
-  lead, selected, onSelect,
+  lead, escalation, assigneeId, selected, onSelect,
 }: {
   lead: LeadRecord;
+  /** Already resolved against the operator's edits by the page. */
+  escalation: EscalationStatus;
+  assigneeId?: string;
   selected: boolean;
   onSelect: () => void;
 }) {
@@ -393,28 +503,73 @@ function ChatListCard({
     >
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-2">
-          <span className="truncate font-mono text-[12px] font-semibold">{lead.id}</span>
+          {/* The name leads. The id is a support handle, not how anyone recognises a
+              person, and a rail of `l_1044` rows is an inbox you cannot read. */}
+          <span className="truncate text-[12.5px] font-semibold">{lead.name}</span>
           <span className="shrink-0 text-[10.5px] text-muted-foreground">
             {relTime(lead.lastInteractionAt)}
           </span>
         </div>
-        <div className="mt-0.5 flex items-center gap-1.5">
-          <span className="truncate font-mono text-[11px] text-muted-foreground">{lead.phone}</span>
-          {ChIcon && ch && (
-            <span
-              className={cn(
-                "flex shrink-0 items-center gap-0.5 rounded-full border border-border bg-background px-1.5 py-[1px] text-[9.5px] font-medium",
-                CHANNEL_TONE[ch],
-              )}
-              title={`Last interaction: ${CHANNEL_LABEL[ch]}`}
-            >
-              <ChIcon className="h-2.5 w-2.5" />
-              {CHANNEL_LABEL[ch]}
-            </span>
-          )}
-        </div>
+        {/* Two lines, and the second holds at most three things. The rail is read
+            by scanning, and a row that carried the lead id, the phone, a channel
+            chip, two state chips, an overflow count, a name and a tag was ten
+            things to take in before deciding whether to click. Everything cut
+            from here is on the header card, one click away, where there is room
+            to lay it out properly. */}
+        {lead.inbound && (
+          <div className="mt-1 flex items-center gap-1.5">
+            <StateChip
+              status={lead.inbound.status}
+              escalation={escalation}
+              disposition={lead.inbound.disposition}
+            />
+            {/* Suppressed in the "Assigned to you" group — the heading already said
+                it, and repeating your own name down every row is noise. */}
+            {assigneeId && assigneeId !== CURRENT_OPERATOR_ID && (
+              <span className="shrink-0 truncate text-[10px] text-muted-foreground">
+                {operator(assigneeId)?.name}
+              </span>
+            )}
+          </div>
+        )}
       </div>
     </button>
+  );
+}
+
+/**
+ * One chip for "what state is this in", not two.
+ *
+ * Status and escalation are separate axes and stay separate in the model — but a
+ * rail is read by scanning, and in a list the two answer one question. Showing
+ * both put "Needs a person" and "Open" side by side on the same row, which reads
+ * as two facts when it is one situation.
+ *
+ * Escalation wins when it is live, because it is the only state that is waiting on
+ * the reader rather than on time. Both axes are still shown in full on the header
+ * card, where there is room for the distinction to mean something.
+ */
+function StateChip({
+  status, escalation, disposition,
+}: {
+  status: SessionStatus;
+  escalation: EscalationStatus;
+  disposition?: string;
+}) {
+  const needsPerson = escalation === "needed";
+  return (
+    <span
+      className={cn(
+        "flex shrink-0 items-center gap-0.5 rounded-full border px-1.5 py-[1px] text-[9.5px] font-medium",
+        needsPerson ? ESCALATION_TONE.needed : STATUS_TONE[status],
+      )}
+      title={needsPerson
+        ? `${ESCALATION_INFO.needed}${disposition ? ` Disposition: ${disposition}` : ""}`
+        : STATUS_INFO[status]}
+    >
+      {needsPerson && <UserRoundCheck className="h-2.5 w-2.5" />}
+      {needsPerson ? ESCALATION_LABEL.needed : STATUS_LABEL[status]}
+    </span>
   );
 }
 
@@ -422,7 +577,139 @@ function ChatListCard({
 
 const MAX_CHIP_CAMPAIGNS = 3;
 
-function LeadHeaderCard({ lead }: { lead: LeadRecord }) {
+/**
+ * The escalation mark, as a control rather than a label.
+ *
+ * The agent set this from its disposition when the conversation closed. That is
+ * a guess made by something that has just left the room; the operator reading
+ * the thread is the one who can tell whether a person is really needed. So the
+ * mark opens — three states, and the agent's own answer named so the operator
+ * can see what they are overriding and put it back.
+ *
+ * Shown even at "No escalation", unlike the rail badge. On a row, a badge for
+ * the common case is noise; here it is the only way to escalate a thread the
+ * agent closed confidently and wrongly.
+ */
+function EscalationControl({
+  sessionId, agentSet, current, disposition, assigneeId,
+}: {
+  sessionId: string;
+  agentSet: EscalationStatus;
+  current: EscalationStatus;
+  disposition?: string;
+  assigneeId?: string;
+}) {
+  const edited = current !== agentSet;
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          className={cn(
+            "flex items-center gap-1 rounded-full border px-2 py-[1px] text-[10.5px] font-medium transition-colors hover:brightness-95",
+            ESCALATION_TONE[current],
+          )}
+          title={ESCALATION_INFO[current]}
+        >
+          <UserRoundCheck className="h-3 w-3" />
+          {ESCALATION_LABEL[current]}
+          {disposition && !edited && (
+            <span className="font-normal opacity-80">· {disposition}</span>
+          )}
+          <ChevronDown className="h-3 w-3 opacity-60" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-[260px] p-1">
+        {(["needed", "handled", "none"] as EscalationStatus[]).map((e) => (
+          <button
+            key={e}
+            onClick={() => {
+              setSessionEscalation(sessionId, e, agentSet);
+              /* Marking something handled without anybody holding it produced a
+                 row sitting in Unassigned labelled "Handled by a person" — two
+                 states that contradict each other. Whoever says it is handled is
+                 the person handling it. */
+              if (e === "handled" && !assigneeId) {
+                assignSession(sessionId, CURRENT_OPERATOR_ID, e);
+              }
+            }}
+            className={cn(
+              "flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left hover:bg-accent",
+              e === current && "bg-accent",
+            )}
+          >
+            <Check className={cn("mt-0.5 h-3 w-3 shrink-0", e === current ? "opacity-100" : "opacity-0")} />
+            <span className="min-w-0">
+              <span className="block text-[12px] font-medium">
+                {ESCALATION_LABEL[e]}
+                {e === agentSet && (
+                  <span className="ml-1 font-normal text-muted-foreground">· agent&rsquo;s</span>
+                )}
+              </span>
+              <span className="block text-[10.5px] leading-snug text-muted-foreground">
+                {ESCALATION_INFO[e]}
+              </span>
+            </span>
+          </button>
+        ))}
+        {disposition && (
+          <p className="border-t border-border px-2 pb-1 pt-1.5 text-[10.5px] leading-snug text-muted-foreground">
+            The agent closed this as <span className="font-medium">{disposition}</span>.
+          </p>
+        )}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/**
+ * Who holds this conversation, and the one action that changes it.
+ *
+ * Assignment used to be a label. `assigneeId` was written only by the seed
+ * generator, so a conversation the agent marked for a person landed in
+ * Unassigned and nothing in the product could move it out — a backlog an
+ * operator could read and never claim.
+ *
+ * Claiming is a button rather than only a side-effect of replying, because the
+ * two are different moments: you often take something to stop a colleague
+ * starting it, well before you have worked out what to say.
+ */
+function AssignControl({
+  sessionId, assigneeId, escalation,
+}: {
+  sessionId: string;
+  assigneeId?: string;
+  escalation: EscalationStatus;
+}) {
+  const mine = assigneeId === CURRENT_OPERATOR_ID;
+  const label = !assigneeId
+    ? "Unassigned"
+    : mine ? "Assigned to you" : `Assigned to ${operator(assigneeId)?.name}`;
+
+  return (
+    <span className="flex items-center gap-1.5">
+      <span className="text-[11.5px] text-muted-foreground">{label}</span>
+      <button
+        onClick={() => assignSession(sessionId, mine ? null : CURRENT_OPERATOR_ID, escalation)}
+        className="rounded-md border border-border px-1.5 py-[1px] text-[10.5px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        title={mine
+          ? "Put it back in the queue for somebody else"
+          : assigneeId
+            ? "Take it from them — the rail will show it as yours"
+            : "Claim it so nobody else starts on it"}
+      >
+        {mine ? "Release" : assigneeId ? "Take over" : "Assign to me"}
+      </button>
+    </span>
+  );
+}
+
+function LeadHeaderCard({
+  lead, escalations, assigneeId,
+}: {
+  lead: LeadRecord;
+  escalations: ReadonlyMap<string, EscalationStatus>;
+  assigneeId?: string;
+}) {
   const uniqueCampaigns = useMemo(() => {
     const m = new Map<string, LeadCampaignEntry>();
     for (const c of lead.campaigns) if (!m.has(c.campaignId)) m.set(c.campaignId, c);
@@ -435,10 +722,51 @@ function LeadHeaderCard({ lead }: { lead: LeadRecord }) {
     <div className="border-b border-border bg-background px-6 py-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="font-mono text-[13px] font-semibold text-foreground">{lead.id}</p>
-          <p className="mt-0.5 font-mono text-[12px] text-muted-foreground">{lead.phone}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-[14px] font-semibold text-foreground">{lead.name}</p>
+            {lead.inbound && (
+              <span
+                className={cn(
+                  "rounded-full border px-2 py-[1px] text-[10.5px] font-medium",
+                  STATUS_TONE[lead.inbound.status],
+                )}
+              >
+                {STATUS_LABEL[lead.inbound.status]}
+              </span>
+            )}
+            {lead.inbound && (
+              <EscalationControl
+                sessionId={lead.inbound.sessionId}
+                agentSet={lead.inbound.escalation}
+                current={resolveEscalation(escalations, lead.inbound.sessionId, lead.inbound.escalation)}
+                disposition={lead.inbound.disposition}
+                assigneeId={assigneeId}
+              />
+            )}
+            {lead.inbound && (
+              <AssignControl
+                sessionId={lead.inbound.sessionId}
+                assigneeId={assigneeId}
+                escalation={resolveEscalation(escalations, lead.inbound.sessionId, lead.inbound.escalation)}
+              />
+            )}
+            {lead.inbound && lead.inbound.openCount > 1 && (
+              <span className="text-[11.5px] text-muted-foreground">
+                {lead.inbound.openCount} conversations open
+              </span>
+            )}
+          </div>
+          <p className="mt-0.5 font-mono text-[11.5px] text-muted-foreground">
+            {lead.id} · {lead.phone}
+          </p>
         </div>
-        <div className="flex flex-wrap items-center gap-1">
+        <div className="flex min-w-0 flex-wrap items-center gap-1">
+          <span className="mr-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/80">
+            Campaigns
+          </span>
+          {uniqueCampaigns.length === 0 && (
+            <span className="text-[11px] text-muted-foreground">None</span>
+          )}
           {shown.map((c) => (
             <span
               key={c.campaignId}
@@ -481,10 +809,12 @@ function LeadHeaderCard({ lead }: { lead: LeadRecord }) {
           icon={<Calendar className="h-3 w-3" />}
           value={formatDateTime(lead.lastInteractionAt)}
         />
+        {/* Campaigns are already named as chips above — a count beside them said
+            nothing the chips did not. */}
         <MetaField
-          label="Campaigns"
+          label="Disposition"
           icon={null}
-          value={`${uniqueCampaigns.length}`}
+          value={lead.inbound?.disposition ?? "—"}
         />
         <MetaField
           label="Messages"

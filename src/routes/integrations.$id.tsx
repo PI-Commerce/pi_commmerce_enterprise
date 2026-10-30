@@ -1,4 +1,8 @@
 import { useState } from "react";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { AppShell } from "@/components/app/AppShell";
 import { Button } from "@/components/ui/button";
@@ -57,6 +61,7 @@ function ConnectionDetail() {
   const conn = useConnection(id);
   const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
   const [draft, setDraft] = useState<AudienceDraft | null>(null);
   const [openQuery, setOpenQuery] = useState<string | null>(null);
 
@@ -140,10 +145,14 @@ function ConnectionDetail() {
           </>
         }
         aside={
+          /* Outline and destructive-toned, matching Delete on the connector pages. It
+             was a ghost button in muted grey, which made the one irreversible action on
+             this page the quietest control on it — and it fired immediately, while the
+             equivalent on every connector page confirms first. */
           <Button
-            variant="ghost" size="sm"
-            className="h-8 gap-1.5 text-xs text-muted-foreground hover:text-destructive"
-            onClick={() => { removeConnection(conn.id); toast.success("Connection removed."); navigate({ to: "/integrations" }); }}
+            variant="outline" size="sm"
+            className="h-8 gap-1.5 text-xs text-destructive hover:text-destructive"
+            onClick={() => setConfirmingRemove(true)}
           >
             <Trash2 className="h-3.5 w-3.5" /> Remove
           </Button>
@@ -405,6 +414,32 @@ function ConnectionDetail() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <AlertDialog open={confirmingRemove} onOpenChange={setConfirmingRemove}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-[15px]">Remove this connection?</AlertDialogTitle>
+            <AlertDialogDescription className="text-[12.5px]">
+              {conn.label} stops existing, along with the audiences defined on it. Runs that
+              pull from it will have nothing to read. The credentials cannot be reissued —
+              reconnecting creates a new connection.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="h-8 text-xs">Keep it</AlertDialogCancel>
+            <AlertDialogAction
+              className="h-8 bg-destructive text-xs text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                removeConnection(conn.id);
+                toast.success("Connection removed.");
+                navigate({ to: "/integrations" });
+              }}
+            >
+              Remove
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
     </AppShell>
   );
 }

@@ -34,6 +34,8 @@ import { NODE_LABELS, SERIAL_PREFIX, type NodeKind, type WorkflowNodeData } from
 import { apiOutcomeOutputs, deriveNodeOutcomeVariables } from "@/lib/wa-outputs";
 import { saveEntryPoint, type EntryPoint } from "@/lib/inbound";
 import { useAgents } from "@/lib/agent-data";
+import { ShadowWarning } from "@/components/inbound/RoutingByNumber";
+import { NumberPicker } from "@/components/inbound/NumberPicker";
 import {
   deadEdges, describeRoute, isRoutingTerminal, resolveViaGraph, TRIGGER_VARIABLES,
   type ArrivalTraits, type InboundGraph,
@@ -58,8 +60,16 @@ const DEFAULTS: Partial<Record<NodeKind, Partial<WorkflowNodeData>>> = {
       }],
     },
   },
-  delay: { subtitle: "Wait", valid: true },
+  /* Splits arrivals, not an audience. Testing two agents or two prompts against
+     live inbound traffic is the reason it is here; the earlier palette left it out
+     on the grounds that inbound has no audience to fan out over, which confused
+     the thing being split with the thing it is drawn from. */
+  abSplit: { subtitle: "Split arrivals", valid: false, error: "Set the split" },
+  whatsappFreeform: { subtitle: "Send and wait", valid: false, error: "Add a message" },
   agentSession: { subtitle: "Select an agent", valid: false, error: "Select agent" },
+  /* Terminal: a person owns the conversation from here, so there is nothing for
+     the journey to do next. */
+  assignHuman: { subtitle: "Needs a person", valid: true },
   end: { valid: true, locked: true },
 };
 
@@ -67,9 +77,25 @@ let nodeSeq = 0;
 
 // ── Graph ⇄ ReactFlow ───────────────────────────────────────────────────────
 
-function toFlow(graph: InboundGraph): { nodes: Node<WorkflowNodeData>[]; edges: Edge[] } {
+/**
+ * Graph to canvas, stamping the entry point's channel onto every node.
+ *
+ * Done here rather than in an effect because the layout pass is async: it reads
+ * the node array, awaits ELK, then writes the laid-out result back wholesale, so
+ * an effect that stamps after mount is simply overwritten. Stamping where the
+ * nodes are built means there is no second writer to race.
+ */
+function toFlow(
+  graph: InboundGraph,
+  ep: { channel: EntryPoint["channel"]; addresses: string[] },
+): { nodes: Node<WorkflowNodeData>[]; edges: Edge[] } {
   return {
-    nodes: graph.nodes.map((n) => ({ id: n.id, type: "workflow", position: n.position, data: n.data })),
+    nodes: graph.nodes.map((n) => ({
+      id: n.id,
+      type: "workflow",
+      position: n.position,
+      data: { ...n.data, config: { ...n.data.config, channel: ep.channel, address: ep.addresses[0] ?? "" } },
+    })),
     edges: graph.edges.map((e) => ({
       id: e.id, source: e.source, target: e.target, sourceHandle: e.sourceHandle ?? undefined, type: "routed",
     })),
@@ -110,13 +136,16 @@ function scenarios(ep: EntryPoint): { label: string; traits: ArrivalTraits }[] {
 // ── Canvas ──────────────────────────────────────────────────────────────────
 
 export function InboundBuilderCanvas({ ep, isNew }: { ep: EntryPoint; isNew: boolean }) {
+  /* `channel` is stamped onto every node's config rather than stored on it: the
+     trigger and agent panels both key off it, and a node carrying its own copy is
+     a copy that can disagree with the entry point it lives on. */
   const navigate = useNavigate();
-  const initial = useMemo(() => toFlow(ep.graph), [ep.graph]);
+  const initial = useMemo(() => toFlow(ep.graph, ep), [ep]);
   const [nodes, setNodes, onNodesChange] = useNodesState(initial.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(initial.edges);
   const [selected, setSelected] = useState<{ id: string; data: WorkflowNodeData } | null>(null);
   const [name, setName] = useState(ep.name);
-  const [address, setAddress] = useState(ep.address);
+  const [addresses, setAddresses] = useState<string[]>(ep.addresses);
   // Liveness is edited here because the canvas is the only surface an entry point
   // has. Unlike the detail page it replaced, the toggle does not write through
   // immediately — it is folded into Save, so routing and liveness commit together
@@ -171,9 +200,20 @@ export function InboundBuilderCanvas({ ep, isNew }: { ep: EntryPoint; isNew: boo
     (id: string, patch: Partial<WorkflowNodeData>) => {
       setNodes((nds) => nds.map((n) => (n.id === id ? { ...n, data: { ...n.data, ...patch } } : n)));
       setSelected((s) => (s && s.id === id ? { ...s, data: { ...s.data, ...patch } } : s));
+      /* A node that gains named outputs orphans the edge that left it when it had
+         none: that edge carries no handle, and nothing matches it any more. The
+         old single path is the catch-all by definition, so adopt it onto
+         `default` rather than letting the author discover a broken graph through
+         an unreachable-path warning they did not cause. */
+      if (patch.outputs?.some((o) => o.id === "default")) {
+        setEdges((eds) => eds.map((e) =>
+          e.source === id && e.sourceHandle == null
+            ? { ...e, sourceHandle: "default" }
+            : e));
+      }
       markDirty();
     },
-    [setNodes, markDirty],
+    [setNodes, setEdges, markDirty],
   );
 
   const deleteNode = useCallback(
@@ -215,16 +255,29 @@ export function InboundBuilderCanvas({ ep, isNew }: { ep: EntryPoint; isNew: boo
           data: {
             kind, title: NODE_LABELS[kind], serial,
             ...DEFAULTS[kind],
-            // The agent picker gates itself on this rather than reaching for the
-            // entry point — see PresetConfig.channel.
-            ...(kind === "agentSession" ? { config: { channel: ep.channel } } : {}),
+            /* Every node that has a config panel keying off the entry point gets
+               it stamped here. See the note at the top of this component. */
+            config: { ...DEFAULTS[kind]?.config, channel: ep.channel, address: addresses[0] ?? "" },
           },
         }];
       });
       markDirty();
     },
-    [setNodes, markDirty, ep.channel],
+    [setNodes, markDirty, ep.channel, addresses],
   );
+
+  /* The number is editable in the header and the codes section renders it into a
+     URL the author copies, so a change has to reach the node. Guarded against the
+     mount pass, where `toFlow` has already stamped it and the async layout write
+     would otherwise race this one. */
+  useEffect(() => {
+    const primary = addresses[0] ?? "";
+    if (primary === (ep.addresses[0] ?? "")) return;
+    setNodes((nds) => nds.map((n) =>
+      n.data.config?.address === primary
+        ? n
+        : { ...n, data: { ...n.data, config: { ...n.data.config, address: primary } } }));
+  }, [addresses, ep.addresses, setNodes]);
 
   const onConnect = useCallback((c: Connection) => {
     setEdges((eds) => addEdge({ ...c, type: "routed" }, eds));
@@ -268,7 +321,7 @@ export function InboundBuilderCanvas({ ep, isNew }: { ep: EntryPoint; isNew: boo
   const handleSave = useCallback(() => {
     const trimmedName = name.trim();
     if (!trimmedName) return toast.error("Name this entry point before saving");
-    if (!address.trim()) return toast.error("Bind a number before saving");
+    if (addresses.length === 0) return toast.error("Bind at least one number before saving");
 
     const invalid = nodes.find((n) => n.data.valid === false);
     if (invalid) {
@@ -288,7 +341,7 @@ export function InboundBuilderCanvas({ ep, isNew }: { ep: EntryPoint; isNew: boo
       }
     }
 
-    saveEntryPoint({ ...ep, name: trimmedName, address: address.trim(), status, graph });
+    saveEntryPoint({ ...ep, name: trimmedName, addresses, status, graph });
     setDirty(false);
     toast.success(isNew ? "Entry point created" : "Changes saved", { description: trimmedName });
 
@@ -301,7 +354,7 @@ export function InboundBuilderCanvas({ ep, isNew }: { ep: EntryPoint; isNew: boo
       void navigate({ to: "/inbound/$id", params: { id: ep.id }, replace: true })
         .finally(() => { savingRef.current = false; });
     }
-  }, [name, address, status, nodes, graph, ep, isNew, navigate]);
+  }, [name, addresses, status, nodes, graph, ep, isNew, navigate]);
 
   // ── Unsaved-changes guard ─────────────────────────────────────────────────
   const { status: blockStatus, proceed, reset } = useBlocker({
@@ -339,12 +392,20 @@ export function InboundBuilderCanvas({ ep, isNew }: { ep: EntryPoint; isNew: boo
           <span className="rounded-md border border-border bg-secondary px-2 py-1 text-[11px] capitalize text-muted-foreground">
             {ep.channel === "voice" ? "Voice" : "WhatsApp"}
           </span>
-          <Input
-            value={address}
-            onChange={(e) => { setAddress(e.target.value); markDirty(); }}
-            placeholder={ep.channel === "voice" ? "+91 80 4718 2200" : "+91 98765 43210"}
-            className="h-8 w-[180px] font-mono text-[12px]"
-          />
+          {/* The picker lists WhatsApp numbers, so it is only right on a WhatsApp
+              entry point. Voice and webhook bind a DID and a URL, which are not in
+              this registry and cannot be created in v1 anyway — shown read-only
+              rather than offered a list of the wrong kind of address. */}
+          {ep.channel === "whatsapp" ? (
+            <NumberPicker
+              value={addresses}
+              onChange={(next) => { setAddresses(next); markDirty(); }}
+            />
+          ) : (
+            <span className="truncate rounded-md border border-border bg-secondary px-2.5 py-1.5 font-mono text-[12px] text-muted-foreground">
+              {addresses[0] ?? "Not bound"}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -383,6 +444,13 @@ export function InboundBuilderCanvas({ ep, isNew }: { ep: EntryPoint; isNew: boo
           </Button>
         </div>
       </header>
+
+      {/* Whether this entry point will ever receive an arrival, said where it can
+          still change what somebody builds. Above the canvas rather than inside a
+          node, because it is about the number, not the graph. */}
+      <div className="shrink-0 px-3 pt-2 empty:hidden">
+        <ShadowWarning ep={{ ...ep, addresses, graph }} />
+      </div>
 
       <div className="relative min-h-0 flex-1">
         {!layingOut && (

@@ -73,34 +73,69 @@ export function CopyRow({
   mono?: boolean;
 }) {
   return (
-    <div
-      className={cn(
-        "flex items-start gap-3 py-2",
-        critical && "border-l-2 border-warning/60 pl-2.5",
+    <DetailRow label={label} critical={critical} action={copyable && value ? <CopyButton value={value} /> : undefined}>
+      <p
+        className={cn(
+          "break-words text-[12px] leading-relaxed",
+          mono && "font-mono text-[11.5px]",
+          value ? "text-foreground" : "text-muted-foreground",
+        )}
+      >
+        {value || "—"}
+      </p>
+      {note && <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">{note}</p>}
+    </DetailRow>
+  );
+}
+
+/**
+ * The row shell every provisioning row shares — label, body, action.
+ *
+ * Extracted because it was being hand-rolled four times: `CopyRow` here plus a bespoke
+ * password/credential row on each of the three connector pages. They agreed on the
+ * label width and then drifted on everything else, and the moment the body column
+ * gained a max-width the copy buttons and the rotate buttons stopped lining up — three
+ * copies cannot stay aligned by agreement.
+ *
+ * The cap is on the *text measure*, not on the column. Capping the column moved the
+ * action inward with it, which left a dead band of empty card to the right of every
+ * button on a wide screen and read as misplacement. So the body column still fills the
+ * row — actions land in one clean column at the card's edge, the way a table's trailing
+ * action column does — while the text inside it stops at a readable width rather than
+ * running the full span.
+ *
+ * A row with no action still reserves the column, so a panel mixing copyable and
+ * non-copyable rows keeps one clean right edge instead of a ragged one.
+ *
+ * The `critical` rule is drawn as an absolutely-positioned bar, and every row carries
+ * the same left inset whether or not it has one. Drawn as a border it inset only the
+ * rows that had it, which shifted their action twelve pixels right of every other
+ * row's — invisible while the action was pinned to the card's edge, obvious once it
+ * followed the content.
+ */
+export function DetailRow({
+  label,
+  critical = false,
+  action,
+  children,
+}: {
+  label: string;
+  critical?: boolean;
+  action?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="relative flex items-start gap-3 py-2 pl-2.5">
+      {critical && (
+        <span className="absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-warning/60" />
       )}
-    >
       <div className="w-[168px] shrink-0 pt-0.5">
         <p className="text-[11.5px] font-medium leading-tight">{label}</p>
       </div>
       <div className="min-w-0 flex-1">
-        <p
-          className={cn(
-            "break-words text-[12px] leading-relaxed",
-            mono && "font-mono text-[11.5px]",
-            value ? "text-foreground" : "text-muted-foreground",
-          )}
-        >
-          {value || "—"}
-        </p>
-        {note && (
-          <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">{note}</p>
-        )}
+        <div className="max-w-3xl">{children}</div>
       </div>
-      {copyable && value ? (
-        <CopyButton value={value} />
-      ) : (
-        <span className="w-[58px] shrink-0" />
-      )}
+      {action ?? <span className="w-[58px] shrink-0" />}
     </div>
   );
 }

@@ -5,7 +5,7 @@ import { AUTO_INCLUDED_FIELDS } from "@/lib/webhooks-data";
 import {
   X, Copy, Trash2, AlertCircle, CheckCircle2, Plus, GripVertical, ChevronDown, ChevronRight, Variable,
   Sparkles, GitBranch, FlaskConical, ArrowUp, ArrowDown, ArrowRight, ArrowLeftRight,
-  FileSpreadsheet, Loader2, Clock, Hash, Info, Pencil, Eye, Workflow,
+  FileSpreadsheet, Loader2, Clock, Hash, Info, Pencil, Eye, Workflow, RefreshCw, Webhook,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useRegion, localizeCurrency } from "@/lib/region";
@@ -61,12 +61,27 @@ import { getTool, TOOLS, type ToolInput } from "@/lib/tool-registry";
 import { flattenBody } from "@/lib/tool-body";
 import { resolveAgent, voiceAgents, useAgents } from "@/lib/agent-data";
 import {
+  TEAMS, team, operator,
+  ASSIGN_RULE_LABEL, ASSIGN_DEFAULT_MAX_OPEN, ASSIGN_DEFAULT_REASSIGN_MINS,
+  TRIGGER_KIND_LABEL, TRIGGER_KIND_INFO, TRIGGER_KINDS_BY_CHANNEL, CHANNEL_LABEL,
+  webhookEndpoint, newWebhookToken, newSigningSecret,
+  WEBHOOK_SIGNATURE_HEADER, WEBHOOK_SIGNATURE_ALGO,
+  isFallbackKind, KIND_PRECEDENCE_COPY, HANDOFF_REASONS,
+  newLinkToken, trackedLink, trackedLinkText,
+  type AdSource, type TrackedLink,
+  AD_SOURCE_LABEL, AD_SOURCE_INFO,
+  type TriggerKind, type InboundChannel, type AdSourceType,
+} from "@/lib/inbound";
+import { CopyRow } from "@/components/clevertap/CopyRow";
+import { triggerVariables } from "@/lib/inbound-graph";
+import {
   CUSTOM_AI_ACTION,
   transformError, transformsError,
   sanitizeOutputName, conversationContextVariables,
 } from "@/lib/ai-transformations";
 import { PromptEditor } from "@/components/workflow/PromptEditor";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Checkbox } from "@/components/ui/checkbox";
 
 const VOICE_AGENTS = voiceAgents();
 
@@ -236,7 +251,11 @@ export function ConfigPanel({ node, readOnly, onClose, onChange, onDelete, onDup
   // Structural nodes: no description, no delete/duplicate footer — just a blurb
   // explaining the role they play. `inboundTrigger` joins Start/End because every
   // arrival begins there; there is exactly one and it cannot be removed.
-  const isSystem = data.kind === "start" || data.kind === "end" || data.kind === "inboundTrigger";
+  /* `inboundTrigger` used to sit here with Start and End as a structural node with
+     nothing to configure. It has a kind now — any message, a keyword list, an ad, a
+     QR link, a webhook event — so it carries real config and leaves the group. It is
+     still not deletable; that is enforced on the canvas, not by this flag. */
+  const isSystem = data.kind === "start" || data.kind === "end";
   // Preset/example nodes render the *real* editor for this kind, hydrated from
   // data.config — so it looks fully configured AND its dropdowns/inputs are live
   // (the user can open and explore them). We only neuter onChange so the stateful
@@ -278,9 +297,7 @@ export function ConfigPanel({ node, readOnly, onClose, onChange, onDelete, onDup
         <div className="scrollbar-thin flex-1 overflow-y-auto px-5 py-5 space-y-5">
           <NameField data={data} readOnly={ro} onChange={safeChange} />
           {!isSystem && <DescriptionField data={data} readOnly={ro} onChange={safeChange} />}
-          {data.kind === "inboundTrigger" ? (
-            <InboundTriggerFields />
-          ) : isSystem ? (
+          {isSystem ? (
             <div className="flex items-start gap-2.5 rounded-lg bg-muted px-3.5 py-3 text-[13px] text-muted-foreground">
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
               <p>
@@ -414,13 +431,20 @@ function KindFields({
   switch (kind) {
     case "start":
     case "end":
-    // Rendered by the panel shell itself — it has no per-kind config, only a
-    // read-only list of the variables it publishes.
-    case "inboundTrigger":
+      // Rendered by the panel shell itself — no per-kind config.
       return null;
+
+    case "inboundTrigger":
+      return <InboundTriggerFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
 
     case "agentSession":
       return <AgentSessionFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
+
+    case "assignHuman":
+      return <EscalateFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
+
+    case "webhook":
+      return <WebhookFields config={config} serial={serial} readOnly={readOnly} mark={mark} onChange={onChange} />;
 
     case "aiTransform":
       return <AiTransformFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
@@ -439,9 +463,6 @@ function KindFields({
 
     case "delay":
       return <DelayFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
-
-    case "aiTransform":
-      return <AiTransformFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
 
     case "voiceCall":
       return <VoiceCallFields config={config} readOnly={readOnly} mark={mark} onChange={onChange} />;
@@ -629,29 +650,6 @@ function SchemaFieldsEditor({
 
 /* --------------------------- Inbound: Trigger / Agent Session / AI Transform --------------------------- */
 
-/** The arrival. It has nothing to configure — its only job is to publish what the
- *  channel actually carries, so the branches downstream can predicate on it. The
- *  list is channel-scoped by the canvas (a phone call has no ad referral or message
- *  text), which is what stops an author writing a branch that can never be taken. */
-function InboundTriggerFields() {
-  const vars = useContext(ExtraVariablesContext).filter((v) => v.source === "Inbound Trigger");
-  return (
-    <Section title="Published variables">
-      <div className="space-y-1.5">
-        {vars.map((v) => (
-          <div key={v.key} className="flex items-center gap-2 rounded-md border border-border bg-card px-2.5 py-1.5">
-            <Variable className="h-3 w-3 shrink-0 text-muted-foreground" />
-            <span className="font-mono text-[11.5px]">{v.key}</span>
-          </div>
-        ))}
-        <p className="pt-1 text-[11px] leading-snug text-muted-foreground">
-          Every arrival starts here. These are the only signals this channel carries —
-          conditionals downstream can branch on them.
-        </p>
-      </div>
-    </Section>
-  );
-}
 
 /**
  * Hands the arrival to an agent, ending routing. The picker is gated to agents of
@@ -659,50 +657,1346 @@ function InboundTriggerFields() {
  * agent. Non-live agents are listed but flagged rather than hidden, so a broken
  * assignment is diagnosable instead of just missing.
  */
-function AgentSessionFields({ config, readOnly, mark, onChange }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
-  const agents = useAgents();
-  const channel = config?.channel ?? "whatsapp";
-  const eligible = agents.filter((a) => a.type === (channel === "voice" ? "voice" : "chat"));
-  const [agentId, setAgentId] = useState(config?.agentId ?? "");
-  const picked = eligible.find((a) => a.id === agentId);
+/* ─────────────────────── Assign to Human (inbound) ──────────────────────────── */
+
+/**
+ * Hands the live session to a person.
+ *
+ * Assignment targets a *team*, never an individual: the tenant's team → user mapping
+ * lives in settings, so somebody joining or leaving never means editing a graph. The
+ * three assignment rules are exclusive because they all answer the same question —
+ * which member gets it — and two answering at once has no defined resolution. The
+ * eligibility flags are independent, so they are checkboxes.
+ *
+ * The fallback line is not decoration. When nobody on the team is eligible the session
+ * goes back to the bot rather than sitting in a queue nobody is watching, and an author
+ * who does not know that will build a graph assuming someone eventually looks.
+ */
+/**
+ * Escalate to a person — a node, not a checkbox.
+ *
+ * This used to be a list of dispositions ticked inside the agent's own config,
+ * which hid the single most consequential thing a journey does two clicks deep
+ * and gave it no presence on the canvas. As a node it sits on the branch the
+ * author wired it to, so "what happens when the agent cannot finish" is answered
+ * by looking at the graph.
+ *
+ * It does not route to a team. In v1 an escalated session is marked and appears
+ * in the Team inbox for whoever is looking — team mapping, round robin and
+ * eligibility come back with {@link AssignHumanFields}, which is kept below for
+ * that day and currently unreachable.
+ */
+function EscalateFields({ config, readOnly, mark, onChange }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
+  const [reason, setReason] = useState<string>(config?.escalateReason ?? HANDOFF_REASONS[0]);
 
   useEffect(() => {
-    mark(!!picked, picked ? undefined : "Select agent");
-    onChange({ config: { ...config, agentId: agentId || undefined }, subtitle: picked?.name ?? "Select an agent" });
-  }, [agentId, picked?.name]);
+    mark(true);
+    onChange({
+      config: { ...config, escalateReason: reason },
+      subtitle: reason,
+    });
+  }, [reason]);
 
   return (
-    <Section title="Handled by">
-      <Field label={`${channel === "voice" ? "Voice" : "Chat"} agent`} required>
-        <Select value={agentId} disabled={readOnly} onValueChange={setAgentId}>
-          <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select an agent" /></SelectTrigger>
-          <SelectContent>
-            {eligible.map((a) => (
-              <SelectItem key={a.id} value={a.id}>
-                <span className="flex items-center gap-2">
-                  <span>{a.name}</span>
-                  <span className="text-[10.5px] text-muted-foreground">{a.status}</span>
-                </span>
-              </SelectItem>
+    <>
+      <Section title="Reason">
+        <div className="space-y-1.5">
+          <p className="text-[11px] leading-snug text-muted-foreground">
+            What the operator sees in the Team inbox. Several branches can lead here
+            and share one reason, which is why it is set on the node rather than taken
+            from the disposition that arrived.
+          </p>
+          {HANDOFF_REASONS.map((r) => (
+            <label key={r} className="flex cursor-pointer items-center gap-2 text-[12.5px]">
+              <input
+                type="radio"
+                className="h-3.5 w-3.5"
+                disabled={readOnly}
+                checked={reason === r}
+                onChange={() => setReason(r)}
+              />
+              {r}
+            </label>
+          ))}
+        </div>
+      </Section>
+
+      <StatusBanner
+        ok
+        title="Marked, not routed"
+        detail="The session is marked as needing a person and appears in the Team inbox for whoever is looking. Routing it to a particular team or operator arrives with the assignment rules; nothing here picks a name."
+      />
+
+      <div className="flex items-start gap-2 rounded-md border border-dashed border-border bg-muted/30 px-2.5 py-2 text-[11px] text-muted-foreground">
+        <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        <span>
+          The journey ends here — a person owns the conversation from this point.
+        </span>
+      </div>
+    </>
+  );
+}
+
+function AssignHumanFields({ config, readOnly, mark, onChange }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
+  const [assignType, setAssignType] = useState<"direct" | "round_robin">(config?.assignType ?? "round_robin");
+  const [teamId, setTeamId] = useState(config?.assignTeamId ?? "");
+  const [rule, setRule] = useState<"" | "load_based" | "auto_reassign" | "contact_owner">(config?.assignRule ?? "");
+  const [maxOpen, setMaxOpen] = useState(config?.maxOpenChats ?? ASSIGN_DEFAULT_MAX_OPEN);
+  const [reassignMins, setReassignMins] = useState(config?.reassignAfterMins ?? ASSIGN_DEFAULT_REASSIGN_MINS);
+  const [toAdmin, setToAdmin] = useState(!!config?.assignToAdmin);
+  const [outsideHours, setOutsideHours] = useState(!!config?.assignOutsideHours);
+  const [skipOffline, setSkipOffline] = useState(!!config?.skipOfflineUsers);
+
+  const picked = team(teamId);
+
+  useEffect(() => {
+    mark(!!picked, picked ? undefined : "Choose a team");
+    onChange({
+      config: {
+        ...config,
+        assignType,
+        assignTeamId: teamId || undefined,
+        assignRule: rule || undefined,
+        maxOpenChats: rule === "load_based" ? maxOpen : undefined,
+        reassignAfterMins: rule === "auto_reassign" ? reassignMins : undefined,
+        assignToAdmin: toAdmin || undefined,
+        assignOutsideHours: outsideHours || undefined,
+        skipOfflineUsers: skipOffline || undefined,
+      },
+      subtitle: picked ? `${picked.name} · ${assignType === "direct" ? "Direct" : "Round robin"}` : "Choose a team",
+    });
+  }, [assignType, teamId, rule, maxOpen, reassignMins, toAdmin, outsideHours, skipOffline, picked?.name]);
+
+  return (
+    <>
+      <Section title="Assignment">
+        <Field label="Assignment type" required>
+          <div className="flex gap-4">
+            {(["direct", "round_robin"] as const).map((t) => (
+              <label key={t} className="flex cursor-pointer items-center gap-1.5 text-[12.5px]">
+                <input
+                  type="radio"
+                  className="h-3.5 w-3.5"
+                  disabled={readOnly}
+                  checked={assignType === t}
+                  onChange={() => setAssignType(t)}
+                />
+                {t === "direct" ? "Direct" : "Round robin"}
+              </label>
             ))}
-          </SelectContent>
-        </Select>
-      </Field>
-      {picked && picked.status !== "live" && (
+          </div>
+        </Field>
+
+        <Field label="Team" required>
+          <Select value={teamId} disabled={readOnly} onValueChange={setTeamId}>
+            <SelectTrigger className="h-9 text-sm"><SelectValue placeholder="Select a team" /></SelectTrigger>
+            <SelectContent>
+              {TEAMS.map((t) => (
+                <SelectItem key={t.id} value={t.id}>
+                  <span className="flex items-center gap-2">
+                    <span>{t.name}</span>
+                    <span className="text-[10.5px] text-muted-foreground">
+                      {t.operatorIds.length} {t.operatorIds.length === 1 ? "member" : "members"}
+                    </span>
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </Field>
+
+        {/* The mapping is tenant config, so the author cannot edit it here — but they
+            do need to see who they just routed to before they publish. */}
+        {picked && (
+          <p className="text-[11px] leading-snug text-muted-foreground">
+            {picked.operatorIds.map((id) => operator(id)?.name).filter(Boolean).join(", ")}
+            {" · "}managed under Settings, not here.
+          </p>
+        )}
+      </Section>
+
+      <Section title="Assignment rule">
+        <div className="space-y-2">
+          {([
+            ["", "No rule", "Anyone on the team, in round-robin order."],
+            ["load_based", ASSIGN_RULE_LABEL.load_based, "Skip an operator already holding too many open chats."],
+            ["auto_reassign", ASSIGN_RULE_LABEL.auto_reassign, "Move it on if the assignee does not reply."],
+            ["contact_owner", ASSIGN_RULE_LABEL.contact_owner, "Send it to whoever owns the contact, if they are on the team."],
+          ] as const).map(([val, label, hint]) => (
+            <label
+              key={val || "none"}
+              className={cn(
+                "flex cursor-pointer items-start gap-2 rounded-md border px-2.5 py-2",
+                rule === val ? "border-foreground/30 bg-accent/40" : "border-border",
+              )}
+            >
+              <input
+                type="radio"
+                className="mt-0.5 h-3.5 w-3.5"
+                disabled={readOnly}
+                checked={rule === val}
+                onChange={() => setRule(val)}
+              />
+              <span className="min-w-0">
+                <span className="block text-[12.5px] font-medium">{label}</span>
+                <span className="block text-[11px] leading-snug text-muted-foreground">{hint}</span>
+                {val === "load_based" && rule === "load_based" && (
+                  <span className="mt-1.5 flex items-center gap-1.5 text-[11.5px]">
+                    Max open chats per operator
+                    <Input
+                      type="number" min={1} value={maxOpen} disabled={readOnly}
+                      onChange={(e) => setMaxOpen(Number(e.target.value) || 1)}
+                      className="h-7 w-20 text-xs"
+                    />
+                  </span>
+                )}
+                {val === "auto_reassign" && rule === "auto_reassign" && (
+                  <span className="mt-1.5 flex items-center gap-1.5 text-[11.5px]">
+                    Reassign after
+                    <Input
+                      type="number" min={1} value={reassignMins} disabled={readOnly}
+                      onChange={(e) => setReassignMins(Number(e.target.value) || 1)}
+                      className="h-7 w-20 text-xs"
+                    />
+                    minutes of no reply
+                  </span>
+                )}
+              </span>
+            </label>
+          ))}
+        </div>
+      </Section>
+
+      <Section title="Operator eligibility">
+        <div className="space-y-2">
+          {([
+            ["admin", "Also assign to admins", toAdmin, setToAdmin],
+            ["hours", "Assign even outside working hours", outsideHours, setOutsideHours],
+            ["offline", "Skip operators who are offline", skipOffline, setSkipOffline],
+          ] as const).map(([key, label, val, set]) => (
+            <label key={key} className="flex cursor-pointer items-center gap-2 text-[12.5px]">
+              <Checkbox checked={val} disabled={readOnly} onCheckedChange={(v) => set(!!v)} />
+              {label}
+            </label>
+          ))}
+        </div>
+        <StatusBanner
+          ok
+          title="Nobody eligible? It goes back to the bot."
+          detail="A session with no available operator returns to automation rather than waiting in a queue — so these rules narrow who answers, never whether anyone does."
+        />
+      </Section>
+    </>
+  );
+}
+
+/* ───────────────────────── Webhook (journey waits) ──────────────────────────── */
+
+/**
+ * An outbound call the journey blocks on.
+ *
+ * The waiting is what makes this different from a tool call, and it is why the
+ * timeout is a required-feeling field rather than an advanced one: a lead sits here
+ * until the endpoint answers, so an endpoint that never does stalls the journey
+ * instead of failing it.
+ *
+ * Response routing lists the codes the author expects, each becoming its own output.
+ * Anything unlisted — and the timeout — leaves by a fallback, so a response nobody
+ * anticipated strands nobody.
+ */
+function WebhookFields({ config, serial, readOnly, mark, onChange }: { config?: PresetConfig; serial?: string; readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
+  const [method, setMethod] = useState(config?.whMethod ?? "POST");
+  const [url, setUrl] = useState(config?.whUrl ?? "");
+  const [useHeaders, setUseHeaders] = useState(!!config?.whHeaders?.length);
+  const [headers, setHeaders] = useState(config?.whHeaders ?? [{ key: "Content-Type", value: "application/json" }]);
+  const [timeoutSecs, setTimeoutSecs] = useState(config?.whTimeoutSecs ?? 10);
+  const [saveResponse, setSaveResponse] = useState(!!config?.whSaveResponse);
+  const [outs, setOuts] = useState(config?.whOutputs ?? [{ id: "o1", name: "", path: "" }]);
+  const [routing, setRouting] = useState(!!config?.whResponseRouting);
+  const [statuses, setStatuses] = useState<number[]>(config?.whExpectedStatuses ?? [200]);
+
+  const urlError = !url.trim()
+    ? "Add a URL"
+    : !/^https:\/\/\S+$/.test(url.trim())
+      ? "Must be an HTTPS URL"
+      : undefined;
+
+  useEffect(() => {
+    mark(!urlError, urlError);
+    onChange({
+      config: {
+        ...config,
+        whMethod: method, whUrl: url.trim() || undefined,
+        whHeaders: useHeaders ? headers.filter((h) => h.key.trim()) : undefined,
+        whTimeoutSecs: timeoutSecs,
+        whSaveResponse: saveResponse || undefined,
+        whOutputs: saveResponse ? outs.filter((o) => o.name.trim()) : undefined,
+        whResponseRouting: routing || undefined,
+        whExpectedStatuses: routing ? statuses : undefined,
+      },
+      subtitle: url.trim() ? `${method} ${url.replace(/^https:\/\//, "").slice(0, 34)}` : "Call out and wait",
+    });
+  }, [method, url, useHeaders, headers, timeoutSecs, saveResponse, outs, routing, statuses]);
+
+  return (
+    <>
+      <Section title="Request">
+        <Field label="URL and method" required>
+          <div className="flex gap-2">
+            <Select value={method} disabled={readOnly} onValueChange={(v) => setMethod(v as typeof method)}>
+              <SelectTrigger className="h-9 w-[104px] text-sm"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {(["GET", "POST", "PUT", "PATCH", "DELETE"] as const).map((m) => (
+                  <SelectItem key={m} value={m}>{m}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Input
+              value={url} disabled={readOnly} placeholder="https://"
+              onChange={(e) => setUrl(e.target.value)}
+              className="h-9 flex-1 font-mono text-xs"
+            />
+          </div>
+        </Field>
+
+        <Field label="Wait up to">
+          <span className="flex items-center gap-1.5 text-[12.5px]">
+            <Input
+              type="number" min={1} max={120} value={timeoutSecs} disabled={readOnly}
+              onChange={(e) => setTimeoutSecs(Number(e.target.value) || 1)}
+              className="h-8 w-20 text-xs"
+            />
+            seconds before taking the fallback branch
+          </span>
+        </Field>
+      </Section>
+
+      <Section title="Headers">
+        <label className="flex cursor-pointer items-center gap-2 text-[12.5px]">
+          <Checkbox checked={useHeaders} disabled={readOnly} onCheckedChange={(v) => setUseHeaders(!!v)} />
+          Send custom headers
+        </label>
+        {useHeaders && (
+          <div className="mt-2 space-y-2">
+            {headers.map((h, i) => (
+              <div key={i} className="flex gap-2">
+                <Input
+                  value={h.key} disabled={readOnly} placeholder="Key"
+                  onChange={(e) => setHeaders(headers.map((x, j) => j === i ? { ...x, key: e.target.value } : x))}
+                  className="h-8 flex-1 font-mono text-xs"
+                />
+                <Input
+                  value={h.value} disabled={readOnly} placeholder="Value"
+                  onChange={(e) => setHeaders(headers.map((x, j) => j === i ? { ...x, value: e.target.value } : x))}
+                  className="h-8 flex-1 font-mono text-xs"
+                />
+                <Button
+                  variant="ghost" size="sm" disabled={readOnly}
+                  className="h-8 w-8 shrink-0 p-0 text-muted-foreground"
+                  onClick={() => setHeaders(headers.filter((_, j) => j !== i))}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            ))}
+            <Button
+              variant="outline" size="sm" disabled={readOnly}
+              className="h-7 gap-1 text-[11px]"
+              onClick={() => setHeaders([...headers, { key: "", value: "" }])}
+            >
+              <Plus className="h-3 w-3" /> Add header
+            </Button>
+          </div>
+        )}
+      </Section>
+
+      <Section title="Save response as variables">
+        <label className="flex cursor-pointer items-center gap-2 text-[12.5px]">
+          <Checkbox checked={saveResponse} disabled={readOnly} onCheckedChange={(v) => setSaveResponse(!!v)} />
+          Lift fields out of the response
+        </label>
+        {saveResponse && (
+          <div className="mt-2 space-y-2">
+            <p className="text-[11px] leading-snug text-muted-foreground">
+              Each becomes <span className="font-mono">{serial ?? "wh_1"}.&lt;name&gt;</span> downstream. Leave the
+              path empty for the whole body.
+            </p>
+            {outs.map((o, i) => (
+              <div key={o.id} className="flex gap-2">
+                <Input
+                  value={o.name} disabled={readOnly} placeholder="Variable name"
+                  onChange={(e) => setOuts(outs.map((x, j) => j === i ? { ...x, name: e.target.value } : x))}
+                  className="h-8 flex-1 font-mono text-xs"
+                />
+                <Input
+                  value={o.path} disabled={readOnly} placeholder="Entire response body"
+                  onChange={(e) => setOuts(outs.map((x, j) => j === i ? { ...x, path: e.target.value } : x))}
+                  className="h-8 flex-1 font-mono text-xs"
+                />
+                <Button
+                  variant="ghost" size="sm" disabled={readOnly}
+                  className="h-8 w-8 shrink-0 p-0 text-muted-foreground"
+                  onClick={() => setOuts(outs.filter((_, j) => j !== i))}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            ))}
+            <Button
+              variant="outline" size="sm" disabled={readOnly}
+              className="h-7 gap-1 text-[11px]"
+              onClick={() => setOuts([...outs, { id: `o${outs.length + 1}`, name: "", path: "" }])}
+            >
+              <Plus className="h-3 w-3" /> Add response variable
+            </Button>
+          </div>
+        )}
+      </Section>
+
+      <Section title="Response routing">
+        <label className="flex cursor-pointer items-center gap-2 text-[12.5px]">
+          <Checkbox checked={routing} disabled={readOnly} onCheckedChange={(v) => setRouting(!!v)} />
+          Branch on the response status
+        </label>
+        {routing && (
+          <div className="mt-2 space-y-2">
+            {statuses.map((code, i) => (
+              <div key={i} className="flex gap-2">
+                <Input
+                  type="number" value={code} disabled={readOnly}
+                  onChange={(e) => setStatuses(statuses.map((x, j) => j === i ? Number(e.target.value) || 0 : x))}
+                  className="h-8 w-28 font-mono text-xs"
+                />
+                <Button
+                  variant="ghost" size="sm" disabled={readOnly}
+                  className="h-8 w-8 shrink-0 p-0 text-muted-foreground"
+                  onClick={() => setStatuses(statuses.filter((_, j) => j !== i))}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            ))}
+            <Button
+              variant="outline" size="sm" disabled={readOnly}
+              className="h-7 gap-1 text-[11px]"
+              onClick={() => setStatuses([...statuses, 400])}
+            >
+              <Plus className="h-3 w-3" /> Add expected status
+            </Button>
+            <StatusBanner
+              ok
+              title="Everything else takes the fallback output"
+              detail="Including the timeout. A status you did not list never strands a lead — it leaves by the branch you did not have to think about."
+            />
+          </div>
+        )}
+      </Section>
+    </>
+  );
+}
+
+/**
+ * Hands the arrival to an agent — the inbound counterpart of the Voice Call node, and
+ * built on the same two-step card so the two read alike: pick the agent, then map what
+ * it needs.
+ *
+ * What differs is where the mapping points. A campaign's voice node maps against an
+ * Audience schema the run supplies; there is no audience here, so the sources are what
+ * the trigger published plus whatever upstream nodes emitted. Everything else — the
+ * numbered steps, the gate on step two, the tool inputs coming from the agent rather
+ * than the node — is deliberately identical.
+ */
+/* ───────────────────────────── Inbound trigger ──────────────────────────────── */
+
+/**
+ * What starts a session, declared rather than inferred.
+ *
+ * The kinds on offer come from the entry point's channel: a voice line has no message
+ * to keyword-match and no ad referral, a webhook has no message at all. Offering a
+ * kind the channel cannot produce is how an entry point goes live and stays silent.
+ *
+ * Each kind owns one list, and every list is optional in the same way — empty means
+ * "any". A CTWA trigger with no ads named fires for every ad, which is the common
+ * case; naming ads narrows it. Keyword is the exception and says so, because a
+ * keyword trigger with no keywords matches nothing and would be a silent dead end.
+ */
+/** Stands in for the first delivery a real receiver would capture. */
+const SAMPLE_EVENT = JSON.stringify(
+  {
+    type: "payment.failed",
+    occurred_at: "2026-10-08T14:06:11Z",
+    customer: { phone: "+91 98100 12345", name: "Nikhil Gupta" },
+    order: { id: "ord_8841", total: 2499, currency: "INR" },
+  },
+  null,
+  2,
+);
+
+/** Every leaf path in a JSON object, dotted — what a field picker offers. */
+function leafPaths(raw: string): string[] {
+  try {
+    const walk = (v: unknown, prefix: string): string[] => {
+      if (v && typeof v === "object" && !Array.isArray(v)) {
+        return Object.entries(v as Record<string, unknown>).flatMap(([k, val]) =>
+          walk(val, prefix ? `${prefix}.${k}` : k),
+        );
+      }
+      return prefix ? [prefix] : [];
+    };
+    return walk(JSON.parse(raw), "");
+  } catch {
+    return [];
+  }
+}
+
+export function InboundTriggerFields({ config, readOnly, mark, onChange }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
+  const channel = (config?.channel ?? "whatsapp") as InboundChannel;
+  /* Stamped by the builder alongside `channel` — the printable link needs the
+     number it points at, and only the entry point knows it. */
+  const address = (config?.address as string | undefined) ?? "";
+  const offered = TRIGGER_KINDS_BY_CHANNEL[channel] ?? ["any_message"];
+  /* A set now, not one. Tolerates the single-kind shape stored before multiselect
+     so an existing entry point opens on what it actually does. */
+  const [kinds, setKinds] = useState<TriggerKind[]>(() => {
+    const many = config?.triggerKinds as TriggerKind[] | undefined;
+    if (many?.length) return many.filter((k) => offered.includes(k));
+    const one = config?.triggerKind as TriggerKind | undefined;
+    return one && offered.includes(one) ? [one] : [offered[0]];
+  });
+  /* Which kind's own options are being edited. The sections below configure one
+     kind at a time; showing four lists at once is how a panel becomes a form
+     nobody reads. */
+  const [kind, setKind] = useState<TriggerKind>(kinds[0] ?? offered[0]);
+  const [keywords, setKeywords] = useState<string[]>(config?.triggerKeywords ?? []);
+  const [ads, setAds] = useState<AdSource[]>(config?.triggerAds ?? []);
+  const [adSource, setAdSource] = useState<AdSourceType>(config?.triggerAdSource ?? "ad");
+  const [links, setLinks] = useState<TrackedLink[]>(() => {
+    const stored = config?.triggerLinks as TrackedLink[] | undefined;
+    if (stored?.length) return stored;
+    const t = newLinkToken();
+    return [{ id: "l1", label: "Default code", token: t, prefill: trackedLinkText(t) }];
+  });
+  const [events, setEvents] = useState<string[]>(config?.triggerEvents ?? []);
+  const [eventPath, setEventPath] = useState(config?.triggerEventPath ?? "");
+  /* Generated on first open, not typed. A client who invents either of these has an
+     endpoint we do not route and a signature we cannot verify. */
+  const [token] = useState(config?.triggerToken ?? newWebhookToken());
+  const [secret, setSecret] = useState(config?.triggerSecret ?? newSigningSecret());
+  const [sample, setSample] = useState(config?.triggerSample ?? "");
+  const [listening, setListening] = useState(false);
+  const [outs, setOuts] = useState(config?.triggerOutputs ?? []);
+  const [draft, setDraft] = useState("");
+
+  /* The one list that cannot be empty. Everything else treats empty as "any"; a
+     keyword trigger with no keywords matches nothing at all. */
+  const error =
+    kinds.length === 0 ? "Pick at least one kind of arrival"
+    : kinds.includes("keyword") && keywords.length === 0 ? "Add at least one keyword"
+    : kinds.includes("webhook") && events.length > 0 && !eventPath.trim()
+      ? "Name the field the event comes from"
+      : undefined;
+
+  const samplePaths = useMemo(() => leafPaths(sample), [sample]);
+
+  const sourceOutputs = useMemo(() => {
+    const out: { id: string; label: string; kind: "outcome" | "default" }[] = [];
+    /* Built in precedence order so the ports read down the node the same way the
+       resolver evaluates them. */
+    if (kinds.includes("ctwa_ad"))
+      for (const a of ads) if (a.id.trim()) out.push({ id: `ad:${a.id}`, label: a.label || a.id, kind: "outcome" });
+    if (kinds.includes("qr_link"))
+      for (const l of links) out.push({ id: `link:${l.token}`, label: l.label || l.token, kind: "outcome" });
+    if (kinds.includes("keyword"))
+      for (const k of keywords) out.push({ id: `kw:${k}`, label: k, kind: "outcome" });
+    return out.length ? [...out, { id: "default", label: "Everything else", kind: "default" as const }] : undefined;
+  }, [kinds, ads, keywords, links]);
+
+  /* Ads left this list when they gained labels and their own outputs. */
+  /* Ads left this list when they gained labels and their own outputs — a plain
+     string could not carry a name, and the id alone is what an author would have
+     had to recognise on the canvas. */
+  const list = kind === "keyword" ? keywords
+    : kind === "webhook" ? events
+    : null;
+  const setList = (next: string[]) => {
+    if (kind === "keyword") setKeywords(next);
+    else if (kind === "webhook") setEvents(next);
+  };
+  const listLabel = kind === "keyword" ? "Keywords" : "Events";
+  const listHint = kind === "keyword"
+    ? "Matched exactly, ignoring case. The matched value is published as trigger.matched_keyword."
+    : "Leave empty to fire for any event posted to this endpoint.";
+
+  useEffect(() => {
+    mark(!error, error);
+    onChange({
+      config: {
+        ...config,
+        triggerKinds: kinds,
+        /* Kept in step so anything still reading the old field routes the same way. */
+        triggerKind: kinds[0],
+        triggerKeywords: kinds.includes("keyword") ? keywords : undefined,
+        triggerAds: kinds.includes("ctwa_ad") ? ads : undefined,
+        triggerAdSource: kinds.includes("ctwa_ad") ? adSource : undefined,
+        triggerLinks: kinds.includes("qr_link") ? links : undefined,
+        triggerEvents: kinds.includes("webhook") ? events : undefined,
+        triggerEventPath: kinds.includes("webhook") ? eventPath.trim() || undefined : undefined,
+        triggerToken: kinds.includes("webhook") ? token : undefined,
+        triggerSecret: kinds.includes("webhook") ? secret : undefined,
+        triggerSample: kinds.includes("webhook") ? sample || undefined : undefined,
+        triggerOutputs: kinds.includes("webhook") ? outs.filter((o) => o.name.trim()) : undefined,
+      },
+      subtitle: kinds.length === 1
+        ? TRIGGER_KIND_LABEL[kinds[0]]
+        : `${kinds.length} kinds of arrival`,
+      /* One output per named source, so "answer this QR differently" is a wire on
+         the canvas rather than a conditional the author has to build. The default
+         is always present and always last: an arrival matching no named source
+         still has somewhere to go, which is the same guarantee the webhook node's
+         fallback gives. */
+      outputs: sourceOutputs,
+    });
+  }, [kinds, keywords, ads, adSource, links, events, eventPath, token, secret, sample, outs, error]);
+
+  /* `any_message` is exclusive. An entry point is either a set of claims or its
+     number's fallback, and an entry point that is both catches everything anyway —
+     the other ticks would be decoration that reads like configuration. */
+  const toggleKind = (k: TriggerKind) => {
+    setKinds((cur) => {
+      let next: TriggerKind[];
+      if (isFallbackKind(k)) next = cur.includes(k) ? [] : [k];
+      else {
+        const base = cur.filter((x) => !isFallbackKind(x));
+        next = base.includes(k) ? base.filter((x) => x !== k) : [...base, k];
+      }
+      if (next.length === 0) next = [k];
+      if (!next.includes(kind)) setKind(next[0]);
+      return next;
+    });
+  };
+
+  const add = () => {
+    const v = draft.trim();
+    if (!v || !list || list.includes(v)) return;
+    setList([...list, v]);
+    setDraft("");
+  };
+
+  return (
+    <>
+      <Section title="Starts when">
+        <div className="space-y-2">
+          {offered.map((k) => {
+            const on = kinds.includes(k);
+            const configurable = on && !isFallbackKind(k) && k !== "any_message";
+            return (
+              <div
+                key={k}
+                className={cn(
+                  "rounded-md border px-2.5 py-2",
+                  on ? "border-foreground/30 bg-accent/40" : "border-border",
+                )}
+              >
+                <label className="flex cursor-pointer items-start gap-2">
+                  <Checkbox
+                    className="mt-0.5"
+                    disabled={readOnly}
+                    checked={on}
+                    onCheckedChange={() => toggleKind(k)}
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[12.5px] font-medium">{TRIGGER_KIND_LABEL[k]}</span>
+                    <span className="block text-[11px] leading-snug text-muted-foreground">
+                      {TRIGGER_KIND_INFO[k]}
+                    </span>
+                  </span>
+                  {/* Which kind's own options the sections below are editing. Only
+                      offered once more than one kind is on, because with one there is
+                      nothing to switch between and a visible switch implies there is. */}
+                  {configurable && kinds.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={(e) => { e.preventDefault(); setKind(k); }}
+                      className={cn(
+                        "shrink-0 rounded px-1.5 py-0.5 text-[10.5px] font-medium transition-colors",
+                        kind === k
+                          ? "bg-foreground text-background"
+                          : "border border-border text-muted-foreground hover:bg-accent",
+                      )}
+                    >
+                      {kind === k ? "Editing" : "Edit"}
+                    </button>
+                  )}
+                </label>
+              </div>
+            );
+          })}
+        </div>
+        {offered.length === 1 ? (
+          <p className="mt-2 text-[11px] leading-snug text-muted-foreground">
+            A {CHANNEL_LABEL[channel].toLowerCase()} entry point carries one kind of arrival,
+            so there is nothing to choose.
+          </p>
+        ) : kinds.some(isFallbackKind) ? (
+          <StatusBanner
+            ok
+            title="This entry point is the number's fallback"
+            detail="Taking any inbound message means taking everything another entry point on this number has not claimed — so the other kinds are off, because ticking them would change nothing."
+          />
+        ) : (
+          <div className="mt-2 space-y-1.5">
+            <p className="text-[11px] leading-snug text-muted-foreground">
+              Several kinds can share one entry point when they share an agent. Which one
+              fired is published as <span className="font-mono">trigger.entry_kind</span>.
+            </p>
+            {/* Said where the overlap is created, not in a doc. An arrival can
+                match two of these at once and something has to decide. */}
+            {kinds.length > 1 && (
+              <p className="text-[11px] leading-snug text-muted-foreground">
+                {KIND_PRECEDENCE_COPY}
+              </p>
+            )}
+          </div>
+        )}
+      </Section>
+
+      {/* Which Meta referral sources count. Above the id list on purpose: it is the
+          coarser filter, and an author who picks "paid ads only" often needs no id
+          list at all. */}
+      {kinds.includes("ctwa_ad") && kind === "ctwa_ad" && (
+        <Section title="Referral source">
+          <div className="space-y-2">
+            {(["ad", "post", "any"] as AdSourceType[]).map((v) => (
+              <label
+                key={v}
+                className={cn(
+                  "flex cursor-pointer items-start gap-2 rounded-md border px-2.5 py-2",
+                  adSource === v ? "border-foreground/30 bg-accent/40" : "border-border",
+                )}
+              >
+                <input
+                  type="radio"
+                  className="mt-0.5 h-3.5 w-3.5"
+                  disabled={readOnly}
+                  checked={adSource === v}
+                  onChange={() => setAdSource(v)}
+                />
+                <span className="min-w-0">
+                  <span className="block text-[12.5px] font-medium">{AD_SOURCE_LABEL[v]}</span>
+                  <span className="block text-[11px] leading-snug text-muted-foreground">
+                    {AD_SOURCE_INFO[v]}
+                  </span>
+                </span>
+              </label>
+            ))}
+          </div>
+          <p className="mt-2 text-[11px] leading-snug text-muted-foreground">
+            Both arrive through the same <span className="font-mono">referral</span> object,
+            so a trigger that does not separate them counts organic traffic against ad spend.
+          </p>
+        </Section>
+      )}
+
+      {list && (
+        <Section title={listLabel}>
+          <div className="space-y-2">
+            <div className="flex gap-2">
+              <Input
+                value={draft}
+                disabled={readOnly}
+                placeholder={kind === "keyword" ? "e.g. BALANCE" : kind === "webhook" ? "e.g. payment.failed" : "Add one…"}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }}
+                className="h-8 flex-1 font-mono text-xs"
+              />
+              <Button variant="outline" size="sm" disabled={readOnly || !draft.trim()} className="h-8 gap-1 text-[11px]" onClick={add}>
+                <Plus className="h-3 w-3" /> Add
+              </Button>
+            </div>
+            {list.length > 0 ? (
+              <div className="flex flex-wrap gap-1.5">
+                {list.map((v) => (
+                  <span key={v} className="flex items-center gap-1 rounded-full border border-border bg-secondary px-2 py-0.5 text-[11px]">
+                    <span className="font-mono">{v}</span>
+                    {!readOnly && (
+                      <button
+                        type="button"
+                        onClick={() => setList(list.filter((x) => x !== v))}
+                        className="text-muted-foreground transition-colors hover:text-destructive"
+                        aria-label={`Remove ${v}`}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <p className="text-[11px] text-muted-foreground">
+                {kind === "keyword" ? "No keywords yet — this trigger matches nothing." : "Empty — fires for any."}
+              </p>
+            )}
+            <p className="text-[11px] leading-snug text-muted-foreground">{listHint}</p>
+          </div>
+        </Section>
+      )}
+
+      {/* The honest version of what used to be "QR code or wa.me link".
+          Nothing here is detected — it is generated, printed, and matched on the way
+          back, and the copy says so rather than implying Meta tells us. */}
+      {kinds.includes("ctwa_ad") && kind === "ctwa_ad" && (
+        <Section title="Ads and posts">
+          <div className="space-y-2">
+            <p className="text-[11px] leading-snug text-muted-foreground">
+              Name the ones worth answering differently; each gets its own output on
+              the node. Leave the list empty to fire for anything matching the source
+              above, through the default output.
+            </p>
+            {ads.map((a, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <Input
+                  value={a.label}
+                  disabled={readOnly}
+                  placeholder="What the ad is, e.g. Diwali gold offer"
+                  onChange={(e) => setAds(ads.map((x, j) => j === i ? { ...x, label: e.target.value } : x))}
+                  className="h-8 flex-1 text-xs"
+                />
+                <Input
+                  value={a.id}
+                  disabled={readOnly}
+                  placeholder="referral.source_id"
+                  onChange={(e) => setAds(ads.map((x, j) => j === i ? { ...x, id: e.target.value } : x))}
+                  className="h-8 w-[150px] font-mono text-[11px]"
+                />
+                {!readOnly && (
+                  <Button
+                    variant="ghost" size="sm"
+                    className="h-8 w-8 shrink-0 p-0 text-muted-foreground"
+                    onClick={() => setAds(ads.filter((_, j) => j !== i))}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                )}
+              </div>
+            ))}
+            <Button
+              variant="outline" size="sm" disabled={readOnly}
+              className="h-7 gap-1 text-[11px]"
+              onClick={() => setAds([...ads, { id: "", label: "" }])}
+            >
+              <Plus className="h-3 w-3" /> Add an ad
+            </Button>
+            {/* The id is what Meta sends and the label is what a person reads. An
+                author should never have to recognise 120210483726150 on a canvas. */}
+            <p className="text-[11px] leading-snug text-muted-foreground">
+              The id is Meta&rsquo;s <span className="font-mono">referral.source_id</span>;
+              the name is what the output port shows.
+            </p>
+          </div>
+        </Section>
+      )}
+
+      {kinds.includes("qr_link") && kind === "qr_link" && (
+        <>
+          <Section title="Codes and links to publish">
+            <div className="space-y-2">
+              <p className="text-[11px] leading-snug text-muted-foreground">
+                One per place you print a code. Each gets its own marker, its own
+                prefilled message and its own output on the node — so the window
+                poster and the till sticker can be answered differently.
+              </p>
+              {links.map((l, i) => (
+                <div key={l.id} className="space-y-1.5 rounded-lg border border-border p-2.5">
+                  <div className="flex items-center gap-2">
+                    <Input
+                      value={l.label}
+                      disabled={readOnly}
+                      placeholder="Where this code lives, e.g. Window poster"
+                      onChange={(e) => setLinks(links.map((x, j) => j === i ? { ...x, label: e.target.value } : x))}
+                      className="h-8 flex-1 text-xs"
+                    />
+                    <span className="shrink-0 rounded border border-warning/40 bg-warning/10 px-1.5 py-0.5 font-mono text-[10.5px] text-warning">
+                      {l.token}
+                    </span>
+                    {links.length > 1 && !readOnly && (
+                      <Button
+                        variant="ghost" size="sm"
+                        className="h-8 w-8 shrink-0 p-0 text-muted-foreground"
+                        onClick={() => setLinks(links.filter((_, j) => j !== i))}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
+                  </div>
+                  <Input
+                    value={l.prefill}
+                    disabled={readOnly}
+                    onChange={(e) => setLinks(links.map((x, j) => j === i ? { ...x, prefill: e.target.value } : x))}
+                    className="h-8 font-mono text-[11px]"
+                  />
+                  {/* The marker has to survive whatever the author writes: it is
+                      the only thing we match on. Said rather than enforced, so a
+                      deliberate edit is still possible. */}
+                  {!l.prefill.includes(l.token) && (
+                    <p className="text-[11px] leading-snug text-destructive">
+                      This message no longer contains {l.token}, so arrivals from this
+                      code will not be recognised.
+                    </p>
+                  )}
+                  <div className="divide-y divide-border rounded-md border border-border">
+                    {address ? (
+                      <CopyRow label="Link" value={trackedLink(address, l.prefill)} />
+                    ) : (
+                      <p className="px-2.5 py-2 text-[11px] text-warning">
+                        Bind a number and the link builds itself.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ))}
+              <Button
+                variant="outline" size="sm" disabled={readOnly}
+                className="h-7 gap-1 text-[11px]"
+                onClick={() => {
+                  const t = newLinkToken();
+                  setLinks([...links, { id: `l${links.length + 1}`, label: "", token: t, prefill: trackedLinkText(t) }]);
+                }}
+              >
+                <Plus className="h-3 w-3" /> Add a code
+              </Button>
+            </div>
+          </Section>
+
+          <Section title="What this can and cannot tell you">
+            <StatusBanner
+              ok={false}
+              title="Nothing identifies the scan itself"
+              detail="Scanning a code reaches nobody — the camera decodes a link and opens a chat, and no event exists until the customer presses send. So scans are uncountable, and the drop-off between scanning and sending is invisible."
+            />
+            <p className="mt-2 text-[11px] leading-snug text-muted-foreground">
+              When the message does arrive it is an ordinary text message. All we
+              have is the marker we planted, so a customer who edits it away lands
+              wherever an unmatched message lands — and anybody who types a marker by
+              hand arrives here too. There is no attribution back to Meta, because
+              Meta was never involved.
+            </p>
+          </Section>
+        </>
+      )}
+
+      {kinds.includes("webhook") && kind === "webhook" && (
+        <>
+          <Section title="Endpoint">
+            <div className="space-y-2">
+              <p className="text-[11px] leading-snug text-muted-foreground">
+                Give this to whoever is sending. It is generated and cannot be edited — an
+                endpoint you choose is one we do not route.
+              </p>
+              <div className="divide-y divide-border rounded-lg border border-border">
+                <CopyRow label="POST to" value={webhookEndpoint(token)} />
+                <CopyRow label="Content-Type" value="application/json" />
+              </div>
+            </div>
+          </Section>
+
+          <Section title="Signing secret">
+            <div className="space-y-2">
+              <div className="divide-y divide-border rounded-lg border border-border">
+                <CopyRow label="Secret" value={secret} critical />
+                <CopyRow label="Signature header" value={WEBHOOK_SIGNATURE_HEADER} />
+                <CopyRow label="Algorithm" value={WEBHOOK_SIGNATURE_ALGO} copyable={false} />
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[11px] leading-snug text-muted-foreground">
+                  We verify every request against this. Rotating it breaks the sender until
+                  they are updated.
+                </p>
+                <Button
+                  variant="outline" size="sm" disabled={readOnly}
+                  className="h-7 shrink-0 gap-1 text-[11px]"
+                  onClick={() => setSecret(newSigningSecret())}
+                >
+                  <RefreshCw className="h-3 w-3" /> Rotate
+                </Button>
+              </div>
+            </div>
+          </Section>
+
+          {/* Capture first, configure second. Picking fields out of a payload you have
+              actually received is the difference between a mapping that works and one
+              that fails silently at runtime and looks like the sender's fault. */}
+          <Section title="Sample event">
+            {sample ? (
+              <div className="space-y-2">
+                <pre className="max-h-[200px] overflow-auto rounded-lg border border-border bg-secondary/40 px-3 py-2.5 font-mono text-[11px] leading-relaxed">
+                  {sample}
+                </pre>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[11px] text-muted-foreground">
+                    Paths below are offered from this payload.
+                  </p>
+                  <Button
+                    variant="ghost" size="sm" disabled={readOnly}
+                    className="h-7 gap-1 text-[11px]"
+                    onClick={() => setSample("")}
+                  >
+                    Capture again
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-[11px] leading-snug text-muted-foreground">
+                  Send one real event to the URL above and we will show it here. Every field
+                  below is then picked from it rather than typed from memory.
+                </p>
+                <Button
+                  variant="outline" size="sm" disabled={readOnly || listening}
+                  className="h-8 gap-1.5 text-xs"
+                  onClick={() => {
+                    setListening(true);
+                    /* Stands in for the socket that would stream the next delivery. */
+                    window.setTimeout(() => { setSample(SAMPLE_EVENT); setListening(false); }, 1200);
+                  }}
+                >
+                  {listening ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Webhook className="h-3.5 w-3.5" />}
+                  {listening ? "Waiting for an event…" : "Listen for a test event"}
+                </Button>
+              </div>
+            )}
+          </Section>
+
+          <Section title="Event identification">
+            <Field label="Event field" required={events.length > 0}>
+              <SelectLike
+                disabled={readOnly || !sample}
+                options={samplePaths}
+                defaultValue={eventPath}
+                onPick={setEventPath}
+                placeholder={sample ? "Pick a field…" : "Capture an event first"}
+              />
+            </Field>
+            <p className="text-[11px] leading-snug text-muted-foreground">
+              Which field names the event. Its value is published as{" "}
+              <span className="font-mono">trigger.event</span>, and the values below decide
+              which ones open a session.
+            </p>
+          </Section>
+
+          {/* The rest of the payload, named. Without this the graph can tell that a
+              payment failed and nothing about which payment — every downstream
+              condition and every agent variable has to come from somewhere. */}
+          <Section title="Output variables">
+            <div className="space-y-2">
+              <p className="text-[11px] leading-snug text-muted-foreground">
+                Lift fields out of the payload so conditions and agents can read them. Each
+                becomes <span className="font-mono">trigger.&lt;name&gt;</span>.
+              </p>
+              {outs.map((o, i) => (
+                <div key={o.id} className="flex gap-2">
+                  <Input
+                    value={o.name} disabled={readOnly} placeholder="Variable name"
+                    onChange={(e) => setOuts(outs.map((x, j) => j === i ? { ...x, name: e.target.value } : x))}
+                    className="h-8 w-[160px] shrink-0 font-mono text-xs"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <SelectLike
+                      disabled={readOnly || !sample}
+                      options={samplePaths}
+                      defaultValue={o.path}
+                      onPick={(v) => setOuts(outs.map((x, j) => j === i ? { ...x, path: v } : x))}
+                      placeholder={sample ? "Pick a field…" : "Capture an event first"}
+                    />
+                  </div>
+                  <Button
+                    variant="ghost" size="sm" disabled={readOnly}
+                    className="h-8 w-8 shrink-0 p-0 text-muted-foreground"
+                    onClick={() => setOuts(outs.filter((_, j) => j !== i))}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              ))}
+              <Button
+                variant="outline" size="sm" disabled={readOnly || !sample}
+                className="h-7 gap-1 text-[11px]"
+                onClick={() => setOuts([...outs, { id: `t${outs.length + 1}`, name: "", path: "" }])}
+              >
+                <Plus className="h-3 w-3" /> Add output variable
+              </Button>
+              {!sample && (
+                <p className="text-[11px] text-muted-foreground">
+                  Capture an event first — a path typed from memory is one that fails at
+                  runtime and looks like the sender&rsquo;s fault.
+                </p>
+              )}
+            </div>
+          </Section>
+        </>
+      )}
+
+      <Section title="Publishes">
+        <div className="flex flex-wrap gap-1.5">
+          {triggerVariables(channel, kinds, outs).map((v) => (
+            <span key={v.key} className="rounded border border-border bg-secondary px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
+              {v.key}
+            </span>
+          ))}
+        </div>
+        <p className="mt-2 text-[11px] leading-snug text-muted-foreground">
+          What downstream conditions can branch on. Changing the kind changes this list —
+          a branch testing a variable this trigger does not publish can never be taken.
+        </p>
+      </Section>
+    </>
+  );
+}
+
+/**
+ * What an attribute obviously maps to, before anybody chooses.
+ *
+ * The trigger is an inbound graph's only upstream, and it publishes the contact
+ * on every channel, so `name` and `phone` have exactly one sensible source. The
+ * rest have none and stay empty rather than guessing.
+ */
+function defaultSourceFor(attrName: string): string {
+  return attrName === "phone" ? "trigger.phone"
+    : attrName === "name" ? "trigger.name"
+    : "";
+}
+
+export function AgentSessionFields({ config, readOnly, mark, onChange }: { config?: PresetConfig; readOnly?: boolean; mark: (v: boolean, e?: string) => void; onChange: (patch: Partial<WorkflowNodeData>) => void }) {
+  const agents = useAgents();
+  const channel = config?.channel ?? "whatsapp";
+  const isVoice = channel === "voice";
+  const eligible = agents.filter((a) => a.type === (isVoice ? "voice" : "chat"));
+  const [agentId, setAgentId] = useState(config?.agentId ?? "");
+  const [priorContext, setPriorContext] = useState(config?.priorSessionContext ?? true);
+  const picked = eligible.find((a) => a.id === agentId);
+  const agentSelected = !!picked;
+
+
+  const agentTools = (picked?.tools ?? []).map(getTool).filter((t): t is NonNullable<typeof t> => !!t);
+  const toolMap = config?.toolInputMap ?? [];
+
+  const setVarMapping = (key: string, def: string, mode?: "variable" | "constant") => {
+    const base = config?.sessionVarMap ?? [];
+    const next = base.filter((m) => m.v !== key);
+    next.push({ v: key, def, mode });
+    onChange({ config: { ...config, sessionVarMap: next } });
+  };
+  const setToolMapping = (key: string, def: string, mode?: "variable" | "constant") => {
+    const next = toolMap.filter((m) => m.v !== key);
+    next.push({ v: key, def, mode });
+    onChange({ config: { ...config, toolInputMap: next } });
+  };
+
+  /* A required attribute with nowhere to come from is an agent that opens with a
+     blank where a name should be. The node is not valid until each one is
+     pointed somewhere — counted against the pre-filled default too, so the
+     obvious mappings do not have to be made by hand to clear the error. */
+  const unmapped = picked?.attributes.filter(
+    (a) => a.required
+      && !(config?.sessionVarMap?.find((m) => m.v === a.name)?.def ?? defaultSourceFor(a.name)),
+  ) ?? [];
+
+  useEffect(() => {
+    const err = !agentSelected ? "Select agent"
+      : unmapped.length ? `Map ${unmapped.map((a) => a.name).join(", ")}`
+      : undefined;
+    mark(!err, err);
+    onChange({
+      config: {
+        ...config,
+        agentId: agentId || undefined,
+        priorSessionContext: priorContext,
+      },
+      subtitle: picked?.name ?? "Select an agent",
+      /* One output per disposition the agent can close on, so the journey
+         branches on how the conversation actually went. This is what replaced
+         the checkbox list that used to live in this panel: escalation is now a
+         node somebody wires a branch to, which means it is visible on the canvas
+         instead of buried two clicks inside a config. */
+      outputs: picked?.dispositions.length
+        ? picked.dispositions.map((d) => ({ id: d, label: d, kind: "outcome" as const }))
+        : undefined,
+    });
+  }, [agentId, picked?.name, picked?.dispositions, priorContext, unmapped.length]);
+
+  return (
+    <>
+      <Section title="Agent">
+        <div className="space-y-4 rounded-xl border border-border bg-card/50 p-4">
+          {/* Step 1 — which agent takes it */}
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <StepChip n={1} done={agentSelected} />
+              <Label className="flex items-center gap-1 text-[12px] font-medium text-foreground">
+                {isVoice ? "Voice" : "Chat"} agent <span className="text-destructive">*</span>
+              </Label>
+            </div>
+            <Select value={agentId} disabled={readOnly} onValueChange={setAgentId}>
+              <SelectTrigger className="h-9 text-sm">
+                <SelectValue placeholder="Select agent…" />
+              </SelectTrigger>
+              <SelectContent>
+                {eligible.map((a) => (
+                  <SelectItem key={a.id} value={a.id}>
+                    <span className="flex items-center gap-2">
+                      <span>{a.name}</span>
+                      <span className="text-[10.5px] text-muted-foreground">{a.status}</span>
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-[11px] leading-snug text-muted-foreground">
+              Only agents of this entry point&rsquo;s channel are offered.
+            </p>
+          </div>
+
+          <div className="border-t border-border/60" />
+
+          {/* Step 2 — gated, because there is nothing to map until an agent is chosen */}
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <StepChip n={2} muted={!agentSelected} />
+              <Label className="text-[12px] font-medium text-foreground">Variable mapping</Label>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Map the agent&rsquo;s required attributes to what the trigger published, or
+              set a constant value.
+            </p>
+            {agentSelected ? (
+              <div className="space-y-2.5 pt-1">
+                {/* One row per attribute the agent declares, with its type and
+                    whether it is required. The agent states what it needs; this
+                    panel is only where each one is pointed at a source. Without
+                    the type and the asterisk an author cannot tell a mapping
+                    they still owe from one they meant to leave empty. */}
+                {picked.attributes.map((attr) => {
+                  const saved = config?.sessionVarMap?.find((m) => m.v === attr.name);
+                  return (
+                    <div key={attr.id} className="grid grid-cols-[132px_1fr] items-start gap-2">
+                      <div className="min-w-0 pt-1.5">
+                        <div className="truncate font-mono text-[11.5px] text-foreground">
+                          {attr.name}
+                          {attr.required && <span className="ml-0.5 text-destructive">*</span>}
+                        </div>
+                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                          {attr.type}
+                        </div>
+                      </div>
+                      <VariablePicker
+                        defaultValue={saved?.def ?? defaultSourceFor(attr.name)}
+                        disabled={readOnly}
+                        allowConstant
+                        mode={saved?.mode}
+                        onChange={(v, mode) => setVarMapping(attr.name, v, mode)}
+                      />
+                    </div>
+                  );
+                })}
+                {picked.attributes.length === 0 && (
+                  <p className="text-[11.5px] text-muted-foreground">
+                    <span className="font-mono">{picked.name}</span> declares no attributes,
+                    so there is nothing to map.
+                  </p>
+                )}
+              </div>
+            ) : (
+              <div className="rounded-md border border-dashed border-border bg-muted/30 px-3 py-3 text-[11.5px] text-muted-foreground">
+                Select an agent above to map its variables.
+              </div>
+            )}
+          </div>
+        </div>
+      </Section>
+
+      {/* Checked by default. The cost of the toggle existing at all is that
+          someone turns it off; the cost of it not existing is an agent that
+          greets a returning customer as a stranger. */}
+      <Section title="Prior conversation context">
+        <label className="flex cursor-pointer items-start gap-2 text-[12.5px]">
+          <Checkbox
+            checked={priorContext}
+            disabled={readOnly}
+            className="mt-0.5"
+            onCheckedChange={(v) => setPriorContext(!!v)}
+          />
+          <span className="min-w-0">
+            <span className="block">Give the agent the last session</span>
+            <span className="block text-[11px] leading-snug text-muted-foreground">
+              A summary of what happened, how it ended and its tags — not the
+              transcript. Published as{" "}
+              <span className="font-mono">session.previous</span>.
+            </span>
+          </span>
+        </label>
+      </Section>
+
+      {agentSelected && picked.status !== "live" && (
         <StatusBanner
           ok={false}
           title={`${picked.name} is ${picked.status}`}
           detail="A live entry point needs a live agent, or these arrivals go unanswered."
         />
       )}
+
+      {/* Tools come from the agent, as on the Voice Call node — the node only maps
+          each input for this graph. */}
+      {agentSelected && agentTools.length > 0 && (
+        <Section title="Tool configuration">
+          <div className="space-y-3 rounded-xl border border-border bg-card/50 p-4">
+            <p className="text-[11px] text-muted-foreground">
+              <span className="font-mono text-foreground">{picked.name}</span> brings{" "}
+              {agentTools.length} tool{agentTools.length === 1 ? "" : "s"}. Map each input to a
+              trigger or upstream variable, or let the agent decide.
+            </p>
+            {agentTools.map((tool) => {
+              const mappable = tool.inputs.filter((i) => i.source !== "constant");
+              return (
+                <div key={tool.handle} className="space-y-2.5 rounded-lg border border-border bg-background/60 p-3">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="font-mono text-[12px] font-medium text-ai">@{tool.handle}</span>
+                    <span className="truncate text-[10.5px] text-muted-foreground">{tool.description}</span>
+                  </div>
+                  {mappable.length > 0 ? mappable.map((inp) => {
+                    const v = `${tool.handle}.${inp.key}`;
+                    const saved = toolMap.find((m) => m.v === v);
+                    const def = saved?.def ?? "__llm__";
+                    return (
+                      <div key={v} className="grid grid-cols-[130px_1fr] items-center gap-2">
+                        <span className="truncate font-mono text-[11.5px] text-muted-foreground" title={inp.description}>
+                          {inp.key}
+                        </span>
+                        <ToolInputMapPicker
+                          defaultValue={def}
+                          disabled={readOnly}
+                          mode={saved?.mode}
+                          onChange={(val, mode) => setToolMapping(v, val, mode)}
+                        />
+                      </div>
+                    );
+                  }) : (
+                    <p className="text-[11px] text-muted-foreground">All inputs are fixed at the tool.</p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </Section>
+      )}
+
       <div className="flex items-start gap-2 rounded-md border border-dashed border-border bg-muted/30 px-2.5 py-2 text-[11px] text-muted-foreground">
         <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0" />
         <span>
-          Routing ends here — the agent owns the conversation from this point, so this
-          node has no output. Only agents of this entry point&rsquo;s channel are offered.
+          The agent owns the conversation to its close, then leaves by the output
+          matching the disposition it chose. Wire the ones that need a person to an
+          Escalate node; anything left unwired simply ends.
         </span>
       </div>
-    </Section>
+    </>
   );
 }
 
@@ -1336,8 +2630,8 @@ function ToolInputMapPicker({
 
   if (m === "constant") {
     return (
-      <div className="flex min-w-0 items-center gap-1">
-        <div className="relative min-w-0 flex-1">
+      <div className="flex min-w-0 flex-wrap items-center gap-1">
+        <div className="relative min-w-[132px] flex-1">
           <Hash className="pointer-events-none absolute left-2.5 top-1/2 z-10 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={v}
@@ -3007,8 +4301,11 @@ function VariablePicker({
     );
   }
   return (
-    <div className="flex min-w-0 items-center gap-1">
-      <div className="relative min-w-0 flex-1">
+    /* Wraps rather than squeezes: the Variable/Value toggle is a fixed width, so
+       without this the field beside it is what gives, and a mapping renders as
+       "conta…" — unreadable exactly when the author is checking it. */
+    <div className="flex min-w-0 flex-wrap items-center gap-1">
+      <div className="relative min-w-[132px] flex-1">
         <Variable className="pointer-events-none absolute left-2.5 top-1/2 z-10 h-3 w-3 -translate-y-1/2 text-ai" />
         <Select value={v || undefined} disabled={disabled} onValueChange={(val) => { setV(val); onChange(val, "variable"); }}>
           <SelectTrigger className="h-9 min-w-0 pl-7 font-mono text-[12px] [&>span]:truncate">

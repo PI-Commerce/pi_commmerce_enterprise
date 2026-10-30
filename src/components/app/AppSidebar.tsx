@@ -16,12 +16,14 @@ type CampaignChild = { to: string; label: string; icon: React.ComponentType<{ cl
 const campaignChildren: CampaignChild[] = [
   { to: "/campaigns", label: "Workflows", icon: Workflow },
   { to: "/broadcasts", label: "Broadcasts", icon: Send },
-  // Templates is a subpath of /campaigns; the exclusive isActive below keeps
-  // Workflows from also lighting up when a template route is open.
-  { to: "/campaigns/templates", label: "Templates", icon: LayoutTemplate },
 ];
 
 const primaryBottom = [
+  // Templates sits outside the Campaigns group: a template is a reusable asset
+  // you author once and launch many campaigns from, not one of the things a
+  // campaign *is*. It stays on the /campaigns/templates path, so the exclusive
+  // isActive below is what keeps Workflows from also lighting up on it.
+  { to: "/campaigns/templates", label: "Templates", icon: LayoutTemplate },
   // Inbound sits beside Campaigns, not inside it. A campaign is a project you
   // launch over a known audience; an entry point is always-on infrastructure
   // whose unit of work is one person's session. Different lifecycle, different object.
@@ -134,7 +136,11 @@ function CampaignsNav({
   isActive: (to: string, exact?: boolean) => boolean;
   collapsed: boolean;
 }) {
-  const onCampaigns = path.startsWith("/campaigns") || path.startsWith("/broadcasts");
+  // Templates lives on /campaigns/templates but is its own top-level nav item, so
+  // it must not light up (or auto-expand) the Campaigns group.
+  const onCampaigns =
+    (path.startsWith("/campaigns") && !path.startsWith("/campaigns/templates")) ||
+    path.startsWith("/broadcasts");
   const [open, setOpen] = useState(onCampaigns);
 
   if (collapsed) {

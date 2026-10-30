@@ -4,6 +4,7 @@ import type { EChartsOption } from "echarts";
 import { AppShell, PageHeader } from "@/components/app/AppShell";
 import { PageTabs } from "@/components/app/Tabs";
 import { InboundAnalytics } from "@/components/analytics/InboundAnalytics";
+import { InboxAnalytics } from "@/components/analytics/InboxAnalytics";
 import { AgentAnalytics } from "@/components/analytics/AgentAnalytics";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -97,7 +98,47 @@ export const Route = createFileRoute("/analytics")({
   head: () => ({ meta: [{ title: "Analytics · Pi Commerce Enterprise" }] }),
 });
 
-type Tab = "campaign" | "inbound" | "agent" | "channel";
+type Tab = "campaign" | "inbound" | "inbox" | "agent" | "channel";
+
+type Section = "outbound" | "inbound" | "assist";
+
+/**
+ * Analytics, grouped by who is doing the work.
+ *
+ * Each section is named for the unit of work it measures, so the three read as
+ * peers. "Agent assist" was neither: it named a capability rather than a thing,
+ * and it is a real industry term for AI prompting a person mid-conversation —
+ * which this section does not show, because the inbox does not do it.
+ *
+ * `Agent` sits under Inbound because that is where an agent owns a conversation
+ * end to end; its outbound use is a node inside a campaign and is already measured
+ * by that campaign's funnel. It is a judgement call — the agent view itself still
+ * shows both directions, so nothing is lost, only made less discoverable from the
+ * campaign side.
+ */
+const SECTIONS: { id: Section; label: string; tabs: { id: Tab; label: string }[] }[] = [
+  {
+    id: "outbound",
+    label: "Outbound campaigns",
+    tabs: [
+      { id: "campaign", label: "Campaigns" },
+      { id: "channel", label: "Channel delivery" },
+    ],
+  },
+  {
+    id: "inbound",
+    label: "Inbound sessions",
+    tabs: [
+      { id: "inbound", label: "Overview" },
+      { id: "agent", label: "AI agents" },
+    ],
+  },
+  { id: "assist", label: "Team inbox", tabs: [{ id: "inbox", label: "Inbox" }] },
+];
+
+function sectionOf(tab: Tab): Section {
+  return SECTIONS.find((s) => s.tabs.some((t) => t.id === tab))?.id ?? "outbound";
+}
 
 const CHANNEL_CTA_LABEL: Record<ChannelKind, string> = {
   whatsapp: "View Detailed WhatsApp Analytics",
@@ -373,21 +414,39 @@ function Analytics() {
     <AppShell>
       <PageHeader
         title="Analytics"
-        description="Outbound campaigns, inbound sessions, and node-level performance across your workspace."
+        description="Campaigns reaching out, sessions answering, and the conversations a person had to finish."
       />
-      {/* Campaign and Inbound are the two directions of work. Agent cuts across
-          both by the thing doing the work. Channel is delivery health — the
-          transport, not the behaviour. */}
-      <PageTabs<Tab>
-        value={tab}
-        onChange={setTab}
-        tabs={[
-          { id: "campaign", label: "Campaign" },
-          { id: "inbound", label: "Inbound" },
-          { id: "agent", label: "Agent" },
-          { id: "channel", label: "Channel" },
-        ]}
+      {/* Three sections, by who is doing the work: the platform reaching out, the
+          platform answering, and a person being handed something the automation
+          could not finish. Five flat tabs made Channel and Agent look like peers of
+          Campaign and Inbound when they are lenses on them. */}
+      <PageTabs<Section>
+        value={sectionOf(tab)}
+        onChange={(sec) => setTab(SECTIONS.find((x) => x.id === sec)!.tabs[0].id)}
+        tabs={SECTIONS.map((x) => ({ id: x.id, label: x.label }))}
       />
+
+      {/* Only where there is something to switch between. A lone sub-tab is a
+          control that implies a choice nobody has. */}
+      {SECTIONS.find((x) => x.id === sectionOf(tab))!.tabs.length > 1 && (
+        <div className="mb-4 flex items-center gap-1">
+          {SECTIONS.find((x) => x.id === sectionOf(tab))!.tabs.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              className={cn(
+                "rounded-md px-2.5 py-1 text-[12px] font-medium transition-colors",
+                tab === t.id
+                  ? "bg-secondary text-foreground"
+                  : "text-muted-foreground hover:bg-accent hover:text-foreground",
+              )}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      )}
+
       {tab === "campaign" && (
         <CampaignAnalytics
           goToChannel={goToChannel}
@@ -396,6 +455,7 @@ function Analytics() {
         />
       )}
       {tab === "inbound" && <InboundAnalytics />}
+      {tab === "inbox" && <InboxAnalytics />}
       {tab === "agent" && (
         <AgentAnalytics agentId={agentId} onAgentChange={setAgentId} />
       )}

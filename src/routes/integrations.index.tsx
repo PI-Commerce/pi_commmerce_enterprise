@@ -21,6 +21,7 @@ import { cn } from "@/lib/utils";
 import {
   useConnections, platform, platformMark, PLATFORMS, LISTED_PUSH_TARGETS,
   BROKERED_OVERFLOW, HEALTH_LABEL, HEALTH_TONE, pushTarget,
+  type PushTarget,
 } from "@/lib/connections";
 import {
   useCtConnectors, formatWaba, ctStatePill, updateCtConnector, removeCtConnector,
@@ -30,6 +31,10 @@ import {
   useSmsConnections, smsStatePill, updateSmsConnection, removeSmsConnection,
   type SmsConnection,
 } from "@/lib/clevertap-sms";
+import {
+  useMoeConnections, moeStatePill, updateMoeConnection, removeMoeConnection,
+  type MoeConnection,
+} from "@/lib/moengage-sms";
 import {
   DELIVERY_LANES, DELIVERY_CHANNEL_LABEL,
   type DeliveryLane, type DeliveryChannel,
@@ -95,6 +100,7 @@ function Connections() {
   const connections = useConnections();
   const ctConnectors = useCtConnectors();
   const smsConnections = useSmsConnections();
+  const moeConnections = useMoeConnections();
   const navigate = useNavigate();
   const [adding, setAdding] = useState(false);
   const [addingCt, setAddingCt] = useState(false);
@@ -106,7 +112,7 @@ function Connections() {
     <AppShell>
       <PageHeader
         title="Connections"
-        description="Three ways to work with the tools you already run: we deliver campaigns built in their tool, they trigger campaigns built here, or we pull audiences from them."
+        description="Every system we exchange an audience with lives here."
         actions={
           /* A verb-only trigger. This page keeps a real distinction between a
              connection (a CRM, holding a credential we use) and a connector (one
@@ -153,7 +159,7 @@ function Connections() {
                 both are the sender the recipient sees. */}
             <TableHead cols={["Platform", "Channel", "Sender", "State", "Last activity"]} />
             <tbody className="divide-y divide-border">
-              {laneRows(ctConnectors, smsConnections).map((r) => {
+              {laneRows(ctConnectors, smsConnections, moeConnections).map((r) => {
                 const t = pushTarget(r.lane.platform);
                 return (
                   <tr
@@ -386,9 +392,9 @@ function Connections() {
               Delete this {deleting?.channel === "sms" ? "connection" : "connector"}?
             </AlertDialogTitle>
             <AlertDialogDescription className="text-[12.5px]">
-              {deleting?.name} stops existing. CleverTap's provider entry keeps posting to
-              an endpoint that is no longer there, so remove it on their side too. The
-              username and password cannot be reissued — a new one gets new ones.
+              {deleting?.name} stops existing. {deleting?.vendor}&rsquo;s provider entry
+              keeps posting to an endpoint that is no longer there, so remove it on their
+              side too. The credentials cannot be reissued — a new one gets new ones.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -397,10 +403,11 @@ function Connections() {
               className="h-8 bg-destructive text-xs text-destructive-foreground hover:bg-destructive/90"
               onClick={() => {
                 if (!deleting) return;
-                if (deleting.channel === "sms") removeSmsConnection(deleting.id);
+                if (deleting.platform === "moengage") removeMoeConnection(deleting.id);
+                else if (deleting.channel === "sms") removeSmsConnection(deleting.id);
                 else removeCtConnector(deleting.id);
                 toast.success("Deleted", {
-                  description: `${deleting.name} · remove the provider entry in CleverTap`,
+                  description: `${deleting.name} · remove the provider entry in ${deleting.vendor}`,
                 });
                 setDeleting(null);
               }}
@@ -414,8 +421,22 @@ function Connections() {
   );
 }
 
-/** What the delete dialog needs, which is less than the record it came from. */
-type Pending = { id: string; name: string; channel: DeliveryChannel };
+/**
+ * What the delete dialog needs, which is less than the record it came from.
+ *
+ * `platform` is here because `channel` stopped being enough to name a store the
+ * moment a second vendor shipped an SMS lane: CleverTap SMS and MoEngage SMS are both
+ * `channel: "sms"` and live in different stores, so dispatching on the channel alone
+ * would delete from the wrong one.
+ */
+type Pending = {
+  id: string;
+  name: string;
+  channel: DeliveryChannel;
+  platform: PushTarget["key"];
+  /** The vendor's display name, for copy that names where the leftover entry lives. */
+  vendor: string;
+};
 
 /**
  * Row actions for one set-up lane.
@@ -460,7 +481,8 @@ function LaneMenu({
           className="gap-2 text-xs"
           onClick={() => {
             const next = !item.enabled;
-            if (channel === "sms") updateSmsConnection(item.id, { enabled: next });
+            if (item.platform === "moengage") updateMoeConnection(item.id, { enabled: next });
+            else if (channel === "sms") updateSmsConnection(item.id, { enabled: next });
             else updateCtConnector(item.id, { enabled: next });
             toast.success(next ? "Enabled" : "Disabled", {
               description: next
@@ -475,7 +497,15 @@ function LaneMenu({
         <DropdownMenuItem
           disabled={item.enabled}
           className="gap-2 text-xs text-destructive focus:text-destructive"
-          onClick={() => onDelete({ id: item.id, name: item.name, channel })}
+          onClick={() =>
+            onDelete({
+              id: item.id,
+              name: item.name,
+              channel,
+              platform: item.platform,
+              vendor: pushTarget(item.platform).name,
+            })
+          }
         >
           <Trash2 className="h-3.5 w-3.5" /> Delete
         </DropdownMenuItem>
@@ -506,11 +536,16 @@ function LaneMenu({
  */
 type LaneItem = {
   id: string;
+  /** Which store this record came from — see {@link Pending}. */
+  platform: PushTarget["key"];
   /** The number, or the headers. Whatever the client recognises this one by. */
   name: string;
   pill: { label: string; tone: string };
   activity?: string;
-  route: "/integrations/clevertap/$id" | "/integrations/clevertap-sms/$id";
+  route:
+    | "/integrations/clevertap/$id"
+    | "/integrations/clevertap-sms/$id"
+    | "/integrations/moengage-sms/$id";
   enabled: boolean;
 };
 
@@ -541,12 +576,31 @@ type LaneRow = {
 function laneRows(
   ctConnectors: CtConnector[],
   smsConnections: SmsConnection[],
+  moeConnections: MoeConnection[],
 ): LaneRow[] {
   const itemsFor = (lane: DeliveryLane, channel: DeliveryChannel): LaneItem[] => {
+    if (lane.platform === "moengage") {
+      /* MoEngage has no WhatsApp lane to carry — custom connectors are SMS-only — so
+         there is no whatsapp branch here, only the guard that keeps one from being
+         added by reflex. */
+      if (channel !== "sms") return [];
+      return moeConnections.map((c) => ({
+        id: c.id,
+        platform: "moengage",
+        /* The workspace, because MoEngage allows one provider per domain and so one
+           connection per workspace — the workspace is the thing it is one of. */
+        name: c.workspace,
+        pill: moeStatePill(c),
+        activity: c.lastRequestAt,
+        route: "/integrations/moengage-sms/$id",
+        enabled: c.enabled,
+      }));
+    }
     if (lane.platform !== "clevertap") return [];
     if (channel === "whatsapp") {
       return ctConnectors.map((c) => ({
         id: c.id,
+        platform: "clevertap",
         name: formatWaba(c.wabaNumber),
         pill: ctStatePill(c),
         activity: c.lastMessageAt,
@@ -556,6 +610,7 @@ function laneRows(
     }
     return smsConnections.map((c) => ({
       id: c.id,
+      platform: "clevertap",
       /* The headers, not the id or a nickname. CleverTap does not name an SMS provider
          after anything of ours the way it names a WhatsApp one after the number, so the
          sender set is the only identifier both sides can see. */

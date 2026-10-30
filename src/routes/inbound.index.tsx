@@ -17,7 +17,7 @@ import {
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Search, Plus, MessageCircle, Phone, ChevronRight } from "lucide-react";
+import { Search, Plus, MessageCircle, Phone, ChevronRight, Webhook, Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAgents } from "@/lib/agent-data";
 import {
@@ -27,13 +27,19 @@ import {
   fmtPct,
   fmtDuration,
   fmtTime,
-  TERMINAL_STAGES,
-  STAGE_LABEL,
+  STATUS_LABEL,
+  SESSION_STATUSES,
+  OUTCOME_REASONS,
+  OUTCOME_REASON_LABEL,
+  CHANNEL_WAITING_ON,
+  routingByAddress,
   type EntryPoint,
   type Session,
-  type SessionStage,
+  type OutcomeReason,
+  type SessionStatus,
 } from "@/lib/inbound";
-import { StageTag, MetricCard } from "@/components/inbound/SessionBits";
+import { StatusTag, MetricCard, ChannelIcon } from "@/components/inbound/SessionBits";
+import { RoutingByNumber } from "@/components/inbound/RoutingByNumber";
 import { SessionSheet } from "@/components/inbound/SessionSheet";
 
 export const Route = createFileRoute("/inbound/")({
@@ -49,7 +55,7 @@ export const Route = createFileRoute("/inbound/")({
   }),
 });
 
-type Tab = "entry" | "sessions";
+type Tab = "entry" | "routing" | "sessions";
 
 function Inbound() {
   const [tab, setTab] = useState<Tab>("entry");
@@ -68,11 +74,14 @@ function Inbound() {
         onChange={setTab}
         tabs={[
           { id: "entry", label: "Entry points", count: eps.length },
+          { id: "routing", label: "Routing", count: routingByAddress(eps).length },
           { id: "sessions", label: "Sessions", count: sessions.length },
         ]}
       />
 
-      {tab === "entry" ? <EntryPointsTab /> : <SessionsTab />}
+      {tab === "entry" ? <EntryPointsTab />
+        : tab === "routing" ? <RoutingByNumber />
+        : <SessionsTab />}
     </AppShell>
   );
 }
@@ -87,7 +96,7 @@ function EntryPointsTab() {
 
   const rows = eps.filter((e) => {
     if (fChannel !== "all" && e.channel !== fChannel) return false;
-    if (query && !`${e.name} ${e.address}`.toLowerCase().includes(query.toLowerCase()))
+    if (query && !`${e.name} ${e.addresses.join(" ")}`.toLowerCase().includes(query.toLowerCase()))
       return false;
     return true;
   });
@@ -111,7 +120,10 @@ function EntryPointsTab() {
           options={[
             { value: "all", label: "All channels" },
             { value: "whatsapp", label: "WhatsApp" },
+            /* Still filterable: the first cut stops anyone creating these, it
+               does not pretend the ones already running are gone. */
             { value: "voice", label: "Voice" },
+            { value: "webhook", label: "Webhook" },
           ]}
         />
         {/* Channel is asked up front because it decides what the trigger publishes
@@ -122,17 +134,19 @@ function EntryPointsTab() {
               <Plus className="h-3.5 w-3.5" /> New entry point
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-[180px]">
+          <DropdownMenuContent align="end" className="w-[210px]">
             <DropdownMenuItem
               onSelect={() => navigate({ to: "/inbound/$id", params: { id: "new" }, search: { channel: "whatsapp" } })}
             >
               <MessageCircle className="mr-2 h-3.5 w-3.5" /> WhatsApp
             </DropdownMenuItem>
-            <DropdownMenuItem
-              onSelect={() => navigate({ to: "/inbound/$id", params: { id: "new" }, search: { channel: "voice" } })}
-            >
-              <Phone className="mr-2 h-3.5 w-3.5" /> Voice
-            </DropdownMenuItem>
+            {/* Listed rather than hidden: a roadmap item somebody can see is a
+                question answered, and an absent one is a support ticket asking
+                whether we support it. Each says what it is waiting on, because
+                "Soon" on its own invites the same question a month later. */}
+            <SoonItem icon={Phone} label="Voice" waiting={CHANNEL_WAITING_ON.voice} />
+            <SoonItem icon={Webhook} label="Webhook" waiting={CHANNEL_WAITING_ON.webhook} />
+            <SoonItem icon={Sparkles} label="Custom ER event" />
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
@@ -169,6 +183,22 @@ function EntryPointsTab() {
   );
 }
 
+/** A channel the first cut cannot start, shown with what it is waiting on. */
+function SoonItem({
+  icon: Icon, label, waiting,
+}: { icon: typeof Phone; label: string; waiting?: string }) {
+  return (
+    <DropdownMenuItem disabled className="justify-between" title={waiting}>
+      <span className="flex items-center">
+        <Icon className="mr-2 h-3.5 w-3.5" /> {label}
+      </span>
+      <span className="rounded-full border border-border bg-secondary px-1.5 py-px text-[9.5px] font-medium text-muted-foreground">
+        Soon
+      </span>
+    </DropdownMenuItem>
+  );
+}
+
 function EntryPointRow({ ep, onOpen }: { ep: EntryPoint; onOpen: () => void }) {
   const m = useMemo(() => computeSessionMetrics(sessionsFor(ep)), [ep]);
   return (
@@ -176,11 +206,7 @@ function EntryPointRow({ ep, onOpen }: { ep: EntryPoint; onOpen: () => void }) {
       <td className="px-4 py-3">
         <div className="flex items-center gap-2.5">
           <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-accent text-foreground">
-            {ep.channel === "voice" ? (
-              <Phone className="h-3.5 w-3.5" />
-            ) : (
-              <MessageCircle className="h-3.5 w-3.5" />
-            )}
+            <ChannelIcon channel={ep.channel} />
           </span>
           <div className="min-w-0">
             <p className="truncate text-[13px] font-medium">{ep.name}</p>
@@ -188,7 +214,20 @@ function EntryPointRow({ ep, onOpen }: { ep: EntryPoint; onOpen: () => void }) {
           </div>
         </div>
       </td>
-      <td className="px-4 py-3 font-mono text-[12px] text-muted-foreground">{ep.address}</td>
+      {/* Every bound number, because the count is the point: an entry point on
+          three numbers reads very differently from one on one. */}
+      <td className="px-4 py-3 font-mono text-[12px] text-muted-foreground">
+        {ep.addresses.length === 0 ? (
+          <span className="not-italic text-warning">No number bound</span>
+        ) : (
+          <span className="flex flex-col gap-0.5">
+            {ep.addresses.slice(0, 2).map((a) => <span key={a}>{a}</span>)}
+            {ep.addresses.length > 2 && (
+              <span className="text-[11px]">+{ep.addresses.length - 2} more</span>
+            )}
+          </span>
+        )}
+      </td>
       <td className="px-4 py-3">
         <EpStatus status={ep.status} />
       </td>
@@ -248,7 +287,8 @@ function SessionsTab() {
   const agents = useAgents();
   const [query, setQuery] = useState("");
   const [fEp, setFEp] = useState<string>("all");
-  const [fStage, setFStage] = useState<"all" | SessionStage>("all");
+  const [fReason, setFReason] = useState<"all" | OutcomeReason>("all");
+  const [fStatus, setFStatus] = useState<"all" | SessionStatus>("all");
   const [open, setOpen] = useState<Session | null>(null);
 
   const all = useMemo(
@@ -263,14 +303,15 @@ function SessionsTab() {
     () =>
       all.filter((s) => {
         if (fEp !== "all" && s.entryPointId !== fEp) return false;
-        if (fStage !== "all" && s.stage !== fStage) return false;
+        if (fReason !== "all" && s.outcomeReason !== fReason) return false;
+        if (fStatus !== "all" && s.status !== fStatus) return false;
         if (query) {
           const hay = `${s.id} ${s.contact.name} ${s.contact.phone}`.toLowerCase();
           if (!hay.includes(query.toLowerCase())) return false;
         }
         return true;
       }),
-    [all, fEp, fStage, query],
+    [all, fEp, fReason, fStatus, query],
   );
 
   const m = useMemo(() => computeSessionMetrics(rows), [rows]);
@@ -288,11 +329,6 @@ function SessionsTab() {
         />
         <MetricCard label="Handoff" value={fmtPct(m.handoffRate)} />
         <MetricCard label="Median handle time" value={fmtDuration(m.medianHandleMs)} />
-        <MetricCard
-          label="Cost / resolution"
-          value={`$${m.costPerResolution.toFixed(3)}`}
-          hint="Compares against outbound cost per conversion."
-        />
       </div>
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -315,13 +351,21 @@ function SessionsTab() {
           ]}
         />
         <FilterSelect
-          label="Stage"
-          value={fStage}
-          onChange={(v) => setFStage(v as typeof fStage)}
+          label="Status"
+          value={fStatus}
+          onChange={(v) => setFStatus(v as typeof fStatus)}
           options={[
-            { value: "all", label: "All stages" },
-            { value: "active", label: "Active" },
-            ...TERMINAL_STAGES.map((s) => ({ value: s, label: STAGE_LABEL[s] })),
+            { value: "all", label: "All statuses" },
+            ...SESSION_STATUSES.map((x) => ({ value: x, label: STATUS_LABEL[x] })),
+          ]}
+        />
+        <FilterSelect
+          label="Reason"
+          value={fReason}
+          onChange={(v) => setFReason(v as typeof fReason)}
+          options={[
+            { value: "all", label: "Any reason" },
+            ...OUTCOME_REASONS.map((r) => ({ value: r, label: OUTCOME_REASON_LABEL[r] })),
           ]}
         />
       </div>
@@ -336,7 +380,8 @@ function SessionsTab() {
                 <th className="px-4 py-2.5 text-left font-medium">Session</th>
                 <th className="px-4 py-2.5 text-left font-medium">Contact</th>
                 <th className="px-4 py-2.5 text-left font-medium">Handled by</th>
-                <th className="px-4 py-2.5 text-left font-medium">Stage</th>
+                <th className="px-4 py-2.5 text-left font-medium">Status</th>
+                <th className="px-4 py-2.5 text-left font-medium">Reason</th>
                 <th className="px-4 py-2.5 text-right font-medium">Turns</th>
                 <th className="px-4 py-2.5 text-right font-medium">Duration</th>
                 <th className="px-4 py-2.5 text-right font-medium">Started</th>
@@ -351,11 +396,7 @@ function SessionsTab() {
                 >
                   <td className="px-4 py-2.5">
                     <div className="flex items-center gap-2">
-                      {s.channel === "voice" ? (
-                        <Phone className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                      ) : (
-                        <MessageCircle className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                      )}
+                      <ChannelIcon channel={s.channel} className="text-muted-foreground" />
                       <span className="font-mono text-[11.5px]">{s.id}</span>
                       {s.referral && (
                         <span
@@ -377,7 +418,14 @@ function SessionsTab() {
                     {agentName(s.agentId) ?? "—"}
                   </td>
                   <td className="px-4 py-2.5">
-                    <StageTag stage={s.stage} />
+                    <StatusTag status={s.status} />
+                  </td>
+                  {/* Replaced the Outcome column. Status and outcome had six
+                      valid combinations between them out of twenty, because
+                      status was a function of the stage — the only thing outcome
+                      added that status did not was *why* it ended, which is this. */}
+                  <td className="px-4 py-2.5 text-[12px] text-muted-foreground">
+                    {s.outcomeReason ? OUTCOME_REASON_LABEL[s.outcomeReason] : "—"}
                   </td>
                   <td className="px-4 py-2.5 text-right font-mono text-[12px]">
                     {s.turnCount || "—"}
