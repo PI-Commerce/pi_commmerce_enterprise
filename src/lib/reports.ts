@@ -18,7 +18,14 @@ export type ReportChannel =
   | "sms"
   | "rcs"
   | "voice"
-  | "campaign";
+  | "campaign"
+  /** Usage & Billing exports (Settings > Usage & Billing). Per-message rows,
+   *  trimmed to the billing-relevant columns. Separate channel values so the
+   *  Reports table labels them distinctly from the delivery reports. */
+  | "usage-whatsapp"
+  | "usage-sms"
+  | "usage-rcs"
+  | "usage-voice";
 
 export type ReportStatus =
   | "queued"
@@ -51,6 +58,10 @@ const CHANNEL_LABEL: Record<ReportChannel, string> = {
   rcs: "RCS logs",
   voice: "Voice logs",
   campaign: "Campaign leads",
+  "usage-whatsapp": "WhatsApp usage",
+  "usage-sms": "SMS usage",
+  "usage-rcs": "RCS usage",
+  "usage-voice": "Voice usage",
 };
 
 export function channelLabel(c: ReportChannel): string {

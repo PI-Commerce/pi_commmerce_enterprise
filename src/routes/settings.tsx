@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/table";
 import { Plus, Pencil } from "lucide-react";
 import { SEED_USERS, type UserRow } from "@/lib/users";
+import { UsageBillingTab } from "@/components/settings/UsageBillingTab";
 
 export const Route = createFileRoute("/settings")({
   component: Settings,
@@ -42,18 +43,18 @@ function Settings() {
         onChange={setTab}
         tabs={[
           { id: "users",         label: "Users" },
-          { id: "usage-billing", label: "Usage & Billing", disabled: true },
+          { id: "usage-billing", label: "Usage & Billing" },
           { id: "team",          label: "Team",            disabled: true },
         ]}
       />
-      {tab === "users" ? (
-        <UsersTab />
-      ) : (
+      {tab === "users" && <UsersTab />}
+      {tab === "usage-billing" && <UsageBillingTab />}
+      {tab === "team" && (
         <div className="rounded-xl border border-dashed border-border bg-card/40 px-6 py-14 text-center">
-          <p className="text-[13px] font-medium">Workspace settings coming soon</p>
+          <p className="text-[13px] font-medium">Team management coming soon</p>
           <p className="mx-auto mt-1 max-w-md text-[12px] text-muted-foreground">
-            Usage &amp; Billing and Team management will land here. For API keys
-            and webhooks, head to Developer.
+            Roles and group-level permissions will land here. For API keys and
+            webhooks, head to Developer.
           </p>
         </div>
       )}
