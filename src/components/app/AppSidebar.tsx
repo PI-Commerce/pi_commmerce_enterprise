@@ -1,43 +1,71 @@
 import { useEffect, useState } from "react";
 import { Link, useRouterState } from "@tanstack/react-router";
 import {
-  LayoutDashboard, Megaphone, Bot, BarChart3, Plug, Settings, Command,
+  LayoutDashboard, Bot, BarChart3, Plug, Settings, Command,
   PanelLeftClose, PanelLeftOpen, Radio, ChevronRight, MessageCircle, MessageSquare, MessageSquareText,
-  Inbox, Code2, Workflow, Send, FileText,
+  Inbox, Code2, Workflow, Send, FileText, Sparkles, ArrowUpRight, ArrowDownLeft, Phone,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useRegion } from "@/lib/region";
 
-const primaryTop = [
-  { to: "/", label: "Dashboard", icon: LayoutDashboard, exact: true },
-] as const;
+type Icon = React.ComponentType<{ className?: string }>;
+type NavItem = { label: string; icon: Icon; to?: string; exact?: boolean };
+type NavGroup = { label: string; icon: Icon; activePrefixes: string[]; children: NavItem[] };
 
-type CampaignChild = { to: string; label: string; icon: React.ComponentType<{ className?: string }> };
-const campaignChildren: CampaignChild[] = [
-  { to: "/campaigns", label: "Workflows", icon: Workflow },
-  { to: "/broadcasts", label: "Broadcasts", icon: Send },
+const homeItems: NavItem[] = [
+  { to: "/", label: "Home", icon: LayoutDashboard, exact: true },
+  { label: "Ask Pi", icon: Sparkles },
 ];
 
-const primaryBottom = [
+const outboundGroup: NavGroup = {
+  label: "Outbound",
+  icon: ArrowUpRight,
+  activePrefixes: ["/campaigns", "/broadcasts"],
+  children: [
+    { to: "/campaigns", label: "Journeys", icon: Workflow },
+    { to: "/broadcasts", label: "Broadcasts", icon: Send },
+  ],
+};
+
+const inboundGroup: NavGroup = {
+  label: "Inbound",
+  icon: ArrowDownLeft,
+  activePrefixes: [],
+  children: [
+    { label: "Journeys", icon: Workflow },
+  ],
+};
+
+const buildItems: NavItem[] = [
   { to: "/agents", label: "Agents", icon: Bot },
+];
+
+const observeItems: NavItem[] = [
   { to: "/inbox", label: "Inbox", icon: Inbox },
   { to: "/analytics", label: "Analytics", icon: BarChart3 },
   { to: "/reports", label: "Reports", icon: FileText },
-] as const;
-
-type ChannelChild = { label: string; icon: React.ComponentType<{ className?: string }>; to?: string };
-const channelChildren: ChannelChild[] = [
-  { to: "/channels/whatsapp", label: "WhatsApp", icon: MessageCircle },
-  { label: "Meta Ads", icon: Megaphone },
-  { to: "/channels/sms", label: "SMS", icon: MessageSquare },
-  { to: "/channels/rcs", label: "RCS", icon: MessageSquareText },
 ];
 
-const secondary = [
-  { to: "/developer", label: "Developer", icon: Code2 },
+const channelsGroup: NavGroup = {
+  label: "Channels",
+  icon: Radio,
+  activePrefixes: ["/channels"],
+  children: [
+    { to: "/channels/whatsapp", label: "WhatsApp", icon: MessageCircle },
+    { to: "/channels/sms", label: "SMS", icon: MessageSquare },
+    { to: "/channels/rcs", label: "RCS", icon: MessageSquareText },
+    { label: "Voice", icon: Phone },
+  ],
+};
+
+const connectItems: NavItem[] = [
   { to: "/integrations", label: "Integrations", icon: Plug },
+];
+
+const adminItems: NavItem[] = [
+  { to: "/developer", label: "Developer", icon: Code2 },
   { to: "/settings", label: "Settings", icon: Settings },
-] as const;
+];
 
 const STORAGE_KEY = "pc_sidebar_collapsed";
 
@@ -54,7 +82,7 @@ export function AppSidebar() {
   }, [collapsed]);
 
   const isActive = (to: string, exact?: boolean) =>
-    exact ? path === to : path === to || path.startsWith(to + "/") || path === to;
+    exact ? path === to : path === to || path.startsWith(to + "/");
 
   return (
     <aside
@@ -75,14 +103,24 @@ export function AppSidebar() {
         )}
       </div>
 
-      <nav className="flex flex-1 flex-col px-2 py-2">
-        <NavSection items={primaryTop} isActive={isActive} collapsed={collapsed} />
-        <CampaignsNav path={path} isActive={isActive} collapsed={collapsed} />
-        <NavSection items={primaryBottom} isActive={isActive} collapsed={collapsed} />
-        <ChannelsNav path={path} isActive={isActive} collapsed={collapsed} />
+      <nav className="flex flex-1 flex-col overflow-y-auto px-2 py-2">
+        <NavList items={homeItems} isActive={isActive} collapsed={collapsed} />
+
+        <SectionLabel label="Build" collapsed={collapsed} />
+        <GroupNav group={outboundGroup} path={path} isActive={isActive} collapsed={collapsed} />
+        <GroupNav group={inboundGroup} path={path} isActive={isActive} collapsed={collapsed} />
+        <NavList items={buildItems} isActive={isActive} collapsed={collapsed} />
+
+        <SectionLabel label="Observe" collapsed={collapsed} />
+        <NavList items={observeItems} isActive={isActive} collapsed={collapsed} />
+
+        <SectionLabel label="Setup" collapsed={collapsed} />
+        <GroupNav group={channelsGroup} path={path} isActive={isActive} collapsed={collapsed} />
+        <NavList items={connectItems} isActive={isActive} collapsed={collapsed} />
+
         <div className="mt-auto">
-          <div className="my-3 h-px bg-border" />
-          <NavSection items={secondary} isActive={isActive} collapsed={collapsed} />
+          <SectionLabel label="Admin" collapsed={collapsed} divider />
+          <NavList items={adminItems} isActive={isActive} collapsed={collapsed} />
         </div>
       </nav>
 
@@ -105,100 +143,61 @@ export function AppSidebar() {
   );
 }
 
-/** Campaigns: expandable group housing Orchestrated (canvas builder) and
- *  Broadcasts (direct-channel one-shot sends). */
-function CampaignsNav({
-  path, isActive, collapsed,
-}: {
-  path: string;
-  isActive: (to: string, exact?: boolean) => boolean;
-  collapsed: boolean;
-}) {
-  const onCampaigns = path.startsWith("/campaigns") || path.startsWith("/broadcasts");
-  const [open, setOpen] = useState(onCampaigns);
-
+function SectionLabel({ label, collapsed, divider }: { label: string; collapsed: boolean; divider?: boolean }) {
   if (collapsed) {
-    return (
-      <ul className="mt-0.5 space-y-0.5">
-        <li>
-          <Link
-            to="/campaigns"
-            title="Campaigns"
-            className={cn(
-              "group flex h-9 w-9 items-center justify-center rounded-md",
-              onCampaigns ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
-            )}
-          >
-            <Megaphone className="h-4 w-4" />
-          </Link>
-        </li>
-      </ul>
-    );
+    return <div className="mx-auto my-2.5 h-px w-6 bg-border" />;
   }
-
   return (
-    <ul className="mt-0.5 space-y-0.5">
-      <li>
-        <button
-          type="button"
-          onClick={() => setOpen((o) => !o)}
-          className={cn(
-            "group flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] transition-colors",
-            onCampaigns ? "font-medium text-foreground" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
-          )}
-        >
-          <Megaphone className={cn("h-4 w-4 shrink-0", onCampaigns ? "text-foreground" : "text-muted-foreground")} />
-          <span>Campaigns</span>
-          <ChevronRight className={cn("ml-auto h-3.5 w-3.5 transition-transform", open && "rotate-90")} />
-        </button>
-        {open && (
-          <ul className="mt-0.5 space-y-0.5 border-l border-border pl-3 ml-[18px]">
-            {campaignChildren.map((child) => (
-              <li key={child.to}>
-                <Link
-                  to={child.to}
-                  className={cn(
-                    "flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[12.5px] transition-colors",
-                    isActive(child.to) ? "bg-accent font-medium text-foreground" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
-                  )}
-                >
-                  <child.icon className={cn("h-3.5 w-3.5 shrink-0", isActive(child.to) ? "text-foreground" : "text-muted-foreground")} />
-                  {child.label}
-                </Link>
-              </li>
-            ))}
-          </ul>
-        )}
-      </li>
-    </ul>
+    <>
+      {divider && <div className="mb-1 mt-3 h-px bg-border" />}
+      <p className={cn("px-2.5 pb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/70", divider ? "pt-2" : "pt-4")}>
+        {label}
+      </p>
+    </>
   );
 }
 
-/** Channels: an expandable sidebar group. WhatsApp is live; the rest are roadmap. */
-function ChannelsNav({
-  path, isActive, collapsed,
+function GroupNav({
+  group, path, isActive, collapsed,
 }: {
+  group: NavGroup;
   path: string;
   isActive: (to: string, exact?: boolean) => boolean;
   collapsed: boolean;
 }) {
-  const onChannels = path.startsWith("/channels");
-  const [open, setOpen] = useState(onChannels);
+  const groupActive = group.activePrefixes.some((p) => path === p || path.startsWith(p + "/"));
+  const [open, setOpen] = useState(groupActive);
+  const firstLink = group.children.find((c) => c.to)?.to;
 
   if (collapsed) {
+    const inner = (
+      <>
+        <group.icon className="h-4 w-4" />
+      </>
+    );
     return (
       <ul className="mt-0.5 space-y-0.5">
         <li>
-          <Link
-            to="/channels/whatsapp"
-            title="Channels"
-            className={cn(
-              "group flex h-9 w-9 items-center justify-center rounded-md",
-              onChannels ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
-            )}
-          >
-            <Radio className="h-4 w-4" />
-          </Link>
+          {firstLink ? (
+            <Link
+              to={firstLink}
+              title={group.label}
+              className={cn(
+                "group flex h-9 w-9 items-center justify-center rounded-md",
+                groupActive ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+              )}
+            >
+              {inner}
+            </Link>
+          ) : (
+            <div
+              title={`${group.label} · Coming soon`}
+              aria-disabled="true"
+              className="flex h-9 w-9 cursor-not-allowed items-center justify-center rounded-md text-muted-foreground/40"
+            >
+              {inner}
+            </div>
+          )}
         </li>
       </ul>
     );
@@ -212,16 +211,16 @@ function ChannelsNav({
           onClick={() => setOpen((o) => !o)}
           className={cn(
             "group flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] transition-colors",
-            onChannels ? "font-medium text-foreground" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+            groupActive ? "font-medium text-foreground" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
           )}
         >
-          <Radio className={cn("h-4 w-4 shrink-0", onChannels ? "text-foreground" : "text-muted-foreground")} />
-          <span>Channels</span>
+          <group.icon className={cn("h-4 w-4 shrink-0", groupActive ? "text-foreground" : "text-muted-foreground")} />
+          <span>{group.label}</span>
           <ChevronRight className={cn("ml-auto h-3.5 w-3.5 transition-transform", open && "rotate-90")} />
         </button>
         {open && (
           <ul className="mt-0.5 space-y-0.5 border-l border-border pl-3 ml-[18px]">
-            {channelChildren.map((child) =>
+            {group.children.map((child) =>
               child.to ? (
                 <li key={child.label}>
                   <Link
@@ -256,21 +255,21 @@ function ChannelsNav({
   );
 }
 
-function NavSection({
+function NavList({
   items,
   isActive,
   collapsed,
 }: {
-  items: ReadonlyArray<{ to: string; label: string; icon: React.ComponentType<{ className?: string }>; exact?: boolean; disabled?: boolean }>;
+  items: ReadonlyArray<NavItem>;
   isActive: (to: string, exact?: boolean) => boolean;
   collapsed: boolean;
 }) {
   return (
     <ul className="space-y-0.5">
       {items.map((item) => {
-        if (item.disabled) {
+        if (!item.to) {
           return (
-            <li key={item.to}>
+            <li key={item.label}>
               <div
                 title={collapsed ? `${item.label} · Coming soon` : "Coming soon"}
                 aria-disabled="true"
